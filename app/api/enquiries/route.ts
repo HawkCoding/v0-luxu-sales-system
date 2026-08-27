@@ -47,6 +47,7 @@ type TransportRequestInsert = {
   flight_number: string | null
   notes: string | null
   sort_order: number
+  pricing_basis: "per_vehicle" | "per_person"
 }
 type VehicleRentalDetailsInsert = {
   transport_request_id: string
@@ -705,6 +706,28 @@ export async function POST(req: Request) {
 
   const transportRequests = Array.isArray(body.transportRequests) ? body.transportRequests : []
   const rentalDetailRows: VehicleRentalDetailsInsert[] = []
+
+  // Explicit resolution mirrors what the DB trigger (stamp_transport_request_pricing_basis)
+  // would do anyway for a NULL value -- doing it here keeps this insert type-safe without
+  // relying on trigger behaviour the caller can't see. Rentals are always per_vehicle.
+  const transportSupplierIds = Array.from(
+    new Set(
+      transportRequests
+        .map((request: Record<string, unknown>) => normalizeNullableText(request.supplierId))
+        .filter((id): id is string => Boolean(id)),
+    ),
+  )
+  const transferBasisBySupplierId = new Map<string, "per_vehicle" | "per_person">()
+  if (transportSupplierIds.length > 0) {
+    const { data: transportSuppliers } = await supabase
+      .from("suppliers")
+      .select("id, transfer_pricing_basis")
+      .in("id", transportSupplierIds)
+    for (const row of transportSuppliers ?? []) {
+      transferBasisBySupplierId.set(row.id, row.transfer_pricing_basis)
+    }
+  }
+
   const transportRows: TransportRequestInsert[] = transportRequests
     .map((request: Record<string, unknown>, index: number): TransportRequestInsert | null => {
       const pickupPoint = normalizeNullableText(request.pickupPoint)
@@ -713,6 +736,7 @@ export async function POST(req: Request) {
 
       const serviceType = normalizeTransportServiceType(request.serviceType)
       const id = randomUUID()
+      const supplierId = normalizeNullableText(request.supplierId)
       const rentalDetails =
         request.rentalDetails && typeof request.rentalDetails === "object" && !Array.isArray(request.rentalDetails)
           ? request.rentalDetails as Record<string, unknown>
@@ -729,7 +753,7 @@ export async function POST(req: Request) {
         id,
         booking_id: booking.id,
         service_type: serviceType,
-        supplier_id: normalizeNullableText(request.supplierId),
+        supplier_id: supplierId,
         route_id: normalizeNullableText(request.routeId),
         suite_type_id: normalizeNullableText(request.suiteTypeId),
         pickup_point: pickupPoint,
@@ -740,6 +764,10 @@ export async function POST(req: Request) {
         flight_number: normalizeNullableText(request.flightNumber),
         notes: normalizeNullableText(request.notes),
         sort_order: index,
+        pricing_basis:
+          serviceType === "transfer" && supplierId
+            ? transferBasisBySupplierId.get(supplierId) ?? "per_vehicle"
+            : "per_vehicle",
       }
     })
     .filter((row: TransportRequestInsert | null): row is TransportRequestInsert => Boolean(row))

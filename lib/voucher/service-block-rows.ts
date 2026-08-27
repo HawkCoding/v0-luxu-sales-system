@@ -114,7 +114,10 @@ export function voucherRowsForBlock(
     if (d.dietary) rows.push({ label: "Dietary", value: d.dietary })
     if (d.occasion) rows.push({ label: "Occasion", value: d.occasion })
   } else if (block.serviceType === "transfer") {
-    if (d.passengerCount != null) rows.push({ label: "No of Guests", value: `${d.passengerCount} Adults` })
+    // A per-person transfer prices adult/child/infant separately, so the "N Adults" line would be
+    // wrong the moment a booking has children -- print the same 3-cell breakdown train/hotel use.
+    if (d.guestBreakdown) rows.push(guestsRow(d.guestBreakdown))
+    else if (d.passengerCount != null) rows.push({ label: "No of Guests", value: `${d.passengerCount} Adults` })
     if (d.vehicleType) rows.push({ label: "Vehicle", value: d.vehicleType })
     // Falls back to the leg's own route name only when the trip has neither a typed pickup nor
     // drop-off — without it such a block would state no location at all, now that the supplier's

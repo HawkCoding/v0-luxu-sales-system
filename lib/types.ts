@@ -485,6 +485,22 @@ export function isTransportSupplier(kind: SupplierKind): boolean {
 }
 
 /**
+ * SUPPLIER_VOCABULARY.priceLabel stays static per kind ("per vehicle" for every transfer
+ * supplier) because it's a Record indexed by SupplierKind alone, and a couple of call sites
+ * (e.g. components/supplier-detail-view.tsx's `vocabulary.priceLabel === "per day"` rental
+ * check) rely on that Record never changing shape. A transfer supplier's actual label depends
+ * on its per-supplier (or per-leg) pricing basis too, so this is the one place that resolves
+ * both together — everywhere else keeps reading SUPPLIER_VOCABULARY[kind].priceLabel directly.
+ */
+export function resolveSupplierPriceLabel(
+  kind: SupplierKind,
+  opts?: { transferPricingBasis?: "per_vehicle" | "per_person" | null },
+): string {
+  if (kind === "transfers" && opts?.transferPricingBasis === "per_person") return "per person"
+  return SUPPLIER_VOCABULARY[kind].priceLabel
+}
+
+/**
  * True for suppliers whose price hangs off the type alone (a tour operator sells a tour type at one
  * price, whatever itinerary it is described by), so their rate cards carry no route and their
  * routes are descriptive instead: one itinerary belongs to one tour type and holds its own copy.
@@ -741,6 +757,11 @@ export interface PricingSnapshot {
    *  voucher builder can match a complimentary flag back to the specific captured trip (unlike
    *  hotels, whose complimentary flag is per-leg, transfers are per-request). */
   transportRequestId?: string | null
+  /** Transfers only: which pricing basis this specific line priced under. Present on every
+   *  transfer line once any transfer supplier has adopted per-person pricing, so a leg mixing a
+   *  per-vehicle row (unswitched) and a per-person row (switched, same leg) stays explicable in
+   *  the internal quote view. See lib/pricing/transfer-basis.ts. */
+  transferPricingBasis?: "per_vehicle" | "per_person" | null
   /** Tour legs only: the consultant-typed flat price that replaced the rate card for this unit,
    *  in sourceCurrency. Internal-only, same posture as manualRoomPrice/manualTransportPrice. */
   manualTourPrice?: number | null
@@ -791,6 +812,11 @@ export interface PackageLeg {
   /** 'manual' suppliers (airlines, by default) skip rate cards entirely -- their price is typed
    *  per unit at quote-build time instead of resolved from a route/suite/date match. */
   pricingMode: "rate_card" | "manual"
+  /** Transfers only: this supplier's default pricing basis (flat per vehicle, or split
+   * adult/child/infant per person). A booking_transport_requests row's own pricing_basis, once
+   * set, always wins over this -- see lib/pricing/transfer-basis.ts resolveTransferPricingBasis.
+   * Ignored for every other supplier kind. */
+  transferPricingBasis: "per_vehicle" | "per_person"
   label: string | null
   sortOrder: number
   /** Hotel legs only: pre-stay (night(s) before departure) or post-stay (from train arrival). */
@@ -873,6 +899,10 @@ export interface Supplier {
   /** 'manual' suppliers (airlines, by default) skip rate cards -- their price is typed per unit
    *  at quote-build time instead. See PackageLeg.pricingMode. */
   pricingMode: "rate_card" | "manual"
+  /** Transfers only: default pricing basis for this supplier's newly created transfer rows. See
+   * PackageLeg.transferPricingBasis and lib/pricing/transfer-basis.ts. Always 'per_vehicle' for
+   * every other supplier kind. */
+  transferPricingBasis: "per_vehicle" | "per_person"
   name: string
   email: string | null
   phone: string | null
@@ -903,6 +933,11 @@ export interface Supplier {
   /** {{trainOnlyNote}} template block, shown only when a quote prices this supplier's train and
    * nothing else. */
   trainOnlyNote: string | null
+  /** Train operators only: how much suite detail the quote itinerary sentence states.
+   * 'type_only' (default) reads "in a Deluxe Suite"; 'full' states the whole configuration, e.g.
+   * "in a Double bedded Deluxe Suite with a shower, Lengthways". The voucher's Suite Type row,
+   * invoice view and worksheet always state the full configuration regardless of this setting. */
+  quoteSuiteDetail: "type_only" | "full"
   /** Printed under this supplier's heading on the voucher, alongside phone/location. */
   streetAddress: string | null
   emergencyPhone: string | null
@@ -1018,6 +1053,22 @@ export interface BookingTransportRequest {
   complimentary: boolean
   notes: string | null
   supplierReference: string | null
+  /** Transfers only, always 'per_vehicle' for a rental. Row-level override of the supplier's
+   * transferPricingBasis default — see lib/pricing/transfer-basis.ts. Once set on a saved row,
+   * this is never re-derived from the supplier, so flipping the supplier later never re-prices
+   * an existing transfer. */
+  pricingBasis: "per_vehicle" | "per_person"
+  /** Per-person mode only. Null means "use the booking's projected totals" — see
+   * lib/pricing/transfer-basis.ts resolveTransferPax. Any one of the three being set means the
+   * other two default to 0, not to the booking totals. */
+  adultCount: number | null
+  childCount: number | null
+  infantCount: number | null
+  /** Per-person mode only. Mirror of priceOverride for the child/infant fares — priceOverride
+   * itself is the adult override in that mode. Each falls back to its own rate-card value when
+   * null. */
+  priceOverrideChild: number | null
+  priceOverrideInfant: number | null
   sortOrder: number
   createdAt: string
   createdAtDisplay?: string

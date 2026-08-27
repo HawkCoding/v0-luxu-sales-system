@@ -10,6 +10,7 @@ interface SendPaymentReminderButtonProps {
   invoiceId: string
   invoiceNumber: string
   bookingId: string
+  customerSurname?: string
   onSent: () => Promise<void> | void
 }
 
@@ -37,6 +38,7 @@ export function SendPaymentReminderButton({
   invoiceId,
   invoiceNumber,
   bookingId,
+  customerSurname,
   onSent,
 }: SendPaymentReminderButtonProps) {
   const [loading, setLoading] = useState(false)
@@ -93,6 +95,7 @@ export function SendPaymentReminderButton({
           signatureBrandId={prepared.email.signatureBrandId}
           paymentMethodId={prepared.email.paymentMethodId}
           invoiceNumber={invoiceNumber}
+          customerSurname={customerSurname}
           to={prepared.email.to}
           kind="payment_reminder"
           attachments={[prepared.attachment]}

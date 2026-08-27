@@ -262,6 +262,8 @@ export interface JobMovementTimeRow {
   flightNumber: string | null
   departureAirportCode: string | null
   arrivalAirportCode: string | null
+  handLuggageKg: number | null
+  checkedLuggageKg: number | null
   hasArrival: boolean
   hasFlightIdentity: boolean
   updatedAt: string | null

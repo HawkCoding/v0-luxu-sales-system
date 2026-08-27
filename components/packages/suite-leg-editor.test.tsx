@@ -13,6 +13,7 @@ const leg: PackageLeg = {
   supplierDescription: null,
   supplierKind: "train_operator",
   pricingMode: "rate_card",
+  transferPricingBasis: "per_vehicle",
   baseRateTypeId: null,
   quoteRateTypeId: null,
   inheritedRateTypeName: null,
@@ -78,6 +79,7 @@ const mismatchedUnits: SuiteLegState["units"] = [
     manualRoomPrice: null,
     complimentaryFirstNight: false,
     manualTourPrice: null,
+    rateTypeId: null,
   },
 ]
 

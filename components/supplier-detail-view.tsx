@@ -117,6 +117,7 @@ import {
   getSupplierVocabulary,
   isTransportSupplier,
   isTypePricedSupplier,
+  resolveSupplierPriceLabel,
   SUPPLIER_KIND_LABELS,
   type Location,
   type SupplierDetail,
@@ -215,6 +216,9 @@ export interface SupplierFormState {
   kind: SupplierKind
   /** 'manual' skips rate cards entirely -- the fare is typed per unit at quote-build time. */
   pricingMode: "rate_card" | "manual"
+  /** Transfers only: default pricing basis for this supplier's newly created transfer rows.
+   *  Ignored for every other kind -- see lib/pricing/transfer-basis.ts. */
+  transferPricingBasis: "per_vehicle" | "per_person"
   emails: EditableSupplierEmail[]
   phone: string
   website: string
@@ -244,6 +248,8 @@ export interface SupplierFormState {
   /** Train operators only: routes.durationDays threshold for "long journey". Null = no concept. */
   longJourneyMinDays: number | null
   trainOnlyNote: string
+  /** Train operators only: how much suite detail the quote itinerary sentence states. */
+  quoteSuiteDetail: "type_only" | "full"
   /** This supplier's base rate -- the baseline its rate adjustments are measured off. */
   baseRateTypeId: string | null
   /** The rate its quotes use; null means "quote at the base rate". */
@@ -430,6 +436,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     name: supplier.name,
     kind: supplier.kind,
     pricingMode: supplier.pricingMode,
+    transferPricingBasis: supplier.transferPricingBasis,
     emails: detailEmails,
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
@@ -464,6 +471,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     })),
     longJourneyMinDays: supplier.longJourneyMinDays ?? null,
     trainOnlyNote: supplier.trainOnlyNote ?? "",
+    quoteSuiteDetail: supplier.quoteSuiteDetail ?? "type_only",
     baseRateTypeId: supplier.baseRateTypeId ?? null,
     quoteRateTypeId: supplier.quoteRateTypeId ?? null,
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
@@ -1076,6 +1084,7 @@ function PackageRateCardMatrix({
   locationsById,
   vocabulary,
   supplierKind,
+  priceLabel,
 }: {
   pkg: SupplierPackage
   suiteTypes: SupplierSuiteType[]
@@ -1084,6 +1093,9 @@ function PackageRateCardMatrix({
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
   supplierKind: SupplierKind
+  /** vocabulary.priceLabel, unless this is a per-person transfer supplier -- see
+   *  resolveSupplierPriceLabel in lib/types.ts. */
+  priceLabel: string
 }) {
   // Mirrors RateCardMatrixEditor: a type-priced supplier shows one price column, no itineraries.
   const pricesByTypeOnly = isTypePricedSupplier(supplierKind)
@@ -1206,10 +1218,10 @@ function PackageRateCardMatrix({
                   <p className="text-sm font-medium text-foreground">{period.label}</p>
                   <p className="text-xs text-muted-foreground">
                     {vocabulary.showSingleSupplement
-                      ? `${period.currency} ${vocabulary.priceLabel} (single: +${pkg.singleSupplementPct.toFixed(
+                      ? `${period.currency} ${priceLabel} (single: +${pkg.singleSupplementPct.toFixed(
                           0,
                         )}%)`
-                      : `${period.currency} ${vocabulary.priceLabel}`}
+                      : `${period.currency} ${priceLabel}`}
                   </p>
                 </div>
                 <Badge variant="outline">{period.currency}</Badge>
@@ -1295,7 +1307,10 @@ interface RateCardMatrixEditorProps {
   packageIndex: number
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
-  isTransport: boolean
+  /** True when this rate card prices flat with no adult/child/infant split -- most transport
+   *  suppliers, plus a transfer supplier still on the per-vehicle basis. False un-hides the
+   *  child/infant inputs, including for a per-person transfer supplier. */
+  flatRate: boolean
   supplierKind: SupplierKind
   trainChildPriceRatio: number
   ageBuckets: AgeBuckets
@@ -1347,7 +1362,7 @@ interface RateCardMatrixEditorProps {
 interface RateCardPricingCellProps {
   match: EditableRateCard
   packageIndex: number
-  isTransport: boolean
+  flatRate: boolean
   supplierKind: SupplierKind
   trainChildPriceRatio: number
   ageBuckets: AgeBuckets
@@ -1367,7 +1382,7 @@ interface RateCardPricingCellProps {
 function RateCardPricingCell({
   match,
   packageIndex,
-  isTransport,
+  flatRate,
   supplierKind,
   trainChildPriceRatio,
   ageBuckets,
@@ -1447,8 +1462,8 @@ function RateCardPricingCell({
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1">
         <span className="flex w-16 shrink-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-          {isTransport ? "Flat" : "Adult"}
-          {!isTransport ? <AgeRangeChip kind="adult" buckets={ageBuckets} /> : null}
+          {flatRate ? "Flat" : "Adult"}
+          {!flatRate ? <AgeRangeChip kind="adult" buckets={ageBuckets} /> : null}
         </span>
         <NumericInput
           min="0"
@@ -1460,7 +1475,7 @@ function RateCardPricingCell({
           onBlur={handleAdultBlur}
         />
       </div>
-      {!isTransport ? (
+      {!flatRate ? (
         <>
           <div className="flex items-center gap-1">
             <span className="flex w-16 shrink-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
@@ -1536,7 +1551,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   packageIndex,
   locationsById,
   vocabulary,
-  isTransport,
+  flatRate,
   supplierKind,
   trainChildPriceRatio,
   ageBuckets,
@@ -1915,7 +1930,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                   <RateCardPricingCell
                                     match={match}
                                     packageIndex={packageIndex}
-                                    isTransport={isTransport}
+                                    flatRate={flatRate}
                                     supplierKind={supplierKind}
                                     trainChildPriceRatio={trainChildPriceRatio}
                                     ageBuckets={ageBuckets}
@@ -4037,7 +4052,9 @@ export function SupplierDetailView({
       for (const route of pkg.routes) {
         const isTransport = isTransportSupplier(form.kind)
         const needsLocations = vocabulary.routeHasLocations && !isTransport
-        if (!route.name.trim()) {
+        // An itinerary has no name field of its own -- the server derives it from the linked tour
+        // type (see isItineraryKind guard below) -- so a blank name here is normal, not an error.
+        if (!isItineraryKind && !route.name.trim()) {
           toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields before saving.`)
           return
         }
@@ -4145,8 +4162,19 @@ export function SupplierDetailView({
                 suiteTypeId: rateCard.suiteTypeId,
                 rateTypeId: rateCard.rateTypeId,
                 pricePerPerson: rateCard.pricePerPerson,
-                childPrice: isTransportSupplier(form.kind) ? null : rateCard.childPrice,
-                infantPrice: isTransportSupplier(form.kind) ? null : rateCard.infantPrice,
+                // Mirrors the server's isFlatRateTransport in app/api/suppliers/[slug]/route.ts --
+                // a per-person transfer supplier keeps its typed child/infant fares; every other
+                // transport supplier (and a still-per-vehicle transfer supplier) has them nulled.
+                childPrice:
+                  isTransportSupplier(form.kind) &&
+                  !(form.kind === "transfers" && form.transferPricingBasis === "per_person")
+                    ? null
+                    : rateCard.childPrice,
+                infantPrice:
+                  isTransportSupplier(form.kind) &&
+                  !(form.kind === "transfers" && form.transferPricingBasis === "per_person")
+                    ? null
+                    : rateCard.infantPrice,
                 currency: rateCard.currency.trim().toUpperCase() || "ZAR",
                 validFrom: rateCard.validFrom,
                 validTo: rateCard.validTo ?? "",
@@ -4212,6 +4240,7 @@ export function SupplierDetailView({
           name: form.name.trim(),
           kind: form.kind,
           pricingMode: form.pricingMode,
+          transferPricingBasis: form.transferPricingBasis,
           email: "",
           emails: cleanedEmails,
           phone: form.phone.trim(),
@@ -4241,6 +4270,7 @@ export function SupplierDetailView({
             })),
           longJourneyMinDays: form.kind === "train_operator" ? form.longJourneyMinDays : null,
           trainOnlyNote: form.kind === "train_operator" ? form.trainOnlyNote.trim() || null : null,
+          quoteSuiteDetail: form.kind === "train_operator" ? form.quoteSuiteDetail : "type_only",
           rateAdjustments: form.rateAdjustments,
           baseRateTypeId: form.baseRateTypeId,
           quoteRateTypeId: form.quoteRateTypeId,
@@ -5150,6 +5180,52 @@ export function SupplierDetailView({
                     </Badge>
                   </div>
                 )}
+                {(isEditing ? form.kind : supplier.kind) === "transfers" ? (
+                  isEditing ? (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                      <div>
+                        <Label
+                          htmlFor="supplier-transfer-pricing-basis"
+                          className="text-sm font-semibold text-foreground"
+                        >
+                          Per-person pricing
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                          {form.transferPricingBasis === "per_person"
+                            ? "Rates below are per person. Each vehicle type carries its own adult / child / infant rate card."
+                            : "Rates below are per vehicle — one flat price per transfer."}
+                        </p>
+                        {supplier.rateCards.length > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            Transfers already on a booking keep the basis they were quoted under. The rate card
+                            amounts are shared, though — re-check them after switching.
+                          </p>
+                        ) : null}
+                      </div>
+                      <Switch
+                        id="supplier-transfer-pricing-basis"
+                        checked={form.transferPricingBasis === "per_person"}
+                        onCheckedChange={(checked) =>
+                          updateField("transferPricingBasis", checked ? "per_person" : "per_vehicle")
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Transfer pricing</p>
+                        <p className="text-sm text-muted-foreground">
+                          {supplier.transferPricingBasis === "per_person"
+                            ? "Per person — adult / child / infant rate cards."
+                            : "Per vehicle — one flat price per transfer."}
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {supplier.transferPricingBasis === "per_person" ? "Per person" : "Per vehicle"}
+                      </Badge>
+                    </div>
+                  )
+                ) : null}
               </div>
 
               {activeVocabulary.showSingleSupplement &&
@@ -5230,6 +5306,31 @@ export function SupplierDetailView({
                           placeholder="We have quoted you for the train only. If you would like to request any other services, we offer those as well."
                         />
                       </div>
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
+                        <div className="space-y-2">
+                          <Label htmlFor="supplier-quote-suite-detail">Quote suite detail</Label>
+                          <Select
+                            value={form.quoteSuiteDetail}
+                            onValueChange={(value) =>
+                              updateField("quoteSuiteDetail", value as "type_only" | "full")
+                            }
+                          >
+                            <SelectTrigger id="supplier-quote-suite-detail" className="max-w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="type_only">Suite type only</SelectItem>
+                              <SelectItem value="full">Full configuration</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          How the quote PDF/email itinerary line names the suite: &quot;in a Deluxe
+                          Suite&quot; (type only) or &quot;in a Double bedded Deluxe Suite with a
+                          shower&quot; (full configuration). The voucher&apos;s Suite Type row always
+                          states the full configuration either way.
+                        </p>
+                      </div>
                     </>
                   ) : (
                     <div className="space-y-3">
@@ -5249,6 +5350,17 @@ export function SupplierDetailView({
                         <p className="text-sm text-muted-foreground">
                           {supplier.trainOnlyNote || "Not set."}
                         </p>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Quote suite detail</p>
+                          <p className="text-sm text-muted-foreground">
+                            How the quote itinerary line names the suite.
+                          </p>
+                        </div>
+                        <Badge variant="outline">
+                          {supplier.quoteSuiteDetail === "full" ? "Full configuration" : "Suite type only"}
+                        </Badge>
                       </div>
                     </div>
                   )}
@@ -5572,7 +5684,10 @@ export function SupplierDetailView({
                   packageIndex={0}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
-                  isTransport={isTransportSupplier(form.kind)}
+                  flatRate={
+                    isTransportSupplier(form.kind) &&
+                    !(form.kind === "transfers" && form.transferPricingBasis === "per_person")
+                  }
                   supplierKind={form.kind}
                   trainChildPriceRatio={trainChildPriceRatio}
                   ageBuckets={resolveAgeBuckets(globalAgeDefaults, {
@@ -5596,6 +5711,9 @@ export function SupplierDetailView({
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
                   supplierKind={supplier.kind}
+                  priceLabel={resolveSupplierPriceLabel(supplier.kind, {
+                    transferPricingBasis: supplier.transferPricingBasis,
+                  })}
                 />
               )}
 

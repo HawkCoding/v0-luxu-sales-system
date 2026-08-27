@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useState } from "react"
-import { ArrowLeftRight, Gift, Info, Plus, Trash2 } from "lucide-react"
+import { ArrowLeftRight, ChevronDown, Gift, Info, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -10,6 +10,7 @@ import { DatePicker } from "@/components/ui/date-picker"
 import { WallClockTimeInput } from "@/components/ui/wall-clock-time-input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NumericInput } from "@/components/ui/numeric-input"
 import { InputGroup, InputGroupAddon, InputGroupText } from "@/components/ui/input-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -32,11 +33,13 @@ import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/
 import { addDays, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
-import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
+// TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
+// import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import {
   createDraftUnit,
   isRouteReversible,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
+  PASSENGER_SUM_SUPPLIER_KINDS,
   type HotelAnchorContext,
   type SuiteLegState,
   type SuiteUnitState,
@@ -567,6 +570,11 @@ export function SuiteLegEditor({
   // A non-optional leg is always part of the booking, whatever a legacy row has stored.
   const included = optional ? value.selected : true
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)
+  // Tours show the same per-unit Adults/Children/Infants inputs but each unit prices off its own
+  // headcount independently -- there's nothing to reconcile against the booking total, so the
+  // running "X/Y adults" tally and its "Spread evenly" fixup only make sense for sleeping/seating
+  // suppliers where every traveller must land in exactly one unit.
+  const showPassengerSumCheck = PASSENGER_SUM_SUPPLIER_KINDS.has(leg.supplierKind)
 
   // Same two rules the server enforces, surfaced under the fields instead of arriving as a 400 the
   // consultant has to trace back. A later arrival date is legitimate (overnight flight) and gets a
@@ -607,6 +615,10 @@ export function SuiteLegEditor({
             ? "plus2"
             : "custom"
   const [arrivalCustomRequested, setArrivalCustomRequested] = useState(false)
+  // Collapsed by default so a leg's fields aren't drowned out by an empty textarea -- but a saved
+  // note must never be hidden by default, so a leg loaded with one opens expanded on first paint.
+  const [notesRequested, setNotesRequested] = useState(false)
+  const notesOpen = notesRequested || Boolean(value.notes?.trim())
   const showArrivalDatePicker = arrivalOffsetMode === "custom" || arrivalCustomRequested
   const setArrivalOffset = (mode: ArrivalOffsetMode) => {
     if (mode === "custom") {
@@ -745,7 +757,7 @@ export function SuiteLegEditor({
    * here; a unit that only prices off the system default shows no base rate and still overrides
    * correctly — the server resolves the real card when it stamps the snapshot.
    */
-  function resolveRoomRateCard(suiteTypeId: string | null) {
+  function resolveRoomRateCard(suiteTypeId: string | null, unitRateTypeId?: string | null) {
     if (!(isHotel || isTour) || !suiteTypeId || !value.serviceDate) return null
     const candidates = findRateCardCandidates(
       leg.rateCards,
@@ -753,7 +765,14 @@ export function SuiteLegEditor({
       suiteTypeId,
       value.serviceDate,
     )
-    const selected = selectRateCard(candidates, value.rateTypeId, leg.quoteRateTypeId, leg.baseRateTypeId, null)
+    const selected = selectRateCard(
+      candidates,
+      // Tours resolve their rate type per unit; every other kind uses the leg's own value.
+      unitRateTypeId ?? value.rateTypeId,
+      leg.quoteRateTypeId,
+      leg.baseRateTypeId,
+      null,
+    )
     return selected?.ok ? selected.card : null
   }
 
@@ -915,7 +934,10 @@ export function SuiteLegEditor({
   )
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    // border-2 (vs. a unit card's plain border below) so one supplier's whole leg reads as a
+    // distinct block -- with several tours/suites stacked underneath each other the single-width
+    // border made it easy to lose track of which fields belonged to which leg.
+    <div className="space-y-3 rounded-md border-2 p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-[160px] flex-1">
           <div className="flex items-center gap-1.5">
@@ -1238,22 +1260,22 @@ export function SuiteLegEditor({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">
-              {isHotel ? "Rooms" : "Suites"}
-              {showPassengerSplit && expectedTotals ? (
+              {vocab.unitNounPlural.charAt(0).toUpperCase() + vocab.unitNounPlural.slice(1)}
+              {showPassengerSumCheck && expectedTotals ? (
                 <span className={splitMatches ? "ml-2 font-normal" : "ml-2 font-normal text-destructive"}>
                   {splitSummed.adultCount}/{expectedTotals.adultCount} adults,{" "}
                   {splitSummed.childCount}/{expectedTotals.childCount} children,{" "}
                   {splitSummed.infantCount}/{expectedTotals.infantCount} infants
                 </span>
               ) : null}
-              {showPassengerSplit && expectedTotals && !splitMatches ? (
+              {showPassengerSumCheck && expectedTotals && !splitMatches ? (
                 <Button
                   type="button"
                   size="sm"
                   variant="link"
                   className="ml-2 h-auto p-0 text-xs"
                   onClick={spreadEvenly}
-                  title="Re-split the booking's traveller totals evenly across these suites"
+                  title={`Re-split the booking's traveller totals evenly across these ${vocab.unitNounPlural.toLowerCase()}`}
                 >
                   Spread evenly
                 </Button>
@@ -1263,10 +1285,19 @@ export function SuiteLegEditor({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => onChange({ ...value, units: [...value.units, createDraftUnit()] })}
+              onClick={() =>
+                onChange({
+                  ...value,
+                  // Tours are independent activities, not sleeping/seating slots -- a new tour is
+                  // almost always the same travellers doing something else, so prefill it with the
+                  // booking's full headcount instead of 0/0/0. Trains/hotels/airlines keep the old
+                  // blank-unit behaviour since Spread evenly is what reconciles those.
+                  units: [...value.units, createDraftUnit(isTour ? expectedTotals ?? undefined : undefined)],
+                })
+              }
             >
               <Plus className="mr-1 h-3 w-3" />
-              Add {isHotel ? "room" : "suite"}
+              Add {vocab.unitNoun}
             </Button>
           </div>
 
@@ -1281,6 +1312,13 @@ export function SuiteLegEditor({
 
             return (
               <div key={unit.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
+                {/* Several tours stacked under one supplier otherwise look identical at a glance --
+                    this index is the only thing that says which card is the next one to fill in. */}
+                {pricesByTypeOnly ? (
+                  <p className="text-xs font-medium text-muted-foreground md:col-span-2 xl:col-span-3">
+                    {vocab.unitNoun.charAt(0).toUpperCase() + vocab.unitNoun.slice(1)} {index + 1}
+                  </p>
+                ) : null}
                 <div className="space-y-1.5">
                   <Label>{vocab.suiteType}</Label>
                   {activeSuiteTypes.length === 0 ? (
@@ -1317,9 +1355,36 @@ export function SuiteLegEditor({
                   ) : null}
                 </div>
 
-                {/* Rate type is a leg-level value, not per-unit, so it's shown once — on the first
-                    card — rather than repeated on every suite/tour type added. */}
-                {pricesByTypeOnly && index === 0 ? rateAndCurrencyFields : null}
+                {/* Tours price independently unit by unit (see PASSENGER_SUM_SUPPLIER_KINDS), so
+                    unlike every other kind's one leg-level rate type, each tour card gets its own —
+                    changing it here must not silently reprice every other tour on this supplier. */}
+                {pricesByTypeOnly ? (
+                  <RateTypeSelect
+                    rateTypes={rateTypes}
+                    allowedRateTypeIds={leg.applicableRateTypeIds}
+                    value={unit.rateTypeId}
+                    onChange={(rateTypeId) => updateUnit(unit.id, { rateTypeId })}
+                    id={`rate-type-${leg.id}-${unit.id}`}
+                    inheritLabel={
+                      value.rateTypeId
+                        ? `Leg default (${rateTypes.find((rt) => rt.id === value.rateTypeId)?.name ?? "custom"})`
+                        : leg.inheritedRateTypeName
+                          ? `Supplier default (${leg.inheritedRateTypeName})`
+                          : "Supplier default"
+                    }
+                  />
+                ) : null}
+
+                {/* Fare currency stays a leg-level fact even for tours -- a manual fare is typed
+                    once for the whole leg, not per unit -- so it keeps its old single placement. */}
+                {pricesByTypeOnly && index === 0 && leg.pricingMode === "manual" ? (
+                  <CurrencySelect
+                    id={`price-currency-${leg.id}`}
+                    label="Fare currency"
+                    value={value.priceCurrency}
+                    onChange={(priceCurrency) => onChange({ ...value, priceCurrency })}
+                  />
+                ) : null}
 
                 {/* TODO: bedroom_types vocab is hidden (hotel_property only) but still fully wired
                     in the DB/quote/voucher layers — see suite-vocabulary-card.tsx. */}
@@ -1447,7 +1512,7 @@ export function SuiteLegEditor({
                   <TourPriceOverride
                     unit={unit}
                     index={index}
-                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId)}
+                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)}
                     fallbackCurrency={value.priceCurrency}
                     quoteCurrency={quoteCurrency}
                     formatInQuoteCurrency={formatInQuoteCurrency}
@@ -1515,7 +1580,7 @@ export function SuiteLegEditor({
                       type="button"
                       variant="outline"
                       size="icon"
-                      aria-label={`Remove ${isHotel ? "room" : "suite"} ${index + 1}`}
+                      aria-label={`Remove ${vocab.unitNoun} ${index + 1}`}
                       onClick={() =>
                         onChange({ ...value, units: value.units.filter((item) => item.id !== unit.id) })
                       }
@@ -1530,14 +1595,26 @@ export function SuiteLegEditor({
 
           {pricesByTypeOnly ? routeOrItineraryField : null}
 
-          <div className="space-y-1.5">
-            <Label>Special requests / allergies</Label>
-            <Textarea
-              value={value.notes ?? ""}
-              onChange={(event) => onChange({ ...value, notes: event.target.value || null })}
-            />
-          </div>
+          <Collapsible open={notesOpen} onOpenChange={setNotesRequested}>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 text-sm font-medium"
+                aria-expanded={notesOpen}
+              >
+                <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${notesOpen ? "" : "-rotate-90"}`} />
+                Special requests / allergies
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-1.5">
+              <Textarea
+                value={value.notes ?? ""}
+                onChange={(event) => onChange({ ...value, notes: event.target.value || null })}
+              />
+            </CollapsibleContent>
+          </Collapsible>
 
+          {/* TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
           <ServiceAdminDates
             value={{
               bookingDate: value.bookingDate,
@@ -1546,7 +1623,7 @@ export function SuiteLegEditor({
               paidWith: value.paidWith,
             }}
             onChange={(next) => onChange({ ...value, ...next })}
-          />
+          /> */}
         </>
       ) : null}
     </div>

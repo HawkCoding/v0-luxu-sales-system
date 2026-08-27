@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TransportLegEditor } from "./transport-leg-editor"
+import { formatMoney } from "@/lib/money"
 import type { TransferAnchorContext, TransportLegState } from "@/lib/packages/apply-dialog-state"
 import type { BookingTransportRequest, PackageLeg } from "@/lib/types"
 
@@ -12,6 +13,7 @@ const transferLeg: PackageLeg = {
   supplierDescription: null,
   supplierKind: "transfers",
   pricingMode: "rate_card",
+  transferPricingBasis: "per_vehicle",
   baseRateTypeId: null,
   quoteRateTypeId: null,
   inheritedRateTypeName: null,
@@ -58,6 +60,37 @@ const transferLeg: PackageLeg = {
   ],
 }
 
+const perPersonLeg: PackageLeg = {
+  ...transferLeg,
+  transferPricingBasis: "per_person",
+  suiteTypes: [
+    {
+      id: "vehicle-1",
+      supplierId: "supplier-transfer",
+      name: "Minivan",
+      passengerCapacity: 6,
+      active: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    },
+  ],
+  rateCards: [
+    {
+      id: "card-1",
+      routeId: "route-1",
+      suiteTypeId: "vehicle-1",
+      rateTypeId: "rate-1",
+      pricePerPerson: 400,
+      childPrice: 200,
+      infantPrice: null,
+      currency: "ZAR",
+      validFrom: "2026-01-01",
+      validTo: null,
+      createdAt: "2026-01-01T00:00:00Z",
+    },
+  ],
+}
+
 const rentalLeg: PackageLeg = {
   ...transferLeg,
   id: "leg-rental",
@@ -89,6 +122,12 @@ function makeRequest(overrides: Partial<BookingTransportRequest> = {}): BookingT
     complimentary: false,
     notes: null,
     supplierReference: null,
+    pricingBasis: "per_vehicle",
+    adultCount: null,
+    childCount: null,
+    infantCount: null,
+    priceOverrideChild: null,
+    priceOverrideInfant: null,
     sortOrder: 0,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
@@ -378,5 +417,143 @@ describe("TransportLegEditor date anchor", () => {
     expect(screen.queryByRole("button", { name: "Pre" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Post" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /pickup date/i })).toBeEnabled()
+  })
+})
+
+describe("TransportLegEditor per-person pricing", () => {
+  it("shows a single Passengers field on a per-vehicle transfer", () => {
+    render(<TransportLegEditor leg={transferLeg} value={makeLegState([makeRequest()])} onChange={vi.fn()} />)
+
+    expect(screen.getByText("Passengers")).toBeInTheDocument()
+    expect(screen.queryByText("Adults")).not.toBeInTheDocument()
+  })
+
+  it("shows Adults/Children/Infants inputs instead of a single Passengers field on a per-person transfer", () => {
+    render(
+      <TransportLegEditor
+        leg={perPersonLeg}
+        value={makeLegState([makeRequest({ pricingBasis: "per_person" })])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Adults")).toBeInTheDocument()
+    expect(screen.getByText("Children")).toBeInTheDocument()
+    expect(screen.getByText("Infants")).toBeInTheDocument()
+  })
+
+  it("prefills passenger placeholders from the booking's projected totals", () => {
+    render(
+      <TransportLegEditor
+        leg={perPersonLeg}
+        value={makeLegState([
+          makeRequest({ pricingBasis: "per_person", adultCount: null, childCount: null, infantCount: null }),
+        ])}
+        onChange={vi.fn()}
+        expectedTotals={{ adultCount: 2, childCount: 1, infantCount: 1 }}
+      />,
+    )
+
+    expect(screen.getByLabelText(/adults for transfer 1/i)).toHaveAttribute("placeholder", "2")
+    expect(screen.getByLabelText(/children for transfer 1/i)).toHaveAttribute("placeholder", "1")
+    expect(screen.getByLabelText(/infants for transfer 1/i)).toHaveAttribute("placeholder", "1")
+  })
+
+  it("warns when the typed passenger split exceeds the vehicle's capacity", () => {
+    render(
+      <TransportLegEditor
+        leg={perPersonLeg}
+        value={makeLegState([
+          makeRequest({ pricingBasis: "per_person", adultCount: 5, childCount: 2, infantCount: 0 }),
+        ])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/exceeds this vehicle's capacity of 6/i)).toBeInTheDocument()
+  })
+
+  it("does not warn when the typed passenger split is within capacity", () => {
+    render(
+      <TransportLegEditor
+        leg={perPersonLeg}
+        value={makeLegState([
+          makeRequest({ pricingBasis: "per_person", adultCount: 2, childCount: 1, infantCount: 0 }),
+        ])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText(/exceeds this vehicle's capacity/i)).not.toBeInTheDocument()
+  })
+
+  it("shows three price override fields once overriding a per-person transfer", () => {
+    render(
+      <TransportLegEditor
+        leg={perPersonLeg}
+        value={makeLegState([makeRequest({ pricingBasis: "per_person" })])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /override price/i }))
+    expect(screen.getByLabelText(/adult price override for transfer 1/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/child price override for transfer 1/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/infant price override for transfer 1/i)).toBeInTheDocument()
+  })
+
+  it("computes the preview total from each passenger kind's own rate", () => {
+    render(
+      <TransportLegEditor
+        leg={perPersonLeg}
+        value={makeLegState([
+          makeRequest({
+            pricingBasis: "per_person",
+            adultCount: 2,
+            childCount: 1,
+            infantCount: 1,
+            priceOverride: 450,
+          }),
+        ])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    // 2 adults x 450 (overridden) + 1 child x 200 (card) + 1 infant x 0 (no card rate) = 1100.
+    expect(document.body.textContent).toContain(formatMoney(1100, "ZAR"))
+  })
+
+  it("clears all three overrides on Revert for a per-person transfer", () => {
+    const onChange = vi.fn()
+    render(
+      <TransportLegEditor
+        leg={perPersonLeg}
+        value={makeLegState([
+          makeRequest({ pricingBasis: "per_person", priceOverride: 450, priceOverrideChild: 220 }),
+        ])}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /revert/i }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requests: [
+          expect.objectContaining({ priceOverride: null, priceOverrideChild: null, priceOverrideInfant: null }),
+        ],
+      }),
+    )
+  })
+
+  it("keeps a saved row per-person even when the leg's current supplier default is per_vehicle", () => {
+    render(
+      <TransportLegEditor
+        leg={{ ...perPersonLeg, transferPricingBasis: "per_vehicle" }}
+        value={makeLegState([makeRequest({ pricingBasis: "per_person" })])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Adults")).toBeInTheDocument()
   })
 })

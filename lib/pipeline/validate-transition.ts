@@ -365,7 +365,7 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   }
 
   if (crossedStages.includes("deposit_requested")) {
-    // A full-payment invoice (booking made inside 60 days of departure, or
+    // A full-payment invoice (booking made inside 2 months of departure, or
     // opted into by the salesperson) covers the whole amount in one go and
     // satisfies the deposit-invoice gate the same way a deposit invoice does.
     const hasDepositInvoice = invoices.some(

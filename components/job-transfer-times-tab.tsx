@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { NumericInput } from "@/components/ui/numeric-input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WallClockTimeInput } from "@/components/ui/wall-clock-time-input"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -27,6 +28,8 @@ interface RowDraft {
   flightNumber: string
   departureAirportCode: string
   arrivalAirportCode: string
+  handLuggageKg: number | null
+  checkedLuggageKg: number | null
 }
 
 function draftFromRow(row: JobMovementTimeRow): RowDraft {
@@ -38,6 +41,8 @@ function draftFromRow(row: JobMovementTimeRow): RowDraft {
     flightNumber: row.flightNumber ?? "",
     departureAirportCode: row.departureAirportCode ?? "",
     arrivalAirportCode: row.arrivalAirportCode ?? "",
+    handLuggageKg: row.handLuggageKg ?? null,
+    checkedLuggageKg: row.checkedLuggageKg ?? null,
   }
 }
 
@@ -106,6 +111,8 @@ export function JobTransferTimesTab({ bookingId }: JobTransferTimesTabProps) {
             flightNumber: draft.flightNumber.trim() || null,
             departureAirportCode: draft.departureAirportCode.trim() || null,
             arrivalAirportCode: draft.arrivalAirportCode.trim() || null,
+            handLuggageKg: draft.handLuggageKg,
+            checkedLuggageKg: draft.checkedLuggageKg,
           }
         : {
             kind: "transport_request" as const,
@@ -240,6 +247,30 @@ export function JobTransferTimesTab({ bookingId }: JobTransferTimesTabProps) {
                 maxLength={4}
                 aria-label="Arrival airport code"
                 className="h-10 w-20 text-center uppercase"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs" htmlFor={`hand-luggage-${row.key}`}>Hand luggage (kg)</Label>
+              <NumericInput
+                id={`hand-luggage-${row.key}`}
+                min="0"
+                step="0.5"
+                className="h-10 w-24"
+                nullable
+                value={draft.handLuggageKg}
+                onValueChange={(next) => updateDraft(row.key, { handLuggageKg: next })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs" htmlFor={`checked-luggage-${row.key}`}>Checked luggage (kg)</Label>
+              <NumericInput
+                id={`checked-luggage-${row.key}`}
+                min="0"
+                step="0.5"
+                className="h-10 w-24"
+                nullable
+                value={draft.checkedLuggageKg}
+                onValueChange={(next) => updateDraft(row.key, { checkedLuggageKg: next })}
               />
             </div>
           </div>

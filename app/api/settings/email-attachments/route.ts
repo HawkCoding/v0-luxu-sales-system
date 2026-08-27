@@ -28,13 +28,20 @@ interface LibraryRow {
   file_name: string
   supplier_id: string | null
   supplier_kind: string | null
+  route_id: string | null
   email_kinds: string[]
   supplier: { name: string } | { name: string }[] | null
+  route: { name: string } | { name: string }[] | null
 }
 
 function supplierNameOf(row: LibraryRow): string | null {
   if (!row.supplier) return null
   return Array.isArray(row.supplier) ? row.supplier[0]?.name ?? null : row.supplier.name
+}
+
+function routeNameOf(row: LibraryRow): string | null {
+  if (!row.route) return null
+  return Array.isArray(row.route) ? row.route[0]?.name ?? null : row.route.name
 }
 
 export async function GET(req: Request) {
@@ -53,13 +60,15 @@ export async function GET(req: Request) {
 
   // A booking-scoped request filters supplier-specific files down to the
   // booking's train (via route → supplier); files scoped to a supplier category
-  // apply when that supplier is of the same kind; unscoped files always apply.
+  // apply when that supplier is of the same kind; a file pinned to a route only
+  // applies on that exact route; unscoped files always apply.
   let bookingSupplierId: string | null = null
   let bookingSupplierKind: string | null = null
+  let bookingRouteId: string | null = null
   if (bookingId) {
     const { data: booking, error: bookingError } = await supabase
       .from("bookings")
-      .select("id, route:routes(supplier:suppliers(id, kind))")
+      .select("id, route_id, route:routes(supplier:suppliers(id, kind))")
       .eq("id", bookingId)
       .maybeSingle()
 
@@ -74,11 +83,14 @@ export async function GET(req: Request) {
       : null
     bookingSupplierId = supplier?.id ?? null
     bookingSupplierKind = supplier?.kind ?? null
+    bookingRouteId = booking.route_id
   }
 
   const { data: rows, error } = await supabase
     .from("email_attachment_library")
-    .select("id, name, file_name, supplier_id, supplier_kind, email_kinds, supplier:suppliers(name)")
+    .select(
+      "id, name, file_name, supplier_id, supplier_kind, route_id, email_kinds, supplier:suppliers(name), route:routes(name)",
+    )
     .order("name", { ascending: true })
 
   if (error) return safeSupabaseError("email-attachments:list", error)
@@ -86,8 +98,9 @@ export async function GET(req: Request) {
   const attachments: LibraryAttachmentOption[] = ((rows ?? []) as LibraryRow[])
     .filter((row) => {
       if (!bookingId) return true
-      // Unscoped files always apply; otherwise match on supplier or category.
+      // Unscoped files always apply; a route pin narrows a supplier match further.
       if (row.supplier_id === null && row.supplier_kind === null) return true
+      if (row.route_id !== null) return row.route_id === bookingRouteId
       if (row.supplier_id !== null) return row.supplier_id === bookingSupplierId
       return row.supplier_kind === bookingSupplierKind
     })
@@ -98,6 +111,8 @@ export async function GET(req: Request) {
       supplierId: row.supplier_id,
       supplierName: supplierNameOf(row),
       supplierKind: row.supplier_kind,
+      routeId: row.route_id,
+      routeName: routeNameOf(row),
       emailKinds: row.email_kinds ?? [],
       defaultSelected: kind ? (row.email_kinds ?? []).includes(kind) : false,
     }))
@@ -156,6 +171,26 @@ export async function POST(req: Request) {
     return jsonError("A file can be scoped to a supplier or a category, not both", 400)
   }
 
+  const rawRouteId = formData.get("routeId")
+  const routeId = typeof rawRouteId === "string" && rawRouteId.trim() ? rawRouteId.trim() : null
+  if (routeId && !z.string().uuid().safeParse(routeId).success) {
+    return jsonError("routeId must be a UUID", 400)
+  }
+  if (routeId && !supplierId) {
+    return jsonError("A route can only be set alongside a supplier", 400)
+  }
+  if (routeId) {
+    const { data: route, error: routeError } = await supabase
+      .from("routes")
+      .select("supplier_id")
+      .eq("id", routeId)
+      .maybeSingle()
+    if (routeError) return safeSupabaseError("email-attachments:route", routeError)
+    if (!route || route.supplier_id !== supplierId) {
+      return jsonError("routeId does not belong to the selected supplier", 400)
+    }
+  }
+
   let emailKinds: string[] = []
   const rawKinds = formData.get("emailKinds")
   if (typeof rawKinds === "string" && rawKinds.trim()) {
@@ -205,9 +240,10 @@ export async function POST(req: Request) {
       file_size: file.size,
       supplier_id: supplierId,
       supplier_kind: supplierKind,
+      route_id: routeId,
       email_kinds: emailKinds,
     })
-    .select("id, name, file_name, supplier_id, supplier_kind, email_kinds")
+    .select("id, name, file_name, supplier_id, supplier_kind, route_id, email_kinds")
     .single()
 
   if (insertError || !inserted) {
@@ -227,6 +263,7 @@ export async function POST(req: Request) {
       file_size: file.size,
       supplier_id: supplierId,
       supplier_kind: supplierKind,
+      route_id: routeId,
       email_kinds: emailKinds,
     },
   })
@@ -237,6 +274,7 @@ export async function POST(req: Request) {
     fileName: inserted.file_name,
     supplierId: inserted.supplier_id,
     supplierKind: inserted.supplier_kind,
+    routeId: inserted.route_id,
     emailKinds: inserted.email_kinds ?? [],
   })
 }

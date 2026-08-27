@@ -30,9 +30,10 @@ interface GenerateDepositInvoiceDialogProps {
   bookingNumber: string
   invoiceNumber?: string | null
   customerName: string
+  customerSurname?: string
   quotes: Quote[]
   defaultDepositPercentage: number
-  /** Booking's departure date — drives the Pay in full default (inside 60 days). */
+  /** Booking's departure date — drives the Pay in full default (inside 2 months). */
   departureDate?: string | null
   /**
    * An existing draft (generated but unsent) deposit or full-payment invoice.
@@ -94,14 +95,29 @@ function addDays(date: Date, days: number): string {
   return next.toISOString().slice(0, 10)
 }
 
-/** Inside 60 days of departure the sales team's terms require full payment upfront. */
-function isInsideSixtyDays(departureDate: string | null | undefined): boolean {
+/**
+ * Adds `months` calendar months to `date`, clamping the day to the last day
+ * of the target month instead of rolling into the following month (e.g. 31
+ * Jan plus 2 months lands on 31 Mar; 31 Dec plus 2 months lands on 28/29 Feb).
+ */
+function addMonthsClamped(date: Date, months: number): string {
+  const day = date.getUTCDate()
+  const targetMonthStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1))
+  const daysInTargetMonth = new Date(
+    Date.UTC(targetMonthStart.getUTCFullYear(), targetMonthStart.getUTCMonth() + 1, 0),
+  ).getUTCDate()
+  targetMonthStart.setUTCDate(Math.min(day, daysInTargetMonth))
+  return targetMonthStart.toISOString().slice(0, 10)
+}
+
+/** Inside 2 months of departure the sales team's terms require full payment upfront. */
+function isInsideTwoMonths(departureDate: string | null | undefined): boolean {
   if (!departureDate) return false
   const day = departureDate.slice(0, 10)
   const parsed = new Date(`${day}T00:00:00Z`)
   if (Number.isNaN(parsed.getTime())) return false
-  const sixtyDaysOut = addDays(new Date(), 60)
-  return day <= sixtyDaysOut
+  const twoMonthsOut = addMonthsClamped(new Date(), 2)
+  return day <= twoMonthsOut
 }
 
 export function GenerateDepositInvoiceDialog({
@@ -112,6 +128,7 @@ export function GenerateDepositInvoiceDialog({
   bookingNumber,
   invoiceNumber,
   customerName,
+  customerSurname,
   quotes,
   defaultDepositPercentage,
   departureDate = null,
@@ -124,8 +141,8 @@ export function GenerateDepositInvoiceDialog({
   const displayNumber = invoiceNumber || bookingNumber
   const [internalOpen, setInternalOpen] = useState(false)
   const [percentage, setPercentage] = useState(String(defaultDepositPercentage))
-  const insideSixtyDays = useMemo(() => isInsideSixtyDays(departureDate), [departureDate])
-  const [payInFull, setPayInFull] = useState(insideSixtyDays)
+  const insideTwoMonths = useMemo(() => isInsideTwoMonths(departureDate), [departureDate])
+  const [payInFull, setPayInFull] = useState(insideTwoMonths)
   const [fullDueDate, setFullDueDate] = useState(() => addDays(new Date(), 2))
   const { data: paymentMethodsData } = usePaymentMethods()
   const paymentMethods = (paymentMethodsData?.methods ?? []).filter((m) => m.enabled)
@@ -297,8 +314,8 @@ export function GenerateDepositInvoiceDialog({
                 <div className="flex flex-col gap-0.5">
                   <Label htmlFor="pay-in-full">Pay in full</Label>
                   <span className="text-xs text-muted-foreground">
-                    {insideSixtyDays
-                      ? "Departure is within 60 days — full payment is due, no deposit split."
+                    {insideTwoMonths
+                      ? "Departure is within 2 months — full payment is due, no deposit split."
                       : "One invoice for the full amount instead of a deposit + final split."}
                   </span>
                 </div>
@@ -422,6 +439,7 @@ export function GenerateDepositInvoiceDialog({
           signatureBrandId={generated.email.signatureBrandId}
           paymentMethodId={generated.email.paymentMethodId}
           invoiceNumber={generated.invoice.invoiceNumber}
+          customerSurname={customerSurname}
           to={generated.email.to}
           kind="invoice"
           moveStage="deposit_requested"

@@ -23,6 +23,7 @@ const supplierRow: SupplierRow = {
   slug: "blue-train",
   kind: "train_operator",
   pricing_mode: "rate_card",
+  transfer_pricing_basis: "per_vehicle",
   base_rate_type_id: null,
   quote_rate_type_id: null,
   status: "draft",
@@ -49,6 +50,7 @@ const supplierRow: SupplierRow = {
   child_max_age: null,
   long_journey_min_days: null,
   train_only_note: null,
+  quote_suite_detail: "type_only",
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-02T11:30:00.000Z",
 }

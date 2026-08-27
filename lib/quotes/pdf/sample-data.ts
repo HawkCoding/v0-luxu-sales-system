@@ -75,7 +75,10 @@ export function sampleQuotePdfData(): Omit<
           startTime: "12:00",
           endTime: "18:00",
           route: "Pretoria to Cape Town",
-          suiteType: "Deluxe Suite (twin, shower)",
+          // suiteType is the full configuration (voucher/invoice wording); itinerarySuiteType is
+          // what the default 'type_only' supplier setting sends to this itinerary sentence.
+          suiteType: "Twin bedded Deluxe Suite with a shower",
+          itinerarySuiteType: "Deluxe Suite",
           durationDays: 3,
           inclusions: [
             "All applicable snacks, meals & drinks (alcoholic & non-alcoholic), Cognacs, and Cuban cigars",

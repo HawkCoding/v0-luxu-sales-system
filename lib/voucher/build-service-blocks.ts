@@ -17,6 +17,9 @@ import { formatSuitePhrase, type SuiteSelection } from "@/lib/templates/suite-de
 import { firstRecord } from "@/lib/utils"
 import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
 import type { JourneyClass, RateAudience } from "@/lib/quotes/quote-config"
+import { fetchDefaultAgeBuckets } from "@/lib/pricing/age-buckets"
+import { projectPassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
+import { resolveTransferPax } from "@/lib/pricing/transfer-basis"
 
 /** Kinds whose suite/room name gets a noun appended when the type name doesn't already carry
  * one (see formatSuitePhrase). Tour, airline and transfer labels feed different sentences
@@ -114,6 +117,9 @@ interface SupplierJoin {
   inclusions: string[] | null
   exclusions: string[] | null
   station_addresses: StationAddressJoin[] | null
+  /** Train-only: 'type_only' (default) or 'full' -- how much suite detail the quote itinerary
+   * sentence states. See resolveLegSuiteNames / lib/quotes/quote-presentation.ts. */
+  quote_suite_detail?: string | null
 }
 
 /** Mirrors `supplierLocationName` in lib/suppliers.ts against this join's shape -- trains print
@@ -172,6 +178,11 @@ interface TransportRequestJoinRow {
     | { return_at: string | null }[]
     | null
   flight_details: FlightDetailsJoin | FlightDetailsJoin[] | null
+  /** Transfers only, always 'per_vehicle' for a rental — see lib/pricing/transfer-basis.ts. */
+  pricing_basis: "per_vehicle" | "per_person"
+  adult_count: number | null
+  child_count: number | null
+  infant_count: number | null
 }
 
 interface SelectionUnitJoinRow {
@@ -373,36 +384,55 @@ function composeUnitSuiteLabel(
  * leg-level suite_types join for rows with no unit children, which therefore have no
  * bedroom/bathroom configuration to compose in.
  *
- * `includeConfig` composes each unit's bed/bathroom/layout configuration into its label (train
- * legs, so the itinerary line reads "Twin bedded Deluxe Suite with a shower"); hotel legs pass
+ * `includeConfig` composes each unit's bed/bathroom/layout configuration into `names` (train
+ * legs, so the itinerary line can read "Twin bedded Deluxe Suite with a shower"); hotel legs pass
  * false since their room name alone already fills that role in the sentence — only the noun is
- * added. `nounKind` drives the noun appended by formatSuitePhrase (null leaves the type name
- * untouched, for tour/airline/transfer legs). */
+ * added, and `names`/`typeOnlyNames` come out identical. `nounKind` drives the noun appended by
+ * formatSuitePhrase (null leaves the type name untouched, for tour/airline/transfer legs).
+ *
+ * `typeOnlyNames` is always the type-name-alone variant, regardless of `includeConfig` — it feeds
+ * the quote itinerary sentence when the supplier's quote_suite_detail is 'type_only' (the default;
+ * see lib/quotes/quote-presentation.ts). Computed in the same pass so a supplier's setting can be
+ * read without a second query. */
 function resolveLegSuiteNames(
   row: SelectionJoinRow,
   includeConfig: boolean,
   nounKind: SupplierKind | null,
-): { names: string[]; unitCount: number } {
+): { names: string[]; typeOnlyNames: string[]; unitCount: number } {
   const unitRows = [...(row.units ?? [])].sort((a, b) => a.sort_order - b.sort_order)
-  const unitLabels = unitRows
-    .map((unit) =>
-      composeUnitSuiteLabel({
-        suiteTypeName: firstRecord(unit.suite_types)?.name,
-        bedroomType: includeConfig ? firstRecord(unit.bedroom_types)?.name : null,
-        bedroomLayout: includeConfig ? firstRecord(unit.bedroom_layouts)?.name : null,
-        bathroomType: includeConfig ? firstRecord(unit.bathroom_types)?.name : null,
-        supplierKind: nounKind,
-      }),
-    )
-    .filter((label): label is string => Boolean(label))
+  const unitLabels: string[] = []
+  const typeOnlyLabels: string[] = []
+  for (const unit of unitRows) {
+    const suiteTypeName = firstRecord(unit.suite_types)?.name
+    const typeOnlyLabel = composeUnitSuiteLabel({ suiteTypeName, supplierKind: nounKind })
+    if (typeOnlyLabel) typeOnlyLabels.push(typeOnlyLabel)
+    const fullLabel = includeConfig
+      ? composeUnitSuiteLabel({
+          suiteTypeName,
+          bedroomType: firstRecord(unit.bedroom_types)?.name,
+          bedroomLayout: firstRecord(unit.bedroom_layouts)?.name,
+          bathroomType: firstRecord(unit.bathroom_types)?.name,
+          supplierKind: nounKind,
+        })
+      : typeOnlyLabel
+    if (fullLabel) unitLabels.push(fullLabel)
+  }
   if (unitRows.length > 0) {
-    return { names: Array.from(new Set(unitLabels)), unitCount: unitRows.length }
+    return {
+      names: Array.from(new Set(unitLabels)),
+      typeOnlyNames: Array.from(new Set(typeOnlyLabels)),
+      unitCount: unitRows.length,
+    }
   }
   const legacyName = composeUnitSuiteLabel({
     suiteTypeName: firstRecord(row.suite_types)?.name,
     supplierKind: nounKind,
   })
-  return { names: legacyName ? [legacyName] : [], unitCount: legacyName ? 1 : 0 }
+  return {
+    names: legacyName ? [legacyName] : [],
+    typeOnlyNames: legacyName ? [legacyName] : [],
+    unitCount: legacyName ? 1 : 0,
+  }
 }
 
 /** Adults/children/infants captured across a leg's suite/room units — null when the leg has no
@@ -533,6 +563,11 @@ interface TransportBlockContext {
    * journey/rate context to filter them by. See `resolveInclusionList`. */
   inclusionLinesBySupplier?: Map<string, FetchedInclusionLine[]>
   inclusionFilter?: InclusionFilterContext
+  /** The booking's projected adult/child/infant totals (default age buckets — see
+   * lib/pricing/age-buckets.ts), used as a per-person transfer request's guest-breakdown fallback
+   * when it carries no typed counts of its own. Mirrors resolveTransferPax's pricing-time
+   * fallback so the voucher's Guests row never disagrees with what the quote actually priced. */
+  fallbackTotals: PassengerTotals
 }
 
 /** One captured transfer/rental/flight trip → one client-facing block. Flights reuse this same
@@ -616,6 +651,20 @@ function transportRequestBlock(
       suiteType: requestSuite?.name ?? blockContext.fallbackVehicle,
       flightNumber: request.flight_number,
       passengerCount: request.passenger_count,
+      guestBreakdown:
+        !isRental && request.pricing_basis === "per_person"
+          ? (() => {
+              const pax = resolveTransferPax(
+                {
+                  adultCount: request.adult_count,
+                  childCount: request.child_count,
+                  infantCount: request.infant_count,
+                },
+                blockContext.fallbackTotals,
+              )
+              return { adults: pax.adultCount, children: pax.childCount, infants: pax.infantCount }
+            })()
+          : null,
       notes: request.notes,
       footnote: request.voucher_footnote,
       inclusions: resolveInclusionList(
@@ -654,12 +703,29 @@ export async function buildVoucherServiceBlocks(
   supabase: SupabaseClient<Database>,
   context: BuildContext,
 ): Promise<BuildVoucherServiceBlocksResult> {
+  // A per-person transfer request with no typed counts of its own falls back to the booking's
+  // projected totals at pricing time (see lib/pricing/transfer-basis.ts resolveTransferPax) --
+  // fetched once here (default age buckets only, not per-supplier) so the voucher's Guests row
+  // never disagrees with what the quote actually priced.
+  const [{ data: bookingRow }, defaultAgeBuckets] = await Promise.all([
+    supabase.from("bookings").select("no_of_adults, no_of_children, child_ages").eq("id", context.bookingId).maybeSingle(),
+    fetchDefaultAgeBuckets(supabase),
+  ])
+  const fallbackTotals: PassengerTotals = projectPassengerTotals(
+    {
+      noOfAdults: bookingRow?.no_of_adults ?? 0,
+      noOfChildren: bookingRow?.no_of_children ?? 0,
+      childAges: bookingRow?.child_ages ?? [],
+    },
+    defaultAgeBuckets,
+  )
+
   const { data: serviceRows, error: servicesError } = await supabase
     .from("booking_services")
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, luggage_storage_available,
-       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
@@ -673,7 +739,7 @@ export async function buildVoucherServiceBlocks(
   const { data: transportRows, error: transportError } = await supabase
     .from("booking_transport_requests")
     .select(
-      `id, service_id, supplier_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, passenger_count, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote,
+      `id, service_id, supplier_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, passenger_count, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, pricing_basis, adult_count, child_count, infant_count,
        suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        suite_types(name),
        rental_details:booking_vehicle_rental_details(return_at),
@@ -783,6 +849,7 @@ export async function buildVoucherServiceBlocks(
             complimentaryTransportRequestIds: context.complimentaryTransportRequestIds,
             inclusionLinesBySupplier,
             inclusionFilter: context.inclusionFilter,
+            fallbackTotals,
           }),
         )
       }
@@ -841,8 +908,22 @@ export async function buildVoucherServiceBlocks(
       supplier?.kind && SUITE_NOUN_KINDS.has(supplier.kind as SupplierKind)
         ? (supplier.kind as SupplierKind)
         : null
-    const { names: suiteNames, unitCount } = resolveLegSuiteNames(row, serviceType === "train", nounKind)
+    const { names: suiteNames, typeOnlyNames, unitCount } = resolveLegSuiteNames(
+      row,
+      serviceType === "train",
+      nounKind,
+    )
     const suiteName = suiteNames.length > 0 ? suiteNames.join(", ") : null
+    const suiteTypeOnlyName = typeOnlyNames.length > 0 ? typeOnlyNames.join(", ") : null
+    // Client-facing quote wording for a train leg only -- 'full' opts a supplier into the same
+    // configuration the voucher's Suite Type row always states; every other supplier defaults to
+    // the type name alone. Non-train legs leave this null so describeBlock's other cases (which
+    // never read it) are unaffected.
+    const itinerarySuiteType = isTrain
+      ? supplier?.quote_suite_detail === "full"
+        ? suiteName
+        : suiteTypeOnlyName
+      : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,
       arrivalStation,
@@ -850,6 +931,7 @@ export async function buildVoucherServiceBlocks(
       arrivalPoint: stationPoints.arrival,
       mealPlan: isHotel ? route?.name ?? null : null,
       suiteType: suiteName,
+      itinerarySuiteType,
       numberOfSuites: unitCount > 0 ? unitCount : null,
       roomType: isHotel ? suiteName : null,
       isComplimentary: isHotel ? context.complimentaryLegIds?.has(row.package_leg_id) ?? false : null,
@@ -951,6 +1033,7 @@ export async function buildVoucherServiceBlocks(
           travellerNames: context.travellerNames ?? null,
           inclusionLinesBySupplier,
           inclusionFilter: context.inclusionFilter,
+          fallbackTotals,
         }),
       )
     })

@@ -92,6 +92,10 @@ const supplierKindSchema = z.enum([
  *  per unit at quote-build time instead. */
 const supplierPricingModeSchema = z.enum(["rate_card", "manual"])
 
+/** Transfers only: default pricing basis for this supplier's newly created transfer rows -- flat
+ *  per vehicle, or split adult/child/infant per person. Ignored for every other supplier kind. */
+const transferPricingBasisSchema = z.enum(["per_vehicle", "per_person"])
+
 const vehicleRentalRouteDetailsSchema = z.object({
   includedKmPerDay: z.number().finite().nonnegative().nullable().optional(),
   extraKmPrice: z.number().finite().nonnegative().nullable().optional(),
@@ -387,6 +391,7 @@ export const supplierSaveSchema = z.object({
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   kind: supplierKindSchema,
   pricingMode: supplierPricingModeSchema.default("rate_card"),
+  transferPricingBasis: transferPricingBasisSchema.default("per_vehicle"),
   email: z
     .string()
     .trim()
@@ -438,6 +443,9 @@ export const supplierSaveSchema = z.object({
    * default) means this supplier has no short/long concept. */
   longJourneyMinDays: z.number().int().min(1).max(365).nullable().optional(),
   trainOnlyNote: z.string().trim().max(2000).nullable().optional(),
+  /** Train operators only: how much suite detail the quote itinerary sentence states. Defaults to
+   * 'type_only' when omitted. */
+  quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
   active: z.boolean(),
   /** The sibling record (same company, different category) this supplier inherits its contact
    * details from. `null` unlinks and keeps the last mirrored values as this record's own. Omit the
@@ -563,6 +571,7 @@ export const supplierDraftSaveSchema = z.object({
   name: z.string().trim().max(200).default(""),
   kind: supplierKindSchema,
   pricingMode: supplierPricingModeSchema.default("rate_card"),
+  transferPricingBasis: transferPricingBasisSchema.default("per_vehicle"),
   email: z
     .string()
     .trim()
@@ -602,6 +611,9 @@ export const supplierDraftSaveSchema = z.object({
   inclusionLines: z.array(supplierInclusionLineSchema).max(200).default([]),
   longJourneyMinDays: z.number().int().min(1).max(365).nullable().optional(),
   trainOnlyNote: z.string().trim().max(2000).nullable().optional(),
+  /** Train operators only: how much suite detail the quote itinerary sentence states. Defaults to
+   * 'type_only' when omitted. */
+  quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
   active: z.boolean().default(true),
   /** See `parentSupplierId` on supplierSaveSchema. */
   parentSupplierId: z.string().uuid().nullable().optional(),

@@ -20,6 +20,8 @@ import {
 } from "@/lib/pricing/commission"
 import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
+import { rateCardFares } from "@/lib/pricing/passenger-fares"
+import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 
 export interface ExtraLineSelection {
   supplierId: string
@@ -119,7 +121,9 @@ export async function priceExtraLineItems(
     await Promise.all([
       supabase
         .from("suppliers")
-        .select("id, name, kind, infant_max_age, child_max_age, base_rate_type_id, quote_rate_type_id")
+        .select(
+          "id, name, kind, infant_max_age, child_max_age, base_rate_type_id, quote_rate_type_id, transfer_pricing_basis",
+        )
         .eq("id", supplierId)
         .single(),
       loadSupplierRateTiersResolver(supabase),
@@ -316,21 +320,30 @@ export async function priceExtraLineItems(
   }
 
   const unit = card.price_per_person
+  const fareCard = { pricePerPerson: card.price_per_person, childPrice: card.child_price, infantPrice: card.infant_price }
+  // An ad-hoc extra has no booking_transport_requests row of its own to carry a per-leg override,
+  // so its basis comes purely from the supplier's current default (see
+  // lib/pricing/transfer-basis.ts resolveTransferPricingBasis).
+  const transferBasis = resolveTransferPricingBasis({
+    serviceType: kind === "vehicle_rental" ? "rental" : "transfer",
+    rowBasis: null,
+    supplierBasis: supplierRow.transfer_pricing_basis,
+  })
   if (kind === "hotel_property") {
     const nights = Math.max(1, quantity ?? 1)
     addLine(description, Math.max(1, job.no_of_suites) * nights, unit, "included")
+  } else if (kind === "transfers" && transferBasis === "per_person") {
+    for (const fare of rateCardFares(fareCard)) {
+      addLine(`${description} - ${fare.label}`, { adultCount, childCount, infantCount }[fare.key], fare.unitPrice, fare.kind)
+    }
   } else if (kind === "transfers") {
     addLine(description, 1, unit, "service")
   } else if (kind === "vehicle_rental") {
     addLine(description, Math.max(1, quantity ?? 1), unit, "service")
   } else {
-    addLine(`${description} - Adult`, adultCount, unit, "adult")
-    addLine(`${description} - Child`, childCount, card.child_price ?? unit, "child")
-    // A card with no infant rate charges nothing for infants. It used to fall through to the
-    // child rate, which made "the supplier set no infant price" and "the supplier charges the
-    // child price for infants" indistinguishable — with the expensive reading winning by default
-    // and nobody asked to confirm it. Zero is the reading a consultant can spot on the quote.
-    addLine(`${description} - Infant`, infantCount, card.infant_price ?? 0, "infant")
+    for (const fare of rateCardFares(fareCard)) {
+      addLine(`${description} - ${fare.label}`, { adultCount, childCount, infantCount }[fare.key], fare.unitPrice, fare.kind)
+    }
   }
 
   return { lineItems }

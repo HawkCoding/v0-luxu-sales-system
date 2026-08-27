@@ -53,6 +53,8 @@ const serviceUpdateSchema = z.object({
   flightNumber: z.string().trim().min(2).max(20).nullable().optional(),
   departureAirportCode: airportCode.optional(),
   arrivalAirportCode: airportCode.optional(),
+  handLuggageKg: z.number().nonnegative().nullable().optional(),
+  checkedLuggageKg: z.number().nonnegative().nullable().optional(),
 })
 
 /** A transfer/rental: pickup_at and return_at are real instants, so the client sends full ISO
@@ -222,6 +224,8 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       if (update.arrivalAirportCode !== undefined) {
         payload.arrival_airport_code = update.arrivalAirportCode
       }
+      if (update.handLuggageKg !== undefined) payload.hand_luggage_kg = update.handLuggageKg
+      if (update.checkedLuggageKg !== undefined) payload.checked_luggage_kg = update.checkedLuggageKg
       if (Object.keys(payload).length === 0) continue
 
       const { error } = await supabase

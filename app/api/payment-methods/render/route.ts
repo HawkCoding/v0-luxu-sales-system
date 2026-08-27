@@ -1,12 +1,13 @@
 import { z } from "zod"
 import { requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError } from "@/lib/api/responses"
-import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { buildBankingDetailsBlock, buildPaymentReference } from "@/lib/invoices/banking-details-block"
 import { getPaymentMethod } from "@/lib/payment-methods"
 
 const bodySchema = z.object({
   paymentMethodId: z.string().uuid().nullish(),
   invoiceNumber: z.string().trim().max(120).optional().default(""),
+  customerSurname: z.string().trim().max(120).optional().default(""),
 })
 
 /**
@@ -31,7 +32,8 @@ export async function POST(req: Request) {
 
   const { supabase } = auth.value
   const method = await getPaymentMethod(supabase, parsed.data.paymentMethodId)
-  const html = buildBankingDetailsBlock(method.banking, parsed.data.invoiceNumber)
+  const reference = buildPaymentReference(parsed.data.invoiceNumber, parsed.data.customerSurname)
+  const html = buildBankingDetailsBlock(method.banking, reference)
 
   return Response.json({ html, paymentMethodId: method.id || null, paymentMethodName: method.name })
 }

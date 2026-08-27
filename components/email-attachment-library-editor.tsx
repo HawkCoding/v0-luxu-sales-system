@@ -16,9 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useActiveSuppliers } from "@/lib/use-data"
+import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { EMAIL_ATTACHMENT_KINDS } from "@/lib/attachments/email-attachment-library"
-import { SUPPLIER_KIND_LABELS } from "@/lib/types"
+import { SUPPLIER_KIND_LABELS, type Supplier } from "@/lib/types"
 
 interface LibraryEntry {
   id: string
@@ -27,6 +27,8 @@ interface LibraryEntry {
   supplierId: string | null
   supplierName: string | null
   supplierKind: string | null
+  routeId: string | null
+  routeName: string | null
   emailKinds: string[]
 }
 
@@ -35,17 +37,20 @@ interface EmailAttachmentLibraryEditorProps {
 }
 
 const ALL_SUPPLIERS = "__all__"
+const ALL_ROUTES = "__all_routes__"
 // Category options are prefixed so their values can never collide with a
 // supplier UUID in the same dropdown.
 const KIND_PREFIX = "kind:"
 
-/** Map the selected dropdown value to the two scope columns (exactly one set, or both null). */
-function scopeFromSelection(value: string): { supplierId: string | null; supplierKind: string | null } {
-  if (value === ALL_SUPPLIERS) return { supplierId: null, supplierKind: null }
+/** Map the selected dropdown value to the scope columns (supplier xor category, or both null). */
+function scopeFromSelection(
+  value: string,
+): { supplierId: string | null; supplierKind: string | null; routeId: string | null } {
+  if (value === ALL_SUPPLIERS) return { supplierId: null, supplierKind: null, routeId: null }
   if (value.startsWith(KIND_PREFIX)) {
-    return { supplierId: null, supplierKind: value.slice(KIND_PREFIX.length) }
+    return { supplierId: null, supplierKind: value.slice(KIND_PREFIX.length), routeId: null }
   }
-  return { supplierId: value, supplierKind: null }
+  return { supplierId: value, supplierKind: null, routeId: null }
 }
 
 /** The dropdown value representing an entry's current scope. */
@@ -53,6 +58,139 @@ function selectionForEntry(entry: LibraryEntry): string {
   if (entry.supplierId) return entry.supplierId
   if (entry.supplierKind) return `${KIND_PREFIX}${entry.supplierKind}`
   return ALL_SUPPLIERS
+}
+
+interface LibraryEntryRowProps {
+  entry: LibraryEntry
+  suppliers: Supplier[]
+  canEdit: boolean
+  onPatch: (
+    id: string,
+    updates: Partial<
+      Pick<LibraryEntry, "name" | "supplierId" | "supplierKind" | "routeId" | "emailKinds">
+    >,
+  ) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+  onToggleKind: (entry: LibraryEntry, kind: string, checked: boolean) => void
+}
+
+function LibraryEntryRow({
+  entry,
+  suppliers,
+  canEdit,
+  onPatch,
+  onDelete,
+  onToggleKind,
+}: LibraryEntryRowProps) {
+  const supplierSlug = entry.supplierId
+    ? suppliers.find((supplier) => supplier.id === entry.supplierId)?.slug ?? null
+    : null
+  const { data: supplierDetail } = useSupplierDetail(supplierSlug ?? "")
+  const routes =
+    supplierDetail && "routes" in supplierDetail
+      ? supplierDetail.routes.filter((route) => route.active)
+      : []
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <Input
+          defaultValue={entry.name}
+          disabled={!canEdit}
+          maxLength={120}
+          aria-label={`Display name for ${entry.fileName}`}
+          className="h-8 w-56 text-sm"
+          onBlur={(event) => {
+            const name = event.target.value.trim()
+            if (name && name !== entry.name) void onPatch(entry.id, { name })
+          }}
+        />
+        <Select
+          value={selectionForEntry(entry)}
+          onValueChange={(value) => void onPatch(entry.id, scopeFromSelection(value))}
+          disabled={!canEdit}
+        >
+          <SelectTrigger className="h-8 w-52 text-sm" aria-label="Scope">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_SUPPLIERS}>All trains / suppliers</SelectItem>
+            <SelectGroup>
+              <SelectLabel>Categories</SelectLabel>
+              {Object.entries(SUPPLIER_KIND_LABELS).map(([kind, label]) => (
+                <SelectItem key={kind} value={`${KIND_PREFIX}${kind}`}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+            {suppliers.length > 0 && (
+              <SelectGroup>
+                <SelectLabel>Suppliers</SelectLabel>
+                {suppliers.map((supplier) => (
+                  <SelectItem key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
+          </SelectContent>
+        </Select>
+        {entry.supplierId && routes.length > 0 ? (
+          <Select
+            value={entry.routeId ?? ALL_ROUTES}
+            onValueChange={(value) =>
+              void onPatch(entry.id, { routeId: value === ALL_ROUTES ? null : value })
+            }
+            disabled={!canEdit}
+          >
+            <SelectTrigger className="h-8 w-44 text-sm" aria-label="Route">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_ROUTES}>All routes</SelectItem>
+              {routes.map((route) => (
+                <SelectItem key={route.id} value={route.id}>
+                  {route.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+        <span className="text-xs text-muted-foreground">{entry.fileName}</span>
+        {canEdit ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="ml-auto h-7 w-7 text-muted-foreground"
+            onClick={() => void onDelete(entry.id)}
+            aria-label={`Remove ${entry.name}`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 pl-6">
+        {EMAIL_ATTACHMENT_KINDS.map((kind) => (
+          <div key={kind.value} className="flex items-center gap-1.5">
+            <Checkbox
+              id={`kind-${entry.id}-${kind.value}`}
+              checked={entry.emailKinds.includes(kind.value)}
+              onCheckedChange={(checked) => onToggleKind(entry, kind.value, checked === true)}
+              disabled={!canEdit}
+            />
+            <Label
+              htmlFor={`kind-${entry.id}-${kind.value}`}
+              className="cursor-pointer text-xs font-normal text-muted-foreground"
+            >
+              {kind.label}
+            </Label>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export function EmailAttachmentLibraryEditor({ canEdit }: EmailAttachmentLibraryEditorProps) {
@@ -100,6 +238,8 @@ export function EmailAttachmentLibraryEditor({ canEdit }: EmailAttachmentLibrary
           supplierId: body.supplierId ?? null,
           supplierName: null,
           supplierKind: body.supplierKind ?? null,
+          routeId: body.routeId ?? null,
+          routeName: null,
           emailKinds: body.emailKinds ?? [],
         },
       ])
@@ -114,7 +254,9 @@ export function EmailAttachmentLibraryEditor({ canEdit }: EmailAttachmentLibrary
 
   async function patchEntry(
     id: string,
-    updates: Partial<Pick<LibraryEntry, "name" | "supplierId" | "supplierKind" | "emailKinds">>,
+    updates: Partial<
+      Pick<LibraryEntry, "name" | "supplierId" | "supplierKind" | "routeId" | "emailKinds">
+    >,
   ) {
     const previous = entries
     setEntries((current) =>
@@ -173,83 +315,15 @@ export function EmailAttachmentLibraryEditor({ canEdit }: EmailAttachmentLibrary
       ) : (
         <div className="space-y-3">
           {entries.map((entry) => (
-            <div key={entry.id} className="space-y-2 rounded-md border p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <Input
-                  defaultValue={entry.name}
-                  disabled={!canEdit}
-                  maxLength={120}
-                  aria-label={`Display name for ${entry.fileName}`}
-                  className="h-8 w-56 text-sm"
-                  onBlur={(event) => {
-                    const name = event.target.value.trim()
-                    if (name && name !== entry.name) void patchEntry(entry.id, { name })
-                  }}
-                />
-                <Select
-                  value={selectionForEntry(entry)}
-                  onValueChange={(value) => void patchEntry(entry.id, scopeFromSelection(value))}
-                  disabled={!canEdit}
-                >
-                  <SelectTrigger className="h-8 w-52 text-sm" aria-label="Scope">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL_SUPPLIERS}>All trains / suppliers</SelectItem>
-                    <SelectGroup>
-                      <SelectLabel>Categories</SelectLabel>
-                      {Object.entries(SUPPLIER_KIND_LABELS).map(([kind, label]) => (
-                        <SelectItem key={kind} value={`${KIND_PREFIX}${kind}`}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                    {(suppliers ?? []).length > 0 && (
-                      <SelectGroup>
-                        <SelectLabel>Suppliers</SelectLabel>
-                        {(suppliers ?? []).map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.id}>
-                            {supplier.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    )}
-                  </SelectContent>
-                </Select>
-                <span className="text-xs text-muted-foreground">{entry.fileName}</span>
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="ml-auto h-7 w-7 text-muted-foreground"
-                    onClick={() => void deleteEntry(entry.id)}
-                    aria-label={`Remove ${entry.name}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 pl-6">
-                {EMAIL_ATTACHMENT_KINDS.map((kind) => (
-                  <div key={kind.value} className="flex items-center gap-1.5">
-                    <Checkbox
-                      id={`kind-${entry.id}-${kind.value}`}
-                      checked={entry.emailKinds.includes(kind.value)}
-                      onCheckedChange={(checked) => toggleKind(entry, kind.value, checked === true)}
-                      disabled={!canEdit}
-                    />
-                    <Label
-                      htmlFor={`kind-${entry.id}-${kind.value}`}
-                      className="cursor-pointer text-xs font-normal text-muted-foreground"
-                    >
-                      {kind.label}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <LibraryEntryRow
+              key={entry.id}
+              entry={entry}
+              suppliers={suppliers ?? []}
+              canEdit={canEdit}
+              onPatch={patchEntry}
+              onDelete={deleteEntry}
+              onToggleKind={toggleKind}
+            />
           ))}
         </div>
       )}
@@ -282,7 +356,8 @@ export function EmailAttachmentLibraryEditor({ canEdit }: EmailAttachmentLibrary
           </Button>
           <span className="text-xs text-muted-foreground">
             Tick the emails each file should be pre-attached to. Scope a file to a category (e.g.
-            Trains) or one supplier to limit where it appears.
+            Trains) or one supplier to limit where it appears, then narrow further to one of that
+            supplier&apos;s routes if it has more than one.
           </span>
         </div>
       ) : null}

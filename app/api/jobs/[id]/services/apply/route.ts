@@ -55,6 +55,8 @@ const unitSelectionSchema = z.object({
   complimentaryFirstNight: z.boolean().optional(),
   /** Tour legs only: the typed flat price that replaces this unit's rate-card-computed total. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
+  /** Tour legs only: this unit's own rate type, overriding the leg-level rateTypeId below. */
+  rateTypeId: z.string().uuid().nullable().optional(),
 })
 
 const applyServicesSchema = z.object({

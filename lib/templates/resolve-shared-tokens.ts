@@ -17,7 +17,7 @@ import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
-import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { buildBankingDetailsBlock, buildPaymentReference } from "@/lib/invoices/banking-details-block"
 import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
 import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
@@ -386,7 +386,9 @@ export async function resolveSharedEmailTokens(
   }
 
   const blocks: Record<string, string> = {
-    bankingDetails: orPlaceholder(buildBankingDetailsBlock(paymentMethod.banking, tokens.invoiceNumber)),
+    bankingDetails: orPlaceholder(
+      buildBankingDetailsBlock(paymentMethod.banking, buildPaymentReference(tokens.invoiceNumber, customer?.last_name)),
+    ),
     guestInfo,
     quoteSummaryTable,
     trainOnlyNote: trainOnlyNote ?? "",

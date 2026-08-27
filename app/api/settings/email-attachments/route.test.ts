@@ -36,6 +36,8 @@ import { GET, POST } from "./route"
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 const SUPPLIER_A = "00000000-0000-4000-8000-00000000bbb1"
 const SUPPLIER_B = "00000000-0000-4000-8000-00000000bbb2"
+const ROUTE_A1 = "00000000-0000-4000-8000-00000000eee1"
+const ROUTE_A2 = "00000000-0000-4000-8000-00000000eee2"
 
 const LIBRARY_ROWS = [
   {
@@ -44,8 +46,10 @@ const LIBRARY_ROWS = [
     file_name: "reservation-form.pdf",
     supplier_id: null,
     supplier_kind: null,
+    route_id: null,
     email_kinds: ["quote"],
     supplier: null,
+    route: null,
   },
   {
     id: "00000000-0000-4000-8000-00000000ccc2",
@@ -53,8 +57,10 @@ const LIBRARY_ROWS = [
     file_name: "blue-train-fact-sheet.pdf",
     supplier_id: SUPPLIER_A,
     supplier_kind: null,
+    route_id: null,
     email_kinds: ["voucher"],
     supplier: { name: "The Blue Train" },
+    route: null,
   },
   {
     id: "00000000-0000-4000-8000-00000000ccc3",
@@ -62,8 +68,10 @@ const LIBRARY_ROWS = [
     file_name: "rovos-fact-sheet.pdf",
     supplier_id: SUPPLIER_B,
     supplier_kind: null,
+    route_id: null,
     email_kinds: ["voucher"],
     supplier: { name: "Rovos Rail" },
+    route: null,
   },
   {
     id: "00000000-0000-4000-8000-00000000ccc4",
@@ -71,8 +79,10 @@ const LIBRARY_ROWS = [
     file_name: "trains-category.pdf",
     supplier_id: null,
     supplier_kind: "train_operator",
+    route_id: null,
     email_kinds: ["voucher"],
     supplier: null,
+    route: null,
   },
   {
     id: "00000000-0000-4000-8000-00000000ccc5",
@@ -80,15 +90,33 @@ const LIBRARY_ROWS = [
     file_name: "tours-category.pdf",
     supplier_id: null,
     supplier_kind: "tour_operator",
+    route_id: null,
     email_kinds: ["voucher"],
     supplier: null,
+    route: null,
+  },
+  {
+    id: "00000000-0000-4000-8000-00000000ccc6",
+    name: "Route A1 directions",
+    file_name: "route-a1-directions.pdf",
+    supplier_id: SUPPLIER_A,
+    supplier_kind: null,
+    route_id: ROUTE_A1,
+    email_kinds: ["voucher"],
+    supplier: { name: "The Blue Train" },
+    route: { name: "Pretoria ↔ Cape Town" },
   },
 ]
 
 function buildListSupabase({
   bookingSupplierId = SUPPLIER_A,
   bookingSupplierKind = "train_operator",
-}: { bookingSupplierId?: string | null; bookingSupplierKind?: string | null } = {}) {
+  bookingRouteId = ROUTE_A1,
+}: {
+  bookingSupplierId?: string | null
+  bookingSupplierKind?: string | null
+  bookingRouteId?: string | null
+} = {}) {
   const supabase = {
     from: vi.fn((table: string) => {
       if (table === "bookings") {
@@ -98,6 +126,7 @@ function buildListSupabase({
               maybeSingle: vi.fn(async () => ({
                 data: {
                   id: BOOKING_ID,
+                  route_id: bookingRouteId,
                   route: { supplier: { id: bookingSupplierId, kind: bookingSupplierKind } },
                 },
                 error: null,
@@ -148,11 +177,15 @@ describe("GET /api/settings/email-attachments", () => {
     const res = await GET(new Request("http://localhost/api/settings/email-attachments"))
     expect(res.status).toBe(200)
     const body = (await res.json()) as { attachments: Array<{ id: string }> }
-    expect(body.attachments).toHaveLength(5)
+    expect(body.attachments).toHaveLength(6)
   })
 
   it("filters supplier and category files to the booking's train and marks kind defaults", async () => {
-    buildListSupabase({ bookingSupplierId: SUPPLIER_A, bookingSupplierKind: "train_operator" })
+    buildListSupabase({
+      bookingSupplierId: SUPPLIER_A,
+      bookingSupplierKind: "train_operator",
+      bookingRouteId: ROUTE_A1,
+    })
     const res = await GET(
       new Request(
         `http://localhost/api/settings/email-attachments?bookingId=${BOOKING_ID}&kind=quote`,
@@ -163,20 +196,40 @@ describe("GET /api/settings/email-attachments", () => {
       attachments: Array<{ name: string; defaultSelected: boolean }>
     }
     // Rovos (other supplier) and the Tours category are excluded — booking is
-    // on a Blue Train (train_operator) route.
+    // on a Blue Train (train_operator) route, and that route matches ROUTE_A1.
     expect(body.attachments.map((a) => a.name)).toEqual([
       "Reservation form",
       "Blue Train fact sheet",
       "Trains category sheet",
+      "Route A1 directions",
     ])
     expect(body.attachments.find((a) => a.name === "Reservation form")?.defaultSelected).toBe(true)
     expect(
       body.attachments.find((a) => a.name === "Blue Train fact sheet")?.defaultSelected,
     ).toBe(false)
   })
+
+  it("excludes a route-pinned file when the booking is on a different route of the same supplier", async () => {
+    buildListSupabase({
+      bookingSupplierId: SUPPLIER_A,
+      bookingSupplierKind: "train_operator",
+      bookingRouteId: ROUTE_A2,
+    })
+    const res = await GET(
+      new Request(`http://localhost/api/settings/email-attachments?bookingId=${BOOKING_ID}`),
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { attachments: Array<{ name: string }> }
+    expect(body.attachments.map((a) => a.name)).not.toContain("Route A1 directions")
+    // The supplier-scoped file (no route pin) still applies to every route of that supplier.
+    expect(body.attachments.map((a) => a.name)).toContain("Blue Train fact sheet")
+  })
 })
 
-function buildUploadSupabase({ insertError = null as unknown } = {}) {
+function buildUploadSupabase({
+  insertError = null as unknown,
+  routeOwnerSupplierId = SUPPLIER_A as string | null,
+} = {}) {
   const storageUpload = vi.fn(async () => ({ error: null }))
   const storageRemove = vi.fn(async () => ({ error: null }))
   const insertSingle = vi.fn(async () =>
@@ -189,6 +242,7 @@ function buildUploadSupabase({ insertError = null as unknown } = {}) {
             file_name: "form.pdf",
             supplier_id: null,
             supplier_kind: null,
+            route_id: null,
             email_kinds: [],
           },
           error: null,
@@ -196,11 +250,25 @@ function buildUploadSupabase({ insertError = null as unknown } = {}) {
   )
 
   const supabase = {
-    from: vi.fn(() => ({
-      insert: vi.fn(() => ({
-        select: vi.fn(() => ({ single: insertSingle })),
-      })),
-    })),
+    from: vi.fn((table: string) => {
+      if (table === "routes") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: routeOwnerSupplierId ? { supplier_id: routeOwnerSupplierId } : null,
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      return {
+        insert: vi.fn(() => ({
+          select: vi.fn(() => ({ single: insertSingle })),
+        })),
+      }
+    }),
     storage: {
       from: vi.fn(() => ({
         upload: storageUpload,
@@ -317,5 +385,42 @@ describe("POST /api/settings/email-attachments", () => {
     expect(res.status).toBe(400)
     const body = (await res.json()) as { error?: string }
     expect(body.error).toContain("not both")
+  })
+
+  it("rejects a routeId without a supplierId", async () => {
+    buildUploadSupabase()
+    const res = await POST(
+      uploadRequest(
+        { name: "form.pdf", type: "application/pdf", content: "data" },
+        { routeId: ROUTE_A1 },
+      ),
+    )
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toContain("alongside a supplier")
+  })
+
+  it("rejects a route that does not belong to the selected supplier", async () => {
+    buildUploadSupabase({ routeOwnerSupplierId: SUPPLIER_B })
+    const res = await POST(
+      uploadRequest(
+        { name: "form.pdf", type: "application/pdf", content: "data" },
+        { supplierId: SUPPLIER_A, routeId: ROUTE_A1 },
+      ),
+    )
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toContain("does not belong")
+  })
+
+  it("accepts a route that belongs to the selected supplier", async () => {
+    buildUploadSupabase({ routeOwnerSupplierId: SUPPLIER_A })
+    const res = await POST(
+      uploadRequest(
+        { name: "form.pdf", type: "application/pdf", content: "data" },
+        { supplierId: SUPPLIER_A, routeId: ROUTE_A1 },
+      ),
+    )
+    expect(res.status).toBe(200)
   })
 })

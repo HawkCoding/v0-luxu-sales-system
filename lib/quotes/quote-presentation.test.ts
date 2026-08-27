@@ -259,6 +259,39 @@ describe("buildQuoteItineraryLines", () => {
     })
   })
 
+  it("prefers itinerarySuiteType over the full suiteType when the supplier states it separately", () => {
+    const [boarding] = buildQuoteItineraryLines([
+      {
+        ...trainBlock,
+        serviceData: {
+          ...trainBlock.serviceData,
+          suiteType: "Double bedded Deluxe Suite with a shower, Lengthways",
+          itinerarySuiteType: "Deluxe Suite",
+        },
+      },
+    ])
+
+    expect(boarding.text).toBe(
+      "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town | Departs at 12h00",
+    )
+  })
+
+  it("falls back to the full suiteType when itinerarySuiteType is absent (blocks built before the field existed)", () => {
+    const [boarding] = buildQuoteItineraryLines([
+      {
+        ...trainBlock,
+        serviceData: {
+          ...trainBlock.serviceData,
+          suiteType: "Double bedded Deluxe Suite with a shower, Lengthways",
+        },
+      },
+    ])
+
+    expect(boarding.text).toBe(
+      "Two nights on the Blue Train in a Double bedded Deluxe Suite with a shower, Lengthways on an all-inclusive basis — Pretoria to Cape Town | Departs at 12h00",
+    )
+  })
+
   it("marks a `#` inclusion as a subheading and strips the marker", () => {
     const [boarding] = buildQuoteItineraryLines([
       {

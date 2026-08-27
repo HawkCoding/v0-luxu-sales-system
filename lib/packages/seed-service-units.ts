@@ -132,6 +132,11 @@ export async function seedUnitsForServices(
         ...passengerInputs,
         supplierId: service.supplier_id,
       })
+      // A tour operator's units are independent activities the same travellers can all join, not
+      // sleeping/seating slots -- so every unit gets the full headcount instead of a fractional
+      // share (mirrors PASSENGER_SUM_SUPPLIER_KINDS in lib/packages/apply-dialog-state.ts, which
+      // excludes tours from the "units must sum to the booking totals" rule this feeds).
+      const isTour = service.kind === "tour_operator"
       // A supplier with no captured suites still gets its single bare unit -- give it the whole
       // headcount so it prices correctly the moment a suite type is chosen.
       const splits = distributePassengerTotals(totals, Math.max(1, captured.length))
@@ -149,6 +154,7 @@ export async function seedUnitsForServices(
       }
 
       captured.forEach((suite, index) => {
+        const split = isTour ? totals : splits[index]
         unitRows.push({
           service_id: service.id,
           suite_type_id: suite.suiteTypeId,
@@ -156,9 +162,9 @@ export async function seedUnitsForServices(
           bedroom_layout_id: suite.bedroomLayoutId,
           bathroom_type_id: suite.bathroomTypeId,
           sort_order: index,
-          adult_count: splits[index].adultCount,
-          child_count: splits[index].childCount,
-          infant_count: splits[index].infantCount,
+          adult_count: split.adultCount,
+          child_count: split.childCount,
+          infant_count: split.infantCount,
           origin,
         })
       })
@@ -173,6 +179,27 @@ export async function seedUnitsForServices(
   const transportServices = services.filter((service) => TRANSPORT_SUPPLIER_KINDS.has(service.kind ?? ""))
 
   if (transportServices.length > 0) {
+    // Explicit resolution mirrors what the DB trigger (stamp_transport_request_pricing_basis)
+    // would do anyway for a NULL value -- doing it here keeps this insert type-safe without
+    // relying on trigger behaviour the caller can't see. Rentals are always per_vehicle.
+    const transferSupplierIds = Array.from(
+      new Set(
+        transportServices
+          .filter((service) => service.kind === "transfers")
+          .map((service) => service.supplier_id),
+      ),
+    )
+    const transferBasisBySupplierId = new Map<string, "per_vehicle" | "per_person">()
+    if (transferSupplierIds.length > 0) {
+      const { data: transferSuppliers } = await supabase
+        .from("suppliers")
+        .select("id, transfer_pricing_basis")
+        .in("id", transferSupplierIds)
+      for (const row of transferSuppliers ?? []) {
+        transferBasisBySupplierId.set(row.id, row.transfer_pricing_basis)
+      }
+    }
+
     const transportRows: BookingTransportRequestInsert[] = transportServices.map((service) => ({
       booking_id: bookingId,
       service_id: service.id,
@@ -182,6 +209,10 @@ export async function seedUnitsForServices(
       dropoff_point: "",
       pickup_at: tripStartDate ? `${tripStartDate}T00:00:00+00:00` : null,
       sort_order: 0,
+      pricing_basis:
+        service.kind === "transfers"
+          ? transferBasisBySupplierId.get(service.supplier_id) ?? "per_vehicle"
+          : "per_vehicle",
     }))
 
     const { data: insertedTransportRows, error: transportInsertError } = await supabase

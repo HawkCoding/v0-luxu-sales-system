@@ -6,7 +6,7 @@ import type {
   ServiceDateAnchor,
   SupplierKind,
 } from "@/lib/types"
-import { SUPPLIER_VOCABULARY } from "@/lib/types"
+import { isTypePricedSupplier, SUPPLIER_VOCABULARY } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import type { AnchorLegDates } from "@/lib/packages/transfer-dates"
@@ -22,6 +22,7 @@ import {
   hasAnyRateCardFor,
   hasAnyRateCardForRateType,
 } from "@/lib/rate-cards/resolve"
+import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 
 /**
  * Pure state model for Build Booking's configure step (components/build-booking-dialog.tsx --
@@ -38,11 +39,17 @@ import {
  */
 
 export const TRANSPORT_SUPPLIER_KINDS = new Set<SupplierKind>(["transfers", "vehicle_rental"])
+/** Kinds whose units show their own per-unit Adults/Children/Infants inputs. */
 export const PASSENGER_SPLIT_SUPPLIER_KINDS = new Set<SupplierKind>([
   "train_operator",
   "tour_operator",
   "airline",
 ])
+/** Kinds where the per-unit counts must sum to the booking's traveller totals -- each unit is a
+ * sleeping/seating slot, so every traveller has to land in exactly one of them. A tour operator's
+ * units are independent activities the same travellers can all join, so it's excluded here even
+ * though it still shows the per-unit inputs (PASSENGER_SPLIT_SUPPLIER_KINDS above). */
+export const PASSENGER_SUM_SUPPLIER_KINDS = new Set<SupplierKind>(["train_operator", "airline"])
 
 export interface SuiteUnitState {
   /** Persisted unit uuid, or a `draft-` key for units added in the dialog. */
@@ -74,6 +81,10 @@ export interface SuiteUnitState {
   manualTourPrice: number | null
   /** Read-only provenance for the override, stamped server-side. Never sent back on save. */
   manualTourPriceSetAt?: string | null
+  /** Tour legs only: this unit's own rate type, overriding the leg's rateTypeId. Every other kind
+   *  keeps one rate type per leg -- see SuiteLegState.rateTypeId -- since a tour is the one kind
+   *  whose units price independently of each other. Null falls back to the leg's rate type. */
+  rateTypeId: string | null
 }
 
 export interface SuiteLegState {
@@ -169,6 +180,7 @@ export interface SavedSelectionUnitRow {
   complimentary_first_night?: boolean | null
   manual_tour_price?: number | null
   manual_tour_price_set_at?: string | null
+  rate_type_id?: string | null
 }
 
 export interface SavedSelectionRow {
@@ -250,17 +262,31 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
     complimentaryFirstNight: false,
     manualTourPrice: null,
     manualTourPriceSetAt: null,
+    rateTypeId: null,
   }
 }
 
-export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | null): BookingTransportRequest {
+export function createDraftTransportRequest(
+  leg: PackageLeg,
+  routeId?: string | null,
+  totals?: PassengerTotals,
+): BookingTransportRequest {
   const now = new Date().toISOString()
   const isRental = leg.supplierKind === "vehicle_rental"
+  const serviceType = isRental ? "rental" : "transfer"
   const route = leg.routes.find((candidate) => candidate.id === (routeId ?? defaultRouteId(leg))) ?? null
+  // A brand-new row has no basis of its own yet, so it takes the supplier's current default --
+  // the same fallback the DB's insert trigger would apply. See lib/pricing/transfer-basis.ts.
+  const pricingBasis = resolveTransferPricingBasis({
+    serviceType,
+    rowBasis: null,
+    supplierBasis: leg.transferPricingBasis,
+  })
+  const isPerPerson = pricingBasis === "per_person"
   return {
     id: crypto.randomUUID(),
     bookingId: "",
-    serviceType: isRental ? "rental" : "transfer",
+    serviceType,
     supplierId: leg.supplierId,
     routeId: null,
     suiteTypeId: null,
@@ -283,6 +309,14 @@ export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | 
     complimentary: false,
     notes: null,
     supplierReference: null,
+    pricingBasis,
+    // Prefilled from the booking's projected totals so a blank field reads as "using the
+    // booking's totals" rather than zero -- the consultant can still edit any of the three.
+    adultCount: isPerPerson ? totals?.adultCount ?? null : null,
+    childCount: isPerPerson ? totals?.childCount ?? null : null,
+    infantCount: isPerPerson ? totals?.infantCount ?? null : null,
+    priceOverrideChild: null,
+    priceOverrideInfant: null,
     sortOrder: 0,
     createdAt: now,
     updatedAt: now,
@@ -334,7 +368,7 @@ function buildRawDefaultLegStates(
         // A new leg types its prices in whatever the quote is denominated in; changing it is an
         // explicit act (the leg's currency dropdown), never a default.
         priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
-        requests: [createDraftTransportRequest(leg)],
+        requests: [createDraftTransportRequest(leg, undefined, options.totalsBySupplierId?.[leg.supplierId])],
         bookingDate: null,
         confirmationDate: null,
         paymentMadeDate: null,
@@ -652,6 +686,7 @@ export function hydrateFromSaved(
         complimentaryFirstNight: unit.complimentary_first_night ?? false,
         manualTourPrice: unit.manual_tour_price ?? null,
         manualTourPriceSetAt: unit.manual_tour_price_set_at ?? null,
+        rateTypeId: unit.rate_type_id ?? null,
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
@@ -745,6 +780,8 @@ export interface PackageSelectionsPatchBody {
       complimentaryFirstNight: boolean
       /** Tour legs only — the server rejects it on any other supplier kind. */
       manualTourPrice: number | null
+      /** Tour legs only — the server rejects it on any other supplier kind. */
+      rateTypeId: string | null
     }>
   }>
 }
@@ -821,6 +858,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
+          rateTypeId: state.supplierKind === "tour_operator" ? unit.rateTypeId : null,
         })),
       }
     }),
@@ -848,6 +886,13 @@ export interface TransportRequestsPutBody {
     priceOverride: number | null
     complimentary: boolean
     notes: string | null
+    /** Transfers only, always 'per_vehicle' for a rental — see lib/pricing/transfer-basis.ts. */
+    pricingBasis: "per_vehicle" | "per_person"
+    adultCount: number | null
+    childCount: number | null
+    infantCount: number | null
+    priceOverrideChild: number | null
+    priceOverrideInfant: number | null
     sortOrder: number
   }>
 }
@@ -890,6 +935,12 @@ export function toTransportRequestsPut(
       priceOverride: request.priceOverride,
       complimentary: request.complimentary,
       notes: request.notes,
+      pricingBasis: request.pricingBasis,
+      adultCount: request.adultCount,
+      childCount: request.childCount,
+      infantCount: request.infantCount,
+      priceOverrideChild: request.priceOverrideChild,
+      priceOverrideInfant: request.priceOverrideInfant,
       sortOrder: index,
     })),
   }
@@ -929,6 +980,8 @@ export interface ApplyLegSelectionPayload {
     complimentaryFirstNight: boolean
     /** Tour legs only: replaces the rate-card-computed total for this unit. */
     manualTourPrice: number | null
+    /** Tour legs only: this unit's own rate type, overriding the leg's rateTypeId below. */
+    rateTypeId?: string | null
   }>
   nights?: number
   /** Per-leg rate type override; omitted falls back to the system default. */
@@ -985,6 +1038,7 @@ export function toApplySelections(
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
+          rateTypeId: state.supplierKind === "tour_operator" ? unit.rateTypeId ?? undefined : undefined,
         })),
       nights:
         state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
@@ -1054,8 +1108,11 @@ export function validateConfigureState(
     const legLabel = leg.label ?? leg.supplierName
 
     // Transport legs don't require a route: preset routes are only quick-fill templates for the
-    // pickup/drop-off fields, and pricing comes from the vehicle-category rate card.
-    if (state.kind !== "transport") {
+    // pickup/drop-off fields, and pricing comes from the vehicle-category rate card. A tour
+    // operator prices the tour type alone -- its itinerary is descriptive copy, so a tour leg
+    // with zero itineraries is still priceable and must not be blocked here (matches the pricing
+    // engine's own rule in lib/quotes/build-from-package.ts).
+    if (state.kind !== "transport" && !isTypePricedSupplier(state.supplierKind)) {
       if (leg.routes.length === 0) {
         errors.push(`${legLabel}: no ${leg.supplierKind === "hotel_property" ? "meal plans" : "routes"} configured for this supplier — add one in Suppliers first`)
       } else if (leg.routes.length > 1 && !state.routeId) {
@@ -1145,7 +1202,10 @@ export function validateConfigureState(
         leg.pricingMode !== "manual" &&
         (unit.manualRoomPrice ?? null) === null &&
         (unit.manualTourPrice ?? null) === null &&
-        state.routeId &&
+        // A tour operator's rate cards carry no route (isTypePricedSupplier), so an itinerary-less
+        // tour leg still has everything it needs to price -- routeId is never a precondition for
+        // it, unlike every other kind here.
+        (state.routeId || isTypePricedSupplier(state.supplierKind)) &&
         state.serviceDate
       ) {
         // Manual-pricing legs (e.g. airlines) have no rate card to check -- the fare is typed
@@ -1156,10 +1216,11 @@ export function validateConfigureState(
         // at a time: it never reads the card, so a missing one is not an error to raise against it.
         const pricingError = describeMissingRateCard(
           leg,
-          state.routeId,
+          state.routeId ?? "",
           unit.suiteTypeId,
           state.serviceDate,
-          state.rateTypeId,
+          // Tours resolve their rate type per unit; every other kind uses the one leg-level value.
+          unit.rateTypeId ?? state.rateTypeId,
           rateTypeNameById,
         )
         if (pricingError) errors.push(`${legLabel}: ${pricingError}`)
@@ -1179,7 +1240,7 @@ export function validateConfigureState(
       )
     }
 
-    if (PASSENGER_SPLIT_SUPPLIER_KINDS.has(state.supplierKind)) {
+    if (PASSENGER_SUM_SUPPLIER_KINDS.has(state.supplierKind)) {
       const totals = options.totalsBySupplierId?.[leg.supplierId]
       if (totals) {
         const summed = state.units.reduce(

@@ -41,6 +41,8 @@ export interface MovementTimeRow {
   flightNumber: string | null
   departureAirportCode: string | null
   arrivalAirportCode: string | null
+  handLuggageKg: number | null
+  checkedLuggageKg: number | null
   /** Whether this movement has an arrival half at all — false for a one-way transfer, which has a
    * pickup and nothing to return to. */
   hasArrival: boolean
@@ -60,6 +62,8 @@ interface ServiceRow {
   flight_number: string | null
   departure_airport_code: string | null
   arrival_airport_code: string | null
+  hand_luggage_kg: number | null
+  checked_luggage_kg: number | null
   updated_at: string | null
   suppliers: { name: string | null; kind: string | null } | { name: string | null; kind: string | null }[] | null
   routes:
@@ -116,7 +120,7 @@ export async function loadMovementTimeRows(
     supabase
       .from("booking_services")
       .select(
-        "id, label, sort_order, service_date, departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, updated_at, suppliers(name, kind), routes(name)",
+        "id, label, sort_order, service_date, departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, updated_at, suppliers(name, kind), routes(name)",
       )
       .eq("booking_id", bookingId)
       .eq("selected", true),
@@ -155,6 +159,8 @@ export async function loadMovementTimeRows(
         flightNumber: row.flight_number,
         departureAirportCode: row.departure_airport_code,
         arrivalAirportCode: row.arrival_airport_code,
+        handLuggageKg: row.hand_luggage_kg,
+        checkedLuggageKg: row.checked_luggage_kg,
         hasArrival: true,
         hasFlightIdentity: true,
         updatedAt: row.updated_at,
@@ -189,6 +195,8 @@ export async function loadMovementTimeRows(
         flightNumber: request.flight_number,
         departureAirportCode: null,
         arrivalAirportCode: null,
+        handLuggageKg: null,
+        checkedLuggageKg: null,
         hasArrival: isRental,
         hasFlightIdentity: false,
         updatedAt: request.updated_at,

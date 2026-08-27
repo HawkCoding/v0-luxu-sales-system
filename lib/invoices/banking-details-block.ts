@@ -4,6 +4,14 @@ import type { BankingSettings } from "@/lib/settings-access"
 // templates. Returns an empty string when nothing is configured so templates
 // degrade gracefully before Settings are filled in.
 
+// Bank reference shown to the customer: invoice number followed by their
+// surname, so a same-day transfer without a matching name is still traceable
+// back to the booking (e.g. "37766 Smith").
+export function buildPaymentReference(invoiceNumber: string, surname?: string | null): string {
+  const trimmedSurname = surname?.trim()
+  return trimmedSurname ? `${invoiceNumber} ${trimmedSurname}` : invoiceNumber
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")

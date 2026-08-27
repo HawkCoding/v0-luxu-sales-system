@@ -27,6 +27,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
     pricingMode: "rate_card",
+    transferPricingBasis: "per_vehicle",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,
@@ -274,6 +275,38 @@ describe("buildDefaultLegStates", () => {
     expect(request.dropoffPoint).toBe("Point D")
   })
 
+  it("createDraftTransportRequest defaults to the supplier's per_vehicle basis with no pax prefill", () => {
+    const request = createDraftTransportRequest(transferLeg, null, { adultCount: 2, childCount: 1, infantCount: 1 })
+    expect(request.pricingBasis).toBe("per_vehicle")
+    expect(request.adultCount).toBeNull()
+    expect(request.childCount).toBeNull()
+    expect(request.infantCount).toBeNull()
+  })
+
+  it("createDraftTransportRequest prefills pax from expectedTotals when the supplier defaults to per_person", () => {
+    const perPersonLeg = leg({ ...transferLeg, transferPricingBasis: "per_person" })
+    const request = createDraftTransportRequest(perPersonLeg, null, {
+      adultCount: 2,
+      childCount: 1,
+      infantCount: 1,
+    })
+    expect(request.pricingBasis).toBe("per_person")
+    expect(request.adultCount).toBe(2)
+    expect(request.childCount).toBe(1)
+    expect(request.infantCount).toBe(1)
+  })
+
+  it("createDraftTransportRequest is always per_vehicle for a rental, regardless of totals", () => {
+    const rentalLeg = leg({
+      id: "leg-rental-draft",
+      supplierKind: "vehicle_rental",
+      transferPricingBasis: "per_person",
+    })
+    const request = createDraftTransportRequest(rentalLeg, null, { adultCount: 2, childCount: 1, infantCount: 1 })
+    expect(request.pricingBasis).toBe("per_vehicle")
+    expect(request.adultCount).toBeNull()
+  })
+
   it("defaults selected to true only for the mandatory train leg", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01" })
     expect(suiteState(states, "leg-train").selected).toBe(true)
@@ -373,6 +406,12 @@ describe("hydrateFromSaved", () => {
     complimentary: false,
     notes: null,
     supplierReference: null,
+    pricingBasis: "per_vehicle",
+    adultCount: null,
+    childCount: null,
+    infantCount: null,
+    priceOverrideChild: null,
+    priceOverrideInfant: null,
     sortOrder: 0,
     createdAt: "",
     updatedAt: "",
@@ -550,6 +589,33 @@ describe("toTransportRequestsPut", () => {
 
     const body = toTransportRequestsPut(states, [])
     expect(body.transportRequests[0].complimentary).toBe(true)
+  })
+
+  it("round-trips the per-person pricing basis, pax counts, and child/infant overrides", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null })
+    const transfer = transportState(states, "leg-transfer")
+    transfer.selected = true
+    transfer.requests[0] = {
+      ...transfer.requests[0],
+      pickupPoint: "Airport",
+      dropoffPoint: "Hotel",
+      pricingBasis: "per_person",
+      adultCount: 4,
+      childCount: 1,
+      infantCount: 0,
+      priceOverrideChild: 220,
+      priceOverrideInfant: null,
+    }
+
+    const body = toTransportRequestsPut(states, [])
+    expect(body.transportRequests[0]).toMatchObject({
+      pricingBasis: "per_person",
+      adultCount: 4,
+      childCount: 1,
+      infantCount: 0,
+      priceOverrideChild: 220,
+      priceOverrideInfant: null,
+    })
   })
 
   it("sends dateAnchor for a transfer request, always null for a rental", () => {
@@ -1024,6 +1090,86 @@ describe("validateConfigureState", () => {
 
     rental.selected = false
     expect(validateConfigureState(rentalPkg, states)).toEqual([])
+  })
+
+  describe("tour operator independence", () => {
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      sortOrder: 7,
+      // No itineraries at all -- a tour operator prices the tour type, and an itinerary is
+      // descriptive copy only, so this must not be treated as "unconfigured" the way a train
+      // with zero routes would be.
+      routes: [],
+      suiteTypes: [
+        { id: "tour-falls", supplierId: "supplier-leg-tour", name: "Tour of the Falls", active: true, createdAt: "", updatedAt: "" },
+        { id: "tour-cruise", supplierId: "supplier-leg-tour", name: "Sundowner Cruise", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["suiteTypes"],
+      rateCards: [
+        {
+          id: "rate-tour-falls",
+          routeId: null,
+          suiteTypeId: "tour-falls",
+          rateTypeId: "rate-type-default",
+          pricePerPerson: 850,
+          childPrice: null,
+          infantPrice: null,
+          currency: "ZAR",
+          validFrom: "2026-01-01",
+          validTo: null,
+          createdAt: "",
+        },
+        {
+          id: "rate-tour-cruise",
+          routeId: null,
+          suiteTypeId: "tour-cruise",
+          rateTypeId: "rate-type-default",
+          pricePerPerson: 450,
+          childPrice: null,
+          infantPrice: null,
+          currency: "ZAR",
+          validFrom: "2026-01-01",
+          validTo: null,
+          createdAt: "",
+        },
+      ] as PackageLeg["rateCards"],
+    })
+    const tourPkg = detail([tourLeg])
+    const tourTotals = { "supplier-leg-tour": { adultCount: 2, childCount: 0, infantCount: 0 } }
+
+    it("never asks for an itinerary, however many tour types are booked", () => {
+      const states = buildDefaultLegStates(tourPkg, { tripStartDate: "2026-09-01", totalsBySupplierId: tourTotals })
+      const tour = suiteState(states, "leg-tour")
+      tour.selected = true
+      tour.units[0].suiteTypeId = "tour-falls"
+      tour.units.push({ ...tour.units[0], id: "draft-2", suiteTypeId: "tour-cruise" })
+
+      const errors = validateConfigureState(tourPkg, states, { totalsBySupplierId: tourTotals })
+      expect(errors.some((e) => e.includes("no routes configured"))).toBe(false)
+      expect(errors.some((e) => e.includes("no itineraries configured"))).toBe(false)
+    })
+
+    it("does not require each tour's own headcount to sum to the booking total", () => {
+      const states = buildDefaultLegStates(tourPkg, { tripStartDate: "2026-09-01", totalsBySupplierId: tourTotals })
+      const tour = suiteState(states, "leg-tour")
+      tour.selected = true
+      // Both tours carry the booking's full 2 adults -- the same travellers doing two different
+      // things, not two adults split across them.
+      tour.units[0] = { ...tour.units[0], suiteTypeId: "tour-falls", adultCount: 2 }
+      tour.units.push({ ...tour.units[0], id: "draft-2", suiteTypeId: "tour-cruise", adultCount: 2 })
+
+      const errors = validateConfigureState(tourPkg, states, { totalsBySupplierId: tourTotals })
+      expect(errors.some((e) => e.includes("hold") && e.includes("but the booking is for"))).toBe(false)
+    })
+
+    it("still requires a train's units to sum to the booking total (regression)", () => {
+      const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: totals })
+      const train = suiteState(states, "leg-train")
+      train.units[0] = { ...train.units[0], suiteTypeId: "suite-1", adultCount: 1 }
+
+      const errors = validateConfigureState(pkg, states, { totalsBySupplierId: totals })
+      expect(errors.some((e) => e.includes("suites hold") && e.includes("but the booking is for"))).toBe(true)
+    })
   })
 
   // Mirrors the server-side rule in lib/quotes/build-from-package.ts: a chosen rate type that has

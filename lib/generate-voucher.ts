@@ -52,6 +52,11 @@ export interface VoucherServiceBlockData {
   /** HH:MM the service ends — train arrival, flight arrival, hotel check-out. */
   endTime?: string | null
   suiteType?: string | null
+  /** What the quote PDF/email itinerary sentence should call the suite -- the full phrase, or the
+   *  suite type alone ("Deluxe Suite") when the supplier's quote_suite_detail is 'type_only'.
+   *  `suiteType` above stays the full phrase for the voucher/invoice/worksheet. Absent on blocks
+   *  built before this field existed, in which case callers fall back to `suiteType`. */
+  itinerarySuiteType?: string | null
   numberOfSuites?: number | null
   roomType?: string | null
   nights?: number | null

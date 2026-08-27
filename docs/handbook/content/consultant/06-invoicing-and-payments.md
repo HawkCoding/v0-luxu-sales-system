@@ -66,13 +66,13 @@ this point — the next dialog does that.
 **Pay in full** raises one invoice for the whole amount instead of a deposit and a
 balance.
 
-It **defaults to on when departure is inside 60 days**, and the switch says why:
-*"Departure is within 60 days — full payment is due, no deposit split."* That is the sales
+It **defaults to on when departure is inside 2 months**, and the switch says why:
+*"Departure is within 2 months — full payment is due, no deposit split."* That is the sales
 team's payment terms, not a system limitation — a booking that close to travel does not
 get a deposit split. You can still switch it off, but you are overriding the terms when
 you do.
 
-Outside 60 days the switch starts off and reads *"One invoice for the full amount instead
+Outside 2 months the switch starts off and reads *"One invoice for the full amount instead
 of a deposit + final split."*
 
 ### Deposit percentage
@@ -89,9 +89,9 @@ you type.
 | Deposit | Three days from generation. Not editable — it is the standard 72-hour deposit term. |
 | Pay in full | Two days from generation, shown in an editable **Due date** field. Change it before generating. |
 
-The **final payment** date is a separate thing and is not asked for here: it is always 60
-days before departure, and the invoice PDF prints it on the money ladder. Where departure
-is already inside that window, the PDF prints *Now*.
+The **final payment** date is a separate thing and is not asked for here: it is always 2
+calendar months before departure, same day-of-month, and the invoice PDF prints it on the
+money ladder. Where departure is already inside that window, the PDF prints *Now*.
 
 > [!NOTE]
 > Every traveller needs a name, surname and ID/passport number on the **Reservation** tab

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { BufferedInput } from "@/components/ui/buffered-input"
 import { SortableList } from "@/components/ui/sortable-list"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -28,6 +29,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { Template } from "@/lib/types"
+
+interface BookingSearchResult {
+  id: string
+  bookingNumber: string
+  customerName: string
+  departureDate: string | null
+}
 import {
   Select,
   SelectContent,
@@ -115,6 +123,9 @@ export default function TemplatesPage() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null)
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [bookingQuery, setBookingQuery] = useState("")
+  const [bookingResults, setBookingResults] = useState<BookingSearchResult[]>([])
+  const [selectedBooking, setSelectedBooking] = useState<{ id: string; label: string } | null>(null)
   const [orderedTemplates, setOrderedTemplates] = useState<Template[]>([])
   const [addingVariantFor, setAddingVariantFor] = useState<Template | null>(null)
   const [variantSupplierId, setVariantSupplierId] = useState("")
@@ -124,8 +135,9 @@ export default function TemplatesPage() {
     if (templates) setOrderedTemplates(templates as Template[])
   }, [templates])
 
-  // Server-render a branded preview (sample token values) whenever a template
-  // is opened for preview; fall back to the raw body if the request fails.
+  // Server-render a branded preview whenever a template is opened for preview
+  // (or a booking is picked/cleared); uses real booking data when selected,
+  // sample token values otherwise. Falls back to the raw body if the request fails.
   useEffect(() => {
     if (!preview) {
       setPreviewHtml(null)
@@ -137,7 +149,12 @@ export default function TemplatesPage() {
     fetch("/api/templates/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: preview.key, subject: preview.subject, bodyHtml: preview.bodyHtml }),
+      body: JSON.stringify({
+        key: preview.key,
+        subject: preview.subject,
+        bodyHtml: preview.bodyHtml,
+        bookingId: selectedBooking?.id,
+      }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("preview failed"))))
       .then((d: { html?: string; warnings?: string[] }) => {
@@ -154,7 +171,21 @@ export default function TemplatesPage() {
     return () => {
       cancelled = true
     }
-  }, [preview])
+  }, [preview, selectedBooking?.id])
+
+  const searchBookings = async () => {
+    const response = await fetch(`/api/bookings/search?q=${encodeURIComponent(bookingQuery)}`)
+    if (!response.ok) return
+    const body = (await response.json()) as { bookings: BookingSearchResult[] }
+    setBookingResults(body.bookings)
+  }
+
+  const closePreview = () => {
+    setPreview(null)
+    setBookingQuery("")
+    setBookingResults([])
+    setSelectedBooking(null)
+  }
 
   const isEditDirty = editing !== null && (editSubject !== editing.subject || editBody !== editing.bodyHtml)
   const editCloseGuard = useDirtyCloseGuard({
@@ -786,12 +817,54 @@ export default function TemplatesPage() {
       </AlertDialog>
 
       {/* Preview Email Template Dialog */}
-      <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
+      <Dialog open={!!preview} onOpenChange={(open) => !open && closePreview()}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Template Preview</DialogTitle>
             <DialogDescription>{preview?.subject}</DialogDescription>
           </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="preview-booking-search">Preview with real booking data</Label>
+            <div className="flex gap-2">
+              <Input
+                id="preview-booking-search"
+                value={bookingQuery}
+                onChange={(event) => setBookingQuery(event.target.value)}
+                placeholder="Booking number or customer name"
+              />
+              <Button type="button" variant="outline" onClick={searchBookings}>Search</Button>
+            </div>
+            {bookingResults.length > 0 && (
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {bookingResults.map((result) => (
+                  <button
+                    key={result.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedBooking({ id: result.id, label: `${result.bookingNumber} — ${result.customerName}` })
+                      setBookingResults([])
+                    }}
+                    className="w-full rounded-md border px-3 py-1.5 text-left text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="font-medium">{result.bookingNumber}</span>{" "}
+                    <span className="text-muted-foreground">{result.customerName}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {selectedBooking ? (
+                <>
+                  Showing real data for {selectedBooking.label}.{" "}
+                  <button type="button" className="underline" onClick={() => setSelectedBooking(null)}>
+                    Use sample data
+                  </button>
+                </>
+              ) : (
+                "Showing sample data."
+              )}
+            </p>
+          </div>
           {previewWarnings.length > 0 && (
             <div className="text-xs text-amber-600 dark:text-amber-500 space-y-0.5" role="alert">
               {previewWarnings.map((w) => (

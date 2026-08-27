@@ -1,6 +1,11 @@
-import { isOptionalPackageLegKind, isTypePricedSupplier, SUPPLIER_VOCABULARY } from "@/lib/types"
+import {
+  isOptionalPackageLegKind,
+  isTypePricedSupplier,
+  resolveSupplierPriceLabel,
+  SUPPLIER_VOCABULARY,
+} from "@/lib/types"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
-import type { CommissionKind, PackageDetail, PricingSnapshot, QuoteLineItem } from "@/lib/types"
+import type { CommissionKind, PackageDetail, PricingSnapshot, QuoteLineItem, SupplierRateCard } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
@@ -22,6 +27,8 @@ import {
 import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
 import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
+import { manualFares, overriddenFares, rateCardFares, type PassengerFare } from "@/lib/pricing/passenger-fares"
+import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
@@ -61,6 +68,10 @@ export interface PackageUnitSelection {
   /** Server-resolved provenance for manualTourPrice, same posture as manualRoomPriceSetAt/-Name. */
   manualTourPriceSetAt?: string | null
   manualTourPriceSetByName?: string | null
+  /** Tour legs only: this unit's own rate type, overriding the leg's rateTypeId (PackageLegSelection
+   *  below) -- a tour is the one kind whose units price independently, so each needs its own rate
+   *  choice instead of sharing the leg's one value. Null/absent falls back to the leg's rateTypeId. */
+  rateTypeId?: string | null
 }
 
 export interface PackageLegSelection {
@@ -105,6 +116,13 @@ interface TransportRequestRow {
   price_override_set_by: string | null
   complimentary: boolean
   rental_details?: { return_at: string | null } | { return_at: string | null }[] | null
+  /** Transfers only, always 'per_vehicle' for a rental — see lib/pricing/transfer-basis.ts. */
+  pricing_basis: "per_vehicle" | "per_person"
+  adult_count: number | null
+  child_count: number | null
+  infant_count: number | null
+  price_override_child: number | null
+  price_override_infant: number | null
 }
 
 interface RateTypeMeta {
@@ -184,7 +202,9 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("id, service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, complimentary, rental_details:booking_vehicle_rental_details(return_at)")
+    .select(
+      "id, service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, complimentary, rental_details:booking_vehicle_rental_details(return_at), pricing_basis, adult_count, child_count, infant_count, price_override_child, price_override_infant",
+    )
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
@@ -474,6 +494,10 @@ export async function buildPackageQuoteLineItems({
     /** Transfers/rentals only: the booking_transport_requests row this line priced, so the voucher
      * builder can match the complimentary flag back to the specific captured trip. */
     transportRequestId?: string | null
+    /** Transfers only: which basis this specific row priced under, so a per-person transfer's
+     * three lines (and any surviving per-vehicle sibling on the same leg) are explicable in the
+     * internal quote view. See lib/pricing/transfer-basis.ts. */
+    transferPricingBasis?: "per_vehicle" | "per_person" | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -504,6 +528,7 @@ export async function buildPackageQuoteLineItems({
     complimentary,
     isComplimentaryTransport,
     transportRequestId,
+    transferPricingBasis,
   }: AddLineItemOptions) {
     // A stay whose every night was gifted still has to reach the quote: the client documents read
     // their itinerary off the priced legs, so dropping the line would drop the hotel entirely.
@@ -623,6 +648,7 @@ export async function buildPackageQuoteLineItems({
               transportRequestId: transportRequestId ?? null,
             }
           : {}),
+        ...(transferPricingBasis ? { transferPricingBasis } : {}),
       }
     }
 
@@ -837,12 +863,24 @@ export async function buildPackageQuoteLineItems({
       const supplierDescription = leg.supplierDescription ?? null
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
 
-      function resolveUnit(suiteTypeId: string, pricingDate: string = legPricingDate) {
+      function resolveUnit(
+        suiteTypeId: string,
+        pricingDate: string = legPricingDate,
+        // Tours resolve their rate type per unit (see PackageUnitSelection.rateTypeId); every
+        // other kind falls straight through to the leg's own value.
+        unitRateTypeId?: string | null,
+      ) {
         const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
         if (!suiteBelongsToLeg) {
           throw new Error(`Selected type is not available for leg: ${legLabel}`)
         }
-        const selected = getValidRateCard(leg, routeId, suiteTypeId, pricingDate, selection.rateTypeId)
+        const selected = getValidRateCard(
+          leg,
+          routeId,
+          suiteTypeId,
+          pricingDate,
+          unitRateTypeId ?? selection.rateTypeId,
+        )
         const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
         // Name the route + type: the missing dimension is almost never the date, and an error
         // that only names the supplier sends people hunting through validity periods.
@@ -879,12 +917,22 @@ export async function buildPackageQuoteLineItems({
        * currency are wanted for the internal "was / now" note — but a miss is no longer fatal.
        * A negotiated one-off room or trip, or a season nobody has loaded yet, is exactly the case
        * the override exists for, and hard-failing there would block the whole quote. */
-      function resolveOverriddenUnit(suiteTypeId: string, pricingDate: string = legPricingDate) {
+      function resolveOverriddenUnit(
+        suiteTypeId: string,
+        pricingDate: string = legPricingDate,
+        unitRateTypeId?: string | null,
+      ) {
         const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
         if (!suiteBelongsToLeg) {
           throw new Error(`Selected type is not available for leg: ${legLabel}`)
         }
-        const selected = getValidRateCard(leg, routeId, suiteTypeId, pricingDate, selection.rateTypeId)
+        const selected = getValidRateCard(
+          leg,
+          routeId,
+          suiteTypeId,
+          pricingDate,
+          unitRateTypeId ?? selection.rateTypeId,
+        )
         return {
           validRateCard: selected?.ok ? selected.card : null,
           rateTypeInherited: selected?.ok ? selected.inherited : null,
@@ -1005,13 +1053,119 @@ export async function buildPackageQuoteLineItems({
               : null
           const qty = isVehicleRental ? billableRentalDaysForRequest(transportRequest) : 1
 
+          // Rentals stay per-vehicle-per-day always (enforced in the DB by
+          // booking_transport_requests_rental_basis_check); a transfer row's own basis wins over
+          // its supplier's current default, so a transfer already priced under one basis is
+          // never silently re-priced by a later supplier-level flip.
+          const transferBasis = resolveTransferPricingBasis({
+            serviceType,
+            rowBasis: transportRequest?.pricing_basis ?? null,
+            supplierBasis: leg.transferPricingBasis,
+          })
+          const requestUnit = isTransfer
+            ? resolveSupplierPriceLabel(leg.supplierKind, { transferPricingBasis: transferBasis })
+            : unit
+
           // A per-request price override beats the rate card (odd trips, after-hours, etc.). A
           // missing card is no longer fatal once an override is set — see resolveOverriddenUnit.
+          // In per-person mode price_override is the adult override; the two extra columns cover
+          // child and infant.
           const overridePrice = transportRequest?.price_override ?? null
+          const overrideChildPrice = transportRequest?.price_override_child ?? null
+          const overrideInfantPrice = transportRequest?.price_override_infant ?? null
+          const hasAnyOverride =
+            overridePrice !== null || overrideChildPrice !== null || overrideInfantPrice !== null
           // Complimentary takes the same non-fatal path as an override (a comped trip needs no
           // rate card either), and forces the charged price to 0 regardless of what price_override
           // holds — the two fields are independent, mirroring the hotel first-night flag.
           const isComplimentary = transportRequest?.complimentary === true
+
+          if (isTransfer && transferBasis === "per_person") {
+            let validRateCard: SupplierRateCard | null
+            let rateTypeInherited: boolean | null
+            let description: string
+            let suiteTypeName: string | null
+            let fares: PassengerFare[]
+
+            if (hasAnyOverride || isComplimentary) {
+              const resolved = resolveOverriddenUnit(suiteTypeId, requestPricingDate)
+              validRateCard = resolved.validRateCard
+              rateTypeInherited = resolved.rateTypeInherited
+              description = resolved.description
+              suiteTypeName = resolved.suiteTypeName
+              fares = overriddenFares(validRateCard, {
+                adult: overridePrice,
+                child: overrideChildPrice,
+                infant: overrideInfantPrice,
+              })
+            } else {
+              const resolved = resolveUnit(suiteTypeId, requestPricingDate)
+              validRateCard = resolved.validRateCard
+              rateTypeInherited = resolved.rateTypeInherited
+              description = resolved.description
+              suiteTypeName = resolved.suiteTypeName
+              fares = rateCardFares(validRateCard)
+            }
+            activeRateCard = validRateCard
+            activeRateCardInherited = rateTypeInherited ?? false
+            const lineCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
+
+            const pax = resolveTransferPax(
+              {
+                adultCount: transportRequest?.adult_count ?? null,
+                childCount: transportRequest?.child_count ?? null,
+                infantCount: transportRequest?.infant_count ?? null,
+              },
+              countsForBuckets(bucketsForLeg(leg)),
+            )
+            const paxByKey = {
+              adultCount: pax.adultCount,
+              childCount: pax.childCount,
+              infantCount: pax.infantCount,
+            }
+
+            for (const fare of fares) {
+              const overrideForKey =
+                fare.key === "adultCount"
+                  ? overridePrice
+                  : fare.key === "childCount"
+                    ? overrideChildPrice
+                    : overrideInfantPrice
+              addLineItem({
+                description,
+                passengerLabel: fare.label,
+                passengerKind: fare.kind,
+                qty: paxByKey[fare.key],
+                unitPrice: fare.unitPrice,
+                supplierDescription,
+                suiteTypeId,
+                suiteTypeName,
+                unit: requestUnit,
+                hideVariantSuffix: true,
+                sourceCurrency: lineCurrency,
+                ...(overrideForKey !== null
+                  ? {
+                      transportOverride: {
+                        price: overrideForKey,
+                        basePrice:
+                          fare.key === "adultCount"
+                            ? validRateCard?.pricePerPerson ?? null
+                            : fare.key === "childCount"
+                              ? validRateCard?.childPrice ?? null
+                              : validRateCard?.infantPrice ?? null,
+                        setAt: transportRequest?.price_override_set_at ?? null,
+                        setByName:
+                          transportOverrideSetByName.get(transportRequest?.price_override_set_by ?? "") ?? null,
+                      },
+                    }
+                  : {}),
+                isComplimentaryTransport: isComplimentary,
+                transportRequestId: transportRequest?.id ?? null,
+                transferPricingBasis: transferBasis,
+              })
+            }
+            continue
+          }
 
           if (overridePrice !== null || isComplimentary) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveOverriddenUnit(
@@ -1084,26 +1238,33 @@ export async function buildPackageQuoteLineItems({
           throw new Error(`No suite type selected for leg: ${legLabel}`)
         }
 
-        const totals = countsForBuckets(bucketsForLeg(leg))
-        const summed = units.reduce(
-          (acc, unitSelection) => ({
-            adultCount: acc.adultCount + (unitSelection.adultCount ?? 0),
-            childCount: acc.childCount + (unitSelection.childCount ?? 0),
-            infantCount: acc.infantCount + (unitSelection.infantCount ?? 0),
-          }),
-          { adultCount: 0, childCount: 0, infantCount: 0 },
-        )
-        if (
-          summed.adultCount !== totals.adultCount ||
-          summed.childCount !== totals.childCount ||
-          summed.infantCount !== totals.infantCount
-        ) {
-          throw new Error(
-            `${legLabel}: suites hold ${summed.adultCount} adults, ${summed.childCount} children, ` +
-              `${summed.infantCount} infants but the booking is for ${totals.adultCount} adults, ` +
-              `${totals.childCount} children, ${totals.infantCount} infants. Update the booking's ` +
-              `travellers, or adjust the suite split.`,
+        // A tour operator's units are independent activities the same travellers can all join, not
+        // sleeping/seating slots -- so unlike every other kind here, their per-unit counts have no
+        // reason to sum to the booking's totals (mirrors validateConfigureState's
+        // PASSENGER_SUM_SUPPLIER_KINDS in lib/packages/apply-dialog-state.ts).
+        if (!isTour) {
+          const totals = countsForBuckets(bucketsForLeg(leg))
+          const summed = units.reduce(
+            (acc, unitSelection) => ({
+              adultCount: acc.adultCount + (unitSelection.adultCount ?? 0),
+              childCount: acc.childCount + (unitSelection.childCount ?? 0),
+              infantCount: acc.infantCount + (unitSelection.infantCount ?? 0),
+            }),
+            { adultCount: 0, childCount: 0, infantCount: 0 },
           )
+          if (
+            summed.adultCount !== totals.adultCount ||
+            summed.childCount !== totals.childCount ||
+            summed.infantCount !== totals.infantCount
+          ) {
+            const unitNoun = SUPPLIER_VOCABULARY[leg.supplierKind].unitNounPlural
+            throw new Error(
+              `${legLabel}: ${unitNoun} hold ${summed.adultCount} adults, ${summed.childCount} children, ` +
+                `${summed.infantCount} infants but the booking is for ${totals.adultCount} adults, ` +
+                `${totals.childCount} children, ${totals.infantCount} infants. Update the booking's ` +
+                `travellers, or adjust the ${SUPPLIER_VOCABULARY[leg.supplierKind].unitNoun} split.`,
+            )
+          }
         }
 
         const isManualPricing = leg.pricingMode === "manual"
@@ -1130,7 +1291,12 @@ export async function buildPackageQuoteLineItems({
                   unitSelection.manualChildPrice ?? "",
                   unitSelection.manualInfantPrice ?? "",
                 ].join("::")
-              : unitSelection.suiteTypeId
+              // Two tour units of the same type on different rate types price at different cards
+              // and must not merge into one averaged line -- every other kind shares one rate type
+              // per leg, so its units of the same suite type always belong in the same group.
+              : isTour
+                ? `${unitSelection.suiteTypeId}::${unitSelection.rateTypeId ?? ""}`
+                : unitSelection.suiteTypeId
           const group = unitsBySuiteType.get(groupKey) ?? []
           group.push(unitSelection)
           unitsBySuiteType.set(groupKey, group)
@@ -1151,7 +1317,7 @@ export async function buildPackageQuoteLineItems({
           if (tourOverridePrice !== null) {
             const unitSelection = groupUnits[0]
             const { validRateCard, rateTypeInherited, description, suiteTypeName } =
-              resolveOverriddenUnit(suiteTypeId)
+              resolveOverriddenUnit(suiteTypeId, legPricingDate, unitSelection.rateTypeId)
             activeRateCard = validRateCard
             activeRateCardInherited = rateTypeInherited ?? false
             const overrideCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
@@ -1177,12 +1343,7 @@ export async function buildPackageQuoteLineItems({
 
           let description: string
           let suiteTypeName: string | null
-          let passengerKinds: {
-            key: "adultCount" | "childCount" | "infantCount"
-            label: string
-            kind: PricingSnapshot["passengerKind"]
-            unitPrice: number
-          }[]
+          let passengerKinds: PassengerFare[]
           // Typed fares carry the leg's own currency; rate-card fares carry the card's.
           let lineSourceCurrency: string
 
@@ -1194,42 +1355,20 @@ export async function buildPackageQuoteLineItems({
             activeRateCardInherited = false
             // A group's units share an identical typed-price triple by construction (see the
             // grouping key above), so the first unit's prices speak for the whole group.
-            const adultPrice = groupUnits[0].manualAdultPrice ?? 0
-            const childPrice = groupUnits[0].manualChildPrice ?? adultPrice
-            const infantPrice = groupUnits[0].manualInfantPrice ?? childPrice
-            passengerKinds = [
-              { key: "adultCount", label: "Adult", kind: "adult", unitPrice: adultPrice },
-              { key: "childCount", label: "Child", kind: "child", unitPrice: childPrice },
-              { key: "infantCount", label: "Infant", kind: "infant", unitPrice: infantPrice },
-            ]
+            passengerKinds = manualFares({
+              adult: groupUnits[0].manualAdultPrice ?? null,
+              child: groupUnits[0].manualChildPrice ?? null,
+              infant: groupUnits[0].manualInfantPrice ?? null,
+            })
             lineSourceCurrency = selection.priceCurrency ?? targetCurrency
           } else {
-            const resolved = resolveUnit(suiteTypeId)
+            const resolved = resolveUnit(suiteTypeId, legPricingDate, groupUnits[0].rateTypeId)
             description = resolved.description
             suiteTypeName = resolved.suiteTypeName
             activeRateCard = resolved.validRateCard
             activeRateCardInherited = resolved.rateTypeInherited
-            const validRateCard = resolved.validRateCard
-            passengerKinds = [
-              { key: "adultCount", label: "Adult", kind: "adult", unitPrice: validRateCard.pricePerPerson },
-              {
-                key: "childCount",
-                label: "Child",
-                kind: "child",
-                unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson,
-              },
-              {
-                // No infant rate on the card means infants travel free. The old chain fell through
-                // to the child rate, so "the supplier set no infant price" and "the supplier
-                // charges the child price for infants" looked identical on the quote — and the
-                // expensive reading won by default. See also price-extra-line.ts.
-                key: "infantCount",
-                label: "Infant",
-                kind: "infant",
-                unitPrice: validRateCard.infantPrice ?? 0,
-              },
-            ]
-            lineSourceCurrency = validRateCard.currency
+            passengerKinds = rateCardFares(resolved.validRateCard)
+            lineSourceCurrency = resolved.validRateCard.currency
           }
 
           for (const { key, label, kind: linePassengerKind, unitPrice } of passengerKinds) {
@@ -1246,9 +1385,13 @@ export async function buildPackageQuoteLineItems({
               const childCount = unitSelection.childCount ?? 0
               const infantCount = unitSelection.infantCount ?? 0
               // Manual-pricing legs never carry a single supplement -- the typed fare is already
-              // the per-seat price a passenger pays, with no notion of a solo room to bump.
+              // the per-seat price a passenger pays, with no notion of a solo room to bump. A tour
+              // unit isn't a shared room either -- it's one traveller party's own booking of the
+              // activity -- so a lone adult on a tour is a genuine 1-pax price, not a solo-room
+              // surcharge case.
               const isSoloRoom =
                 !isManualPricing &&
+                !isTour &&
                 SUPPLIER_VOCABULARY[leg.supplierKind].showSingleSupplement &&
                 packageDetail.singleSupplementPct > 0 &&
                 adultCount + childCount + infantCount === 1

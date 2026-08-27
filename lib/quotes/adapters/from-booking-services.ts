@@ -23,6 +23,7 @@ interface SupplierJoin {
   pricing_mode: "rate_card" | "manual"
   base_rate_type_id: string | null
   quote_rate_type_id: string | null
+  transfer_pricing_basis: "per_vehicle" | "per_person"
 }
 
 interface BookingServiceWithSupplier extends BookingServiceRow {
@@ -62,7 +63,9 @@ export async function loadBookingServicesPackageDetail(
   const [{ data: serviceRows }, resolveSupplierRateTiers] = await Promise.all([
     supabase
       .from("booking_services")
-      .select("*, suppliers(name, description, kind, pricing_mode, base_rate_type_id, quote_rate_type_id)")
+      .select(
+        "*, suppliers(name, description, kind, pricing_mode, base_rate_type_id, quote_rate_type_id, transfer_pricing_basis)",
+      )
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
     loadSupplierRateTiersResolver(supabase),
@@ -152,6 +155,7 @@ export async function loadBookingServicesPackageDetail(
       supplierDescription: supplier?.description ?? null,
       supplierKind,
       supplierPricingMode: supplier?.pricing_mode ?? "rate_card",
+      supplierTransferPricingBasis: supplier?.transfer_pricing_basis ?? "per_vehicle",
       supplierBaseRateTypeId: rateTiers.baseRateTypeId,
       supplierQuoteRateTypeId: rateTiers.quoteRateTypeId,
       supplierInheritedRateTypeName: rateTiers.inheritedRateTypeName,
@@ -235,6 +239,7 @@ export function bookingServicesToLegSelections(
         complimentaryFirstNight: unit.complimentary_first_night,
         manualTourPrice: unit.manual_tour_price,
         manualTourPriceSetAt: unit.manual_tour_price_set_at,
+        rateTypeId: unit.rate_type_id,
       }))
 
     const selection: PackageLegSelection = {

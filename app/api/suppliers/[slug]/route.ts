@@ -363,6 +363,13 @@ export async function PATCH(
 
   const now = new Date().toISOString()
   const isTransport = isTransportSupplier(parsed.kind)
+  // A per-person transfer supplier still uses every other isTransport behaviour below (vehicle
+  // categories as suite types, pickup/dropoff route points) -- only its rate cards carry real
+  // child/infant fares instead of being nulled. Read from the INCOMING payload, not the stored
+  // row: the server is authoritative, but if this read the old value, the very first save after
+  // flipping the toggle would null the child/infant prices the consultant just typed in the same
+  // round trip.
+  const isFlatRateTransport = isTransport && !(parsed.kind === "transfers" && parsed.transferPricingBasis === "per_person")
   // Tour operators: rate cards price the tour type (no route), routes describe it.
   const isItineraryKind = isTypePricedSupplier(parsed.kind)
   const normalizedSuiteTypes = parsed.suiteTypes
@@ -535,7 +542,11 @@ export async function PATCH(
           ? route.name.length > 0 && Boolean(route.pickup_point) && Boolean(route.dropoff_point)
           : routeUsesLocations
             ? route.name.length > 0 && Boolean(route.origin_location_id) && Boolean(route.destination_location_id)
-            : route.name.length > 0
+            : isItineraryKind
+              // An itinerary has no name of its own -- a draft is worth keeping once it's linked
+              // to a tour type or carries copy, same rule shouldSendRoute applies on full saves.
+              ? Boolean(route.suite_type_id) || route.name.length > 0 || Boolean(route.description)
+              : route.name.length > 0
         : true,
     )
 
@@ -643,8 +654,8 @@ export async function PATCH(
         suite_type_id: rateCard.suiteTypeId,
         rate_type_id: resolvedRateTypeId,
         price_per_person: rateCard.pricePerPerson,
-        child_price: isTransport ? null : rateCard.childPrice,
-        infant_price: isTransport ? null : rateCard.infantPrice,
+        child_price: isFlatRateTransport ? null : rateCard.childPrice,
+        infant_price: isFlatRateTransport ? null : rateCard.infantPrice,
         currency: rateCard.currency.trim().toUpperCase() || "ZAR",
         valid_from: rateCard.validFrom,
         valid_to: normalizeNullableDate(rateCard.validTo),
@@ -938,6 +949,10 @@ export async function PATCH(
     name: parsed.name.trim(),
     kind: parsed.kind,
     pricing_mode: parsed.pricingMode,
+    // Normalized here rather than trusted from the payload as-is: the DB enforces "transfers only"
+    // via suppliers_transfer_pricing_basis_kind_check, and this keeps that constraint from ever
+    // actually firing regardless of what a stale client form happens to submit for another kind.
+    transfer_pricing_basis: parsed.kind === "transfers" ? parsed.transferPricingBasis : "per_vehicle",
     parent_supplier_id: nextParentSupplierId,
     // Written for unlinked records only -- for a linked one the trigger replaces these with the
     // parent's values, so submitting them here would be theatre.
@@ -962,6 +977,7 @@ export async function PATCH(
     // than wiped on every save.
     long_journey_min_days: parsed.kind === "train_operator" ? parsed.longJourneyMinDays ?? null : null,
     train_only_note: parsed.kind === "train_operator" ? normalizeOptionalText(parsed.trainOnlyNote) : null,
+    quote_suite_detail: parsed.kind === "train_operator" ? parsed.quoteSuiteDetail ?? "type_only" : "type_only",
     base_rate_type_id: requestedBaseRateTypeId,
     // Normalised: nominating the base rate is the same as nominating nothing.
     quote_rate_type_id: rateTiers.quoteRateTypeId,

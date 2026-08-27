@@ -60,6 +60,10 @@ export interface PackageLegWithSupplier extends PackageLegRow {
   supplierDescription: string | null
   supplierKind: SupplierKind
   supplierPricingMode: "rate_card" | "manual"
+  /** Transfers only: the supplier's default pricing basis, carried onto every leg of theirs so
+   * the pricing engine and the transport leg editor can fall back to it for a row that hasn't
+   * set its own basis yet. Ignored for every other supplier kind. */
+  supplierTransferPricingBasis: "per_vehicle" | "per_person"
   /** Already resolved via loadSupplierRateTiersResolver -- not the raw supplier columns. */
   supplierBaseRateTypeId: string | null
   supplierQuoteRateTypeId: string | null
@@ -193,6 +197,7 @@ export function mapPackageLeg(
     supplierDescription: row.supplierDescription,
     supplierKind: row.supplierKind,
     pricingMode: row.supplierPricingMode,
+    transferPricingBasis: row.supplierTransferPricingBasis,
     label: row.label,
     sortOrder: row.sort_order,
     dateAnchor: normalizeLegDateAnchor(row.date_anchor),
