@@ -1,5 +1,22 @@
 import { z } from "zod"
 import { SUPPLIER_VOCABULARY, SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
+import { findUnknownSuitePatternTokens } from "@/lib/templates/suite-phrase-pattern"
+
+/** Rejects a save outright when the pattern references a token other than {type}/{bedroom}/
+ * {layout}/{bathroom} -- an unknown token (a typo, e.g. "{bedrom}") must never reach a client
+ * document as literal text. */
+const suitePhrasePatternSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .nullable()
+  .optional()
+  .refine(
+    (value) => findUnknownSuitePatternTokens(value).length === 0,
+    (value) => ({
+      message: `Unknown token(s) in suite phrase pattern: ${findUnknownSuitePatternTokens(value).join(", ")}`,
+    }),
+  )
 
 /**
  * Rate-card currencies were free text (any string up to 10 chars) until the value started
@@ -446,6 +463,7 @@ export const supplierSaveSchema = z.object({
   /** Train operators only: how much suite detail the quote itinerary sentence states. Defaults to
    * 'type_only' when omitted. */
   quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
+  suitePhrasePattern: suitePhrasePatternSchema,
   active: z.boolean(),
   /** The sibling record (same company, different category) this supplier inherits its contact
    * details from. `null` unlinks and keeps the last mirrored values as this record's own. Omit the
@@ -614,6 +632,7 @@ export const supplierDraftSaveSchema = z.object({
   /** Train operators only: how much suite detail the quote itinerary sentence states. Defaults to
    * 'type_only' when omitted. */
   quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
+  suitePhrasePattern: suitePhrasePatternSchema,
   active: z.boolean().default(true),
   /** See `parentSupplierId` on supplierSaveSchema. */
   parentSupplierId: z.string().uuid().nullable().optional(),

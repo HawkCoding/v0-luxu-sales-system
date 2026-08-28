@@ -8,7 +8,8 @@ import type {
 } from "@/lib/types"
 import { isTypePricedSupplier, SUPPLIER_VOCABULARY } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
-import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
+import type { AnchoredStay, HotelStayDates } from "@/lib/packages/hotel-dates"
+import { findAnchorTrainLeg, resolveChainedHotelStayDates } from "@/lib/packages/hotel-dates"
 import type { AnchorLegDates } from "@/lib/packages/transfer-dates"
 import { findTransferAnchorLeg, resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import type { ServiceDateSpan } from "@/lib/packages/trip-date-range"
@@ -489,6 +490,59 @@ export interface HotelAnchorContext {
   trainLabel: string
   departureDate: string | null
   durationDays: number | null
+  /** This hotel's own resolved stay — chained with any other stay anchored to the same train on
+   *  the same side, not just this hotel in isolation. Null while the anchor can't resolve yet
+   *  (e.g. the train has no departure date). */
+  stayDates: HotelStayDates | null
+}
+
+/** Every anchored hotel leg's chained stay dates in one pass, keyed by legId. Groups hotel states
+ * by (anchor train, pre/post side) — a hotel between two trains resolves to a different train
+ * depending on its own anchor, so the side is part of the grouping key, not just the train — and
+ * runs {@link resolveChainedHotelStayDates} once per group so stays on the same side of the same
+ * train are laid end to end instead of each landing on the train's date independently. Custom-
+ * anchored legs never enter a group, so a hand-typed date is never moved and never shifts a
+ * neighbour. */
+function resolveAllAnchoredHotelDates(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+): Map<string, HotelStayDates> {
+  interface Group {
+    anchor: "pre" | "post"
+    train: { departureDate: string | null; durationDays: number | null }
+    stays: AnchoredStay[]
+  }
+  const groups = new Map<string, Group>()
+
+  for (const state of states) {
+    if (state.kind !== "suite" || state.supplierKind !== "hotel_property") continue
+    if (state.dateAnchor !== "pre" && state.dateAnchor !== "post") continue
+
+    const context = getHotelAnchorContext(detail, states, state.legId)
+    if (!context) continue
+
+    const leg = detail.legs.find((candidate) => candidate.id === state.legId)
+    if (!leg) continue
+
+    const key = `${context.trainLeg.id}:${state.dateAnchor}`
+    const group =
+      groups.get(key) ??
+      ({
+        anchor: state.dateAnchor,
+        train: { departureDate: context.departureDate, durationDays: context.durationDays },
+        stays: [],
+      } satisfies Group)
+    group.stays.push({ legId: state.legId, nights: state.nights ?? 1, sortOrder: leg.sortOrder })
+    groups.set(key, group)
+  }
+
+  const resolved = new Map<string, HotelStayDates>()
+  for (const group of groups.values()) {
+    for (const [legId, dates] of resolveChainedHotelStayDates(group.stays, group.anchor, group.train)) {
+      resolved.set(legId, dates)
+    }
+  }
+  return resolved
 }
 
 /** View-model form of {@link getHotelAnchorContext} — what the suite leg editor takes as a prop. */
@@ -504,21 +558,24 @@ export function toHotelAnchorContext(
     trainLabel: context.trainLeg.label ?? context.trainLeg.supplierName,
     departureDate: context.departureDate,
     durationDays: context.durationDays,
+    stayDates: resolveAllAnchoredHotelDates(detail, states).get(hotelLegId) ?? null,
   }
 }
 
-/** Recomputes the service date of every pre/post-anchored hotel leg from its train leg. Runs after
- * any state change so editing the train's departure date or a hotel's nights re-dates the stay. */
+/** Recomputes the service date of every pre/post-anchored hotel leg from its train leg, chaining
+ * consecutive same-side stays on one train end to end. Runs after any state change so editing the
+ * train's departure date or any stay's nights re-dates the whole group. */
 export function applyAnchoredHotelDates(
   detail: PackageDetail,
   states: ApplyLegState[],
 ): ApplyLegState[] {
+  const resolved = resolveAllAnchoredHotelDates(detail, states)
+
   return states.map((state) => {
     if (state.kind !== "suite" || state.supplierKind !== "hotel_property") return state
     if (state.dateAnchor !== "pre" && state.dateAnchor !== "post") return state
 
-    const context = getHotelAnchorContext(detail, states, state.legId)
-    const dates = resolveHotelStayDates(state.dateAnchor, state.nights ?? 1, context)
+    const dates = resolved.get(state.legId)
     if (!dates || dates.checkIn === state.serviceDate) return state
 
     return { ...state, serviceDate: dates.checkIn }

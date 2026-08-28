@@ -30,7 +30,7 @@ import {
 import { cn } from "@/lib/utils"
 import { formatDisplayDate } from "@/lib/date-format"
 import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
-import { addDays, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
+import { addDays } from "@/lib/packages/hotel-dates"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
 // TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
@@ -693,12 +693,10 @@ export function SuiteLegEditor({
 
   const nights = Math.max(1, value.nights ?? 1)
   const anchored = value.dateAnchor === "pre" || value.dateAnchor === "post"
-  const stayDates = anchorContext
-    ? resolveHotelStayDates(value.dateAnchor, nights, {
-        departureDate: anchorContext.departureDate,
-        durationDays: anchorContext.durationDays,
-      })
-    : null
+  // Chained with any other stay anchored to the same train on the same side (see
+  // resolveAllAnchoredHotelDates) — not just this hotel resolved on its own — so the preview
+  // always matches what applyAnchoredHotelDates is about to save.
+  const stayDates = anchorContext?.stayDates ?? null
   // Post-stay dates are counted off the train's arrival, which we can only work out from the
   // route's length — without it we'd silently check the guest in on the departure day.
   const missingTrainDuration =

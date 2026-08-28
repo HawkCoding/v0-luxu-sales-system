@@ -120,6 +120,10 @@ interface SupplierJoin {
   /** Train-only: 'type_only' (default) or 'full' -- how much suite detail the quote itinerary
    * sentence states. See resolveLegSuiteNames / lib/quotes/quote-presentation.ts. */
   quote_suite_detail?: string | null
+  /** Optional per-supplier word order for the full suite phrase -- see
+   * lib/templates/suite-description.ts and lib/templates/suite-phrase-pattern.ts. Never applied
+   * to typeOnlyNames, only to the full-configuration branch of resolveLegSuiteNames. */
+  suite_phrase_pattern?: string | null
 }
 
 /** Mirrors `supplierLocationName` in lib/suppliers.ts against this join's shape -- trains print
@@ -393,11 +397,14 @@ function composeUnitSuiteLabel(
  * `typeOnlyNames` is always the type-name-alone variant, regardless of `includeConfig` — it feeds
  * the quote itinerary sentence when the supplier's quote_suite_detail is 'type_only' (the default;
  * see lib/quotes/quote-presentation.ts). Computed in the same pass so a supplier's setting can be
- * read without a second query. */
+ * read without a second query. `phrasePattern` (suppliers.suite_phrase_pattern) is applied only to
+ * the full-configuration branch, never to typeOnlyNames — the quote sentence keeps the default
+ * grammar's plain type name regardless of a supplier's custom wording. */
 function resolveLegSuiteNames(
   row: SelectionJoinRow,
   includeConfig: boolean,
   nounKind: SupplierKind | null,
+  phrasePattern: string | null,
 ): { names: string[]; typeOnlyNames: string[]; unitCount: number } {
   const unitRows = [...(row.units ?? [])].sort((a, b) => a.sort_order - b.sort_order)
   const unitLabels: string[] = []
@@ -413,6 +420,7 @@ function resolveLegSuiteNames(
           bedroomLayout: firstRecord(unit.bedroom_layouts)?.name,
           bathroomType: firstRecord(unit.bathroom_types)?.name,
           supplierKind: nounKind,
+          phrasePattern,
         })
       : typeOnlyLabel
     if (fullLabel) unitLabels.push(fullLabel)
@@ -725,7 +733,7 @@ export async function buildVoucherServiceBlocks(
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, luggage_storage_available,
-       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
@@ -912,6 +920,7 @@ export async function buildVoucherServiceBlocks(
       row,
       serviceType === "train",
       nounKind,
+      supplier?.suite_phrase_pattern ?? null,
     )
     const suiteName = suiteNames.length > 0 ? suiteNames.join(", ") : null
     const suiteTypeOnlyName = typeOnlyNames.length > 0 ? typeOnlyNames.join(", ") : null

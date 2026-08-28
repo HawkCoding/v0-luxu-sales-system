@@ -91,6 +91,7 @@ import {
   shouldPromptChildUpdate,
 } from "@/lib/suppliers/auto-child-price"
 import { shouldSendRoute } from "@/lib/suppliers/itinerary-payload"
+import { formatSuitePhrase } from "@/lib/templates/suite-description"
 import { readSupplierDraft, serializeSupplierDraft } from "@/lib/suppliers/supplier-draft-storage"
 import { AgeRangeChip } from "@/components/ui/age-range-chip"
 import {
@@ -250,6 +251,9 @@ export interface SupplierFormState {
   trainOnlyNote: string
   /** Train operators only: how much suite detail the quote itinerary sentence states. */
   quoteSuiteDetail: "type_only" | "full"
+  /** Optional per-supplier word order for the full suite/room phrase -- see
+   * lib/templates/suite-phrase-pattern.ts. Empty string = default grammar. */
+  suitePhrasePattern: string
   /** This supplier's base rate -- the baseline its rate adjustments are measured off. */
   baseRateTypeId: string | null
   /** The rate its quotes use; null means "quote at the base rate". */
@@ -472,6 +476,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     longJourneyMinDays: supplier.longJourneyMinDays ?? null,
     trainOnlyNote: supplier.trainOnlyNote ?? "",
     quoteSuiteDetail: supplier.quoteSuiteDetail ?? "type_only",
+    suitePhrasePattern: supplier.suitePhrasePattern ?? "",
     baseRateTypeId: supplier.baseRateTypeId ?? null,
     quoteRateTypeId: supplier.quoteRateTypeId ?? null,
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
@@ -4274,6 +4279,7 @@ export function SupplierDetailView({
           longJourneyMinDays: form.kind === "train_operator" ? form.longJourneyMinDays : null,
           trainOnlyNote: form.kind === "train_operator" ? form.trainOnlyNote.trim() || null : null,
           quoteSuiteDetail: form.kind === "train_operator" ? form.quoteSuiteDetail : "type_only",
+          suitePhrasePattern: form.suitePhrasePattern.trim() || null,
           rateAdjustments: form.rateAdjustments,
           baseRateTypeId: form.baseRateTypeId,
           quoteRateTypeId: form.quoteRateTypeId,
@@ -5369,6 +5375,61 @@ export function SupplierDetailView({
                   )}
                 </div>
               ) : null}
+
+              <div className="rounded-lg border p-4 space-y-3">
+                {isEditing ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-suite-phrase-pattern">Suite phrase wording</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Controls the word order of the full suite/room description printed on the
+                        voucher, invoice and accommodation emails — the quote itinerary line is
+                        unaffected. Tokens: <code>{"{type}"}</code>, <code>{"{bedroom}"}</code>,{" "}
+                        <code>{"{layout}"}</code>, <code>{"{bathroom}"}</code>. Wrap a token in{" "}
+                        <code>{"[...]"}</code> to drop that whole chunk when it has nothing to
+                        show, e.g. <code>{"[{bedroom}] [{layout}] {type}"}</code>. Leave blank to
+                        use the default wording.
+                      </p>
+                      <BufferedInput
+                        id="supplier-suite-phrase-pattern"
+                        value={form.suitePhrasePattern}
+                        onValueChange={(value) => updateField("suitePhrasePattern", value)}
+                        placeholder="[{bedroom} bedded] {type} [with a {bathroom}]"
+                      />
+                    </div>
+                    {(() => {
+                      const firstSuiteType =
+                        form.suiteTypes.find((suiteType) => suiteType.active) ?? form.suiteTypes[0]
+                      const preview = formatSuitePhrase({
+                        suiteTypeName: firstSuiteType?.name || "Deluxe",
+                        bedroomType: form.bedroomTypes[0]?.name ?? "Double",
+                        bedroomLayout: form.bedroomLayouts[0]?.name ?? "Crosswise",
+                        bathroomType: form.bathroomTypes[0]?.name ?? "Shower",
+                        supplierKind: form.kind as SupplierKind,
+                        phrasePattern: form.suitePhrasePattern.trim() || null,
+                      })
+                      return (
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">
+                            {form.suitePhrasePattern.trim() ? "Preview: " : "Default: "}
+                          </span>
+                          <span className="font-medium text-foreground">{preview || "—"}</span>
+                        </p>
+                      )
+                    })()}
+                  </>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Suite phrase wording</p>
+                      <p className="text-sm text-muted-foreground">
+                        Word order for the full suite/room description on client documents.
+                      </p>
+                    </div>
+                    <Badge variant="outline">{supplier.suitePhrasePattern || "Default"}</Badge>
+                  </div>
+                )}
+              </div>
 
               {/* Trains carry their times per route (see RouteEditorRow) — a supplier-wide pair
                   would claim every route departs at the same hour. */}

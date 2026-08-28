@@ -984,6 +984,9 @@ export async function PATCH(
     long_journey_min_days: parsed.kind === "train_operator" ? parsed.longJourneyMinDays ?? null : null,
     train_only_note: parsed.kind === "train_operator" ? normalizeOptionalText(parsed.trainOnlyNote) : null,
     quote_suite_detail: parsed.kind === "train_operator" ? parsed.quoteSuiteDetail ?? "type_only" : "type_only",
+    // Every kind may word its full suite/room phrase, not just trains -- see
+    // lib/templates/suite-phrase-pattern.ts.
+    suite_phrase_pattern: normalizeOptionalText(parsed.suitePhrasePattern),
     base_rate_type_id: requestedBaseRateTypeId,
     // Normalised: nominating the base rate is the same as nominating nothing.
     quote_rate_type_id: rateTiers.quoteRateTypeId,

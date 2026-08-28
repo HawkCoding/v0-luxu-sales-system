@@ -33,6 +33,7 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     longJourneyMinDays: null,
     trainOnlyNote: "",
     quoteSuiteDetail: "type_only",
+    suitePhrasePattern: "",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     rateAdjustments: [],
@@ -88,13 +89,14 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "singleSupplementPct",
         "stationAddresses",
         "streetAddress",
+        "suitePhrasePattern",
         "suiteTypes",
         "trainOnlyNote",
         "transferPricingBasis",
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(5)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(6)
   })
 })
 

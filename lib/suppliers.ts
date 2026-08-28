@@ -145,6 +145,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     longJourneyMinDays: row.long_journey_min_days ?? null,
     trainOnlyNote: row.train_only_note ?? null,
     quoteSuiteDetail: row.quote_suite_detail === "full" ? "full" : "type_only",
+    suitePhrasePattern: row.suite_phrase_pattern ?? null,
     streetAddress: row.street_address ?? null,
     emergencyPhone: row.emergency_phone ?? null,
     defaultContactName: row.default_contact_name ?? null,

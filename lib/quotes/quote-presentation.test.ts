@@ -336,6 +336,37 @@ describe("buildQuoteItineraryLines", () => {
     expect(dates).toEqual(["2026-07-18", "2026-07-20", "2026-07-20", "2026-07-22"])
   })
 
+  it("collapses two hotel blocks whose check-out lands on the same date with identical wording", () => {
+    // Two consecutive stays anchored to the same train can still produce a byte-identical
+    // check-out line (no property name in describeEndLine's text) if their dates ever coincide —
+    // this is the backstop, independent of whichever date-anchor fix is in place upstream.
+    const secondHotel: VoucherServiceBlock = {
+      ...hotelBlock,
+      title: "Victoria Falls Hotel",
+      contactDetails: { name: "Victoria Falls Hotel", location: "Victoria Falls" },
+      displayOrder: 1.5,
+    }
+
+    const lines = buildQuoteItineraryLines([hotelBlock, secondHotel])
+
+    const checkOuts = lines.filter((line) => line.text.startsWith("Check out"))
+    expect(checkOuts).toHaveLength(1)
+    expect(checkOuts[0]).toEqual({ dateISO: "2026-07-20", text: "Check out at 10h00", bullets: [] })
+  })
+
+  it("keeps two same-date check-outs distinct when the times differ", () => {
+    const secondHotel: VoucherServiceBlock = {
+      ...hotelBlock,
+      serviceData: { ...hotelBlock.serviceData, endTime: "11:00" },
+      title: "Victoria Falls Hotel",
+      contactDetails: { name: "Victoria Falls Hotel", location: "Victoria Falls" },
+    }
+
+    const lines = buildQuoteItineraryLines([hotelBlock, secondHotel])
+    const checkOuts = lines.filter((line) => line.text.startsWith("Check out"))
+    expect(checkOuts.map((line) => line.text)).toEqual(["Check out at 10h00", "Check out at 11h00"])
+  })
+
   it("prints a station transfer before the hotel it delivers guests to, even though the hotel's default check-in time is earlier on the clock", () => {
     // Regression for the reported bug: train arrives 25 Nov 18h00, the transfer that carries
     // guests from the station to the hotel also runs 25 Nov 18h00, and the hotel's check-in is

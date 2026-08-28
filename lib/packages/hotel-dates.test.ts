@@ -3,6 +3,7 @@ import type { PackageLeg, SupplierKind } from "@/lib/types"
 import {
   addDays,
   findAnchorTrainLeg,
+  resolveChainedHotelStayDates,
   resolveHotelStayDates,
   trainArrivalDate,
 } from "@/lib/packages/hotel-dates"
@@ -92,6 +93,93 @@ describe("resolveHotelStayDates", () => {
 
   it("floors fractional nights at one", () => {
     expect(resolveHotelStayDates("pre", 0, train)?.checkIn).toBe("2026-06-09")
+  })
+})
+
+describe("resolveChainedHotelStayDates", () => {
+  const train = { departureDate: "2026-09-15", durationDays: 3 }
+
+  it("chains two 1-night pre-stays back from departure — the job 42369 case", () => {
+    const dates = resolveChainedHotelStayDates(
+      [
+        { legId: "safari-collection", nights: 1, sortOrder: 0 },
+        { legId: "victoria-falls-hotel", nights: 1, sortOrder: 1 },
+      ],
+      "pre",
+      train,
+    )
+
+    expect(dates.get("safari-collection")).toEqual({ checkIn: "2026-09-13", checkOut: "2026-09-14" })
+    expect(dates.get("victoria-falls-hotel")).toEqual({ checkIn: "2026-09-14", checkOut: "2026-09-15" })
+  })
+
+  it("chains mixed night counts, still ending on departure day", () => {
+    const dates = resolveChainedHotelStayDates(
+      [
+        { legId: "first", nights: 2, sortOrder: 0 },
+        { legId: "second", nights: 1, sortOrder: 1 },
+      ],
+      "pre",
+      train,
+    )
+
+    expect(dates.get("first")).toEqual({ checkIn: "2026-09-12", checkOut: "2026-09-14" })
+    expect(dates.get("second")).toEqual({ checkIn: "2026-09-14", checkOut: "2026-09-15" })
+  })
+
+  it("chains two post-stays forward from arrival", () => {
+    const dates = resolveChainedHotelStayDates(
+      [
+        { legId: "first", nights: 1, sortOrder: 0 },
+        { legId: "second", nights: 2, sortOrder: 1 },
+      ],
+      "post",
+      train,
+    )
+
+    // Arrival is departure + (durationDays - 1) = 2026-09-17.
+    expect(dates.get("first")).toEqual({ checkIn: "2026-09-17", checkOut: "2026-09-18" })
+    expect(dates.get("second")).toEqual({ checkIn: "2026-09-18", checkOut: "2026-09-20" })
+  })
+
+  it("chains regardless of input order — sortOrder decides the sequence, not array position", () => {
+    const dates = resolveChainedHotelStayDates(
+      [
+        { legId: "second", nights: 1, sortOrder: 1 },
+        { legId: "first", nights: 1, sortOrder: 0 },
+      ],
+      "pre",
+      train,
+    )
+
+    expect(dates.get("first")).toEqual({ checkIn: "2026-09-13", checkOut: "2026-09-14" })
+    expect(dates.get("second")).toEqual({ checkIn: "2026-09-14", checkOut: "2026-09-15" })
+  })
+
+  it("a group of one matches resolveHotelStayDates exactly", () => {
+    for (const anchor of ["pre", "post"] as const) {
+      for (const nights of [1, 2, 3]) {
+        const chained = resolveChainedHotelStayDates(
+          [{ legId: "solo", nights, sortOrder: 0 }],
+          anchor,
+          train,
+        )
+        expect(chained.get("solo")).toEqual(resolveHotelStayDates(anchor, nights, train))
+      }
+    }
+  })
+
+  it("returns an empty map when the train has no departure date", () => {
+    const dates = resolveChainedHotelStayDates(
+      [{ legId: "solo", nights: 1, sortOrder: 0 }],
+      "pre",
+      { departureDate: null, durationDays: 3 },
+    )
+    expect(dates.size).toBe(0)
+  })
+
+  it("returns an empty map for an empty group", () => {
+    expect(resolveChainedHotelStayDates([], "pre", train).size).toBe(0)
   })
 })
 

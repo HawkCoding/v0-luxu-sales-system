@@ -379,7 +379,8 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
 
 /**
  * The client-facing itinerary. One block can produce two lines — a hotel stay is a check-in line
- * and a separate check-out line on a later date — so lines are re-sorted by date afterwards.
+ * and a separate check-out line on a later date — so lines are re-sorted by date afterwards, then
+ * any exact duplicate (same date, same text, same bullets) is collapsed to one.
  *
  * `flightCapBullet` (already formatted, e.g. "Flights are capped at R2 000pp — incl. baggage &
  * fees" via {@link formatFlightCapLine}) is attached under the *first* flight block only, one
@@ -413,7 +414,7 @@ export function buildQuoteItineraryLines(
   })
 
   // Undated lines keep their position at the end rather than sorting to the front.
-  return lines
+  const sorted = lines
     .map((line, index) => ({ line, index }))
     .sort((a, b) => {
       const aDate = a.line.dateISO ?? "9999-12-31"
@@ -422,6 +423,17 @@ export function buildQuoteItineraryLines(
       return a.index - b.index
     })
     .map((entry) => entry.line)
+
+  // Two stays that land on the same date can produce a byte-identical closing line (a check-out
+  // line states no property, just a time — see describeEndLine) even once dates are chained
+  // correctly; collapsing them here is a backstop against ever printing the same dated line twice.
+  const seen = new Set<string>()
+  return sorted.filter((line) => {
+    const key = `${line.dateISO ?? ""} ${line.text} ${line.bullets.map((b) => `${b.kind}:${b.text}`).join("")}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 /**

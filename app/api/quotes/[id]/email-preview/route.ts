@@ -181,6 +181,26 @@ export async function POST(req: Request, { params }: RouteParams) {
     ),
   })
 
+  // Resolved live (not read off the frozen snapshot) so an edit to a supplier's suite phrase
+  // pattern is picked up by a reissued preview without needing to re-price the quote.
+  const snapshotSupplierIds = Array.from(
+    new Set(
+      lineItems
+        .map((li) => (li.pricing_snapshot as PricingSnapshot | null)?.supplierId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  )
+  const suitePhrasePatternsBySupplierId = new Map<string, string | null>()
+  if (snapshotSupplierIds.length > 0) {
+    const { data: patternRows } = await supabase
+      .from("suppliers")
+      .select("id, suite_phrase_pattern")
+      .in("id", snapshotSupplierIds)
+    for (const row of patternRows ?? []) {
+      suitePhrasePatternsBySupplierId.set(row.id, row.suite_phrase_pattern ?? null)
+    }
+  }
+
   const shared = await resolveSharedEmailTokens(supabase, quote.booking_id)
   const composed = await composeEmail(supabase, "quote_email", {
     tokens: {
@@ -201,6 +221,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       ...buildSuiteTokens(
         suiteSelectionsFromSnapshots(
           lineItems.map((li) => li.pricing_snapshot as PricingSnapshot | null),
+          suitePhrasePatternsBySupplierId,
         ),
       ),
     },
