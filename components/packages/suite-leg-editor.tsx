@@ -643,6 +643,21 @@ export function SuiteLegEditor({
         )
       : null
 
+  // Itinerary is descriptive-only for a tour operator and belongs to exactly one tour type, so
+  // it's never picked by the user (see legFields below) — re-derive it from whatever tour types
+  // are currently chosen, rather than leaving whatever routeId happens to be stored. Every caller
+  // that can change *which* tour types are on the leg (picking a type, adding a unit, removing a
+  // unit) must run this, or a stale itinerary from a since-changed/removed tour can stick around —
+  // see getRequiredRouteId in lib/quotes/build-from-package.ts, the server-side counterpart.
+  function deriveTourRoutePatch(nextUnits: SuiteUnitState[]): { routeId?: string | null } {
+    if (!pricesByTypeOnly) return {}
+    const nextSuiteTypeIds = new Set(nextUnits.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])))
+    const matchingRoutes = leg.routes.filter(
+      (route) => route.suiteTypeId && nextSuiteTypeIds.has(route.suiteTypeId),
+    )
+    return { routeId: matchingRoutes.length === 1 ? matchingRoutes[0].id : null }
+  }
+
   function updateUnit(id: string, patch: Partial<SuiteUnitState>) {
     const units = value.units.map((unit) =>
       unit.id === id
@@ -657,17 +672,7 @@ export function SuiteLegEditor({
         : unit,
     )
 
-    // Itinerary is descriptive-only for a tour operator and belongs to exactly one tour type, so
-    // it's never picked by the user (see legFields below) — re-derive it from the chosen type(s)
-    // instead of just clearing it when the type changes.
-    let routePatch: { routeId?: string | null } = {}
-    if (pricesByTypeOnly && patch.suiteTypeId !== undefined) {
-      const nextSuiteTypeIds = new Set(units.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])))
-      const matchingRoutes = leg.routes.filter(
-        (route) => route.suiteTypeId && nextSuiteTypeIds.has(route.suiteTypeId),
-      )
-      routePatch = { routeId: matchingRoutes.length === 1 ? matchingRoutes[0].id : null }
-    }
+    const routePatch = patch.suiteTypeId !== undefined ? deriveTourRoutePatch(units) : {}
 
     onChange({ ...value, units, ...routePatch })
   }
@@ -1285,16 +1290,14 @@ export function SuiteLegEditor({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() =>
-                onChange({
-                  ...value,
-                  // Tours are independent activities, not sleeping/seating slots -- a new tour is
-                  // almost always the same travellers doing something else, so prefill it with the
-                  // booking's full headcount instead of 0/0/0. Trains/hotels/airlines keep the old
-                  // blank-unit behaviour since Spread evenly is what reconciles those.
-                  units: [...value.units, createDraftUnit(isTour ? expectedTotals ?? undefined : undefined)],
-                })
-              }
+              onClick={() => {
+                // Tours are independent activities, not sleeping/seating slots -- a new tour is
+                // almost always the same travellers doing something else, so prefill it with the
+                // booking's full headcount instead of 0/0/0. Trains/hotels/airlines keep the old
+                // blank-unit behaviour since Spread evenly is what reconciles those.
+                const units = [...value.units, createDraftUnit(isTour ? expectedTotals ?? undefined : undefined)]
+                onChange({ ...value, units, ...deriveTourRoutePatch(units) })
+              }}
             >
               <Plus className="mr-1 h-3 w-3" />
               Add {vocab.unitNoun}
@@ -1581,9 +1584,10 @@ export function SuiteLegEditor({
                       variant="outline"
                       size="icon"
                       aria-label={`Remove ${vocab.unitNoun} ${index + 1}`}
-                      onClick={() =>
-                        onChange({ ...value, units: value.units.filter((item) => item.id !== unit.id) })
-                      }
+                      onClick={() => {
+                        const units = value.units.filter((item) => item.id !== unit.id)
+                        onChange({ ...value, units, ...deriveTourRoutePatch(units) })
+                      }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

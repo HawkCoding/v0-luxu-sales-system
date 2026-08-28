@@ -327,8 +327,35 @@ function sortedLegs(detail: PackageDetail): PackageLeg[] {
   return detail.legs.slice().sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
-function defaultRouteId(leg: PackageLeg): string | null {
+/**
+ * A tour operator's itinerary belongs to exactly one tour type, so "the leg's only itinerary"
+ * is only a safe default when it actually matches a chosen tour type — never blindly grab it
+ * just because it's the only one on the supplier (mirrors getRequiredRouteId in
+ * lib/quotes/build-from-package.ts, the server-side counterpart of this guard). Every other
+ * kind keeps the plain "only one route on the leg" default.
+ */
+function defaultRouteId(leg: PackageLeg, chosenSuiteTypeIds?: Set<string>): string | null {
+  if (isTypePricedSupplier(leg.supplierKind)) {
+    if (!chosenSuiteTypeIds || chosenSuiteTypeIds.size === 0) return null
+    const matching = leg.routes.filter((route) => route.suiteTypeId && chosenSuiteTypeIds.has(route.suiteTypeId))
+    return matching.length === 1 ? matching[0].id : null
+  }
   return leg.routes.length === 1 ? leg.routes[0].id : null
+}
+
+/** True when a persisted routeId actually belongs to one of the chosen tour types — a stale or
+ * mismatched saved value (e.g. left over from a removed tour, or an earlier bad default stamp)
+ * must be re-derived rather than trusted just because it was saved. Non-type-priced kinds have
+ * no such mismatch to guard against, so any saved value is trusted as-is. */
+function isTrustedRouteId(
+  leg: PackageLeg,
+  routeId: string | null | undefined,
+  chosenSuiteTypeIds: Set<string>,
+): boolean {
+  if (!isTypePricedSupplier(leg.supplierKind)) return true
+  if (!routeId) return false
+  const route = leg.routes.find((candidate) => candidate.id === routeId)
+  return Boolean(route?.suiteTypeId && chosenSuiteTypeIds.has(route.suiteTypeId))
 }
 
 /** Only two-way (round_trip) routes can be flipped; one-way (and unresolved) routes cannot. */
@@ -691,7 +718,17 @@ export function hydrateFromSaved(
 
     const isHotel = fallback.supplierKind === "hotel_property"
     const isAirline = fallback.supplierKind === "airline"
-    const routeId = row.route_id ?? fallback.routeId
+    const leg = legById.get(fallback.legId)
+    const chosenSuiteTypeIds = new Set(
+      units.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])),
+    )
+    const persistedRouteId = row.route_id
+    const routeId =
+      leg && isTypePricedSupplier(fallback.supplierKind)
+        ? persistedRouteId && isTrustedRouteId(leg, persistedRouteId, chosenSuiteTypeIds)
+          ? persistedRouteId
+          : defaultRouteId(leg, chosenSuiteTypeIds)
+        : persistedRouteId ?? fallback.routeId
 
     return {
       ...fallback,
@@ -1068,7 +1105,9 @@ function describeMissingRateCard(
   rateTypeNameById?: Map<string, string>,
 ): string | null {
   const suiteTypeName = leg.suiteTypes.find((s) => s.id === suiteTypeId)?.name ?? "this type"
-  const routeName = leg.routes.find((r) => r.id === routeId)?.name ?? "this route"
+  // A tour operator's itinerary saves with a blank name (see app/api/suppliers/[slug]/route.ts),
+  // so `||` here (not `??`) is deliberate -- an empty string must fall back same as a missing route.
+  const routeName = leg.routes.find((r) => r.id === routeId)?.name || "this route"
   const where = `"${suiteTypeName}" on "${routeName}"`
 
   if (findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate).length === 0) {

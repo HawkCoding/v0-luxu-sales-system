@@ -23,7 +23,11 @@ import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { formatMoney, normaliseCurrency } from "@/lib/money"
-import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import {
+  deriveFlightCapPerPerson,
+  deriveJourneyFromBlocks,
+  deriveTrainDepartureFromBlocks,
+} from "@/lib/quotes/quote-presentation"
 import {
   complimentaryLegIdsFromLineItems,
   complimentaryTransportRequestIdsFromLineItems,
@@ -254,6 +258,7 @@ export async function resolveSharedEmailTokens(
   let quoteSummaryTable = PLACEHOLDER
   let rateLabel: string | null = null
   let trainOnlyNote: string | null = null
+  let trainDepartureDate: string | null = null
   if (latestQuote) {
     try {
       const { data: lineItems } = await supabase
@@ -287,6 +292,7 @@ export async function resolveSharedEmailTokens(
       })
 
       const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
+      trainDepartureDate = deriveTrainDepartureFromBlocks(itineraryBlocks)
       const documentText = await getDocumentTextSettings(supabase)
 
       quoteSummaryTable = buildQuoteSummaryBlock({
@@ -351,8 +357,13 @@ export async function resolveSharedEmailTokens(
     supplierName: orPlaceholder(supplierName),
     direction: orPlaceholder(direction),
     routeName: orPlaceholder(direction),
-    departureDate: orPlaceholder(departureDate),
-    departureDateShort: orPlaceholder(departureDate),
+    tripStartDate: orPlaceholder(departureDate),
+    departureDate: orPlaceholder(
+      trainDepartureDate ? formatDisplayDateLong(trainDepartureDate) : departureDate,
+    ),
+    departureDateShort: orPlaceholder(
+      trainDepartureDate ? formatDisplayDateLong(trainDepartureDate) : departureDate,
+    ),
     tripEndDate: orPlaceholder(formatDisplayDateLong(booking?.trip_end_date ?? null)),
     tripTitle: PLACEHOLDER,
     suiteType: orPlaceholder(suiteTokens.suiteType),

@@ -134,6 +134,26 @@ export function deriveJourneyFromBlocks(blocks: VoucherServiceBlock[]): QuoteJou
 }
 
 /**
+ * Train leg's own departure date — the earliest serviceType === "train" block's
+ * departureDate — distinct from deriveJourneyFromBlocks, which mixes in hotel
+ * pre-nights and other leg kinds. Mirrors the worksheet's top-right "Departure
+ * Date" cell (lib/worksheet/build-worksheet-view.ts), which isolates the train
+ * leg the same way via suppliers.kind === "train_operator".
+ * Returns null when the booking has no dated train leg.
+ */
+export function deriveTrainDepartureFromBlocks(blocks: VoucherServiceBlock[]): string | null {
+  const dates: string[] = []
+  for (const block of blocks) {
+    if (block.serviceType !== "train") continue
+    const parsed = parseIsoDate(block.serviceData.departureDate)
+    if (parsed) dates.push(toIsoDateString(parsed))
+  }
+  if (dates.length === 0) return null
+  dates.sort()
+  return dates[0]
+}
+
+/**
  * "18 – 22 July 2026" (same month), "28 July – 02 August 2026" (cross-month),
  * "18 December 2026 – 03 January 2027" (cross-year), "18 July 2026" (start
  * only), null when no start date. Days are zero-padded throughout.
@@ -275,14 +295,19 @@ function describeBlock(block: VoucherServiceBlock): string {
       const title = block.title?.trim() || supplier || "Excursion"
       // Leg labels are often already written as "Excursion in Kimberley" — don't say it twice.
       const namesLocation = location ? title.toLowerCase().includes(location.toLowerCase()) : true
-      // The booked itinerary names the day; the tour type it belongs to is what was priced.
-      const itinerary = d.itinerary?.trim() || null
-      const namesItinerary = itinerary ? title.toLowerCase().includes(itinerary.toLowerCase()) : true
+      // The tour type is what was booked and priced. d.itinerary (the itinerary's own name) is
+      // deliberately never read here: an itinerary has no name field of its own, so that value is
+      // either a copy of *some* tour type's name (redundant when it matches this one, misleading
+      // when it doesn't — see lib/invoices/describe-invoice-line.ts) or blank. What the itinerary
+      // actually has to say lives in d.itineraryDescription, which already leads this block's
+      // bullets further down.
+      const tourType = d.suiteType?.trim() || null
+      const namesTourType = tourType ? title.toLowerCase().includes(tourType.toLowerCase()) : true
       return joinSentence(
         [
           title,
           namesLocation ? null : `in ${location}`,
-          namesItinerary ? null : `— ${itinerary}`,
+          namesTourType ? null : `— ${tourType}`,
         ],
         [start ? `at ${start}` : null],
       )

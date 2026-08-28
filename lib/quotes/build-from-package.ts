@@ -664,20 +664,29 @@ export async function buildPackageQuoteLineItems({
     leg: PackageDetail["legs"][number],
     selection: { routeId?: string; units?: PackageUnitSelection[] },
   ): string | null {
-    if (selection.routeId) {
-      return selection.routeId
-    }
     // A tour operator's itinerary is descriptive only and belongs to exactly one tour type, so
     // auto-picking one is only safe when it actually matches a chosen tour type — never blindly
-    // grab the supplier's only itinerary if it happens to describe a different tour type.
+    // grab the supplier's only itinerary if it happens to describe a different tour type. This
+    // also governs a *persisted* routeId: a stale/mismatched one (e.g. left over from a removed
+    // tour, or stamped by an unrelated default) must not be trusted just because it was saved —
+    // see defaultRouteId in lib/packages/apply-dialog-state.ts for the other half of this guard.
     if (isTypePricedSupplier(leg.supplierKind)) {
       const chosenSuiteTypeIds = new Set(
         (selection.units ?? []).flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])),
       )
+      if (selection.routeId) {
+        const persisted = leg.routes.find((route) => route.id === selection.routeId)
+        if (persisted?.suiteTypeId && chosenSuiteTypeIds.has(persisted.suiteTypeId)) {
+          return selection.routeId
+        }
+      }
       const matching = leg.routes.filter(
         (route) => route.suiteTypeId && chosenSuiteTypeIds.has(route.suiteTypeId),
       )
       return matching.length === 1 ? matching[0].id : null
+    }
+    if (selection.routeId) {
+      return selection.routeId
     }
     if (leg.routes.length === 1) {
       return leg.routes[0].id
@@ -885,7 +894,9 @@ export async function buildPackageQuoteLineItems({
         // Name the route + type: the missing dimension is almost never the date, and an error
         // that only names the supplier sends people hunting through validity periods.
         const typeLabel = suiteTypeName ?? SUPPLIER_VOCABULARY[leg.supplierKind].suiteType
-        const where = `"${typeLabel}" on "${routeName ?? "this route"}" (${legLabel})`
+        // A tour operator's itinerary saves with a blank name (see app/api/suppliers/[slug]/route.ts),
+        // so `||` here (not `??`) is deliberate -- an empty string must fall back same as a null route.
+        const where = `"${typeLabel}" on "${routeName || "this route"}" (${legLabel})`
         if (!selected) {
           throw new Error(
             hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)

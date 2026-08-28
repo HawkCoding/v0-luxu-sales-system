@@ -145,10 +145,11 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   consultantName,
   { name: "direction", description: "Travel route / journey name", kind: "scalar", sample: "Pretoria → Cape Town" },
   { name: "routeName", description: "Route or journey name (alias of direction)", kind: "scalar", sample: "Pretoria → Cape Town" },
-  { name: "departureDate", description: "Departure date of the trip", kind: "scalar", sample: "14 September 2026" },
+  { name: "tripStartDate", description: "First day of the trip overall (earliest of any leg — hotel pre-nights count)", kind: "scalar", sample: "12 September 2026" },
+  { name: "departureDate", description: "Train's own departure date (falls back to trip start date if no train leg)", kind: "scalar", sample: "14 September 2026" },
   {
     name: "departureDateShort",
-    description: "Departure date as used in the subject line",
+    description: "Train's own departure date as used in the subject line (falls back to trip start date if no train leg)",
     kind: "scalar",
     sample: "14 September 2026",
   },

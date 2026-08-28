@@ -943,6 +943,113 @@ describe("per-leg rate types", () => {
     expect(suiteState(states, "leg-hotel").rateTypeId).toBeNull()
   })
 
+  it("hydrateFromSaved discards a persisted tour itinerary that belongs to a different tour type", () => {
+    // Reproduces the LTT-2026-0012 bug: booking_services.route_id was stamped onto a leg whose
+    // unit is booked under a different tour type than the persisted itinerary describes. Trusting
+    // it as-is would surface the wrong itinerary (and, via lib/invoices, the wrong tour name).
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [
+        { id: "route-heli", supplierId: "supplier-leg-tour", name: "Helicopter Flight", suiteTypeId: "tour-heli", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["routes"],
+      suiteTypes: [
+        { id: "tour-heli", supplierId: "supplier-leg-tour", name: "Helicopter Flight", active: true, createdAt: "", updatedAt: "" },
+        { id: "tour-cruise", supplierId: "supplier-leg-tour", name: "Sundowner Cruise", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["suiteTypes"],
+    })
+    const tourPkg = detail([tourLeg])
+    const saved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-tour",
+          package_leg_id: "leg-tour",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-tour",
+          // Persisted itinerary names the Helicopter tour, but the booked unit is Sundowner Cruise.
+          route_id: "route-heli",
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-14",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [
+            {
+              id: "unit-a",
+              suite_type_id: "tour-cruise",
+              bedroom_type_id: null,
+              bedroom_layout_id: null,
+              bathroom_type_id: null,
+              adult_count: 2,
+              child_count: 0,
+              infant_count: 0,
+              sort_order: 0,
+            },
+          ],
+        },
+      ],
+    }
+
+    const states = hydrateFromSaved(tourPkg, saved, [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-tour").routeId).toBeNull()
+  })
+
+  it("hydrateFromSaved keeps a persisted tour itinerary that matches the booked tour type", () => {
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [
+        { id: "route-cruise", supplierId: "supplier-leg-tour", name: "Sundowner Cruise", suiteTypeId: "tour-cruise", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["routes"],
+      suiteTypes: [
+        { id: "tour-cruise", supplierId: "supplier-leg-tour", name: "Sundowner Cruise", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["suiteTypes"],
+    })
+    const tourPkg = detail([tourLeg])
+    const saved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-tour",
+          package_leg_id: "leg-tour",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-tour",
+          route_id: "route-cruise",
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-14",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [
+            {
+              id: "unit-a",
+              suite_type_id: "tour-cruise",
+              bedroom_type_id: null,
+              bedroom_layout_id: null,
+              bathroom_type_id: null,
+              adult_count: 2,
+              child_count: 0,
+              infant_count: 0,
+              sort_order: 0,
+            },
+          ],
+        },
+      ],
+    }
+
+    const states = hydrateFromSaved(tourPkg, saved, [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-tour").routeId).toBe("route-cruise")
+  })
+
   it("toPackageSelectionsPatch emits rateTypeId for suite and transport legs", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null })
     const train = suiteState(states, "leg-train")

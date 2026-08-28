@@ -164,7 +164,10 @@ function resolveServiceDescription(service: WorksheetServiceRow, serviceType: st
     const routeName = resolveVoucherRouteName(firstRecord(service.routes), service.route_reversed ?? false)
     return routeName ? `${supplierName} — ${routeName}` : supplierName
   }
-  if (serviceType === "hotel") {
+  if (serviceType === "hotel" || serviceType === "tour") {
+    // resolveRoomNames reads unit-level suite_types.name — for a tour leg that's the tour type
+    // (what was booked and priced), never the itinerary. The itinerary has no name of its own to
+    // display here regardless — see lib/invoices/describe-invoice-line.ts.
     const roomNames = resolveRoomNames(service)
     return roomNames.length > 0 ? `${supplierName} — ${roomNames.join(", ")}` : supplierName
   }

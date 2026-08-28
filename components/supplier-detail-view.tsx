@@ -2755,7 +2755,7 @@ const ItineraryEditorRow = memo(function ItineraryEditorRow({
           size="icon"
           variant="outline"
           className={REMOVE_ICON_BUTTON_CLASS}
-          aria-label={`Remove ${route.name.trim() || vocabulary.route.toLowerCase()}`}
+          aria-label={`Remove ${vocabulary.route.toLowerCase()}`}
           onClick={() => onRemoveRoute(packageIndex, routeIndex)}
         >
           <Trash2 className="h-4 w-4" />
@@ -2909,7 +2909,10 @@ function ItinerariesByTourType({
             <ul className="space-y-1.5">
               {grouped.map((route) => (
                 <li key={route.id} className="flex flex-wrap items-baseline gap-2">
-                  <Badge variant="outline">{route.name}</Badge>
+                  {/* An itinerary has no name of its own -- routes.name holds a synthetic unique
+                      value (see app/api/suppliers/[slug]/route.ts), never anything to show. The
+                      tour type it belongs to is already the heading above this list. */}
+                  <Badge variant="outline">{vocabulary.route}</Badge>
                   {route.active ? null : (
                     <span className="text-xs text-muted-foreground">Inactive</span>
                   )}
@@ -3247,11 +3250,12 @@ export function SupplierDetailView({
         .flatMap((pkg) => pkg.routes)
         .filter((route) => suiteType && route.suiteTypeId === suiteType.id)
       if (linkedItineraries.length > 0) {
-        const names = linkedItineraries
-          .map((route) => route.name.trim() || `Unnamed ${vocabulary.route.toLowerCase()}`)
-          .join(", ")
+        // An itinerary has no name to list -- routes.name holds a synthetic unique value (see
+        // app/api/suppliers/[slug]/route.ts). Naming the tour type is what locates them anyway.
+        const count = linkedItineraries.length
+        const noun = count === 1 ? vocabulary.route.toLowerCase() : vocabulary.routePlural.toLowerCase()
         toast.error(
-          `Move or remove ${linkedItineraries.length === 1 ? "the" : "these"} ${vocabulary.routePlural.toLowerCase()} first: ${names}.`,
+          `Move or remove the ${count} ${noun} under "${suiteType?.name.trim() || `this ${vocabulary.suiteType.toLowerCase()}`}" first.`,
           { id: "suite-type-has-itineraries" },
         )
         return
@@ -4116,9 +4120,8 @@ export function SupplierDetailView({
         (route) => shouldSendRoute(route, true) && !route.suiteTypeId,
       )
       if (unassignedItinerary) {
-        const itineraryLabel = unassignedItinerary.name.trim() || vocabulary.route.toLowerCase()
         toast.error(
-          `Pick a ${vocabulary.suiteType.toLowerCase()} for "${itineraryLabel}" — every ${vocabulary.route.toLowerCase()} belongs to one.`,
+          `Pick a ${vocabulary.suiteType.toLowerCase()} for every ${vocabulary.route.toLowerCase()} — each one belongs to exactly one.`,
         )
         return
       }

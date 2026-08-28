@@ -16,7 +16,12 @@ export function describeInvoiceLine(
   const isGenericService = snapshot?.serviceType === "transfer" || snapshot?.serviceType === "rental"
   const supplier = isGenericService ? null : snapshot?.supplierName?.trim() || snapshot?.legLabel?.trim() || null
 
-  const detail = snapshot?.routeName?.trim() || null
+  // A tour operator sells the tour type, not the itinerary that describes it — routeName on a
+  // tour line is descriptive copy shared by every tour on the leg, so two different tours would
+  // otherwise render identically. Falls back to routeName only for snapshots stamped before the
+  // tour type was captured here.
+  const isTour = snapshot?.supplierKind === "tour_operator"
+  const detail = (isTour ? snapshot?.suiteTypeName?.trim() : null) || snapshot?.routeName?.trim() || null
 
   let base: string
   if (supplier) {

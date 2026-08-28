@@ -7,7 +7,11 @@ import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { formatMoney } from "@/lib/money"
-import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import {
+  deriveFlightCapPerPerson,
+  deriveJourneyFromBlocks,
+  deriveTrainDepartureFromBlocks,
+} from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import {
@@ -153,6 +157,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   // Journey + header departure date come from the priced legs, not the booking's
   // enquiry-time scalar dates which drift out of sync once the package changes.
   const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
+  const trainDeparture = deriveTrainDepartureFromBlocks(itineraryBlocks)
 
   const quoteSummaryTable = buildQuoteSummaryBlock({
     quoteNumber,
@@ -185,8 +190,9 @@ export async function POST(req: Request, { params }: RouteParams) {
       quoteNumber,
       quoteDate: formatDisplayDateLong(quoteDate),
       validityDate: formatDisplayDateLong(quote.validity_until) || "To be confirmed",
-      departureDate: formatDisplayDateLong(journey.start) || "To be confirmed",
-      departureDateShort: formatDisplayDateLong(journey.start) || "TBC",
+      tripStartDate: formatDisplayDateLong(journey.start) || "To be confirmed",
+      departureDate: formatDisplayDateLong(trainDeparture ?? journey.start) || "To be confirmed",
+      departureDateShort: formatDisplayDateLong(trainDeparture ?? journey.start) || "TBC",
       direction: quotedRouteName ?? route?.name ?? "your journey",
       supplierName,
       clientSurname,

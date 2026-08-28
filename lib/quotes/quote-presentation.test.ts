@@ -8,6 +8,7 @@ import {
   collectQuoteExclusions,
   deriveFlightCapPerPerson,
   deriveJourneyFromBlocks,
+  deriveTrainDepartureFromBlocks,
   derivePerPersonRate,
   formatFlightCapLine,
   formatJourneyRange,
@@ -80,6 +81,25 @@ describe("deriveJourneyFromBlocks", () => {
       ]),
     ).toBeNull()
     expect(deriveJourneyFromBlocks([])).toBeNull()
+  })
+})
+
+describe("deriveTrainDepartureFromBlocks", () => {
+  it("uses the train leg's own departure date even when an earlier hotel block exists", () => {
+    expect(deriveTrainDepartureFromBlocks([hotelBlock, trainBlock])).toBe("2026-07-20")
+  })
+
+  it("returns null when no block is a train leg", () => {
+    expect(deriveTrainDepartureFromBlocks([hotelBlock])).toBeNull()
+  })
+
+  it("returns null when the train block has no departure date", () => {
+    expect(
+      deriveTrainDepartureFromBlocks([
+        { ...trainBlock, serviceData: { ...trainBlock.serviceData, departureDate: null } },
+      ]),
+    ).toBeNull()
+    expect(deriveTrainDepartureFromBlocks([])).toBeNull()
   })
 })
 
@@ -391,7 +411,7 @@ describe("buildQuoteItineraryLines", () => {
     expect(line.text).toBe("Transfer from the hotel to the station at 10h00")
   })
 
-  it("names the booked itinerary on a tour and leads its bullets with the itinerary's copy", () => {
+  it("names the tour type on a tour (not the itinerary) and leads its bullets with the itinerary's copy", () => {
     const [line] = buildQuoteItineraryLines([
       {
         serviceType: "tour",
@@ -410,12 +430,33 @@ describe("buildQuoteItineraryLines", () => {
     ])
 
     expect(line.text).toBe(
-      "City Sightseeing in Cape Town — Cape Town - One Day Pass | at 09h00",
+      "City Sightseeing in Cape Town — Classic Hop-on-Hop-off Ticket | at 09h00",
     )
     expect(line.bullets).toEqual([
       { kind: "item", text: "Red route, 15 stops, hop off as often as you like." },
       { kind: "item", text: "Audio guide" },
     ])
+  })
+
+  it("never names the itinerary's own name on a tour, even when it differs from the tour type (a stale/copied itinerary name must not surface)", () => {
+    const [line] = buildQuoteItineraryLines([
+      {
+        serviceType: "tour",
+        title: "Wild Horizons - Tours",
+        contactDetails: { name: "Wild Horizons - Tours", location: "Victoria Falls" },
+        serviceData: {
+          departureDate: "2026-09-14",
+          startTime: "17:00",
+          suiteType: "Sundowner Cruise - Zimbabwe",
+          itinerary: "Helicopter Flight 12/13 minutes - Zimbabwe",
+        },
+        displayOrder: 1,
+      },
+    ])
+
+    expect(line.text).toBe(
+      "Wild Horizons - Tours in Victoria Falls — Sundowner Cruise - Zimbabwe | at 17h00",
+    )
   })
 
   it("omits the closing line when there is no end date", () => {

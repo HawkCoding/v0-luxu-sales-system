@@ -1322,6 +1322,49 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems.every((li) => li.pricingSnapshot?.routeId !== "route-day-pass")).toBe(true)
   })
 
+  it("ignores a persisted routeId that belongs to a different tour type than the one booked", async () => {
+    // Reproduces the LTT-2026-0012 bug: booking_services.route_id was stamped (by
+    // defaultRouteId's single-itinerary fallback) onto a leg whose unit was actually booked
+    // under a different tour type. A stale/mismatched persisted routeId must be re-derived, not
+    // trusted just because it was saved.
+    const tourLeg = leg({
+      id: "leg-tour-stale",
+      supplierKind: "tour_operator",
+      routes: [
+        { ...route("route-heli", "supplier-leg-tour", "Helicopter Flight 12/13 minutes - Zimbabwe"), suiteTypeId: "tour-heli" },
+      ] as PackageLeg["routes"],
+      suiteTypes: [
+        suiteType("tour-heli", "supplier-leg-tour", "Helicopter Flight 12/13 minutes - Zimbabwe"),
+        suiteType("tour-cruise", "supplier-leg-tour", "Sundowner Cruise - Zimbabwe"),
+      ],
+      rateCards: [
+        rateCard({ id: "rc-heli", routeId: null, suiteTypeId: "tour-heli", pricePerPerson: 1200 }),
+        rateCard({ id: "rc-cruise", routeId: null, suiteTypeId: "tour-cruise", pricePerPerson: 650 }),
+      ],
+    })
+
+    const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour-stale",
+          selected: true,
+          // Persisted routeId names the Helicopter itinerary, but the booked unit is Sundowner
+          // Cruise — this pairing is exactly what a stale defaultRouteId stamp produces.
+          routeId: "route-heli",
+          units: [{ suiteTypeId: "tour-cruise", adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(incompleteLegs).toHaveLength(0)
+    expect(lineItems.every((li) => li.unitPrice === 650)).toBe(true)
+    expect(lineItems.every((li) => li.pricingSnapshot?.routeId !== "route-heli")).toBe(true)
+  })
+
   it("rejects hotel legs without units (the old dialog payload shape)", async () => {
     const hotelLeg = leg({
       id: "leg-hotel",
