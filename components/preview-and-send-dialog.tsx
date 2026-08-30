@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import { Paperclip, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -68,6 +68,12 @@ interface PreviewAndSendDialogProps {
     contentBase64: string
     contentType?: string
   }>
+  /**
+   * Extra control rendered at the left of the footer, before Cancel. Used for
+   * the escape hatch a caller would otherwise need a preceding dialog for —
+   * e.g. "Change amount" on a generated-but-unsent invoice.
+   */
+  secondaryAction?: ReactNode
   onSent: () => Promise<void> | void
 }
 
@@ -92,6 +98,7 @@ export function PreviewAndSendDialog({
   invoiceNumber,
   customerSurname,
   attachments,
+  secondaryAction,
   onSent,
 }: PreviewAndSendDialogProps) {
   const [subject, setSubject] = useState(initialSubject)
@@ -311,6 +318,7 @@ export function PreviewAndSendDialog({
         </div>
 
         <DialogFooter>
+          {secondaryAction}
           <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
             Cancel
           </Button>

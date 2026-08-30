@@ -15,6 +15,7 @@ interface QuoteFixture {
   status?: string
   currency?: string
   commission_bonus?: number
+  agent_commission?: number
 }
 
 interface Captured {
@@ -81,6 +82,7 @@ function buildSupabase(quote: QuoteFixture, captured: Captured) {
                   subtotal: 2500,
                   total: 2500,
                   commission_bonus: quote.commission_bonus ?? 0,
+                  agent_commission: quote.agent_commission ?? 0,
                 },
                 error: null,
               }),
@@ -169,6 +171,18 @@ describe("POST /api/quotes/[id]/currency", () => {
 
     expect(captured.quoteUpdate?.commission_bonus).toBe(200)
     expect(captured.quoteUpdate?.currency).toBe("USD")
+  })
+
+  it("converts the agent commission alongside the lines and nets it off the new total", async () => {
+    const captured: Captured = {}
+    authorise({ status: "draft", agent_commission: 100 }, captured)
+
+    const response = await post({ currency: "USD", rate: 2 })
+    const payload = await response.json()
+
+    expect(captured.quoteUpdate?.agent_commission).toBe(200)
+    // Lines convert to a subtotal of 5000 (2000x2 + 1000); a converted commission of 200 nets to 4800.
+    expect(payload.total).toBe(4800)
   })
 
   it("also converts a quote that is still pricing_incomplete", async () => {

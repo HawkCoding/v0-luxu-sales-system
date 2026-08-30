@@ -135,6 +135,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       total: quote.total,
       currency: quote.currency,
       commission_bonus: quote.commission_bonus,
+      agent_commission: quote.agent_commission,
       quote_number: quoteNumber,
       parent_quote_id: quote.id,
       title: quote.title,

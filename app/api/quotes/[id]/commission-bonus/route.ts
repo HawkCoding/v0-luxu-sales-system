@@ -55,7 +55,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, booking_id, status, subtotal, total, commission_bonus, updated_at")
+    .select("id, booking_id, status, subtotal, total, commission_bonus, agent_commission, updated_at")
     .eq("id", id)
     .single()
 
@@ -95,7 +95,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const bonus = parsed.bonus
   const nextLineItems = applyCommissionBonus(currentLineItems, bonus)
-  const { subtotal, total } = calculateQuoteTotals(nextLineItems)
+  // Rounding is folded into the line items; Agent Commission is a separate total-level
+  // adjustment that must survive untouched across this save.
+  const { subtotal, total } = calculateQuoteTotals(nextLineItems, Number(quote.agent_commission ?? 0))
 
   const rows = nextLineItems.map((li, idx) => ({
     description: li.description,

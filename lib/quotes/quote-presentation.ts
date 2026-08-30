@@ -84,6 +84,20 @@ export function formatTotalLabel(pax: QuotePax): string {
  */
 export const VAT_INCLUSIVE_SUFFIX = "(incl.VAT)"
 
+/**
+ * Client-facing label for the flat discount given to a booking agency (quotes.agent_commission).
+ * Single source so the quote PDF, the quote email block and the invoice PDF read identically.
+ */
+export const AGENT_COMMISSION_LABEL = "Agent Commission"
+
+/** House red for a client-visible deducted amount. Matches the invoice's bank-charges note. */
+export const AGENT_COMMISSION_COLOR = "#c0392b"
+
+/** "-R5,000.00" — a discount always reads as a subtraction, never as a bare positive figure. */
+export function formatAgentCommission(amount: number, format: (value: number) => string): string {
+  return `-${format(Math.abs(amount))}`
+}
+
 /** Suffix on a hotel's check-out line when the property lets guests store luggage at reception. */
 const LUGGAGE_STORAGE_NOTE = "Guests can store their luggage at reception."
 

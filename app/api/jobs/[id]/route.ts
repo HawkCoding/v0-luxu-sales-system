@@ -7,7 +7,7 @@ import {
   BOOKING_SUITE_COLUMNS,
   BOOKING_TRANSPORT_REQUEST_COLUMNS,
   BOOKING_WITH_SUPPLIER_COLUMNS,
-  CORRESPONDENCE_COLUMNS,
+  CORRESPONDENCE_LIST_COLUMNS,
   CUSTOMER_COLUMNS,
   DOCUMENT_COLUMNS,
   INVOICE_COLUMNS,
@@ -179,12 +179,27 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       .order("sort_order"),
     supabase.from("itineraries").select(ITINERARY_COLUMNS).eq("booking_id", id).order("created_at"),
     supabase.from("quotes").select(QUOTE_COLUMNS).eq("booking_id", id).order("created_at"),
-    supabase.from("quote_line_items").select(QUOTE_LINE_ITEM_COLUMNS).order("sort_order"),
+    // Scoped to this booking's quotes via an inner join rather than filtered in JS below: an
+    // unfiltered read pulled every line item in the table on every job page load, and would have
+    // started silently truncating older quotes once PostgREST's row cap was reached.
+    supabase
+      .from("quote_line_items")
+      .select(`${QUOTE_LINE_ITEM_COLUMNS}, quotes!inner(booking_id)`)
+      .eq("quotes.booking_id", id)
+      .order("sort_order"),
     supabase.from("payments").select(PAYMENT_COLUMNS).eq("booking_id", id).order("received_at"),
     supabase.from("invoices").select(INVOICE_COLUMNS).eq("booking_id", id).order("created_at", { ascending: false }),
     supabase.from("documents").select(DOCUMENT_COLUMNS).eq("booking_id", id).order("created_at"),
-    supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).eq("booking_id", id).order("created_at"),
-    supabase.from("audit_logs").select(AUDIT_LOG_COLUMNS).eq("entity_id", id).order("created_at", { ascending: false }),
+    supabase.from("correspondences").select(CORRESPONDENCE_LIST_COLUMNS).eq("booking_id", id).order("created_at"),
+    // Capped: these rows carry before_json/after_json, so an old booking's full audit trail was a
+    // multi-megabyte read on every page load. Newest-first, and the only non-display consumer
+    // (autoBuildAudit below) wants the newest match anyway.
+    supabase
+      .from("audit_logs")
+      .select(AUDIT_LOG_COLUMNS)
+      .eq("entity_id", id)
+      .order("created_at", { ascending: false })
+      .limit(200),
     // The booking's built services, for the Enquiry tab's readiness panel — what it's built as vs
     // what the customer asked for (see lib/enquiry/build-readiness.ts).
     supabase
@@ -449,6 +464,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     total: q.total,
     currency: q.currency,
     commissionBonus: Number(q.commission_bonus ?? 0),
+    agentCommission: Number(q.agent_commission ?? 0),
     updatedAt: q.updated_at,
     updatedAtDisplay: formatDisplayDateTime(q.updated_at),
     lastSentAt: q.last_sent_at ?? undefined,
@@ -553,7 +569,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     channel: c.channel,
     kind: c.kind,
     subject: c.subject,
-    bodyHtml: c.body_html ?? "",
+    // Not read on the job page (the correspondence tab renders subject/status/dates only) and not
+    // fetched — see CORRESPONDENCE_LIST_COLUMNS. Kept on the shape so Correspondence stays one type.
+    bodyHtml: "",
     status: c.status,
     sentAt: c.sent_at ?? undefined,
     sentAtDisplay: formatDisplayDateTime(c.sent_at),

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { formatDistanceToNow } from "date-fns"
 import { toast } from "sonner"
 import { ChevronDown, ChevronUp, Eye, EyeOff, Inbox, Play, PlugZap, Plus, Save, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -436,6 +437,8 @@ export function InboundEmailSettings() {
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {account.host}:{account.port} {"->"} {account.processedFolder} / {account.needsReviewFolder}
+                    {" · "}
+                    <SyncStatusLabel enabled={account.enabled} lastSyncedAt={account.lastSyncedAt} />
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -626,6 +629,32 @@ export function InboundEmailSettings() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+const STALE_SYNC_THRESHOLD_MS = 24 * 60 * 60 * 1000
+
+/** Renders "Synced 2 hours ago" / "Never synced", flagged when an enabled mailbox is overdue. */
+function SyncStatusLabel({ enabled, lastSyncedAt }: { enabled: boolean; lastSyncedAt: string | null }) {
+  if (!lastSyncedAt) {
+    return <span>Never synced</span>
+  }
+
+  const isStale = enabled && Date.now() - new Date(lastSyncedAt).getTime() > STALE_SYNC_THRESHOLD_MS
+  const label = `Synced ${formatDistanceToNow(new Date(lastSyncedAt), { addSuffix: true })}`
+
+  if (!isStale) {
+    return <span>{label}</span>
+  }
+
+  return (
+    <span
+      className="text-amber-600 dark:text-amber-500"
+      title="No sync in over 24 hours"
+      aria-label={`${label} (overdue)`}
+    >
+      {label}
+    </span>
   )
 }
 

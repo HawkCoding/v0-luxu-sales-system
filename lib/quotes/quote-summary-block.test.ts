@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
+import { formatMoney } from "@/lib/money"
 import { buildQuoteSummaryBlock, type QuoteSummaryInput } from "./quote-summary-block"
 
 const itineraryBlocks: VoucherServiceBlock[] = [
@@ -214,6 +215,29 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("TOTAL:")
     expect(html).not.toContain("Guests:")
     expect(html).not.toContain("per person")
+  })
+
+  describe("agent commission", () => {
+    it("renders nothing extra when there is no commission — byte-identical to before this field existed", () => {
+      const html = buildQuoteSummaryBlock(base)
+      expect(html).not.toContain("Subtotal:")
+      expect(html).not.toContain("Agent Commission")
+    })
+
+    it("renders the subtotal and a red discount row above the total when a commission is set", () => {
+      const html = buildQuoteSummaryBlock({ ...base, subtotal: 91300, agentCommission: 5000, total: 86300 })
+      expect(html).toContain("Subtotal:")
+      expect(html).toContain("Agent Commission: -R")
+      expect(html).toContain("#c0392b")
+      expect(html).toContain("TOTAL for 2 Adults:")
+    })
+
+    it("derives the per-person rate from the gross subtotal, not the discounted total", () => {
+      const html = buildQuoteSummaryBlock({ ...base, subtotal: 91300, agentCommission: 5000, total: 86300 })
+      // 91300 / 2 adults = 45650 gross per person, not 43150 (86300 / 2).
+      expect(html).toContain(formatMoney(45650))
+      expect(html).not.toContain(formatMoney(43150))
+    })
   })
 })
 

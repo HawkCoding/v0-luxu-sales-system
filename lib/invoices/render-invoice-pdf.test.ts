@@ -172,6 +172,36 @@ describe("renderInvoicePdf smoke", () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
   })
 
+  it("renders the Agent Commission row and a Total incl. VAT row when a discount is set", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "LTT-2026-0001-INV",
+      bookingNumber: "LTT-2026-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      departure: null,
+      items,
+      totals: {
+        subtotalInclVat: 63900,
+        agentCommission: 5000,
+        totalInclVat: 58900,
+        depositPercentage: 25,
+        depositAmount: 14725,
+        finalAmount: 44175,
+        finalDueDate: "2026-07-19",
+        amountReceived: 0,
+        amountReceivedAt: null,
+        outstanding: 58900,
+      },
+      banking,
+    })
+
+    expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+    const { text } = await pdfParse(buffer)
+    expect(text).toContain("Agent Commission")
+    expect(text).toContain("Total incl. VAT")
+  })
+
   it("renders a paid-up invoice without banking details configured", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "LTT-2026-0001-INV",

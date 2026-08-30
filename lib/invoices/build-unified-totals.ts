@@ -28,7 +28,9 @@ export function buildUnifiedTotals(input: {
   const { balance } = input
   if (input.mode === "full") {
     return {
-      subtotalInclVat: balance.quoteTotal,
+      subtotalInclVat: balance.quoteSubtotal,
+      agentCommission: balance.agentCommission,
+      totalInclVat: balance.quoteTotal,
       depositPercentage: null,
       depositAmount: null,
       finalAmount: balance.quoteTotal,
@@ -42,7 +44,9 @@ export function buildUnifiedTotals(input: {
 
   const depositAmount = input.depositAmount
   return {
-    subtotalInclVat: balance.quoteTotal,
+    subtotalInclVat: balance.quoteSubtotal,
+    agentCommission: balance.agentCommission,
+    totalInclVat: balance.quoteTotal,
     depositPercentage: input.depositPercentage,
     depositAmount,
     finalAmount: Math.max(0, round2(balance.quoteTotal - (depositAmount ?? 0))),

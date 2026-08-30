@@ -6,7 +6,7 @@ import {
   type PackageLegWithSupplier,
   type PackageRow,
 } from "@/lib/packages"
-import { attachSuiteVariantVocab } from "@/lib/packages/suite-variant-vocab"
+import { applySuiteVariantVocab, fetchSuiteVariantVocab } from "@/lib/packages/suite-variant-vocab"
 import { loadSupplierRateTiersResolver } from "@/lib/rate-types/load-supplier-rate-tiers"
 import type { PackageDetail, SupplierKind } from "@/lib/types"
 import type { PackageLegSelection, PackageUnitSelection } from "@/lib/quotes/build-from-package"
@@ -95,18 +95,6 @@ export async function loadBookingServicesPackageDetail(
   // Tour-operator cards price the tour type and carry no route, so they are only reachable via
   // their suite type -- see lib/rate-cards/resolve.ts.
   const suiteTypeIds = suiteTypes.map((suiteType) => suiteType.id)
-  const [routedRateCardsResult, typeRateCardsResult, vehicleRentalDetailsResult] = await Promise.all([
-    routeIds.length > 0
-      ? supabase.from("rate_cards").select("*").in("route_id", routeIds)
-      : Promise.resolve({ data: [] }),
-    suiteTypeIds.length > 0
-      ? supabase.from("rate_cards").select("*").is("route_id", null).in("suite_type_id", suiteTypeIds)
-      : Promise.resolve({ data: [] }),
-    routeIds.length > 0
-      ? supabase.from("vehicle_rental_route_details").select("*").in("route_id", routeIds)
-      : Promise.resolve({ data: [] }),
-  ])
-
   const locationIds = Array.from(
     new Set(
       routes
@@ -114,11 +102,25 @@ export async function loadBookingServicesPackageDetail(
         .filter((id): id is string => Boolean(id)),
     ),
   )
-  const { data: locationRows } =
-    locationIds.length > 0
-      ? await supabase.from("locations").select("id, name").in("id", locationIds)
-      : { data: [] as { id: string; name: string }[] }
-  const locationNameById = new Map((locationRows ?? []).map((row) => [row.id, row.name]))
+  // locations only needs routes (wave 2) and the suite variant vocab only needs suiteTypeIds
+  // (also wave 2) -- both join this wave rather than waiting behind the rate-card reads.
+  const [routedRateCardsResult, typeRateCardsResult, vehicleRentalDetailsResult, locationRowsResult, suiteVariantVocab] =
+    await Promise.all([
+      routeIds.length > 0
+        ? supabase.from("rate_cards").select("*").in("route_id", routeIds)
+        : Promise.resolve({ data: [] }),
+      suiteTypeIds.length > 0
+        ? supabase.from("rate_cards").select("*").is("route_id", null).in("suite_type_id", suiteTypeIds)
+        : Promise.resolve({ data: [] }),
+      routeIds.length > 0
+        ? supabase.from("vehicle_rental_route_details").select("*").in("route_id", routeIds)
+        : Promise.resolve({ data: [] }),
+      locationIds.length > 0
+        ? supabase.from("locations").select("id, name").in("id", locationIds)
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      fetchSuiteVariantVocab(supabase, suiteTypeIds),
+    ])
+  const locationNameById = new Map((locationRowsResult.data ?? []).map((row) => [row.id, row.name]))
 
   // Every active route belonging to a service's supplier is eligible for that service -- see
   // the doc comment above. mapPackageLeg needs one "link" row per (leg, route) pair to treat a
@@ -192,8 +194,9 @@ export async function loadBookingServicesPackageDetail(
 
   // Without this vocab layering every suite type here would come back with no bedroom/bathroom
   // variant options, hiding those selectors from the Build Booking suite editor even when the
-  // supplier has them.
-  await attachSuiteVariantVocab(supabase, detail)
+  // supplier has them. Fetched concurrently with the rate-card wave above; applied now that
+  // mapPackageDetail has produced the suite type objects to mutate.
+  applySuiteVariantVocab(detail, suiteVariantVocab)
 
   return { detail, services, units }
 }

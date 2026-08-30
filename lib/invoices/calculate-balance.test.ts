@@ -62,4 +62,32 @@ describe("calculateInvoiceBalance", () => {
     expect(result.balance).toBe(750)
     expect(result.totalPaid).toBe(450)
   })
+
+  it("carries the agent commission through, defaulting to zero when unset", async () => {
+    const withCommission = await calculateInvoiceBalance(
+      createSupabaseMock(
+        {
+          id: "quote-1",
+          subtotal: 1400,
+          total: 1200,
+          agent_commission: 200,
+          status: "accepted",
+          created_at: "2026-05-01T00:00:00.000Z",
+        },
+        [],
+      ) as never,
+      "booking-1",
+    )
+    expect(withCommission.agentCommission).toBe(200)
+    expect(withCommission.quoteSubtotal).toBe(1400)
+
+    const withoutCommission = await calculateInvoiceBalance(
+      createSupabaseMock(
+        { id: "quote-1", subtotal: 1200, total: 1200, status: "accepted", created_at: "2026-05-01T00:00:00.000Z" },
+        [],
+      ) as never,
+      "booking-1",
+    )
+    expect(withoutCommission.agentCommission).toBe(0)
+  })
 })

@@ -1,12 +1,36 @@
 import { describe, expect, it } from "vitest"
 import type { QuoteLineItem } from "@/lib/types"
 import {
+  calculateQuoteTotals,
   complimentaryNights,
   hasComplimentaryNight,
   isComplimentaryTransport,
   isMissingPricing,
   stayNights,
 } from "@/lib/quotes/pricing-engine"
+
+describe("calculateQuoteTotals", () => {
+  const lines: QuoteLineItem[] = [
+    { description: "Line 1", qty: 1, unitPrice: 60000, total: 60000 },
+    { description: "Line 2", qty: 1, unitPrice: 40000, total: 40000 },
+  ]
+
+  it("keeps total === subtotal when no agent commission is passed (default arg)", () => {
+    expect(calculateQuoteTotals(lines)).toEqual({ subtotal: 100000, total: 100000 })
+  })
+
+  it("subtracts a positive agent commission from the subtotal to give the total", () => {
+    expect(calculateQuoteTotals(lines, 5000)).toEqual({ subtotal: 100000, total: 95000 })
+  })
+
+  it("clamps the total at zero rather than going negative", () => {
+    expect(calculateQuoteTotals(lines, 500000)).toEqual({ subtotal: 100000, total: 0 })
+  })
+
+  it("ignores a negative commission rather than adding it back", () => {
+    expect(calculateQuoteTotals(lines, -5000)).toEqual({ subtotal: 100000, total: 100000 })
+  })
+})
 
 describe("isMissingPricing", () => {
   const line = (overrides: Partial<QuoteLineItem>): QuoteLineItem => ({

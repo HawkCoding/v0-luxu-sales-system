@@ -397,6 +397,14 @@ export function QuotePreviewSendDialog({
                     {formatMoney(quote.subtotal, quote.currency)}
                   </span>
                 </div>
+                {(quote.agentCommission ?? 0) > 0 && (
+                  <div className="flex justify-end gap-8 text-xs">
+                    <span className="text-destructive">Agent Commission</span>
+                    <span className="text-destructive font-medium w-28">
+                      -{formatMoney(quote.agentCommission ?? 0, quote.currency)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-end gap-8 text-sm font-semibold">
                   <span className="text-foreground">Total</span>
                   <span className="text-foreground w-28">{formatMoney(quote.total, quote.currency)}</span>

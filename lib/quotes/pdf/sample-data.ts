@@ -16,6 +16,9 @@ export function sampleQuotePdfData(): Omit<
     journeyEnd: "2026-07-22",
     adults: 2,
     children: 0,
+    // Exercises the Agent Commission row: subtotal 91300, a R5000 discount, net total 86300.
+    subtotal: 91300,
+    agentCommission: 5000,
     total: 86300,
     itineraryBlocks: [
       {

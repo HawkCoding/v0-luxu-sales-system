@@ -8,6 +8,11 @@ import { formatMoney } from "@/lib/money"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import {
+  AGENT_COMMISSION_COLOR,
+  AGENT_COMMISSION_LABEL,
+  formatAgentCommission,
+} from "@/lib/quotes/quote-presentation"
 import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 /** The invoice recipient. A full tax invoice must name and address them. */
@@ -60,8 +65,14 @@ export interface InvoiceItem {
  * VAT-inclusive only — the sales team's invoices never break out VAT.
  */
 export interface InvoiceTotals {
-  /** VAT-inclusive subtotal — the reference's "Subtotal incl. VAT". */
+  /** VAT-inclusive subtotal — the reference's "Subtotal incl. VAT". Gross of any agent commission. */
   subtotalInclVat: number
+  /** Positive magnitude of the agency discount. Zero/absent renders the ladder exactly as it did
+   *  before this field existed — no commission row, no separate total row. */
+  agentCommission?: number
+  /** subtotalInclVat − agentCommission. Only rendered as its own row when agentCommission > 0;
+   *  the deposit/final/outstanding figures below already derive from this, not from subtotalInclVat. */
+  totalInclVat?: number
   depositPercentage?: number | null
   depositAmount?: number | null
   finalAmount: number
@@ -722,6 +733,30 @@ export function InvoiceDocument({
                 {formatMoney(totals.subtotalInclVat, currency)}
               </Text>
             </View>
+            {totals.agentCommission ? (
+              <>
+                <View style={styles.totalsRow}>
+                  <Text
+                    style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
+                  >
+                    {AGENT_COMMISSION_LABEL}
+                  </Text>
+                  <Text
+                    style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
+                  >
+                    {formatAgentCommission(totals.agentCommission, (v) => formatMoney(v, currency))}
+                  </Text>
+                </View>
+                <View style={styles.totalsRow}>
+                  <Text style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700 }]}>
+                    Total incl. VAT
+                  </Text>
+                  <Text style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700 }]}>
+                    {formatMoney(totals.totalInclVat ?? totals.subtotalInclVat, currency)}
+                  </Text>
+                </View>
+              </>
+            ) : null}
             <View style={styles.totalsDivider} />
             {totals.depositAmount !== null && totals.depositAmount !== undefined ? (
               <View style={styles.totalsRow}>

@@ -62,9 +62,10 @@ const depositGate: GateFailure = {
 
 const finalPaymentGate: GateFailure = {
   gateId: "final_payment_confirmation",
-  message: "Confirm the booking is paid in full.",
-  fixHint: "Tick to confirm — no amount entry needed.",
+  message: "Payment in full needs confirming.",
+  fixHint: "No amount entry needed — the balance is already on record.",
   severity: "confirm",
+  confirmLabel: "I confirm the full balance has been received.",
 }
 
 describe("StageTransitionModal", () => {

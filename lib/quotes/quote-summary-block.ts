@@ -12,9 +12,12 @@ import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-f
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import {
+  AGENT_COMMISSION_COLOR,
+  AGENT_COMMISSION_LABEL,
   buildQuoteItineraryLines,
   collectQuoteExclusions,
   derivePerPersonRate,
+  formatAgentCommission,
   formatFlightCapLine,
   formatJourneyRange,
   formatPaxLabel,
@@ -30,8 +33,14 @@ export interface QuoteSummaryInput {
   journeyEnd: string | null
   adults: number
   children: number
-  /** VAT-inclusive grand total (quotes.total). */
+  /** VAT-inclusive grand total (quotes.total) — already net of agentCommission. */
   total: number
+  /** Gross travel price before the agency discount (quotes.subtotal). Only shown, and only used
+   *  to derive the per-person rate, when agentCommission is greater than zero. */
+  subtotal?: number
+  /** Flat discount given to a booking agency (quotes.agent_commission). Zero/absent renders the
+   *  pricing box exactly as it did before this field existed. */
+  agentCommission?: number
   /** The quote's currency (quotes.currency). Every amount in the block is in it. */
   currency?: string
   /** Package itinerary; empty array omits the section entirely. */
@@ -65,6 +74,9 @@ const summaryLine = "margin:0 0 6px;color:#312b24;font-size:13px;line-height:19p
 const pricingBox =
   "margin:18px 0;padding:14px 16px;background-color:#f4efe6;border:1px solid #d8cdbc;"
 const perPersonLine = "margin:0 0 6px;color:#554c42;font-size:13px;line-height:19px;"
+const subtotalLine = "margin:0 0 4px;color:#554c42;font-size:13px;line-height:19px;"
+const agentCommissionLine = `margin:0 0 4px;color:${AGENT_COMMISSION_COLOR};font-size:13px;font-weight:700;line-height:19px;`
+const pricingDivider = "margin:0 0 6px;border-bottom:1px solid #d8cdbc;"
 const totalLine = "margin:0;color:#172018;font-size:16px;font-weight:700;line-height:22px;"
 const sectionHeading =
   "margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid #d8cdbc;color:#172018;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;"
@@ -85,7 +97,11 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const pax = { adults: input.adults, children: input.children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(input.journeyStart, input.journeyEnd)
-  const perPersonRate = derivePerPersonRate(input.total, pax)
+  const agentCommission = input.agentCommission ?? 0
+  const hasAgentCommission = agentCommission > 0
+  // Per-person rate is always the gross rate — the discount is the agency's cut, not the
+  // traveller's. Falls back to `total` when no subtotal is supplied (pre-existing callers).
+  const perPersonRate = derivePerPersonRate(hasAgentCommission ? (input.subtotal ?? input.total) : input.total, pax)
 
   const metaLines = [
     ...(QUOTE_REFERENCE_ENABLED
@@ -112,6 +128,11 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     `<div style="${pricingBox}" data-label="Total price">` +
     (perPersonRate !== null
       ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${money(perPersonRate)} per person</p>`
+      : "") +
+    (hasAgentCommission
+      ? `<p style="${subtotalLine}">Subtotal: ${money(input.subtotal ?? input.total)}</p>` +
+        `<p style="${agentCommissionLine}">${escapeHtml(AGENT_COMMISSION_LABEL)}: ${escapeHtml(formatAgentCommission(agentCommission, money))}</p>` +
+        `<div style="${pricingDivider}"></div>`
       : "") +
     `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${money(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>` +
     `</div>`

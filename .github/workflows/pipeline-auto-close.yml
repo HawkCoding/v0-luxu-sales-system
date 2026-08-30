@@ -1,0 +1,41 @@
+name: Pipeline Auto-Close
+
+# Moved out of vercel.json to make room for /api/cron/email-sync under the Vercel Hobby plan's
+# 2-cron limit (Hobby allows 2 daily crons; the project needs 3: email-sync, quote-follow-ups,
+# and this one). This workflow calls the exact same authenticated endpoint
+# (app/api/cron/pipeline-auto-close/route.ts) on the schedule that used to live in vercel.json.
+#
+# Requires two repository secrets (Settings > Secrets and variables > Actions):
+#   PROD_APP_URL  - the deployed app's base URL, e.g. https://app.luxustravel.co.za
+#   CRON_SECRET   - must match the CRON_SECRET environment variable set in Vercel
+# Until both are set, this workflow will fail closed (the endpoint requires the exact secret).
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: pipeline-auto-close
+  cancel-in-progress: false
+
+jobs:
+  auto-close:
+    name: Trigger pipeline auto-close
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/cron/pipeline-auto-close
+        run: |
+          if [ -z "${{ secrets.PROD_APP_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "PROD_APP_URL and/or CRON_SECRET repository secrets are not set -- skipping." >&2
+            exit 1
+          fi
+          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PROD_APP_URL }}/api/cron/pipeline-auto-close")
+          cat /tmp/response.json
+          if [ "$status" -ge 300 ]; then
+            echo "pipeline-auto-close endpoint returned HTTP $status" >&2
+            exit 1
+          fi

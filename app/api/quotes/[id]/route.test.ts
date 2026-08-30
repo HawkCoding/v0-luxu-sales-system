@@ -24,7 +24,12 @@ interface PrevLine {
   pricing_snapshot: unknown
 }
 
-function buildAuth(previousLineItems: PrevLine[], status = "draft", overrideReason: string | null = null) {
+function buildAuth(
+  previousLineItems: PrevLine[],
+  status = "draft",
+  overrideReason: string | null = null,
+  agentCommission = 0,
+) {
   const rpc = vi.fn(async () => ({ error: null }))
   const auditInsert = vi.fn(async () => ({ error: null }))
   const quoteUpdate = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
@@ -44,6 +49,7 @@ function buildAuth(previousLineItems: PrevLine[], status = "draft", overrideReas
                   status,
                   updated_at: QUOTE_UPDATED_AT,
                   override_reason: overrideReason,
+                  agent_commission: agentCommission,
                 },
                 error: null,
               })),
@@ -355,5 +361,27 @@ describe("PATCH /api/quotes/[id]", () => {
       expect(res.status).toBe(200)
       expect(rpc).toHaveBeenCalledWith("replace_quote_line_items", expect.anything())
     })
+  })
+
+  // A line-item edit must not silently wipe out an existing Agent Commission — it's a
+  // total-level adjustment, unrelated to which lines make up the subtotal.
+  it("keeps an existing agent commission netted off the total after a line-item edit", async () => {
+    const { rpc } = buildAuth(
+      [prevLine({ description: "Package Total", unit_price: 24800, total: 24800 })],
+      "draft",
+      null,
+      5000,
+    )
+
+    const res = await PATCH(
+      patchReq({ lineItems: [{ description: "Package Total", qty: 1, unitPrice: 24800, total: 24800 }] }),
+      routeParams,
+    )
+    const payload = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(payload.subtotal).toBe(24800)
+    expect(payload.total).toBe(19800)
+    expect(rpc).toHaveBeenCalledWith("replace_quote_line_items", expect.objectContaining({ p_total: 19800 }))
   })
 })

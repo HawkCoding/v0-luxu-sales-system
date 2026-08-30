@@ -63,7 +63,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, booking_id, subtotal, total, status, updated_at, override_reason")
+    .select("id, booking_id, subtotal, total, status, updated_at, override_reason, agent_commission")
     .eq("id", id)
     .single()
 
@@ -136,7 +136,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     )
   }
 
-  const { subtotal, total } = calculateQuoteTotals(normalizedLineItems)
+  // A line-item edit must not silently wipe out an existing agent commission — it's a
+  // total-level adjustment, unrelated to which lines make up the subtotal.
+  const { subtotal, total } = calculateQuoteTotals(normalizedLineItems, Number(quote.agent_commission ?? 0))
 
   const lineItems = normalizedLineItems.map((li, idx) => ({
     description: li.description,

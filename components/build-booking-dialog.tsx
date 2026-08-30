@@ -228,7 +228,6 @@ export function BuildBookingDialog({
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
-  const [confirmingServices, setConfirmingServices] = useState(false)
   const [syncingTotals, setSyncingTotals] = useState(false)
   const [editingTravellers, setEditingTravellers] = useState(false)
   const [travellerDraft, setTravellerDraft] = useState<TravellerCounts | null>(null)
@@ -753,28 +752,28 @@ export function BuildBookingDialog({
     )
   }
 
-  async function confirmServices() {
-    setConfirmingServices(true)
+  /**
+   * Records who accepted the auto-filled services and when.
+   *
+   * This used to be its own "Confirm services" button on the banner below,
+   * which gated nothing — no pipeline gate reads `services_confirmed`. Pricing
+   * the quote off these services is a far stronger acceptance than clicking a
+   * button beside them, so the stamp now rides on Apply to quote instead.
+   *
+   * Never throws: a booking whose quote saved but whose stamp failed is a
+   * missing audit row, not a failed apply.
+   */
+  async function stampServicesConfirmed() {
     try {
       const res = await fetch(`/api/jobs/${jobId}/services/confirm`, { method: "POST" })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        toast.error(typeof body?.error === "string" ? body.error : "Failed to confirm services")
-        return
-      }
+      if (!res.ok) return
       const body = (await res.json().catch(() => null)) as { servicesConfirmedAt?: string } | null
       setLegStates((prev) => prev.map((state) => ({ ...state, origin: "consultant" })))
       // The confirmer's name only comes back on the next load of saved state; the stamp itself is
-      // what matters here, so the banner falls back to "Services confirmed <date>".
+      // what matters here, so the line falls back to "Services confirmed <date>".
       setConfirmedStamp({ at: body?.servicesConfirmedAt ?? new Date().toISOString(), by: null })
-      // Confirming flips origin on the service rows, which bumps their updated_at — re-read the
-      // versions or the next save in this session 409s against this dialog's own write.
-      await refreshLegVersions()
-      toast.success("Services confirmed")
     } catch {
-      toast.error("Failed to confirm services. Please try again.")
-    } finally {
-      setConfirmingServices(false)
+      // Swallowed on purpose — see above.
     }
   }
 
@@ -881,10 +880,13 @@ export function BuildBookingDialog({
 
     try {
       // 1. Persist per-leg selections and suite units (voucher generation reads these).
+      // deferTripDateRecompute: the transport-requests PUT in step 2 below always follows and
+      // recomputes trip dates from the final state of both tables -- doing it again here would
+      // just be discarded work on the same request round trip.
       const patchRes = await fetch(`/api/jobs/${jobId}/services`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toPackageSelectionsPatch(legStates)),
+        body: JSON.stringify({ ...toPackageSelectionsPatch(legStates), deferTripDateRecompute: true }),
       })
       if (!patchRes.ok) {
         const body = await patchRes.json().catch(() => ({}))
@@ -978,6 +980,13 @@ export function BuildBookingDialog({
     }
     try {
       await saveQuote({ lineItems: lineItemsToSave }, options)
+      // Applying is the acceptance — stamp it rather than asking for a
+      // separate click that gated nothing. Deliberately not gated on
+      // `hasAutoFilledServices`: editing a field already flips that leg to
+      // origin='consultant', so by the time a reviewed booking reaches Apply
+      // there is usually nothing left marked auto. Only the first apply
+      // stamps, so the record keeps whoever actually accepted the build.
+      if (!confirmedStamp) await stampServicesConfirmed()
       toast.success("Booking services applied to quote")
       discardQuoteDraft()
       setOpen(false)
@@ -1181,14 +1190,11 @@ export function BuildBookingDialog({
             />
 
             {hasAutoFilledServices && (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
                 <p className="text-sm">
-                  Some services below were filled in automatically from the enquiry. Review them, then
-                  confirm — or edit any field to accept it individually.
+                  Some services below were filled in automatically from the enquiry. Check the dates,
+                  suites and rates — they are recorded as reviewed when you apply this to the quote.
                 </p>
-                <Button type="button" variant="outline" size="sm" onClick={confirmServices} disabled={confirmingServices}>
-                  {confirmingServices ? "Confirming…" : "Confirm services"}
-                </Button>
               </div>
             )}
 
@@ -1377,7 +1383,9 @@ export function BuildBookingDialog({
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                Confirm replacement
+                {/* Nothing is being replaced on a first build — the old title
+                    contradicted the body copy right below it. */}
+                {existingLineItemCount > 0 ? "Confirm replacement" : "Review quote lines"}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>

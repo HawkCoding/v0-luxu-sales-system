@@ -54,4 +54,30 @@ describe("QuoteDocument", () => {
     expect(doc.props.subject).toBe("Quotation")
     expect(doc.props.title).not.toContain(QUOTE_NUMBER)
   })
+
+  describe("agent commission", () => {
+    // sampleQuotePdfData ships subtotal: 91300, agentCommission: 5000, total: 86300 specifically
+    // to exercise this row.
+    it("shows the subtotal and the discount above the net total", () => {
+      const text = renderedText(buildDocument()).join(" | ")
+
+      expect(text).toContain("Subtotal")
+      expect(text).toContain("Agent Commission")
+    })
+
+    it("renders nothing extra when there is no commission", () => {
+      const doc = QuoteDocument({
+        ...sampleQuotePdfData(),
+        quoteNumber: QUOTE_NUMBER,
+        quoteDate: "2026-07-16",
+        subtotal: undefined,
+        agentCommission: 0,
+        total: 86300,
+      }) as React.ReactElement
+      const text = renderedText(doc).join(" | ")
+
+      expect(text).not.toContain("Subtotal")
+      expect(text).not.toContain("Agent Commission")
+    })
+  })
 })

@@ -1234,6 +1234,9 @@ export interface Quote {
   currency: string
   /** Flat manual amount folded into the Commission line. Already included in subtotal/total. */
   commissionBonus?: number
+  /** Positive magnitude of the agency discount. subtotal − agentCommission = total. Shown to the
+   *  client on the quote and invoice, unlike commissionBonus which is invisible. */
+  agentCommission?: number
   lastSentAt?: string
   lastSentAtDisplay?: string
   overridePin?: string

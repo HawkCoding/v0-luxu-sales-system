@@ -2648,6 +2648,7 @@ export type Database = {
       }
       quotes: {
         Row: {
+          agent_commission: number
           amount_received: number | null
           booking_id: string
           commission_bonus: number
@@ -2675,6 +2676,7 @@ export type Database = {
           validity_until: string | null
         }
         Insert: {
+          agent_commission?: number
           amount_received?: number | null
           booking_id: string
           commission_bonus?: number
@@ -2702,6 +2704,7 @@ export type Database = {
           validity_until?: string | null
         }
         Update: {
+          agent_commission?: number
           amount_received?: number | null
           booking_id?: string
           commission_bonus?: number

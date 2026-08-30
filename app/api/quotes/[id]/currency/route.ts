@@ -59,7 +59,7 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, booking_id, currency, status, subtotal, total, commission_bonus")
+    .select("id, booking_id, currency, status, subtotal, total, commission_bonus, agent_commission")
     .eq("id", id)
     .single()
 
@@ -131,6 +131,10 @@ export async function POST(req: Request, { params }: RouteParams) {
     }
   })
 
+  // The agent commission is a flat amount in the quote's currency, so it converts too --
+  // otherwise re-pricing the quote would silently change how much discount was applied.
+  const agentCommission = applyFxRate(Number(quote.agent_commission ?? 0), rate)
+
   const { subtotal, total } = calculateQuoteTotals(
     converted.map((line) => ({
       description: line.description,
@@ -139,6 +143,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       unitPrice: line.unit_price,
       total: line.total,
     })),
+    agentCommission,
   )
 
   const { error: replaceError } = await supabase.rpc("replace_quote_line_items", {
@@ -159,6 +164,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     .update({
       currency: toCurrency,
       commission_bonus: commissionBonus,
+      agent_commission: agentCommission,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

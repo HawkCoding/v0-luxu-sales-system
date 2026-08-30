@@ -10,7 +10,10 @@ export function sampleInvoicePdfData(): Omit<
 > {
   const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const unitPrice = 16903.75
-  const total = 33807.5
+  const subtotal = 33807.5
+  // Exercises the Agent Commission row: deposit/final/outstanding are all percentages of the net.
+  const agentCommission = 1807.5
+  const total = Math.round((subtotal - agentCommission) * 100) / 100
   const deposit = Math.round(total * 0.25 * 100) / 100
   return {
     invoiceNumber: "LTT-2026-0001-INV",
@@ -51,11 +54,13 @@ export function sampleInvoicePdfData(): Omit<
         pax: 2,
         description: "Cape Town Journey — Deluxe Suite",
         unitPrice,
-        total,
+        total: subtotal,
       },
     ],
     totals: {
-      subtotalInclVat: total,
+      subtotalInclVat: subtotal,
+      agentCommission,
+      totalInclVat: total,
       depositPercentage: 25,
       depositAmount: deposit,
       finalAmount: Math.round((total - deposit) * 100) / 100,
