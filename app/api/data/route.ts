@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import {
+  BOOKING_LIST_WITH_SUPPLIER_COLUMNS,
   BOOKING_SUITE_COLUMNS,
-  BOOKING_WITH_SUPPLIER_COLUMNS,
-  CORRESPONDENCE_COLUMNS,
+  CORRESPONDENCE_LIST_COLUMNS,
   CUSTOMER_COLUMNS,
   DOCUMENT_COLUMNS,
   ITINERARY_COLUMNS,
@@ -79,10 +79,13 @@ export async function GET(req: Request) {
   const needProfiles = want("bookings")
 
   const auditCutoff = getAuditCutoffDate().toISOString()
-  const defaultDepositPercentage = want("settings") ? await getDefaultDepositPercentage(supabase) : null
   const emptyResult = Promise.resolve({ data: [] })
+  const depositPercentageResult: Promise<number | null> = want("settings")
+    ? getDefaultDepositPercentage(supabase)
+    : Promise.resolve(null)
 
   const [
+    defaultDepositPercentage,
     { data: customers },
     { data: bookings },
     { data: profiles },
@@ -97,13 +100,14 @@ export async function GET(req: Request) {
     { data: pipelineHistory },
     { data: templates },
   ] = await Promise.all([
+    depositPercentageResult,
     want("customers")
       ? supabase.from("customers").select(CUSTOMER_COLUMNS).order("created_at", { ascending: false })
       : emptyResult,
     needBookingRows
       ? supabase
           .from("bookings")
-          .select(BOOKING_WITH_SUPPLIER_COLUMNS)
+          .select(BOOKING_LIST_WITH_SUPPLIER_COLUMNS)
           .order("created_at", { ascending: false })
       : emptyResult,
     needProfiles
@@ -126,7 +130,7 @@ export async function GET(req: Request) {
       ? supabase.from("documents").select(DOCUMENT_COLUMNS).order("created_at", { ascending: false })
       : emptyResult,
     want("correspondences")
-      ? supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).order("created_at", { ascending: false })
+      ? supabase.from("correspondences").select(CORRESPONDENCE_LIST_COLUMNS).order("created_at", { ascending: false })
       : emptyResult,
     want("auditLogs")
       ? supabase
@@ -250,7 +254,6 @@ export async function GET(req: Request) {
       emailImportMailbox: b.email_import_mailbox,
       emailImportReceivedAt: b.email_import_received_at,
       emailImportReceivedAtDisplay: formatDisplayDateTime(b.email_import_received_at),
-      emailImportRawPreview: b.email_import_raw_preview,
       noOfAdults: b.no_of_adults,
       noOfChildren: b.no_of_children,
       noOfSuites: b.no_of_suites,
@@ -269,8 +272,6 @@ export async function GET(req: Request) {
                 .supplier_id!,
             ) ?? null)
           : null),
-      rawText: b.raw_text,
-      extractedJson: b.extracted_json,
       termsAccepted: b.terms_accepted,
       additionalServices: b.additional_services,
       additionalServicesDetails: b.additional_services_details,
@@ -334,6 +335,21 @@ export async function GET(req: Request) {
   }
 
   if (want("quotes")) {
+    // Grouped once up front so each quote does an O(1) map lookup instead of
+    // re-scanning the full quoteLineItems array — O(n+m) instead of O(n*m).
+    // quoteLineItems is already ordered by sort_order ascending from the query,
+    // and pushing in that order preserves it per group.
+    type QuoteLineItemRow = NonNullable<typeof quoteLineItems>[number]
+    const lineItemsByQuoteId = new Map<string, QuoteLineItemRow[]>()
+    for (const li of quoteLineItems ?? []) {
+      const bucket = lineItemsByQuoteId.get(li.quote_id)
+      if (bucket) {
+        bucket.push(li)
+      } else {
+        lineItemsByQuoteId.set(li.quote_id, [li])
+      }
+    }
+
     response.quotes = (quotes ?? []).map((q) => ({
       id: q.id,
       bookingId: q.booking_id,
@@ -346,6 +362,7 @@ export async function GET(req: Request) {
       subtotal: q.subtotal,
       total: q.total,
       commissionBonus: Number(q.commission_bonus ?? 0),
+      agentCommission: Number(q.agent_commission ?? 0),
       lastSentAt: q.last_sent_at,
       lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
       overridePin: q.override_pin,
@@ -354,18 +371,16 @@ export async function GET(req: Request) {
       updatedAt: q.updated_at,
       createdAtDisplay: formatDisplayDateTime(q.created_at),
       updatedAtDisplay: formatDisplayDateTime(q.updated_at),
-      lineItems: (quoteLineItems ?? [])
-        .filter((li) => li.quote_id === q.id)
-        .map((li) => ({
-          id: li.id,
-          description: li.description,
-          supplierDescription: li.supplier_description,
-          qty: li.qty,
-          unitPrice: li.unit_price,
-          total: li.total,
-          pricingSnapshot: li.pricing_snapshot,
-          sortOrder: li.sort_order,
-        })),
+      lineItems: (lineItemsByQuoteId.get(q.id) ?? []).map((li) => ({
+        id: li.id,
+        description: li.description,
+        supplierDescription: li.supplier_description,
+        qty: li.qty,
+        unitPrice: li.unit_price,
+        total: li.total,
+        pricingSnapshot: li.pricing_snapshot,
+        sortOrder: li.sort_order,
+      })),
     }))
   }
 
@@ -403,7 +418,6 @@ export async function GET(req: Request) {
       channel: c.channel,
       kind: c.kind,
       subject: c.subject,
-      bodyHtml: c.body_html,
       status: c.status,
       sentAt: c.sent_at,
       sentAtDisplay: formatDisplayDateTime(c.sent_at),

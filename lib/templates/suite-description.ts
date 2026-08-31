@@ -5,6 +5,7 @@
 // shower". The vocabulary rows (bedroom/bathroom types) are free text per
 // supplier, so the grammar lives here rather than in the database.
 
+import { renderSuitePhrasePattern } from "@/lib/templates/suite-phrase-pattern"
 import type { PricingSnapshot, SupplierKind } from "@/lib/types"
 
 /** Variant group labels as written by lib/quotes/build-from-package.ts. */
@@ -53,6 +54,14 @@ export interface SuiteSelection {
   bathroomType?: string | null
   /** Drives both the accommodation-leg ranking and the prose noun. */
   supplierKind?: SupplierKind | null
+  /**
+   * Optional per-supplier override of the full-phrase word order (suppliers.suite_phrase_pattern),
+   * e.g. "[{bedroom}] [{layout}] {type}" for a train that reads "Double Crosswise Deluxe Suite"
+   * rather than the default grammar's "Double bedded Deluxe Suite with a shower, Crosswise". Not
+   * consulted by describeConfiguration -- the {{suiteConfiguration}} token is config-only by
+   * definition and always uses the plain grammar.
+   */
+  phrasePattern?: string | null
 }
 
 export interface SuiteTokens {
@@ -132,6 +141,16 @@ export function formatSuitePhrase(selection: SuiteSelection): string {
   const suite = suiteTypeWithNoun(selection)
   if (!suite) return ""
 
+  const pattern = clean(selection.phrasePattern)
+  if (pattern) {
+    return renderSuitePhrasePattern(pattern, {
+      type: suite,
+      bedroom: clean(selection.bedroomType),
+      layout: clean(selection.bedroomLayout),
+      bathroom: clean(selection.bathroomType),
+    })
+  }
+
   return [beddingPrefix(selection), suite, configurationSuffix(selection)]
     .filter((part) => part.length > 0)
     .join(" ")
@@ -191,9 +210,14 @@ function chosenVariant(snapshot: PricingSnapshot, label: string): string | null 
   return selected ? clean(selected.values[0]) || null : null
 }
 
-/** Derives suite selections from quote line-item pricing snapshots. */
+/**
+ * Derives suite selections from quote line-item pricing snapshots. `patternsBySupplierId` is
+ * resolved live by the caller (not frozen into the snapshot) so an edit to a supplier's pattern
+ * is picked up by a reissued document without needing to re-price the quote.
+ */
 export function suiteSelectionsFromSnapshots(
   snapshots: (PricingSnapshot | null | undefined)[],
+  patternsBySupplierId?: Map<string, string | null>,
 ): SuiteSelection[] {
   const selections: SuiteSelection[] = []
 
@@ -208,6 +232,9 @@ export function suiteSelectionsFromSnapshots(
       bedroomLayout: chosenVariant(snapshot, BEDROOM_LAYOUT_LABEL),
       bathroomType: chosenVariant(snapshot, BATHROOM_TYPE_LABEL),
       supplierKind: snapshot.supplierKind,
+      phrasePattern: snapshot.supplierId
+        ? patternsBySupplierId?.get(snapshot.supplierId) ?? null
+        : null,
     })
   }
 

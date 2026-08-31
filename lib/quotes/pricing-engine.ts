@@ -4,10 +4,19 @@ export function roundMoney(value: number): number {
   return Math.round(value * 100) / 100
 }
 
-export function calculateQuoteTotals(lineItems: QuoteLineItem[]) {
+/**
+ * `agentCommission` is the positive magnitude of a discount given to a booking agency
+ * (quotes.agent_commission) — unlike commission_bonus/Rounding, it is a total-level
+ * adjustment shown to the client, not folded into a line item. Defaults to 0 so every
+ * pre-existing call site keeps total === subtotal.
+ */
+export function calculateQuoteTotals(lineItems: QuoteLineItem[], agentCommission = 0) {
   const subtotal = roundMoney(lineItems.reduce((sum, item) => sum + item.total, 0))
+  // Never let the discount drive the total negative — the API clamps the input too, this is
+  // just the backstop.
+  const total = roundMoney(Math.max(0, subtotal - Math.max(0, agentCommission)))
 
-  return { subtotal, total: subtotal }
+  return { subtotal, total }
 }
 
 export function isPricingEngineLineItem(lineItem: QuoteLineItem): boolean {

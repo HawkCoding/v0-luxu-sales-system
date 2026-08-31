@@ -326,6 +326,21 @@ lowering it never compounds — it is always applied against the calculated amou
 On a quote you cannot edit, the rounding field is shown read-only as a **Rounding** row, and
 is hidden entirely when it is zero.
 
+### Agent Commission
+
+Below Rounding, set off by a thin line above and below it, is **Agent Commission** — for when
+another agency books through us and we give them a discount. Unlike Rounding, this one *is*
+shown to the customer: it prints as its own red line, on both the quote and the invoice.
+
+Type a positive amount — the minus sign is already part of the field, so you never type it
+yourself — and click **Save**. It is subtracted straight from the subtotal to give the total;
+the per-person rate keeps showing the gross (undiscounted) price. Leave it blank or at zero
+and nothing extra appears anywhere.
+
+Like Rounding, it can only be changed while the quote is still **Provisional** (Draft, Pricing
+Incomplete or Ready). Once sent or accepted, use **Revise** — the amount carries forward onto
+the new version.
+
 ## Editing lines by hand
 
 While a quote is **Provisional**, each line has a bin icon that removes it. This is a direct

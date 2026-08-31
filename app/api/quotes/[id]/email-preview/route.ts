@@ -7,7 +7,11 @@ import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { formatMoney } from "@/lib/money"
-import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import {
+  deriveFlightCapPerPerson,
+  deriveJourneyFromBlocks,
+  deriveTrainDepartureFromBlocks,
+} from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import {
@@ -56,7 +60,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, total, currency, created_at, journey_class, rate_audience, show_train_only_note, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, total, agent_commission, currency, created_at, journey_class, rate_audience, show_train_only_note, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -153,6 +157,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   // Journey + header departure date come from the priced legs, not the booking's
   // enquiry-time scalar dates which drift out of sync once the package changes.
   const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
+  const trainDeparture = deriveTrainDepartureFromBlocks(itineraryBlocks)
 
   const quoteSummaryTable = buildQuoteSummaryBlock({
     quoteNumber,
@@ -163,6 +168,8 @@ export async function POST(req: Request, { params }: RouteParams) {
     adults: booking?.no_of_adults ?? 0,
     children: booking?.no_of_children ?? 0,
     total: quote.total,
+    subtotal: quote.subtotal,
+    agentCommission: Number(quote.agent_commission ?? 0),
     currency: quote.currency,
     itineraryBlocks,
     packageIncludesHeading: documentText.quote_doc_includes_heading,
@@ -176,6 +183,26 @@ export async function POST(req: Request, { params }: RouteParams) {
     ),
   })
 
+  // Resolved live (not read off the frozen snapshot) so an edit to a supplier's suite phrase
+  // pattern is picked up by a reissued preview without needing to re-price the quote.
+  const snapshotSupplierIds = Array.from(
+    new Set(
+      lineItems
+        .map((li) => (li.pricing_snapshot as PricingSnapshot | null)?.supplierId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  )
+  const suitePhrasePatternsBySupplierId = new Map<string, string | null>()
+  if (snapshotSupplierIds.length > 0) {
+    const { data: patternRows } = await supabase
+      .from("suppliers")
+      .select("id, suite_phrase_pattern")
+      .in("id", snapshotSupplierIds)
+    for (const row of patternRows ?? []) {
+      suitePhrasePatternsBySupplierId.set(row.id, row.suite_phrase_pattern ?? null)
+    }
+  }
+
   const shared = await resolveSharedEmailTokens(supabase, quote.booking_id)
   const composed = await composeEmail(supabase, "quote_email", {
     tokens: {
@@ -185,8 +212,9 @@ export async function POST(req: Request, { params }: RouteParams) {
       quoteNumber,
       quoteDate: formatDisplayDateLong(quoteDate),
       validityDate: formatDisplayDateLong(quote.validity_until) || "To be confirmed",
-      departureDate: formatDisplayDateLong(journey.start) || "To be confirmed",
-      departureDateShort: formatDisplayDateLong(journey.start) || "TBC",
+      tripStartDate: formatDisplayDateLong(journey.start) || "To be confirmed",
+      departureDate: formatDisplayDateLong(trainDeparture ?? journey.start) || "To be confirmed",
+      departureDateShort: formatDisplayDateLong(trainDeparture ?? journey.start) || "TBC",
       direction: quotedRouteName ?? route?.name ?? "your journey",
       supplierName,
       clientSurname,
@@ -195,6 +223,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       ...buildSuiteTokens(
         suiteSelectionsFromSnapshots(
           lineItems.map((li) => li.pricing_snapshot as PricingSnapshot | null),
+          suitePhrasePatternsBySupplierId,
         ),
       ),
     },

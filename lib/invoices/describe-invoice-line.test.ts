@@ -150,6 +150,49 @@ describe("describeInvoiceLine", () => {
     )
   })
 
+  it("renders Supplier — Tour type for a tour line, not the shared itinerary name", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Wild Horizons - Tours",
+      legLabel: "Wild Horizons - Tours",
+      supplierKind: "tour_operator",
+      routeName: "Helicopter Flight 12/13 minutes - Zimbabwe",
+      suiteTypeName: "Sundowner Cruise - Zimbabwe",
+    })
+    expect(describeInvoiceLine("Wild Horizons - Tours - Sundowner Cruise - Zimbabwe - Adult", snapshot)).toBe(
+      "Wild Horizons - Tours — Sundowner Cruise - Zimbabwe",
+    )
+  })
+
+  it("renders two tour lines differently when they share a routeName but differ in tour type", () => {
+    const shared = { supplierName: "Wild Horizons - Tours", supplierKind: "tour_operator" as const, routeName: "Helicopter Flight 12/13 minutes - Zimbabwe" }
+    const first = describeInvoiceLine("line 1", makeSnapshot({ ...shared, suiteTypeName: "Sundowner Cruise - Zimbabwe" }))
+    const second = describeInvoiceLine("line 2", makeSnapshot({ ...shared, suiteTypeName: "Tour of the Falls - Zimbabwe" }))
+    expect(first).toBe("Wild Horizons - Tours — Sundowner Cruise - Zimbabwe")
+    expect(second).toBe("Wild Horizons - Tours — Tour of the Falls - Zimbabwe")
+    expect(first).not.toBe(second)
+  })
+
+  it("falls back to routeName on a tour line with no suiteTypeName (legacy snapshot)", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Wild Horizons - Tours",
+      supplierKind: "tour_operator",
+      routeName: "Helicopter Flight 12/13 minutes - Zimbabwe",
+      suiteTypeName: null,
+    })
+    expect(describeInvoiceLine("line", snapshot)).toBe("Wild Horizons - Tours — Helicopter Flight 12/13 minutes - Zimbabwe")
+  })
+
+  it("still appends (Child) on a tour line", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Wild Horizons - Tours",
+      supplierKind: "tour_operator",
+      routeName: "Helicopter Flight 12/13 minutes - Zimbabwe",
+      suiteTypeName: "Sundowner Cruise - Zimbabwe",
+      passengerKind: "child",
+    })
+    expect(describeInvoiceLine("line", snapshot)).toBe("Wild Horizons - Tours — Sundowner Cruise - Zimbabwe (Child)")
+  })
+
   it("explains a hotel line billed for fewer nights than the stay", () => {
     const snapshot = makeSnapshot({
       supplierName: "Table Bay Hotel",

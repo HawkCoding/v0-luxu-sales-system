@@ -10,10 +10,6 @@
       "schedule": "0 5 * * *"
     },
     {
-      "path": "/api/cron/pipeline-auto-close",
-      "schedule": "0 3 * * *"
-    },
-    {
       "path": "/api/cron/quote-follow-ups",
       "schedule": "0 9 * * *"
     }

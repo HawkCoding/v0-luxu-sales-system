@@ -13,6 +13,17 @@ export const BOOKING_WITH_ROUTE_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, 
 // so list views can show the real supplier instead of guessing from the route name.
 export const BOOKING_WITH_SUPPLIER_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name)`
 
+/** BOOKING_COLUMNS without raw_text / email_import_raw_preview, for list reads across
+ * every /api/data page. Neither field renders in any list view — the raw enquiry text
+ * is only shown on the booking detail Enquiry tab, which fetches it from /api/jobs/[id].
+ * Written out as a literal (not derived from BOOKING_COLUMNS at runtime) because
+ * Supabase's typed select() infers columns from the string literal type — a
+ * computed string widens to `string` and falls back to an untyped result. */
+export const BOOKING_LIST_COLUMNS =
+  "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, is_repeat_client_at_creation, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, no_of_adults, no_of_children, no_of_adults_original, no_of_children_original, no_of_suites, child_ages, route_id, extracted_json, terms_accepted, additional_services, additional_services_details, promotion_code, extend_stay, extra_nights, hotel_phase, hotel_supplier_id, customer_invoice_number, services_confirmed_at, services_confirmed_by, created_at, updated_at, quote_sent_at, accepted_at, reservation_form_received_at, deposit_requested_at, deposit_paid_at, final_paid_at, voucher_sent_at, closed_at, deposit_paid, invoice_balance, overpaid_amount, cancelled_at, refund_status, refund_amount, refund_reference, refunded_at, outcome, outcome_reason_id, outcome_notes, outcome_set_at, outcome_set_by"
+
+export const BOOKING_LIST_WITH_SUPPLIER_COLUMNS = `${BOOKING_LIST_COLUMNS}, route:routes(id, name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name)`
+
 export const BOOKING_SUITE_COLUMNS =
   "id, booking_id, suite_number, suite_type_id, suite_type_name, bedroom_type_id, bedroom_layout_id, bathroom_type_id, source_phrase, match_json"
 
@@ -26,7 +37,7 @@ export const PAYMENT_COLUMNS =
   "id, booking_id, amount, received_at, method, reference, notes, created_at"
 
 export const QUOTE_COLUMNS =
-  "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, total, currency, commission_bonus, last_sent_at, override_pin, override_reason, created_at, updated_at"
+  "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, total, currency, commission_bonus, agent_commission, last_sent_at, override_pin, override_reason, created_at, updated_at"
 
 export const QUOTE_LINE_ITEM_COLUMNS =
   "id, quote_id, description, supplier_description, pricing_snapshot, qty, unit_price, total, sort_order"
@@ -42,6 +53,12 @@ export const DOCUMENT_COLUMNS =
 
 export const CORRESPONDENCE_COLUMNS =
   "id, booking_id, channel, kind, subject, body_html, status, sent_at, scheduled_at, error, provider_message_id, created_at"
+
+/** CORRESPONDENCE_COLUMNS without body_html, for list reads that only render the envelope.
+ * The rendered HTML of every email on a booking is a large payload nothing in a list view shows —
+ * the send/preview dialogs get their HTML from the /prepare endpoints, not from list data. */
+export const CORRESPONDENCE_LIST_COLUMNS =
+  "id, booking_id, channel, kind, subject, status, sent_at, scheduled_at, error, provider_message_id, created_at"
 
 export const PIPELINE_HISTORY_COLUMNS =
   "id, booking_id, from_stage, to_stage, moved_by, moved_at"

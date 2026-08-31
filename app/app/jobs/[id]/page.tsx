@@ -183,8 +183,9 @@ export default function JobDetailPage() {
   const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
   const [transitionCanOverride, setTransitionCanOverride] = useState(false)
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
+  // No auto-preview flag: the invoice dialog always goes straight to preview
+  // when there is an unsent draft to resume.
   const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
-  const [depositInvoiceAutoPreview, setDepositInvoiceAutoPreview] = useState(false)
   const [paymentConfirmationOpen, setPaymentConfirmationOpen] = useState(false)
   const [depositPaymentConfirmationOpen, setDepositPaymentConfirmationOpen] = useState(false)
   const [voucherOpen, setVoucherOpen] = useState(false)
@@ -270,7 +271,6 @@ export default function JobDetailPage() {
     router.replace(`/app/bookings/${id}`)
     setPendingStage(targetStage)
     if (send === "deposit_invoice") {
-      setDepositInvoiceAutoPreview(true)
       setDepositInvoiceOpen(true)
     } else if (send === "payment_confirmation") {
       setPaymentConfirmationOpen(true)
@@ -506,7 +506,6 @@ export default function JobDetailPage() {
     setTransitionFailures([])
     setTransitionCanOverride(false)
     setPendingStage(null)
-    setDepositInvoiceAutoPreview(false)
     setVoucherAutoPreview(false)
   }
 
@@ -569,7 +568,6 @@ export default function JobDetailPage() {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
           setTransitionCanOverride(stageGatePayload.canOverride)
-          setDepositInvoiceAutoPreview(true)
           setDepositInvoiceOpen(true)
           return
         }
@@ -1241,10 +1239,7 @@ export default function JobDetailPage() {
 
       <GenerateDepositInvoiceDialog
         open={depositInvoiceOpen}
-        onOpenChange={(next) => {
-          setDepositInvoiceOpen(next)
-          if (!next) setDepositInvoiceAutoPreview(false)
-        }}
+        onOpenChange={setDepositInvoiceOpen}
         trigger={false}
         jobId={id}
         bookingNumber={job.jobNumber}
@@ -1256,10 +1251,8 @@ export default function JobDetailPage() {
         departureDate={enquiry?.departureDate ?? null}
         draftInvoice={draftDepositInvoice}
         amending={invoiceNeedsAmendment}
-        autoPreview={depositInvoiceAutoPreview}
         onSent={async () => {
           setDepositInvoiceOpen(false)
-          setDepositInvoiceAutoPreview(false)
           await mutate()
           resetPendingTransition()
         }}

@@ -1,21 +1,10 @@
 // @vitest-environment node
-// pdf-parse pulls in pdf.js, which needs the node environment (jsdom trips the
+// Text extraction runs pdf.js, which needs the node environment (jsdom trips the
 // "No PDFJS.workerSrc specified" path).
 import { describe, expect, it } from "vitest"
-import { createRequire } from "node:module"
 import { renderVoucherPdf } from "../render-pdf"
+import { extractPdfPageTexts } from "@/lib/pdf/extract-text.fixtures"
 import type { VoucherData, VoucherServiceBlock } from "@/lib/generate-voucher"
-
-const require = createRequire(import.meta.url)
-// pdf-parse ships CJS with no usable type surface for the pagerender hook.
-const pdfParse = require("pdf-parse") as (
-  buffer: Buffer,
-  options?: { pagerender: (page: PdfPage) => Promise<string> },
-) => Promise<unknown>
-
-interface PdfPage {
-  getTextContent: (options: unknown) => Promise<{ items: Array<{ str: string }> }>
-}
 
 function serviceBlock(index: number, notes?: string): VoucherServiceBlock {
   return {
@@ -65,16 +54,8 @@ const voucherData = {
 // Section titles carry letterSpacing, so pdf.js emits their glyphs as separate
 // items — whitespace is stripped before matching.
 async function pageTexts(buffer: Buffer): Promise<string[]> {
-  const pages: string[] = []
-  await pdfParse(buffer, {
-    pagerender: async (page) => {
-      const content = await page.getTextContent({ normalizeWhitespace: true })
-      const text = content.items.map((item) => item.str).join(" ")
-      pages.push(text.replace(/\s+/g, ""))
-      return text
-    },
-  })
-  return pages
+  const pages = await extractPdfPageTexts(buffer)
+  return pages.map((page) => page.replace(/\s+/g, ""))
 }
 
 describe("voucher page breaks", () => {

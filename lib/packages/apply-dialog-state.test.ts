@@ -4,12 +4,14 @@ import { joinLocalDateTime, splitLocalDateTime } from "@/lib/date-time-field"
 import {
   applyAnchoredAirlineDates,
   applyAnchoredDates,
+  applyAnchoredHotelDates,
   applyAnchoredTransferDates,
   buildDefaultLegStates,
   createDraftTransportRequest,
   getTransferAnchorContext,
   hydrateFromSaved,
   toApplySelections,
+  toHotelAnchorContext,
   toPackageSelectionsPatch,
   toTransferAnchorContext,
   toTransportRequestsPut,
@@ -636,6 +638,116 @@ describe("toTransportRequestsPut", () => {
 // pkg is Train(1) -> Hotel(2) -> Transfer(3), so leg-transfer anchors to the hotel — these tests
 // build a second itinerary shape (Train -> Transfer -> Hotel -> Transfer) to cover a transfer that
 // anchors straight to the train, one that anchors to a hotel, and one with nothing above it.
+// Two pre-stay hotels ahead of one train, joined by a transfer between them — the job 42369 shape
+// (Victoria Falls Safari Collection, then a transfer, then Victoria Falls Hotel, then Rovos Rail).
+describe("chained hotel date anchors", () => {
+  const chainHotelA = { ...hotelLeg, id: "leg-hotel-a", sortOrder: 1 }
+  const chainHotelB = { ...hotelLeg, id: "leg-hotel-b", sortOrder: 3 }
+  const chainTransfer = leg({ id: "leg-transfer-mid", supplierKind: "transfers", sortOrder: 2 })
+  const chainTrain = { ...trainLeg, sortOrder: 4 }
+  const twoHotelPkg = detail([chainHotelA, chainTransfer, chainTrain, chainHotelB])
+
+  it("lays two pre-stay hotels end to end instead of both landing on departure day", () => {
+    let states = buildDefaultLegStates(twoHotelPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-15"
+    const hotelA = suiteState(states, "leg-hotel-a")
+    hotelA.selected = true
+    hotelA.dateAnchor = "pre"
+    hotelA.nights = 1
+    const hotelB = suiteState(states, "leg-hotel-b")
+    hotelB.selected = true
+    hotelB.dateAnchor = "pre"
+    hotelB.nights = 1
+
+    states = applyAnchoredHotelDates(twoHotelPkg, states)
+
+    expect(suiteState(states, "leg-hotel-a").serviceDate).toBe("2026-09-13")
+    expect(suiteState(states, "leg-hotel-b").serviceDate).toBe("2026-09-14")
+  })
+
+  it("re-chains when nights change on either stay", () => {
+    let states = buildDefaultLegStates(twoHotelPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-15"
+    suiteState(states, "leg-hotel-a").selected = true
+    suiteState(states, "leg-hotel-a").dateAnchor = "pre"
+    suiteState(states, "leg-hotel-a").nights = 2
+    suiteState(states, "leg-hotel-b").selected = true
+    suiteState(states, "leg-hotel-b").dateAnchor = "pre"
+    suiteState(states, "leg-hotel-b").nights = 1
+
+    states = applyAnchoredHotelDates(twoHotelPkg, states)
+
+    expect(suiteState(states, "leg-hotel-a").serviceDate).toBe("2026-09-12")
+    expect(suiteState(states, "leg-hotel-b").serviceDate).toBe("2026-09-14")
+  })
+
+  it("leaves a custom-anchored hotel untouched and does not let it shift its neighbour", () => {
+    let states = buildDefaultLegStates(twoHotelPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-15"
+    const hotelA = suiteState(states, "leg-hotel-a")
+    hotelA.selected = true
+    hotelA.dateAnchor = "custom"
+    hotelA.serviceDate = "2026-09-01"
+    hotelA.nights = 1
+    const hotelB = suiteState(states, "leg-hotel-b")
+    hotelB.selected = true
+    hotelB.dateAnchor = "pre"
+    hotelB.nights = 1
+
+    states = applyAnchoredHotelDates(twoHotelPkg, states)
+
+    expect(suiteState(states, "leg-hotel-a").serviceDate).toBe("2026-09-01")
+    expect(suiteState(states, "leg-hotel-b").serviceDate).toBe("2026-09-14")
+  })
+
+  it("toHotelAnchorContext reports the chained stay, matching what applyAnchoredHotelDates saves", () => {
+    const states = buildDefaultLegStates(twoHotelPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-15"
+    suiteState(states, "leg-hotel-a").selected = true
+    suiteState(states, "leg-hotel-a").dateAnchor = "pre"
+    suiteState(states, "leg-hotel-a").nights = 1
+    suiteState(states, "leg-hotel-b").selected = true
+    suiteState(states, "leg-hotel-b").dateAnchor = "pre"
+    suiteState(states, "leg-hotel-b").nights = 1
+
+    const contextA = toHotelAnchorContext(twoHotelPkg, states, "leg-hotel-a")
+    const contextB = toHotelAnchorContext(twoHotelPkg, states, "leg-hotel-b")
+
+    expect(contextA?.stayDates).toEqual({ checkIn: "2026-09-13", checkOut: "2026-09-14" })
+    expect(contextB?.stayDates).toEqual({ checkIn: "2026-09-14", checkOut: "2026-09-15" })
+  })
+
+  it("keeps two hotels anchored to different trains in separate groups", () => {
+    const trainA = { ...trainLeg, id: "leg-train-a", sortOrder: 0 }
+    const trainB = { ...trainLeg, id: "leg-train-b", sortOrder: 3 }
+    const hotelA = { ...hotelLeg, id: "leg-hotel-a", sortOrder: 1 }
+    const hotelB = { ...hotelLeg, id: "leg-hotel-b", sortOrder: 2 }
+    const pkgTwoTrains = detail([trainA, hotelA, hotelB, trainB])
+
+    let states = buildDefaultLegStates(pkgTwoTrains, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train-a").serviceDate = "2026-09-10"
+    suiteState(states, "leg-train-b").serviceDate = "2026-09-20"
+    // hotelA sits after train-a and before train-b: pre-anchoring it should resolve forward to
+    // the nearer following train (train-b), per findAnchorTrainLeg's fallback rule.
+    const stateA = suiteState(states, "leg-hotel-a")
+    stateA.selected = true
+    stateA.dateAnchor = "pre"
+    stateA.nights = 1
+    const stateB = suiteState(states, "leg-hotel-b")
+    stateB.selected = true
+    stateB.dateAnchor = "pre"
+    stateB.nights = 1
+
+    states = applyAnchoredHotelDates(pkgTwoTrains, states)
+
+    // Both anchor to train-b (pre, nearest following train) and chain to each other rather than
+    // each independently landing on 2026-09-19 — this is the same grouping behaviour as the
+    // one-train case, just confirming a second train in the package doesn't create a bad group.
+    expect(suiteState(states, "leg-hotel-a").serviceDate).toBe("2026-09-18")
+    expect(suiteState(states, "leg-hotel-b").serviceDate).toBe("2026-09-19")
+  })
+})
+
 describe("transfer date anchors", () => {
   const chainTransfer1 = leg({ id: "leg-transfer-1", supplierKind: "transfers", sortOrder: 2 })
   const chainTransfer2 = leg({ id: "leg-transfer-2", supplierKind: "transfers", sortOrder: 4 })
@@ -941,6 +1053,113 @@ describe("per-leg rate types", () => {
     expect(transportState(states, "leg-transfer").rateTypeId).toBeNull()
     // Leg with no saved row keeps inheriting.
     expect(suiteState(states, "leg-hotel").rateTypeId).toBeNull()
+  })
+
+  it("hydrateFromSaved discards a persisted tour itinerary that belongs to a different tour type", () => {
+    // Reproduces the LTT-2026-0012 bug: booking_services.route_id was stamped onto a leg whose
+    // unit is booked under a different tour type than the persisted itinerary describes. Trusting
+    // it as-is would surface the wrong itinerary (and, via lib/invoices, the wrong tour name).
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [
+        { id: "route-heli", supplierId: "supplier-leg-tour", name: "Helicopter Flight", suiteTypeId: "tour-heli", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["routes"],
+      suiteTypes: [
+        { id: "tour-heli", supplierId: "supplier-leg-tour", name: "Helicopter Flight", active: true, createdAt: "", updatedAt: "" },
+        { id: "tour-cruise", supplierId: "supplier-leg-tour", name: "Sundowner Cruise", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["suiteTypes"],
+    })
+    const tourPkg = detail([tourLeg])
+    const saved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-tour",
+          package_leg_id: "leg-tour",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-tour",
+          // Persisted itinerary names the Helicopter tour, but the booked unit is Sundowner Cruise.
+          route_id: "route-heli",
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-14",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [
+            {
+              id: "unit-a",
+              suite_type_id: "tour-cruise",
+              bedroom_type_id: null,
+              bedroom_layout_id: null,
+              bathroom_type_id: null,
+              adult_count: 2,
+              child_count: 0,
+              infant_count: 0,
+              sort_order: 0,
+            },
+          ],
+        },
+      ],
+    }
+
+    const states = hydrateFromSaved(tourPkg, saved, [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-tour").routeId).toBeNull()
+  })
+
+  it("hydrateFromSaved keeps a persisted tour itinerary that matches the booked tour type", () => {
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [
+        { id: "route-cruise", supplierId: "supplier-leg-tour", name: "Sundowner Cruise", suiteTypeId: "tour-cruise", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["routes"],
+      suiteTypes: [
+        { id: "tour-cruise", supplierId: "supplier-leg-tour", name: "Sundowner Cruise", active: true, createdAt: "", updatedAt: "" },
+      ] as PackageLeg["suiteTypes"],
+    })
+    const tourPkg = detail([tourLeg])
+    const saved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-tour",
+          package_leg_id: "leg-tour",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-tour",
+          route_id: "route-cruise",
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-14",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [
+            {
+              id: "unit-a",
+              suite_type_id: "tour-cruise",
+              bedroom_type_id: null,
+              bedroom_layout_id: null,
+              bathroom_type_id: null,
+              adult_count: 2,
+              child_count: 0,
+              infant_count: 0,
+              sort_order: 0,
+            },
+          ],
+        },
+      ],
+    }
+
+    const states = hydrateFromSaved(tourPkg, saved, [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-tour").routeId).toBe("route-cruise")
   })
 
   it("toPackageSelectionsPatch emits rateTypeId for suite and transport legs", () => {

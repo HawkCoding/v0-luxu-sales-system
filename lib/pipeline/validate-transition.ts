@@ -10,6 +10,12 @@ export interface GateFailure {
   fixHint: string
   severity: GateSeverity
   autoFixable?: GateAutoFix
+  /**
+   * Wording for the tick itself on a `confirm` gate. Without it the modal
+   * reuses `message` for both the heading and the checkbox, which reads as two
+   * demands where there is one.
+   */
+  confirmLabel?: string
 }
 
 export interface TransitionBooking {
@@ -423,7 +429,11 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
         gateId: "final_invoice",
         message: "An invoice is required before marking the booking paid in full.",
         fixHint: "Generate the booking's invoice before moving to Paid in Full.",
-        severity: "confirm",
+        // `block`, not `confirm`. Nothing about this is a judgement call the
+        // salesperson signs off on, and as a confirm gate it rendered as an
+        // alert with nothing to tick — so ticking the paid-in-full box below
+        // moved the booking to Paid in Full with no invoice attached at all.
+        severity: "block",
       })
     } else if (
       !hasSubjectCorrespondence(correspondences, ["final invoice"]) &&
@@ -447,9 +457,10 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   if (crossedStages.includes("final_paid") && !manualConfirmations.finalPaymentReceived) {
     failures.push({
       gateId: "final_payment_confirmation",
-      message: "Confirm the booking is paid in full.",
-      fixHint: "Tick to confirm — no amount entry needed.",
+      message: "Payment in full needs confirming.",
+      fixHint: "No amount entry needed — the balance is already on record.",
       severity: "confirm",
+      confirmLabel: "I confirm the full balance has been received.",
     })
   }
 
@@ -476,7 +487,11 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
         gateId: "voucher_document",
         message: "A voucher PDF is required before moving to Voucher Sent.",
         fixHint: "Generate the voucher PDF, preview it, and send it to the customer.",
-        severity: "confirm",
+        // `block`, not `confirm`. `autoFixable` already lets the booking page
+        // skip the modal entirely and open the voucher dialog when generating
+        // can succeed; whenever it can't (a leg still missing its supplier
+        // reference), a missing PDF is a hard stop, not something to tick past.
+        severity: "block",
         autoFixable: "create_voucher_pdf",
       })
     }

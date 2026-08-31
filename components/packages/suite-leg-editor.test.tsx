@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SuiteLegEditor } from "./suite-leg-editor"
-import type { SuiteLegState, TransferAnchorContext } from "@/lib/packages/apply-dialog-state"
+import type { HotelAnchorContext, SuiteLegState, TransferAnchorContext } from "@/lib/packages/apply-dialog-state"
 import type { PackageLeg } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 
@@ -202,6 +202,52 @@ function makeHotelState(overrides: Partial<SuiteLegState["units"][number]> = {})
     origin: "consultant",
   }
 }
+
+describe("SuiteLegEditor hotel date anchor", () => {
+  it("renders the check-in/check-out anchorContext supplies, not a locally re-derived date", () => {
+    // The chained stay (e.g. the second of two consecutive pre-stay hotels) doesn't match what a
+    // standalone single-hotel resolve would produce — this proves the editor trusts the context's
+    // stayDates rather than recomputing its own from anchorContext.departureDate/durationDays.
+    const chainedAnchorContext: HotelAnchorContext = {
+      trainLabel: "The Blue Train",
+      departureDate: "2026-09-15",
+      durationDays: null,
+      stayDates: { checkIn: "2026-09-14", checkOut: "2026-09-15" },
+    }
+
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), dateAnchor: "pre", nights: 1 }}
+        onChange={vi.fn()}
+        anchorContext={chainedAnchorContext}
+      />,
+    )
+
+    expect(screen.getByText(/14-09-2026/)).toBeInTheDocument()
+    expect(screen.getByText(/15-09-2026/)).toBeInTheDocument()
+  })
+
+  it("shows the unresolved-anchor fallback copy when the context has no stayDates yet", () => {
+    const unresolvedAnchorContext: HotelAnchorContext = {
+      trainLabel: "The Blue Train",
+      departureDate: null,
+      durationDays: null,
+      stayDates: null,
+    }
+
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), dateAnchor: "pre", nights: 1 }}
+        onChange={vi.fn()}
+        anchorContext={unresolvedAnchorContext}
+      />,
+    )
+
+    expect(screen.getByText(/work out this hotel's check-in/i)).toBeInTheDocument()
+  })
+})
 
 describe("SuiteLegEditor luggage storage", () => {
   it("renders unticked for a hotel leg with no saved flag", () => {
@@ -512,6 +558,109 @@ describe("SuiteLegEditor flight From/To auto-fill", () => {
         departureAirportCode: "DUR",
         arrivalAirportCode: "ORT",
       }),
+    )
+  })
+})
+
+const tourLeg: PackageLeg = {
+  ...leg,
+  id: "leg-tour",
+  supplierId: "supplier-tour",
+  supplierName: "Wild Horizons - Tours",
+  supplierKind: "tour_operator",
+  label: "Wild Horizons - Tours",
+  routes: [
+    {
+      id: "route-cruise",
+      supplierId: "supplier-tour",
+      name: "Sundowner Cruise - Zimbabwe",
+      originLocationId: null,
+      destinationLocationId: null,
+      suiteTypeId: "tour-cruise",
+      active: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    },
+  ] as PackageLeg["routes"],
+  suiteTypes: [
+    { id: "tour-falls", supplierId: "supplier-tour", name: "Tour of the Falls - Zimbabwe", active: true, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+    { id: "tour-cruise", supplierId: "supplier-tour", name: "Sundowner Cruise - Zimbabwe", active: true, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+  ],
+  rateCards: [],
+}
+
+function makeTourUnit(id: string, suiteTypeId: string | null): SuiteLegState["units"][number] {
+  return {
+    id,
+    suiteTypeId,
+    bedroomTypeId: null,
+    bedroomLayoutId: null,
+    bathroomTypeId: null,
+    adultCount: 2,
+    childCount: 0,
+    infantCount: 0,
+    manualAdultPrice: null,
+    manualChildPrice: null,
+    manualInfantPrice: null,
+    manualRoomPrice: null,
+    complimentaryFirstNight: false,
+    manualTourPrice: null,
+    rateTypeId: null,
+  }
+}
+
+function makeTourLegState(units: SuiteLegState["units"], routeId: string | null): SuiteLegState {
+  return {
+    ...makeLegState(units),
+    legId: "leg-tour",
+    supplierKind: "tour_operator",
+    routeId,
+  }
+}
+
+describe("SuiteLegEditor tour itinerary re-derivation", () => {
+  it("clears the stamped itinerary when the tour whose type it matches is removed", () => {
+    // route-cruise is stamped onto the leg (matching tour-cruise, unit-2's type). Removing unit-2
+    // leaves only tour-falls, which has no matching itinerary — the stale itinerary must not stick.
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={tourLeg}
+        value={makeTourLegState(
+          [makeTourUnit("unit-1", "tour-falls"), makeTourUnit("unit-2", "tour-cruise")],
+          "route-cruise",
+        )}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /remove tour 2/i }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        units: [expect.objectContaining({ id: "unit-1", suiteTypeId: "tour-falls" })],
+        routeId: null,
+      }),
+    )
+  })
+
+  it("keeps the itinerary when the remaining tour still matches it", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={tourLeg}
+        value={makeTourLegState(
+          [makeTourUnit("unit-1", "tour-cruise"), makeTourUnit("unit-2", "tour-cruise")],
+          "route-cruise",
+        )}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /remove tour 2/i }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ routeId: "route-cruise" }),
     )
   })
 })

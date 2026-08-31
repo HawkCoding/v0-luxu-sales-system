@@ -167,6 +167,32 @@ describe("buildWorksheetServiceLines", () => {
     expect(line.description).toBe("Table Bay Hotel — Deluxe Suite")
   })
 
+  it("describes a tour line with the tour type(s) booked, never the itinerary", () => {
+    const [line] = buildWorksheetServiceLines({
+      services: [
+        service({
+          id: "tour",
+          service_date: "2026-09-14",
+          suppliers: { name: "Wild Horizons - Tours", kind: "tour_operator" },
+          routes: {
+            duration_days: null,
+            name: "Helicopter Flight 12/13 minutes - Zimbabwe",
+            direction_mode: "one_way",
+            origin: null,
+            destination: null,
+          },
+          units: [
+            { complimentary_first_night: false, suite_types: { name: "Sundowner Cruise - Zimbabwe" } },
+            { complimentary_first_night: false, suite_types: { name: "Tour of the Falls - Zimbabwe" } },
+          ],
+        }),
+      ],
+      transportRequests: [],
+    })
+
+    expect(line.description).toBe("Wild Horizons - Tours — Sundowner Cruise - Zimbabwe, Tour of the Falls - Zimbabwe")
+  })
+
   it("notes a gifted first night on the hotel line so ops confirms the deal that was quoted", () => {
     const [line] = buildWorksheetServiceLines({
       services: [

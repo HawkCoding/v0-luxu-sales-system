@@ -938,6 +938,13 @@ export interface Supplier {
    * "in a Double bedded Deluxe Suite with a shower, Lengthways". The voucher's Suite Type row,
    * invoice view and worksheet always state the full configuration regardless of this setting. */
   quoteSuiteDetail: "type_only" | "full"
+  /** Optional per-supplier word order for the full suite phrase (voucher Suite Type row,
+   * invoice departure block, {{suiteDescription}}/{{suiteType}} email tokens), e.g.
+   * "[{bedroom}] [{layout}] {type}" -> "Double Crosswise Deluxe Suite" for a supplier that
+   * doesn't read like the default grammar's "Double bedded Deluxe Suite with a shower,
+   * Crosswise". Null uses the default grammar. Never applied to the quote itinerary sentence
+   * unless quoteSuiteDetail is 'full'. See lib/templates/suite-phrase-pattern.ts. */
+  suitePhrasePattern: string | null
   /** Printed under this supplier's heading on the voucher, alongside phone/location. */
   streetAddress: string | null
   emergencyPhone: string | null
@@ -1227,6 +1234,9 @@ export interface Quote {
   currency: string
   /** Flat manual amount folded into the Commission line. Already included in subtotal/total. */
   commissionBonus?: number
+  /** Positive magnitude of the agency discount. subtotal − agentCommission = total. Shown to the
+   *  client on the quote and invoice, unlike commissionBonus which is invisible. */
+  agentCommission?: number
   lastSentAt?: string
   lastSentAtDisplay?: string
   overridePin?: string

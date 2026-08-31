@@ -84,6 +84,20 @@ export function formatTotalLabel(pax: QuotePax): string {
  */
 export const VAT_INCLUSIVE_SUFFIX = "(incl.VAT)"
 
+/**
+ * Client-facing label for the flat discount given to a booking agency (quotes.agent_commission).
+ * Single source so the quote PDF, the quote email block and the invoice PDF read identically.
+ */
+export const AGENT_COMMISSION_LABEL = "Agent Commission"
+
+/** House red for a client-visible deducted amount. Matches the invoice's bank-charges note. */
+export const AGENT_COMMISSION_COLOR = "#c0392b"
+
+/** "-R5,000.00" — a discount always reads as a subtraction, never as a bare positive figure. */
+export function formatAgentCommission(amount: number, format: (value: number) => string): string {
+  return `-${format(Math.abs(amount))}`
+}
+
 /** Suffix on a hotel's check-out line when the property lets guests store luggage at reception. */
 const LUGGAGE_STORAGE_NOTE = "Guests can store their luggage at reception."
 
@@ -131,6 +145,26 @@ export function deriveJourneyFromBlocks(blocks: VoucherServiceBlock[]): QuoteJou
   if (dates.length === 0) return null
   dates.sort()
   return { start: dates[0], end: dates[dates.length - 1] }
+}
+
+/**
+ * Train leg's own departure date — the earliest serviceType === "train" block's
+ * departureDate — distinct from deriveJourneyFromBlocks, which mixes in hotel
+ * pre-nights and other leg kinds. Mirrors the worksheet's top-right "Departure
+ * Date" cell (lib/worksheet/build-worksheet-view.ts), which isolates the train
+ * leg the same way via suppliers.kind === "train_operator".
+ * Returns null when the booking has no dated train leg.
+ */
+export function deriveTrainDepartureFromBlocks(blocks: VoucherServiceBlock[]): string | null {
+  const dates: string[] = []
+  for (const block of blocks) {
+    if (block.serviceType !== "train") continue
+    const parsed = parseIsoDate(block.serviceData.departureDate)
+    if (parsed) dates.push(toIsoDateString(parsed))
+  }
+  if (dates.length === 0) return null
+  dates.sort()
+  return dates[0]
 }
 
 /**
@@ -275,14 +309,19 @@ function describeBlock(block: VoucherServiceBlock): string {
       const title = block.title?.trim() || supplier || "Excursion"
       // Leg labels are often already written as "Excursion in Kimberley" — don't say it twice.
       const namesLocation = location ? title.toLowerCase().includes(location.toLowerCase()) : true
-      // The booked itinerary names the day; the tour type it belongs to is what was priced.
-      const itinerary = d.itinerary?.trim() || null
-      const namesItinerary = itinerary ? title.toLowerCase().includes(itinerary.toLowerCase()) : true
+      // The tour type is what was booked and priced. d.itinerary (the itinerary's own name) is
+      // deliberately never read here: an itinerary has no name field of its own, so that value is
+      // either a copy of *some* tour type's name (redundant when it matches this one, misleading
+      // when it doesn't — see lib/invoices/describe-invoice-line.ts) or blank. What the itinerary
+      // actually has to say lives in d.itineraryDescription, which already leads this block's
+      // bullets further down.
+      const tourType = d.suiteType?.trim() || null
+      const namesTourType = tourType ? title.toLowerCase().includes(tourType.toLowerCase()) : true
       return joinSentence(
         [
           title,
           namesLocation ? null : `in ${location}`,
-          namesItinerary ? null : `— ${itinerary}`,
+          namesTourType ? null : `— ${tourType}`,
         ],
         [start ? `at ${start}` : null],
       )
@@ -354,7 +393,8 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
 
 /**
  * The client-facing itinerary. One block can produce two lines — a hotel stay is a check-in line
- * and a separate check-out line on a later date — so lines are re-sorted by date afterwards.
+ * and a separate check-out line on a later date — so lines are re-sorted by date afterwards, then
+ * any exact duplicate (same date, same text, same bullets) is collapsed to one.
  *
  * `flightCapBullet` (already formatted, e.g. "Flights are capped at R2 000pp — incl. baggage &
  * fees" via {@link formatFlightCapLine}) is attached under the *first* flight block only, one
@@ -388,7 +428,7 @@ export function buildQuoteItineraryLines(
   })
 
   // Undated lines keep their position at the end rather than sorting to the front.
-  return lines
+  const sorted = lines
     .map((line, index) => ({ line, index }))
     .sort((a, b) => {
       const aDate = a.line.dateISO ?? "9999-12-31"
@@ -397,6 +437,17 @@ export function buildQuoteItineraryLines(
       return a.index - b.index
     })
     .map((entry) => entry.line)
+
+  // Two stays that land on the same date can produce a byte-identical closing line (a check-out
+  // line states no property, just a time — see describeEndLine) even once dates are chained
+  // correctly; collapsing them here is a backstop against ever printing the same dated line twice.
+  const seen = new Set<string>()
+  return sorted.filter((line) => {
+    const key = `${line.dateISO ?? ""} ${line.text} ${line.bullets.map((b) => `${b.kind}:${b.text}`).join("")}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 /**

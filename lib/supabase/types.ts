@@ -2648,6 +2648,7 @@ export type Database = {
       }
       quotes: {
         Row: {
+          agent_commission: number
           amount_received: number | null
           booking_id: string
           commission_bonus: number
@@ -2675,6 +2676,7 @@ export type Database = {
           validity_until: string | null
         }
         Insert: {
+          agent_commission?: number
           amount_received?: number | null
           booking_id: string
           commission_bonus?: number
@@ -2702,6 +2704,7 @@ export type Database = {
           validity_until?: string | null
         }
         Update: {
+          agent_commission?: number
           amount_received?: number | null
           booking_id?: string
           commission_bonus?: number
@@ -3710,6 +3713,7 @@ export type Database = {
           slug: string
           status: string
           street_address: string | null
+          suite_phrase_pattern: string | null
           train_only_note: string | null
           transfer_pricing_basis: Database["public"]["Enums"]["transport_pricing_basis"]
           updated_at: string
@@ -3746,6 +3750,7 @@ export type Database = {
           slug: string
           status?: string
           street_address?: string | null
+          suite_phrase_pattern?: string | null
           train_only_note?: string | null
           transfer_pricing_basis?: Database["public"]["Enums"]["transport_pricing_basis"]
           updated_at?: string
@@ -3782,6 +3787,7 @@ export type Database = {
           slug?: string
           status?: string
           street_address?: string | null
+          suite_phrase_pattern?: string | null
           train_only_note?: string | null
           transfer_pricing_basis?: Database["public"]["Enums"]["transport_pricing_basis"]
           updated_at?: string

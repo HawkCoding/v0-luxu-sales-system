@@ -437,14 +437,11 @@ export async function PATCH(
   const allowedBedroomLayoutIds = new Set(normalizedBedroomLayouts.map((row) => row.id))
   const allowedBathroomTypeIds = new Set(normalizedBathroomTypes.map((row) => row.id))
 
-  // Train routes auto-fill their name from origin/destination + direction, and tour operator
-  // itineraries auto-fill their name from their tour type -- both only when the client sends an
-  // empty name; a user-provided name always wins. Other kinds keep their free-text name.
-  const autoDeriveRouteName = parsed.kind === "train_operator" || parsed.kind === "tour_operator"
+  // Train routes auto-fill their name from origin/destination + direction, only when the client
+  // sends an empty name; a user-provided name always wins. A tour operator's itinerary has no
+  // name field at all (see derivedName below) so it never participates in this.
+  const autoDeriveRouteName = parsed.kind === "train_operator"
   const locationNameById = new Map(existingDetail.locations.map((location) => [location.id, location.name]))
-  // Derived from the same normalizedSuiteTypes being saved in this request, so renaming a tour
-  // type renames its itinerary in the same save rather than lagging until the next edit.
-  const suiteTypeNameById = new Map(normalizedSuiteTypes.map((suiteType) => [suiteType.id, suiteType.name]))
 
   // `existingDetail.locations` only covers cities the supplier's *stored* routes and stations
   // already reference, so a blank-named route pointing at a city this supplier has never used
@@ -503,14 +500,23 @@ export async function PATCH(
       const directionMode = route.directionMode ?? "one_way"
       const originName = originLocationId ? locationNameById.get(originLocationId) : undefined
       const destinationName = destinationLocationId ? locationNameById.get(destinationLocationId) : undefined
+      const routeId = route.id ?? makeUuid()
+      // A tour operator's itinerary has no name of its own -- it used to be auto-named after its
+      // linked tour type, but that copy is exactly what let an itinerary look like (and, once
+      // stamped on the wrong leg, be mistaken for) a different tour than the one actually booked.
+      // See lib/invoices/describe-invoice-line.ts and lib/quotes/build-from-package.ts. It can't
+      // simply be blank: routes carries a real UNIQUE(name, supplier_id) constraint (see
+      // supabase/migrations/20260426110000_packages_multileg.sql), and a supplier can have more
+      // than one itinerary. The route's own id is used instead -- trivially unique forever, and
+      // never rendered anywhere (an itinerary has no name field in the supplier editor).
       const derivedName =
         parsed.kind === "tour_operator"
-          ? (route.suiteTypeId ? suiteTypeNameById.get(route.suiteTypeId) : undefined) ?? null
+          ? routeId
           : autoDeriveRouteName && originName && destinationName
             ? buildRouteName(originName, destinationName, directionMode)
           : null
       return {
-        id: route.id ?? makeUuid(),
+        id: routeId,
         supplier_id: supplierId,
         name: route.name.trim() || (derivedName ?? ""),
         origin_location_id: originLocationId,
@@ -978,6 +984,9 @@ export async function PATCH(
     long_journey_min_days: parsed.kind === "train_operator" ? parsed.longJourneyMinDays ?? null : null,
     train_only_note: parsed.kind === "train_operator" ? normalizeOptionalText(parsed.trainOnlyNote) : null,
     quote_suite_detail: parsed.kind === "train_operator" ? parsed.quoteSuiteDetail ?? "type_only" : "type_only",
+    // Every kind may word its full suite/room phrase, not just trains -- see
+    // lib/templates/suite-phrase-pattern.ts.
+    suite_phrase_pattern: normalizeOptionalText(parsed.suitePhrasePattern),
     base_rate_type_id: requestedBaseRateTypeId,
     // Normalised: nominating the base rate is the same as nominating nothing.
     quote_rate_type_id: rateTiers.quoteRateTypeId,

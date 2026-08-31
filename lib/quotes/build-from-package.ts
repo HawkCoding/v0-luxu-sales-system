@@ -25,6 +25,7 @@ import {
   selectRateCard,
 } from "@/lib/rate-cards/resolve"
 import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
+import { calculateQuoteTotals } from "@/lib/quotes/pricing-engine"
 import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
 import { manualFares, overriddenFares, rateCardFares, type PassengerFare } from "@/lib/pricing/passenger-fares"
@@ -190,52 +191,106 @@ export async function buildPackageQuoteLineItems({
   fxRateAsOf = null,
 }: BuildPackageQuoteLineItemsInput): Promise<BuildPackageQuoteLineItemsResult> {
   const targetCurrency = normaliseCurrency(quoteCurrency)
-  const { data: job, error: jobError } = await supabase
-    .from("bookings")
-    .select("id, no_of_adults, no_of_children, no_of_suites, child_ages, departure_date")
-    .eq("id", jobId)
-    .single()
+
+  // Everything below is independent of everything else here except transportOverrideSetByName
+  // (which needs transportRequests first) -- fired as one wave instead of seven sequential ones.
+  const suiteTypeIds = packageDetail.legs.flatMap((leg) =>
+    leg.suiteTypes.map((suiteType) => suiteType.id),
+  )
+  const bedroomTypeIds = new Set<string>()
+  const bedroomLayoutIds = new Set<string>()
+  const bathroomTypeIds = new Set<string>()
+  for (const entry of selections) {
+    for (const unitSelection of entry.units ?? []) {
+      if (unitSelection.bedroomTypeId) bedroomTypeIds.add(unitSelection.bedroomTypeId)
+      if (unitSelection.bedroomLayoutId) bedroomLayoutIds.add(unitSelection.bedroomLayoutId)
+      if (unitSelection.bathroomTypeId) bathroomTypeIds.add(unitSelection.bathroomTypeId)
+    }
+  }
+  const supplierIds = Array.from(
+    new Set(packageDetail.legs.map((leg) => leg.supplierId).filter((id): id is string => Boolean(id))),
+  )
+
+  const [
+    { data: job, error: jobError },
+    { data: transportRequests },
+    bedroomTypesResult,
+    bedroomLayoutsResult,
+    bathroomTypesResult,
+    bedroomTypeNamesResult,
+    bedroomLayoutNamesResult,
+    bathroomTypeNamesResult,
+    defaultBuckets,
+    { data: supplierAgeRows },
+  ] = await Promise.all([
+    supabase
+      .from("bookings")
+      .select("id, no_of_adults, no_of_children, no_of_suites, child_ages, departure_date")
+      .eq("id", jobId)
+      .single(),
+    supabase
+      .from("booking_transport_requests")
+      .select(
+        "id, service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, complimentary, rental_details:booking_vehicle_rental_details(return_at), pricing_basis, adult_count, child_count, infant_count, price_override_child, price_override_infant",
+      )
+      .eq("booking_id", jobId)
+      .order("sort_order", { ascending: true }),
+    suiteTypeIds.length > 0
+      ? supabase
+          .from("suite_type_bedroom_types")
+          .select("suite_type_id, bedroom_types(name, sort_order)")
+          .in("suite_type_id", suiteTypeIds)
+      : Promise.resolve({ data: [] as { suite_type_id: string }[] }),
+    suiteTypeIds.length > 0
+      ? supabase
+          .from("suite_type_bedroom_layouts")
+          .select("suite_type_id, bedroom_layouts(name, sort_order)")
+          .in("suite_type_id", suiteTypeIds)
+      : Promise.resolve({ data: [] as { suite_type_id: string }[] }),
+    suiteTypeIds.length > 0
+      ? supabase
+          .from("suite_type_bathroom_types")
+          .select("suite_type_id, bathroom_types(name, sort_order)")
+          .in("suite_type_id", suiteTypeIds)
+      : Promise.resolve({ data: [] as { suite_type_id: string }[] }),
+    bedroomTypeIds.size > 0
+      ? supabase.from("bedroom_types").select("id, name").in("id", Array.from(bedroomTypeIds))
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    bedroomLayoutIds.size > 0
+      ? supabase.from("bedroom_layouts").select("id, name").in("id", Array.from(bedroomLayoutIds))
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    bathroomTypeIds.size > 0
+      ? supabase.from("bathroom_types").select("id, name").in("id", Array.from(bathroomTypeIds))
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    fetchDefaultAgeBuckets(supabase),
+    supplierIds.length > 0
+      ? supabase.from("suppliers").select("id, infant_max_age, child_max_age").in("id", supplierIds)
+      : Promise.resolve({ data: [] as { id: string; infant_max_age: number | null; child_max_age: number | null }[] }),
+  ])
 
   if (jobError || !job) {
     throw new Error("Job not found")
   }
 
-  const { data: transportRequests } = await supabase
-    .from("booking_transport_requests")
-    .select(
-      "id, service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, complimentary, rental_details:booking_vehicle_rental_details(return_at), pricing_basis, adult_count, child_count, infant_count, price_override_child, price_override_infant",
-    )
-    .eq("booking_id", jobId)
-    .order("sort_order", { ascending: true })
-
   // Batch-resolve display names for whoever set a transport price override, same source as the
-  // hotel room override's "set by" note — read once here rather than per request below.
+  // hotel room override's "set by" note — read once here rather than per request below. Depends
+  // on transportRequests above, so it's the one query that can't join the wave.
   const transportOverrideSetByName = await resolveOverrideSetterNames(
     supabase,
     (transportRequests ?? []).map((request) => request.price_override_set_by),
   )
 
+  const supplierOverridesById = new Map<string, { infantMaxAge: number | null; childMaxAge: number | null }>()
+  for (const row of supplierAgeRows ?? []) {
+    supplierOverridesById.set(row.id, {
+      infantMaxAge: row.infant_max_age ?? null,
+      childMaxAge: row.child_max_age ?? null,
+    })
+  }
+
   // Load variant snapshots for all suite types in this package — used for line description suffixes.
-  const suiteTypeIds = packageDetail.legs.flatMap((leg) =>
-    leg.suiteTypes.map((suiteType) => suiteType.id),
-  )
   const variantSnapshotBySuiteTypeId = new Map<string, { label: string; values: string[] }[]>()
   if (suiteTypeIds.length > 0) {
-    const [bedroomTypesResult, bedroomLayoutsResult, bathroomTypesResult] = await Promise.all([
-      supabase
-        .from("suite_type_bedroom_types")
-        .select("suite_type_id, bedroom_types(name, sort_order)")
-        .in("suite_type_id", suiteTypeIds),
-      supabase
-        .from("suite_type_bedroom_layouts")
-        .select("suite_type_id, bedroom_layouts(name, sort_order)")
-        .in("suite_type_id", suiteTypeIds),
-      supabase
-        .from("suite_type_bathroom_types")
-        .select("suite_type_id, bathroom_types(name, sort_order)")
-        .in("suite_type_id", suiteTypeIds),
-    ])
-
     function collectVariantNames<TKey extends string>(
       rows: { suite_type_id: string }[] | null | undefined,
       key: TKey,
@@ -293,31 +348,11 @@ export async function buildPackageQuoteLineItems({
     }
   }
 
-  // Load display names for the SPECIFIC bedroom/layout/bathroom a unit selected (as opposed to
-  // variantSnapshotBySuiteTypeId, which lists everything a suite type could offer). These are the
-  // only names that ever reach a line description: a unit with nothing picked is described by its
-  // suite type alone, never by the catalogue of options it could have had.
-  const bedroomTypeIds = new Set<string>()
-  const bedroomLayoutIds = new Set<string>()
-  const bathroomTypeIds = new Set<string>()
-  for (const entry of selections) {
-    for (const unitSelection of entry.units ?? []) {
-      if (unitSelection.bedroomTypeId) bedroomTypeIds.add(unitSelection.bedroomTypeId)
-      if (unitSelection.bedroomLayoutId) bedroomLayoutIds.add(unitSelection.bedroomLayoutId)
-      if (unitSelection.bathroomTypeId) bathroomTypeIds.add(unitSelection.bathroomTypeId)
-    }
-  }
-  const [bedroomTypeNamesResult, bedroomLayoutNamesResult, bathroomTypeNamesResult] = await Promise.all([
-    bedroomTypeIds.size > 0
-      ? supabase.from("bedroom_types").select("id, name").in("id", Array.from(bedroomTypeIds))
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    bedroomLayoutIds.size > 0
-      ? supabase.from("bedroom_layouts").select("id, name").in("id", Array.from(bedroomLayoutIds))
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    bathroomTypeIds.size > 0
-      ? supabase.from("bathroom_types").select("id, name").in("id", Array.from(bathroomTypeIds))
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-  ])
+  // Display names for the SPECIFIC bedroom/layout/bathroom a unit selected (as opposed to
+  // variantSnapshotBySuiteTypeId, which lists everything a suite type could offer) — fetched in
+  // the wave above. These are the only names that ever reach a line description: a unit with
+  // nothing picked is described by its suite type alone, never by the catalogue of options it
+  // could have had.
   const bedroomTypeNameById = new Map((bedroomTypeNamesResult.data ?? []).map((row) => [row.id, row.name]))
   const bedroomLayoutNameById = new Map((bedroomLayoutNamesResult.data ?? []).map((row) => [row.id, row.name]))
   const bathroomTypeNameById = new Map((bathroomTypeNamesResult.data ?? []).map((row) => [row.id, row.name]))
@@ -382,24 +417,6 @@ export async function buildPackageQuoteLineItems({
   // The booking's real headcount — used once, for the single whole-booking commission line,
   // not per line (a line's own qty may be nights/vehicles/rooms rather than passengers).
   const travellerCount = job.no_of_adults + job.no_of_children
-
-  const defaultBuckets = await fetchDefaultAgeBuckets(supabase)
-  const supplierIds = Array.from(
-    new Set(packageDetail.legs.map((leg) => leg.supplierId).filter((id): id is string => Boolean(id))),
-  )
-  const supplierOverridesById = new Map<string, { infantMaxAge: number | null; childMaxAge: number | null }>()
-  if (supplierIds.length > 0) {
-    const { data: supplierAgeRows } = await supabase
-      .from("suppliers")
-      .select("id, infant_max_age, child_max_age")
-      .in("id", supplierIds)
-    for (const row of supplierAgeRows ?? []) {
-      supplierOverridesById.set(row.id, {
-        infantMaxAge: row.infant_max_age ?? null,
-        childMaxAge: row.child_max_age ?? null,
-      })
-    }
-  }
 
   function bucketsForLeg(leg: PackageDetail["legs"][number]): AgeBuckets {
     const override = leg.supplierId ? supplierOverridesById.get(leg.supplierId) : null
@@ -664,20 +681,29 @@ export async function buildPackageQuoteLineItems({
     leg: PackageDetail["legs"][number],
     selection: { routeId?: string; units?: PackageUnitSelection[] },
   ): string | null {
-    if (selection.routeId) {
-      return selection.routeId
-    }
     // A tour operator's itinerary is descriptive only and belongs to exactly one tour type, so
     // auto-picking one is only safe when it actually matches a chosen tour type — never blindly
-    // grab the supplier's only itinerary if it happens to describe a different tour type.
+    // grab the supplier's only itinerary if it happens to describe a different tour type. This
+    // also governs a *persisted* routeId: a stale/mismatched one (e.g. left over from a removed
+    // tour, or stamped by an unrelated default) must not be trusted just because it was saved —
+    // see defaultRouteId in lib/packages/apply-dialog-state.ts for the other half of this guard.
     if (isTypePricedSupplier(leg.supplierKind)) {
       const chosenSuiteTypeIds = new Set(
         (selection.units ?? []).flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])),
       )
+      if (selection.routeId) {
+        const persisted = leg.routes.find((route) => route.id === selection.routeId)
+        if (persisted?.suiteTypeId && chosenSuiteTypeIds.has(persisted.suiteTypeId)) {
+          return selection.routeId
+        }
+      }
       const matching = leg.routes.filter(
         (route) => route.suiteTypeId && chosenSuiteTypeIds.has(route.suiteTypeId),
       )
       return matching.length === 1 ? matching[0].id : null
+    }
+    if (selection.routeId) {
+      return selection.routeId
     }
     if (leg.routes.length === 1) {
       return leg.routes[0].id
@@ -885,7 +911,9 @@ export async function buildPackageQuoteLineItems({
         // Name the route + type: the missing dimension is almost never the date, and an error
         // that only names the supplier sends people hunting through validity periods.
         const typeLabel = suiteTypeName ?? SUPPLIER_VOCABULARY[leg.supplierKind].suiteType
-        const where = `"${typeLabel}" on "${routeName ?? "this route"}" (${legLabel})`
+        // A tour operator's itinerary saves with a blank name (see app/api/suppliers/[slug]/route.ts),
+        // so `||` here (not `??`) is deliberate -- an empty string must fall back same as a null route.
+        const where = `"${typeLabel}" on "${routeName || "this route"}" (${legLabel})`
         if (!selected) {
           throw new Error(
             hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)
@@ -1522,8 +1550,5 @@ export async function buildPackageQuoteLineItems({
   return { lineItems: applyCommissionBonus(lineItems, commissionBonus), incompleteLegs }
 }
 
-export function calculateQuoteTotals(lineItems: QuoteLineItem[]) {
-  const subtotal = Math.round(lineItems.reduce((sum, item) => sum + item.total, 0) * 100) / 100
-
-  return { subtotal, total: subtotal }
-}
+// Re-exported so a new draft's totals can never disagree with the pricing engine's own math.
+export { calculateQuoteTotals }

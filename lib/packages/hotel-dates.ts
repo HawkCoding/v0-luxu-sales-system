@@ -12,6 +12,14 @@ import type { PackageLeg, ServiceDateAnchor } from "@/lib/types"
  *
  * Arrival comes from the train route's durationDays, which counts the departure day itself —
  * a 3-day journey leaving on the 10th arrives on the 12th.
+ *
+ * That's the single-stay rule. A package can also carry *two or more* stays on the same side of
+ * the same train — a guest changing hotels mid-visit, joined by a transfer leg between them. Each
+ * stay still anchors to the same train, so resolving them independently collapses them onto the
+ * same dates (a pre-stay's check-out is always the train's departure day, whatever its night
+ * count). {@link resolveChainedHotelStayDates} lays a whole group of same-side stays end to end
+ * instead, so only the group's last pre-stay (or first post-stay) touches the train's date and
+ * every other stay in the group hands its date to its neighbour.
  */
 
 export function addDays(date: string, days: number): string {
@@ -58,6 +66,58 @@ export function resolveHotelStayDates(
       : trainArrivalDate(train.departureDate, train.durationDays)
 
   return { checkIn, checkOut: addDays(checkIn, stayNights) }
+}
+
+/** One stay in an anchor group passed to {@link resolveChainedHotelStayDates}. */
+export interface AnchoredStay {
+  legId: string
+  nights: number
+  /** Itinerary position (PackageLeg.sortOrder) — the chain lays stays out in this order. */
+  sortOrder: number
+}
+
+/**
+ * Check-in/check-out for every stay in one anchor group (same train, same side), laid end to end
+ * instead of each landing on the train's date independently. A group of one stay returns exactly
+ * what {@link resolveHotelStayDates} would for that stay — this is the many-stay generalisation
+ * of that function, not a different rule.
+ *
+ * pre:  the *last* stay (by sortOrder) checks out on the train's departure day; walking backwards,
+ *       each earlier stay checks out the day its successor checks in.
+ * post: the *first* stay checks in on the train's arrival day; walking forwards, each later stay
+ *       checks in the day its predecessor checks out.
+ *
+ * Returns an empty map when the anchor can't be resolved, matching resolveHotelStayDates's null.
+ */
+export function resolveChainedHotelStayDates(
+  stays: AnchoredStay[],
+  anchor: "pre" | "post",
+  train: AnchorTrain | null,
+): Map<string, HotelStayDates> {
+  const result = new Map<string, HotelStayDates>()
+  if (!train?.departureDate) return result
+
+  const ordered = stays.slice().sort((a, b) => a.sortOrder - b.sortOrder)
+
+  if (anchor === "pre") {
+    let checkOut = train.departureDate
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      const stayNights = Math.max(1, Math.floor(ordered[i].nights))
+      const checkIn = addDays(checkOut, -stayNights)
+      result.set(ordered[i].legId, { checkIn, checkOut })
+      checkOut = checkIn
+    }
+    return result
+  }
+
+  let checkIn = trainArrivalDate(train.departureDate, train.durationDays)
+  for (const stay of ordered) {
+    const stayNights = Math.max(1, Math.floor(stay.nights))
+    const checkOut = addDays(checkIn, stayNights)
+    result.set(stay.legId, { checkIn, checkOut })
+    checkIn = checkOut
+  }
+  return result
 }
 
 /**

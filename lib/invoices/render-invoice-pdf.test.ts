@@ -1,15 +1,11 @@
 // @vitest-environment node
-// pdf-parse pulls in pdf.js, which needs the node environment (jsdom trips the
+// Text extraction runs pdf.js, which needs the node environment (jsdom trips the
 // "No PDFJS.workerSrc specified" path).
-import { createRequire } from "node:module"
 import { describe, expect, it } from "vitest"
 import type { InvoiceTotals } from "./pdf/invoice-document"
+import { extractPdfText } from "@/lib/pdf/extract-text.fixtures"
 import { makeBankingSettings } from "@/lib/settings-access.fixtures"
 import { renderInvoicePdf } from "./render-invoice-pdf"
-
-const require = createRequire(import.meta.url)
-// pdf-parse ships CJS with no usable type surface for text extraction.
-const pdfParse = require("pdf-parse") as (buffer: Buffer) => Promise<{ text: string }>
 
 const banking = makeBankingSettings({
   bank_name: "Example Bank",
@@ -78,7 +74,7 @@ describe("renderInvoicePdf smoke", () => {
     expect(buffer.length).toBeGreaterThan(1000)
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
 
-    const { text } = await pdfParse(buffer)
+    const text = await extractPdfText(buffer)
     expect(text).toContain("Pretoria → Cape Town")
     expect(text).not.toContain("Pretoria ’ Cape Town")
     expect(text).toContain("PLEASE USE REFERENCE")
@@ -115,7 +111,7 @@ describe("renderInvoicePdf smoke", () => {
       },
     })
 
-    const { text } = await pdfParse(buffer)
+    const text = await extractPdfText(buffer)
     // Every address line must survive: the stacked lines used to collapse into
     // one line's height and paint over the Phone row.
     expect(text).toContain("Sandgebaan")
@@ -170,6 +166,36 @@ describe("renderInvoicePdf smoke", () => {
     })
 
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+  })
+
+  it("renders the Agent Commission row and a Total incl. VAT row when a discount is set", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "LTT-2026-0001-INV",
+      bookingNumber: "LTT-2026-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      departure: null,
+      items,
+      totals: {
+        subtotalInclVat: 63900,
+        agentCommission: 5000,
+        totalInclVat: 58900,
+        depositPercentage: 25,
+        depositAmount: 14725,
+        finalAmount: 44175,
+        finalDueDate: "2026-07-19",
+        amountReceived: 0,
+        amountReceivedAt: null,
+        outstanding: 58900,
+      },
+      banking,
+    })
+
+    expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+    const text = await extractPdfText(buffer)
+    expect(text).toContain("Agent Commission")
+    expect(text).toContain("Total incl. VAT")
   })
 
   it("renders a paid-up invoice without banking details configured", async () => {

@@ -761,6 +761,48 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.itinerarySuiteType).toBe("Deluxe Suite")
   })
 
+  it("applies the supplier's suite phrase pattern to the full configuration only, never the type-only itinerary name", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-deluxe",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "Rovos Rail",
+            suppliers: supplier({
+              kind: "train_operator",
+              name: "Rovos Rail",
+              suite_phrase_pattern: "[{bedroom}] [{layout}] {type}",
+            }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: null,
+            units: [
+              {
+                suite_type_id: "suite-deluxe",
+                sort_order: 0,
+                suite_types: { name: "Deluxe Suite" },
+                bedroom_types: { name: "Double" },
+                bedroom_layouts: { name: "Crosswise" },
+                bathroom_types: { name: "Shower" },
+              },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.suiteType).toBe("Double Crosswise Deluxe Suite")
+    // quote_suite_detail defaults to type_only, and the pattern must not leak into it.
+    expect(blocks[0].serviceData.itinerarySuiteType).toBe("Deluxe Suite")
+  })
+
   it("states the full configuration on the quote itinerary sentence when the supplier opts in", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({

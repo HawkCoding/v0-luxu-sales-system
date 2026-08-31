@@ -324,7 +324,7 @@ describe("validateTransition", () => {
     expect(withPayment).toEqual([])
   })
 
-  it("prompts for a final invoice before paid in full", () => {
+  it("blocks paid in full while the booking has no invoice", () => {
     const failures = validateTransition({
       ...baseInput,
       booking: { ...baseInput.booking, stage: "deposit_paid" },
@@ -335,9 +335,9 @@ describe("validateTransition", () => {
     expect(failures).toEqual([
       expect.objectContaining({
         gateId: "final_invoice",
-        severity: "confirm",
+        severity: "block",
       }),
-      expect.objectContaining({ gateId: "final_payment_confirmation" }),
+      expect.objectContaining({ gateId: "final_payment_confirmation", severity: "confirm" }),
     ])
   })
 
@@ -399,7 +399,7 @@ describe("validateTransition", () => {
     expect(failures).toContainEqual(
       expect.objectContaining({
         gateId: "voucher_document",
-        severity: "confirm",
+        severity: "block",
         autoFixable: "create_voucher_pdf",
       }),
     )

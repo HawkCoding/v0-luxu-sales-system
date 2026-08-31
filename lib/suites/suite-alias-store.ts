@@ -4,6 +4,7 @@ import type { SuiteAxis } from "@/lib/suites/suite-vocabulary"
 import { normalizeSuitePhrase } from "@/lib/suites/suite-phrase-tokens"
 
 type ServiceClient = SupabaseClient<Database>
+type SuiteVocabAliasInsert = Database["public"]["Tables"]["suite_vocab_aliases"]["Insert"]
 
 const AXIS_TO_DB_VALUE: Record<SuiteAxis, Database["public"]["Enums"]["suite_alias_axis"]> = {
   suiteType: "suite_type",
@@ -40,18 +41,32 @@ export async function recordSuiteAliasCorrections(
   writes: readonly SuiteAliasWrite[],
   actorUserId: string | null,
 ): Promise<void> {
-  for (const write of writes) {
-    const phrase = normalizeSuitePhrase(write.phrase)
-    if (!phrase) continue
+  // Normalize first so the lookup and the upsert agree on the key, and drop writes whose phrase
+  // normalizes to nothing.
+  const normalized = writes
+    .map((write) => ({ ...write, phrase: normalizeSuitePhrase(write.phrase) }))
+    .filter((write) => Boolean(write.phrase))
+  if (normalized.length === 0) return
 
-    const { data: existing } = await supabase
-      .from("suite_vocab_aliases")
-      .select("id, status, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id")
-      .eq("supplier_id", write.supplierId)
-      .eq("axis", AXIS_TO_DB_VALUE[write.axis])
-      .eq("phrase", phrase)
-      .maybeSingle()
+  // One read for every phrase in this batch instead of a SELECT per write. Over-fetches slightly
+  // (any axis/supplier pairing that shares a phrase with this batch), which costs nothing -- the
+  // "already points at this target" check below is keyed on the full triple regardless.
+  const { data: existingRows } = await supabase
+    .from("suite_vocab_aliases")
+    .select("id, supplier_id, axis, phrase, status, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id")
+    .in("supplier_id", Array.from(new Set(normalized.map((write) => write.supplierId))))
+    .in("phrase", Array.from(new Set(normalized.map((write) => write.phrase))))
 
+  const aliasKey = (supplierId: string, axis: string, phrase: string) => `${supplierId}|${axis}|${phrase}`
+  const existingByKey = new Map(
+    (existingRows ?? []).map((row) => [aliasKey(row.supplier_id, row.axis, row.phrase), row]),
+  )
+
+  const now = new Date().toISOString()
+  const rows: SuiteVocabAliasInsert[] = []
+
+  for (const write of normalized) {
+    const existing = existingByKey.get(aliasKey(write.supplierId, AXIS_TO_DB_VALUE[write.axis], write.phrase))
     const targetColumn = TARGET_COLUMN_BY_AXIS[write.axis]
     const existingTargetId = existing ? (existing as Record<string, string | null>)[targetColumn] : null
 
@@ -60,39 +75,39 @@ export async function recordSuiteAliasCorrections(
       continue
     }
 
-    const { error } = await supabase
-      .from("suite_vocab_aliases")
-      .upsert(
-        {
-          supplier_id: write.supplierId,
-          axis: AXIS_TO_DB_VALUE[write.axis],
-          phrase,
-          suite_type_id: null,
-          bedroom_type_id: null,
-          bedroom_layout_id: null,
-          bathroom_type_id: null,
-          [targetColumn]: write.targetId,
-          status: "provisional",
-          confirmed_at: null,
-          last_seen_at: new Date().toISOString(),
-          hit_count: existing ? 1 : 0,
-          created_by: actorUserId,
-        },
-        { onConflict: "supplier_id,axis,phrase" },
-      )
+    rows.push({
+      supplier_id: write.supplierId,
+      axis: AXIS_TO_DB_VALUE[write.axis],
+      phrase: write.phrase,
+      suite_type_id: null,
+      bedroom_type_id: null,
+      bedroom_layout_id: null,
+      bathroom_type_id: null,
+      [targetColumn]: write.targetId,
+      status: "provisional",
+      confirmed_at: null,
+      last_seen_at: now,
+      hit_count: existing ? 1 : 0,
+      created_by: actorUserId,
+    })
+  }
 
-    // Still never thrown -- the contract above stands -- but no longer invisible. A rejected write
-    // here (RLS, constraint, anything) meant the alias loop learned nothing while every caller and
-    // every mocked unit test reported success; the only way that surfaced was a QA run counting
-    // rows. Logged so the next silent rejection shows up in the server log instead.
-    if (error) {
-      console.error("suite-alias-store:record", {
-        supplierId: write.supplierId,
-        axis: write.axis,
-        phrase,
-        message: error.message,
-      })
-    }
+  if (rows.length === 0) return
+
+  const { error } = await supabase
+    .from("suite_vocab_aliases")
+    .upsert(rows, { onConflict: "supplier_id,axis,phrase" })
+
+  // Still never thrown -- the contract above stands -- but no longer invisible. A rejected write
+  // here (RLS, constraint, anything) meant the alias loop learned nothing while every caller and
+  // every mocked unit test reported success; the only way that surfaced was a QA run counting
+  // rows. Logged so the next silent rejection shows up in the server log instead.
+  if (error) {
+    console.error("suite-alias-store:record", {
+      supplierIds: Array.from(new Set(normalized.map((write) => write.supplierId))),
+      phrases: Array.from(new Set(normalized.map((write) => write.phrase))),
+      message: error.message,
+    })
   }
 }
 

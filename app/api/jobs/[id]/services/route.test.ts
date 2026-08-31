@@ -149,6 +149,10 @@ function buildSupabase(state: MockState = {}) {
               unitDeletes.push(serviceId)
               return { error: null }
             }),
+            in: vi.fn(async (_col: string, serviceIds: string[]) => {
+              unitDeletes.push(...serviceIds)
+              return { error: null }
+            }),
           })),
           insert: vi.fn(async (rows: Record<string, unknown>[]) => {
             unitInserts.push(...rows)

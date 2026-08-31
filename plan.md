@@ -2,7 +2,7 @@
 
 ## Summary
 
-Build an IMAP-only inbound email intake system for cPanel/web-hosted mailboxes. Admins manage mailbox accounts and inbound subject rules in Settings. The system syncs every 10 minutes, reads matching form-submission emails from INBOX, creates enquiries automatically, and marks incomplete imports as `Needs Review`.
+Build an IMAP-only inbound email intake system for cPanel/web-hosted mailboxes. Admins manage mailbox accounts and inbound subject rules in Settings. The system reads matching form-submission emails from INBOX, creates enquiries automatically, and marks incomplete imports as `Needs Review`. (As shipped: Vercel Hobby only allows a daily cron, so the actual cadence is a daily `vercel.json` run plus a best-effort `*/15` GitHub Actions workflow — see `.github/workflows/email-sync.yml` — not a true 10-minute schedule.)
 
 Core decisions:
 - IMAP only for v1; no POP3.
@@ -24,7 +24,7 @@ Core decisions:
   - sync run logs
   - email import review metadata on bookings
 - Add encrypted credential handling with `EMAIL_CREDENTIAL_ENCRYPTION_KEY`.
-- Add `CRON_SECRET` and a Vercel cron job at `/api/cron/email-sync` every 10 minutes.
+- Add `CRON_SECRET` and a Vercel cron job at `/api/cron/email-sync` (as shipped: daily, per `vercel.json`, supplemented by a best-effort `*/15` GitHub Actions workflow).
 - Extend enquiry/booking metadata so email-created records can show:
   - source mailbox
   - subject

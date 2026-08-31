@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useMemo, useRef, useState } from "react"
-import { CheckCircle2, ChevronDown, FileText, Info, Send, ShieldAlert, Wand2 } from "lucide-react"
+import { CheckCircle2, ChevronDown, FileText, Info, Send, ShieldAlert } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -249,30 +249,7 @@ export function StageTransitionModal({
                         ) : null}
                       </div>
                     </div>
-                    {confirmationKey && failure.autoFixable && (
-                      <div className="flex items-center gap-2">
-                        {confirmations[confirmationKey] === true ? (
-                          <div
-                            className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400"
-                            data-testid={`autofix-${failure.gateId}-satisfied`}
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                            <span>Will fix on confirm</span>
-                          </div>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => handleConfirmationChange(failure, true)}
-                            data-testid={`autofix-${failure.gateId}`}
-                          >
-                            <Wand2 data-icon="inline-start" />
-                            Fix and continue
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                    {confirmationKey && !failure.autoFixable && (
+                    {confirmationKey && (
                       <div className="flex items-center gap-2">
                         <Checkbox
                           id={`${failure.gateId}-confirm`}
@@ -280,7 +257,9 @@ export function StageTransitionModal({
                           onCheckedChange={(checked) => handleConfirmationChange(failure, checked === true)}
                         />
                         <Label htmlFor={`${failure.gateId}-confirm`} className="text-sm">
-                          {failure.message}
+                          {/* Falls back to the heading only for a gate that
+                              hasn't been given tick wording of its own. */}
+                          {failure.confirmLabel ?? failure.message}
                         </Label>
                       </div>
                     )}

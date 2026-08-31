@@ -4,9 +4,18 @@ import type { InvoiceBalance } from "./calculate-balance"
 
 function makeBalance(overrides: Partial<InvoiceBalance> = {}): InvoiceBalance {
   return {
-    quote: { id: "q1", subtotal: 10000, total: 10000, currency: "ZAR", status: "accepted", created_at: "2026-07-01T00:00:00Z" },
+    quote: {
+      id: "q1",
+      subtotal: 10000,
+      total: 10000,
+      agent_commission: 0,
+      currency: "ZAR",
+      status: "accepted",
+      created_at: "2026-07-01T00:00:00Z",
+    },
     quoteTotal: 10000,
     quoteSubtotal: 10000,
+    agentCommission: 0,
     currency: "ZAR",
     totalPaid: 0,
     lastPaymentAt: null,
@@ -65,5 +74,50 @@ describe("buildUnifiedTotals", () => {
     })
     expect(totals.outstanding).toBe(0)
     expect(totals.amountReceived).toBe(10000)
+  })
+
+  describe("agent commission", () => {
+    // quoteSubtotal is the gross travel price, quoteTotal is already net of the discount — the
+    // deposit is a percentage of the net (calculateDepositAmount is fed quote.total elsewhere),
+    // so this ladder just has to carry both figures through without recomputing either.
+    const balance = makeBalance({ quoteSubtotal: 12000, quoteTotal: 10000, agentCommission: 2000, balance: 10000 })
+
+    it("carries the gross subtotal, the commission and the net total separately", () => {
+      const totals = buildUnifiedTotals({
+        balance,
+        departureDate: "2026-12-01",
+        depositPercentage: 25,
+        depositAmount: 2500,
+      })
+      expect(totals.subtotalInclVat).toBe(12000)
+      expect(totals.agentCommission).toBe(2000)
+      expect(totals.totalInclVat).toBe(10000)
+      expect(totals.finalAmount).toBe(7500)
+    })
+
+    it("carries the same split through full-payment mode", () => {
+      const totals = buildUnifiedTotals({
+        balance,
+        departureDate: "2026-08-01",
+        depositPercentage: null,
+        depositAmount: null,
+        mode: "full",
+      })
+      expect(totals.subtotalInclVat).toBe(12000)
+      expect(totals.agentCommission).toBe(2000)
+      expect(totals.totalInclVat).toBe(10000)
+      expect(totals.finalAmount).toBe(10000)
+    })
+
+    it("leaves subtotalInclVat === totalInclVat when there is no commission", () => {
+      const totals = buildUnifiedTotals({
+        balance: makeBalance(),
+        departureDate: "2026-12-01",
+        depositPercentage: 25,
+        depositAmount: 2500,
+      })
+      expect(totals.subtotalInclVat).toBe(totals.totalInclVat)
+      expect(totals.agentCommission).toBe(0)
+    })
   })
 })

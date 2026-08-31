@@ -198,7 +198,7 @@ export async function POST(req: Request) {
       active: false,
       status: "temporary",
     })
-    .select("id, slug, kind, pricing_mode, transfer_pricing_basis, status, name, email, phone, website, location, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, parent_supplier_id, long_journey_min_days, train_only_note, quote_suite_detail, created_at, updated_at")
+    .select("id, slug, kind, pricing_mode, transfer_pricing_basis, status, name, email, phone, website, location, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, parent_supplier_id, long_journey_min_days, train_only_note, quote_suite_detail, suite_phrase_pattern, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {

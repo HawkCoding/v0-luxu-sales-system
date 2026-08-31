@@ -1215,7 +1215,12 @@ describe("PATCH /api/suppliers/[slug]", () => {
       expect(response.status).toBe(400)
     })
 
-    it("derives a blank tour-operator itinerary name from its tour type, and rewrites a mismatched name on save", async () => {
+    it("names a tour-operator itinerary after its own id, never the tour type", async () => {
+      // An itinerary's name used to be copied from its linked tour type -- that copy is what let
+      // a mismatched itinerary read like a different tour than the one actually booked (see
+      // lib/invoices/describe-invoice-line.ts). It can't simply save blank either: routes carries
+      // a real UNIQUE(name, supplier_id) constraint and a supplier can have more than one
+      // itinerary, so the route's own id (always unique) stands in instead.
       const SUITE_TYPE_ID = "00000000-0000-4000-8000-0000000000d4"
       const { routeUpsertPayloads } = setup("tour_operator", { locationsFromDetail: true })
 
@@ -1245,8 +1250,212 @@ describe("PATCH /api/suppliers/[slug]", () => {
       )
 
       expect(response.status).toBe(200)
+      const routeRows = routeUpsertPayloads[0] as Array<{ name: string; id: string }>
+      expect(routeRows[0].name).toBe(ROUTE_ID)
+      expect(routeRows[0].name).not.toBe("Classic Hop-on-Hop-off Ticket")
+    })
+
+    it("never collides on name when a supplier has one itinerary per tour type", async () => {
+      // One itinerary per tour type is already enforced by the schema, but a supplier still has
+      // many tour types and so many itineraries -- and routes' UNIQUE constraint is on
+      // (name, supplier_id), per supplier, not per tour type. This is the case that made saving a
+      // blank name impossible and forced the route-id-as-name scheme.
+      const SUITE_TYPE_ID = "00000000-0000-4000-8000-0000000000d4"
+      const SECOND_SUITE_TYPE_ID = "00000000-0000-4000-8000-0000000000d6"
+      const SECOND_ROUTE_ID = "00000000-0000-4000-8000-0000000000d5"
+      const { routeUpsertPayloads } = setup("tour_operator", { locationsFromDetail: true })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Supplier",
+            kind: "tour_operator",
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [
+              { id: SUITE_TYPE_ID, name: "Sundowner Cruise - Zimbabwe", active: true },
+              { id: SECOND_SUITE_TYPE_ID, name: "Tour of the Falls - Zimbabwe", active: true },
+            ],
+            routes: [
+              { id: ROUTE_ID, name: "", suiteTypeId: SUITE_TYPE_ID, active: true, rateCards: [] },
+              { id: SECOND_ROUTE_ID, name: "", suiteTypeId: SECOND_SUITE_TYPE_ID, active: true, rateCards: [] },
+            ],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
       const routeRows = routeUpsertPayloads[0] as Array<{ name: string }>
-      expect(routeRows[0].name).toBe("Classic Hop-on-Hop-off Ticket")
+      expect(routeRows).toHaveLength(2)
+      expect(new Set(routeRows.map((row) => row.name)).size).toBe(2)
+    })
+  })
+
+  describe("transfer rate card pricing by basis", () => {
+    const ROUTE_ID = "00000000-0000-4000-8000-0000000000e1"
+    const RATE_TYPE_ID = "00000000-0000-4000-8000-0000000000e2"
+    const VEHICLE_TYPE_ID = "00000000-0000-4000-8000-0000000000e3"
+
+    function setup(transferPricingBasis: "per_vehicle" | "per_person") {
+      const rateCardUpsertPayloads: Array<unknown> = []
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      mockAuth()
+      helperMocks.loadSupplierDetail.mockResolvedValue({
+        supplier: { ...supplierRow, kind: "transfers", transfer_pricing_basis: transferPricingBasis },
+        suiteTypes: [
+          {
+            id: VEHICLE_TYPE_ID,
+            supplier_id: SUPPLIER_ID,
+            name: "Luxury Bus",
+            active: true,
+            sort_order: 0,
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        emails: [],
+        routes: [],
+        stationAddresses: [],
+        rateCards: [],
+        locations: [],
+        bedroomTypes: [],
+        bedroomLayouts: [],
+        bathroomTypes: [],
+        suiteTypeBedroomTypes: [],
+        suiteTypeBedroomLayouts: [],
+        suiteTypeBathroomTypes: [],
+        rateTypes: [{ id: RATE_TYPE_ID, code: "standard", name: "Standard", archived_at: null }],
+        inclusionLines: [],
+      })
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") return { update: () => supplierUpdateQuery }
+        if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+        if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+        if (table === "routes") return { upsert: async () => ({ error: null }) }
+        if (table === "rate_cards") {
+          return {
+            upsert: async (payload: unknown) => {
+              rateCardUpsertPayloads.push(payload)
+              return { error: null }
+            },
+          }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        if (
+          table === "suite_type_bedroom_types" ||
+          table === "suite_type_bedroom_layouts" ||
+          table === "suite_type_bathroom_types"
+        ) {
+          return { delete: () => ({ in: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+
+      return { rateCardUpsertPayloads }
+    }
+
+    function patchWithRateCard(transferPricingBasis: "per_vehicle" | "per_person") {
+      return PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Transfers",
+            kind: "transfers",
+            transferPricingBasis,
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [{ id: VEHICLE_TYPE_ID, name: "Luxury Bus", active: true }],
+            routes: [
+              {
+                id: ROUTE_ID,
+                name: "Airport - Hotel",
+                pickupPoint: "Airport",
+                dropoffPoint: "Hotel",
+                directionMode: "one_way",
+                active: true,
+                rateCards: [
+                  {
+                    routeId: ROUTE_ID,
+                    suiteTypeId: VEHICLE_TYPE_ID,
+                    rateTypeId: RATE_TYPE_ID,
+                    pricePerPerson: 400,
+                    childPrice: 200,
+                    infantPrice: 50,
+                    currency: "ZAR",
+                    validFrom: "2026-01-01",
+                    validTo: null,
+                  },
+                ],
+              },
+            ],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+    }
+
+    it("keeps the typed child/infant fares for a per-person transfer supplier", async () => {
+      const { rateCardUpsertPayloads } = setup("per_person")
+      const response = await patchWithRateCard("per_person")
+
+      expect(response.status).toBe(200)
+      const rows = rateCardUpsertPayloads[0] as Array<{ child_price: number | null; infant_price: number | null }>
+      expect(rows[0].child_price).toBe(200)
+      expect(rows[0].infant_price).toBe(50)
+    })
+
+    it("still nulls child/infant fares for a per-vehicle transfer supplier", async () => {
+      const { rateCardUpsertPayloads } = setup("per_vehicle")
+      const response = await patchWithRateCard("per_vehicle")
+
+      expect(response.status).toBe(200)
+      const rows = rateCardUpsertPayloads[0] as Array<{ child_price: number | null; infant_price: number | null }>
+      expect(rows[0].child_price).toBeNull()
+      expect(rows[0].infant_price).toBeNull()
+    })
+
+    it("keeps child/infant fares on the very first save after flipping to per_person in the same round trip", async () => {
+      // The stored supplier row is still per_vehicle (loadSupplierDetail below) -- only the
+      // incoming payload says per_person. isFlatRateTransport must read the payload, not the
+      // stored row, or this save would null the very prices the consultant just typed.
+      const { rateCardUpsertPayloads } = setup("per_vehicle")
+      const response = await patchWithRateCard("per_person")
+
+      expect(response.status).toBe(200)
+      const rows = rateCardUpsertPayloads[0] as Array<{ child_price: number | null; infant_price: number | null }>
+      expect(rows[0].child_price).toBe(200)
+      expect(rows[0].infant_price).toBe(50)
     })
   })
 

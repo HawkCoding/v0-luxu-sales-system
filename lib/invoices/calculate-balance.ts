@@ -3,7 +3,7 @@ import type { Database } from "@/lib/supabase/types"
 
 type QuoteBalanceRow = Pick<
   Database["public"]["Tables"]["quotes"]["Row"],
-  "id" | "subtotal" | "total" | "currency" | "status" | "created_at"
+  "id" | "subtotal" | "total" | "currency" | "status" | "created_at" | "agent_commission"
 >
 
 export interface InvoiceBalance {
@@ -11,6 +11,9 @@ export interface InvoiceBalance {
   quoteTotal: number
   /** VAT-exclusive value of the supply, for the tax-invoice breakdown. */
   quoteSubtotal: number
+  /** Positive magnitude of the agency discount (quotes.agent_commission). Already reflected in
+   *  quoteTotal — carried here only so the invoice can print it as its own line. */
+  agentCommission: number
   /** The accepted quote's currency — an invoice is always raised in it, so the client is billed
    *  in the same currency they accepted. */
   currency: string
@@ -28,7 +31,7 @@ export async function calculateInvoiceBalance(
     await Promise.all([
       supabase
         .from("quotes")
-        .select("id, subtotal, total, currency, status, created_at")
+        .select("id, subtotal, total, currency, status, created_at, agent_commission")
         .eq("booking_id", bookingId)
         .eq("status", "accepted")
         .order("created_at", { ascending: false })
@@ -55,6 +58,7 @@ export async function calculateInvoiceBalance(
     quote,
     quoteTotal: Number(quote.total),
     quoteSubtotal: Number(quote.subtotal),
+    agentCommission: Number(quote.agent_commission ?? 0),
     currency: quote.currency,
     totalPaid,
     lastPaymentAt,

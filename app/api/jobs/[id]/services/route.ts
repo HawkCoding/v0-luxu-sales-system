@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { NextResponse } from "next/server"
+import { NextResponse, after } from "next/server"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
@@ -136,6 +136,10 @@ const updateServiceSchema = z.object({
 
 const patchServicesSchema = z.object({
   selections: z.array(updateServiceSchema).min(1, "At least one selection is required"),
+  /** Skips the trip-date recompute (5 sequential reads) when the caller knows a transport-requests
+   * PUT immediately follows and will recompute from the final state of both tables anyway — see
+   * PUT /api/jobs/[id]/transport-requests. Defaults to false so every other caller is unaffected. */
+  deferTripDateRecompute: z.boolean().optional(),
 })
 
 interface RouteParams {
@@ -566,8 +570,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
-  // Field updates.
-  for (const selection of parsed.data.selections) {
+  // Field updates. Issued concurrently rather than one awaited round trip per leg: each targets a
+  // distinct row id, so there is no ordering between them. They can't be collapsed into a single
+  // statement — every row sets a different subset of columns (the schema's `!== undefined` partial
+  // update contract), which an upsert would flatten into "write every column".
+  const fieldUpdates = parsed.data.selections.map((selection) => {
     const updatePayload: BookingServiceUpdate = {}
     if (selection.selected !== undefined) updatePayload.selected = selection.selected
     if (selection.routeId !== undefined) updatePayload.route_id = selection.routeId
@@ -602,14 +609,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     // FieldFlags/editedAxes convention: an auto-filled value stops being auto-filled on edit.
     updatePayload.origin = "consultant"
 
-    const { error: updateError } = await supabase
+    return supabase
       .from("booking_services")
       .update(updatePayload)
       .eq("booking_id", id)
       .eq("id", selection.packageLegId)
+  })
 
-    if (updateError) return safeSupabaseError("services:update", updateError)
-  }
+  const updateResults = await Promise.all(fieldUpdates)
+  const firstUpdateError = updateResults.find((result) => result.error)?.error
+  if (firstUpdateError) return safeSupabaseError("services:update", firstUpdateError)
 
   // Per-service unit replacement (full replace-set, only for services whose payload includes units).
   const servicesWithUnits = parsed.data.selections.filter((selection) => selection.units)
@@ -649,15 +658,23 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const savedAt = new Date().toISOString()
 
-  for (const selection of servicesWithUnits) {
+  // One delete + one insert across every service in the payload, rather than a pair per service.
+  // The replace-set semantics are unchanged: the delete covers exactly the services whose payload
+  // carries units, which is the same set the per-service loop used to clear.
+  if (servicesWithUnits.length > 0) {
     const { error: deleteUnitsError } = await supabase
       .from("booking_service_units")
       .delete()
-      .eq("service_id", selection.packageLegId)
+      .in(
+        "service_id",
+        servicesWithUnits.map((selection) => selection.packageLegId),
+      )
 
     if (deleteUnitsError) return safeSupabaseError("services:clear-units", deleteUnitsError)
+  }
 
-    const unitRows: BookingServiceUnitInsert[] = (selection.units ?? []).map((unit, index) => {
+  const unitRows: BookingServiceUnitInsert[] = servicesWithUnits.flatMap((selection) =>
+    (selection.units ?? []).map((unit, index) => {
       const roomPrice = unit.manualRoomPrice ?? null
       const previous = unit.id ? existingUnitProvenance.get(unit.id) : undefined
       const unchanged = roomPrice !== null && previous?.price === roomPrice
@@ -689,12 +706,12 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         rate_type_id: unit.rateTypeId ?? null,
         origin: "consultant" as const,
       }
-    })
+    }),
+  )
 
-    if (unitRows.length > 0) {
-      const { error: insertUnitsError } = await supabase.from("booking_service_units").insert(unitRows)
-      if (insertUnitsError) return safeSupabaseError("services:insert-units", insertUnitsError)
-    }
+  if (unitRows.length > 0) {
+    const { error: insertUnitsError } = await supabase.from("booking_service_units").insert(unitRows)
+    if (insertUnitsError) return safeSupabaseError("services:insert-units", insertUnitsError)
   }
 
   // Learn from the correction — the higher-traffic correction point, same alias store as the
@@ -705,21 +722,33 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   // write made with the session client was silently rejected by RLS and the store swallowed it.
   // The user is already authorised for this booking above; this write is a system consequence of
   // that, not a user-scoped one.
+  // Scheduled after the response is sent, not awaited on the request: the result is discarded
+  // either way (best-effort per the doc comment above), so there is no reason the consultant's
+  // save should wait on it.
   if (servicesWithUnits.length > 0) {
+    const unitsToLearn = servicesWithUnits.flatMap((selection) => selection.units ?? [])
+    const learn = async () => {
+      try {
+        await learnSuiteAliasesFromUnits(createServiceClient(), id, unitsToLearn, user.id)
+      } catch (error) {
+        console.error("services:suiteAliasLearning", error)
+      }
+    }
     try {
-      await learnSuiteAliasesFromUnits(
-        createServiceClient(),
-        id,
-        servicesWithUnits.flatMap((selection) => selection.units ?? []),
-        user.id,
-      )
-    } catch (error) {
-      console.error("services:suiteAliasLearning", error)
+      after(learn)
+    } catch {
+      // after() needs Next's request-scope context, which only exists when this handler is
+      // invoked through the real Next server -- a unit test calling PATCH directly doesn't set
+      // that up, and after() throws synchronously outside it. Fire the write without the
+      // keep-alive guarantee in that case; it's still best-effort, and no test asserts on it.
+      void learn()
     }
   }
 
-  const recompute = await recomputeBookingTripDates(supabase, id)
-  if (recompute.error) return jsonError(recompute.error, 500)
+  if (!parsed.data.deferTripDateRecompute) {
+    const recompute = await recomputeBookingTripDates(supabase, id)
+    if (recompute.error) return jsonError(recompute.error, 500)
+  }
 
   await writeAuditLog(supabase, {
     actor: profile.actorName,

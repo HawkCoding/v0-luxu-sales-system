@@ -16,8 +16,12 @@ QA 11 (a sent quote for the follow-up worker), QA 14 (a booking at
 
 ## Surfaces under test
 
-- Schedules: `vercel.json` — `0 2 * * *` email-sync, `0 3 * * *`
-  pipeline-auto-close, `0 9 * * *` quote-follow-ups
+- Schedules: `vercel.json` — `0 5 * * *` email-sync, `0 9 * * *`
+  quote-follow-ups. `pipeline-auto-close` moved to GitHub Actions
+  (`.github/workflows/pipeline-auto-close.yml`, `0 3 * * *`) to stay under the
+  Vercel Hobby 2-cron limit; `email-sync` is also double-run from
+  `.github/workflows/email-sync.yml` (`*/15`, best-effort) as a sub-daily
+  supplement to the daily Vercel floor.
 - [app/api/cron/email-sync/route.ts](../../../app/api/cron/email-sync/route.ts) (`maxDuration=60`)
 - [app/api/cron/pipeline-auto-close/route.ts](../../../app/api/cron/pipeline-auto-close/route.ts)
 - [app/api/cron/quote-follow-ups/route.ts](../../../app/api/cron/quote-follow-ups/route.ts), [lib/quotes/follow-up-worker.ts](../../../lib/quotes/follow-up-worker.ts)
@@ -84,7 +88,7 @@ QA 11 (a sent quote for the follow-up worker), QA 14 (a booking at
     with the rest and logs the failure to the error log. One bad booking aborting
     the nightly run is Sev-1.
 
-### Email sync (`0 2 * * *`)
+### Email sync (`0 5 * * *` Vercel, plus `*/15` GitHub Actions)
 
 21. Run with a valid bearer → `syncAllEnabledInboundEmailAccounts()` executes.
     With the QA 09 account configured, confirm it attempts a connection and

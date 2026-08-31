@@ -220,6 +220,27 @@ describe("formatSuitePhrase", () => {
   it("returns an empty string when there is no suite name", () => {
     expect(formatSuitePhrase({ suiteTypeName: "" })).toBe("")
   })
+
+  it("uses the supplier's phrase pattern instead of the default grammar when set", () => {
+    expect(
+      formatSuitePhrase({
+        suiteTypeName: "Deluxe",
+        bedroomType: "Double",
+        bedroomLayout: "Crosswise",
+        supplierKind: "train_operator",
+        phrasePattern: "[{bedroom}] [{layout}] {type}",
+      }),
+    ).toBe("Double Crosswise Deluxe Suite")
+  })
+
+  it("falls back to the default grammar when phrasePattern is blank", () => {
+    expect(formatSuitePhrase({ ...full, phrasePattern: "" })).toBe(
+      "Twin bedded Deluxe Suite with a shower",
+    )
+    expect(formatSuitePhrase({ ...full, phrasePattern: null })).toBe(
+      "Twin bedded Deluxe Suite with a shower",
+    )
+  })
 })
 
 describe("suiteSelectionsFromSnapshots", () => {
@@ -274,5 +295,29 @@ describe("suiteSelectionsFromSnapshots", () => {
     ])
 
     expect(selections).toHaveLength(1)
+  })
+
+  it("stamps phrasePattern from the supplier id map, live rather than frozen", () => {
+    const patterns = new Map([["supplier-1", "[{bedroom}] {type}"]])
+    const selections = suiteSelectionsFromSnapshots(
+      [snapshot({ supplierId: "supplier-1", suiteTypeName: "Deluxe", supplierKind: "train_operator" })],
+      patterns,
+    )
+
+    expect(selections[0].phrasePattern).toBe("[{bedroom}] {type}")
+  })
+
+  it("leaves phrasePattern null when the supplier id has no entry in the map", () => {
+    const patterns = new Map([["some-other-supplier", "{type}"]])
+    const selections = suiteSelectionsFromSnapshots([snapshot({ supplierId: "supplier-1" })], patterns)
+
+    expect(selections[0].phrasePattern).toBeNull()
+  })
+
+  it("leaves phrasePattern null when the snapshot has no supplier id, even with a pattern map", () => {
+    const patterns = new Map([["supplier-1", "{type}"]])
+    const selections = suiteSelectionsFromSnapshots([snapshot({ supplierId: null })], patterns)
+
+    expect(selections[0].phrasePattern).toBeNull()
   })
 })

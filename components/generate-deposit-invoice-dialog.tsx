@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 import type { Invoice, Quote } from "@/lib/types"
@@ -47,12 +48,6 @@ interface GenerateDepositInvoiceDialogProps {
    * been superseded — the action re-issues that same invoice at the new total.
    */
   amending?: boolean
-  /**
-   * Skip the resume-mode confirmation card and go straight to preview — used
-   * when the dialog was opened because the only thing left to do is send the
-   * already-generated draft (e.g. a stage move that's otherwise ready).
-   */
-  autoPreview?: boolean
   onSent: () => Promise<void> | void
   /** Called after "Change amount" voids the draft, so the caller can refetch. */
   onDraftDiscarded?: () => Promise<void> | void
@@ -134,7 +129,6 @@ export function GenerateDepositInvoiceDialog({
   departureDate = null,
   draftInvoice = null,
   amending = false,
-  autoPreview = false,
   onSent,
   onDraftDiscarded,
 }: GenerateDepositInvoiceDialogProps) {
@@ -189,6 +183,11 @@ export function GenerateDepositInvoiceDialog({
       setPercentage(String(draftInvoice.depositPercentage ?? defaultDepositPercentage))
       setPayInFull(draftInvoice.kind === "full")
       setDraftDiscarded(true)
+      // "Change amount" now lives in the preview's footer, so swap the preview
+      // back out for the amount form the salesperson asked for.
+      setPreviewOpen(false)
+      setGenerated(null)
+      setDialogOpen(true)
       await onDraftDiscarded?.()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Draft invoice could not be discarded")
@@ -237,22 +236,24 @@ export function GenerateDepositInvoiceDialog({
     }
   }
 
-  // autoPreview: skip straight to the preview step for an already-generated
-  // draft, same as clicking "Preview & Send" — no need to re-render the
-  // resume card first. Guarded with a ref so a re-render (or the preview
-  // closing back to the form) doesn't re-fire the request.
+  // Resuming an unsent draft has nothing left to decide — every input on this
+  // dialog is hidden in that mode, and the page already carries a banner and a
+  // button saying the invoice needs sending. So skip the summary card entirely
+  // and open the preview, which shows the same amount on the invoice itself.
+  // Guarded with a ref so a re-render (or the preview closing back to the
+  // form) doesn't re-fire the request.
   const autoPreviewFired = useRef(false)
   useEffect(() => {
     if (!dialogOpen) {
       autoPreviewFired.current = false
       return
     }
-    if (!autoPreview || !resumingDraft || autoPreviewFired.current || generating) return
+    if (!resumingDraft || autoPreviewFired.current || generating) return
     autoPreviewFired.current = true
     void generateInvoice()
     // Only re-run when the dialog opens or the draft to resume changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dialogOpen, autoPreview, resumingDraft])
+  }, [dialogOpen, resumingDraft])
 
   async function handleSent() {
     if (!generated) return
@@ -289,103 +290,89 @@ export function GenerateDepositInvoiceDialog({
           </DialogTrigger>
         ) : null}
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {resumingDraft
-                ? resumingFull
-                  ? "Send invoice"
-                  : "Send deposit invoice"
-                : amending
-                  ? "Amend and resend invoice"
-                  : "Generate invoice"}
-            </DialogTitle>
-            <DialogDescription>
-              {resumingDraft
-                ? `${draftInvoice?.invoiceNumber} was generated but has not been sent. Preview and send it to the customer.`
-                : amending
-                  ? `The quote for ${displayNumber} has been revised. Re-issue the same invoice at the new total — any payment already received stays on record and is shown on the PDF.`
-                  : `Create a draft invoice for ${displayNumber}, then preview and send it.`}
-            </DialogDescription>
-          </DialogHeader>
+          {resumingDraft ? (
+            // Transient only: the effect above is already opening the preview.
+            // Nothing here is decidable, so don't render a form the salesperson
+            // would only see flash past.
+            <>
+              <DialogHeader>
+                <DialogTitle>Opening {draftInvoice?.invoiceNumber}</DialogTitle>
+                <DialogDescription>Preparing the email preview…</DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-2 py-2">
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>{amending ? "Amend and resend invoice" : "Generate invoice"}</DialogTitle>
+                <DialogDescription>
+                  {amending
+                    ? `The quote for ${displayNumber} has been revised. Re-issue the same invoice at the new total — any payment already received stays on record and is shown on the PDF.`
+                    : `Create a draft invoice for ${displayNumber}, then preview and send it.`}
+                </DialogDescription>
+              </DialogHeader>
 
-          <div className="flex flex-col gap-4">
-            {!resumingDraft ? (
-              <div className="flex items-center justify-between gap-3 rounded-md border p-3">
-                <div className="flex flex-col gap-0.5">
-                  <Label htmlFor="pay-in-full">Pay in full</Label>
-                  <span className="text-xs text-muted-foreground">
-                    {insideTwoMonths
-                      ? "Departure is within 2 months — full payment is due, no deposit split."
-                      : "One invoice for the full amount instead of a deposit + final split."}
-                  </span>
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="pay-in-full">Pay in full</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {insideTwoMonths
+                        ? "Departure is within 2 months — full payment is due, no deposit split."
+                        : "One invoice for the full amount instead of a deposit + final split."}
+                    </span>
+                  </div>
+                  <Switch id="pay-in-full" checked={payInFull} onCheckedChange={setPayInFull} />
                 </div>
-                <Switch id="pay-in-full" checked={payInFull} onCheckedChange={setPayInFull} />
-              </div>
-            ) : null}
-            {!resumingDraft && !payInFull ? (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="deposit-percentage">Deposit percentage</Label>
-                <Input
-                  id="deposit-percentage"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={percentage}
-                  onChange={(event) => setPercentage(event.target.value)}
-                />
-              </div>
-            ) : null}
-            {!resumingDraft && payInFull ? (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="full-due-date">Due date</Label>
-                <Input
-                  id="full-due-date"
-                  type="date"
-                  value={fullDueDate}
-                  onChange={(event) => setFullDueDate(event.target.value)}
-                />
-              </div>
-            ) : null}
-            {!resumingDraft && paymentMethods.length > 1 ? (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="invoice-payment-method">Payment method</Label>
-                <Select value={paymentMethodId ?? undefined} onValueChange={setPaymentMethodId}>
-                  <SelectTrigger id="invoice-payment-method">
-                    <SelectValue placeholder="Choose a payment method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {paymentMethods.map((method) => (
-                      <SelectItem key={method.id} value={method.id}>
-                        {method.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
-            <div className="rounded-md border p-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Customer</span>
-                <span className="font-medium">{customerName || "Traveller"}</span>
-              </div>
-              {resumingDraft ? (
-                <>
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Invoice</span>
-                    <span className="font-medium">{draftInvoice?.invoiceNumber}</span>
+                {!payInFull ? (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="deposit-percentage">Deposit percentage</Label>
+                    <Input
+                      id="deposit-percentage"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={percentage}
+                      onChange={(event) => setPercentage(event.target.value)}
+                    />
                   </div>
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">
-                      {resumingFull ? "Full amount" : `Deposit (${draftInvoice?.depositPercentage ?? "-"}%)`}
-                    </span>
-                    <span className="font-semibold">
-                      {draftInvoice ? formatMoney(draftInvoice.amount, draftInvoice.currency) : "-"}
-                    </span>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="full-due-date">Due date</Label>
+                    <Input
+                      id="full-due-date"
+                      type="date"
+                      value={fullDueDate}
+                      onChange={(event) => setFullDueDate(event.target.value)}
+                    />
                   </div>
-                </>
-              ) : (
-                <>
+                )}
+                {paymentMethods.length > 1 ? (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="invoice-payment-method">Payment method</Label>
+                    <Select value={paymentMethodId ?? undefined} onValueChange={setPaymentMethodId}>
+                      <SelectTrigger id="invoice-payment-method">
+                        <SelectValue placeholder="Choose a payment method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {paymentMethods.map((method) => (
+                          <SelectItem key={method.id} value={method.id}>
+                            {method.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                <div className="rounded-md border p-3 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Customer</span>
+                    <span className="font-medium">{customerName || "Traveller"}</span>
+                  </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Quote total</span>
                     <span className="font-medium">{quote ? formatMoney(quote.total, quote.currency) : "-"}</span>
@@ -396,32 +383,19 @@ export function GenerateDepositInvoiceDialog({
                       {quote ? formatMoney(payInFull ? quote.total : amountPreview, quote.currency) : "-"}
                     </span>
                   </div>
-                </>
-              )}
-            </div>
-          </div>
+                </div>
+              </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={generating || discarding}>
-              Cancel
-            </Button>
-            {resumingDraft ? (
-              <Button variant="outline" onClick={discardDraft} disabled={generating || discarding}>
-                {discarding ? "Discarding..." : "Change amount"}
-              </Button>
-            ) : null}
-            <Button onClick={generateInvoice} disabled={generating || discarding || !quote}>
-              {generating
-                ? resumingDraft
-                  ? "Preparing..."
-                  : "Generating..."
-                : resumingDraft
-                  ? "Preview & Send"
-                  : amending
-                    ? "Amend & Preview"
-                    : "Generate"}
-            </Button>
-          </DialogFooter>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={generating || discarding}>
+                  Cancel
+                </Button>
+                <Button onClick={generateInvoice} disabled={generating || discarding || !quote}>
+                  {generating ? "Generating..." : amending ? "Amend & Preview" : "Generate"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -444,6 +418,18 @@ export function GenerateDepositInvoiceDialog({
           kind="invoice"
           moveStage="deposit_requested"
           attachments={generated.attachment ? [generated.attachment] : undefined}
+          secondaryAction={
+            draftInvoice && !draftDiscarded ? (
+              <Button
+                variant="outline"
+                className="sm:mr-auto"
+                onClick={discardDraft}
+                disabled={discarding}
+              >
+                {discarding ? "Discarding..." : "Change amount"}
+              </Button>
+            ) : undefined
+          }
           onSent={handleSent}
         />
       ) : null}

@@ -21,7 +21,7 @@ import { useRole } from "@/lib/role-context"
 import { NewEnquiryDialog } from "@/components/new-enquiry-dialog"
 import Link from "next/link"
 import { useState, useEffect } from "react"
-import { CheckCircle2, GripVertical, Search, Clipboard, Plus, Settings, Download } from "lucide-react"
+import { CheckCircle2, GripVertical, Search, Clipboard, Plus, Settings, Download, Loader2 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -83,7 +83,7 @@ export default function PipelinePage() {
   // stage selector, and audit button. The selector uses the same gated transition flow.
   const router = useRouter()
   const { data: jobs, isLoading: loadingJobs, error: jobsError, mutate: mutateJobs } = usePipeline()
-  const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useData(["auditLogs", "bookings", "customers", "payments", "quotes", "settings"])
+  const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useData(["bookings", "customers", "payments", "quotes", "settings"])
   const { data: assignableData } = useAssignableUsers()
   const { can } = useRole()
   const [draggedJob, setDraggedJob] = useState<string | null>(null)
@@ -491,7 +491,6 @@ export default function PipelinePage() {
                           canDrag={can("edit:pipeline")}
                           onDragStart={handleDragStart}
                           onMoveStage={(jobId, toStage) => moveJob(jobId, toStage)}
-                          auditLogs={data.auditLogs || []}
                         />
                       ))}
                       {stageJobs.length === 0 && (
@@ -571,31 +570,41 @@ function PipelineCard({
   canDrag,
   onDragStart,
   onMoveStage,
-  auditLogs,
 }: {
   job: PipelineJob
   isDragging: boolean
   canDrag: boolean
   onDragStart: (e: React.DragEvent, id: string) => void
   onMoveStage: (id: string, toStage: PipelineStage) => void | Promise<void>
-  auditLogs: any[]
 }) {
   const paymentDotClass = PAYMENT_COLORS[job.paymentColor] || "bg-muted-foreground"
   const showTripCompleteBadge = job.stage === "voucher_sent" && isPastOrToday(job.tripEndDate)
   const displayReference = bookingDisplayReference(job)
+  const [downloadingAudit, setDownloadingAudit] = useState(false)
 
-  const handleDownloadAudit = async (e: React.MouseEvent, allAuditLogs: any[]) => {
+  // Audit history is fetched on demand rather than carried in the /api/data payload —
+  // it's before/after JSON blobs for every change, needed only when this hover-only
+  // button is actually clicked, not on every pipeline load.
+  const handleDownloadAudit = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    
+
+    setDownloadingAudit(true)
     try {
-      const jobAuditLogs = allAuditLogs.filter(log => log.entityId === job.id || 
-        (log.entityType === 'Booking' && log.entityId === job.id))
-      downloadAuditLog(jobAuditLogs, job.bookingNumber)
+      const res = await fetch(
+        `/api/audit?entityType=Booking&entityId=${encodeURIComponent(job.id)}&pageSize=250`,
+      )
+      const payload = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(payload?.error ?? "Audit log could not be loaded")
+      }
+      downloadAuditLog(payload.logs ?? [], job.bookingNumber)
       toast.success("Audit log downloaded")
     } catch (error) {
       console.error("[v0] Failed to download audit:", error)
-      toast.error("Failed to download audit log")
+      toast.error(error instanceof Error ? error.message : "Failed to download audit log")
+    } finally {
+      setDownloadingAudit(false)
     }
   }
 
@@ -661,12 +670,17 @@ function PipelineCard({
           </div>
         )}
         <button
-          onClick={(e) => handleDownloadAudit(e, auditLogs)}
-          className="absolute bottom-1.5 right-1.5 opacity-0 transition-opacity p-1 hover:bg-secondary rounded group-hover:opacity-100 focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+          onClick={handleDownloadAudit}
+          disabled={downloadingAudit}
+          className="absolute bottom-1.5 right-1.5 opacity-0 transition-opacity p-1 hover:bg-secondary rounded group-hover:opacity-100 focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
           aria-label={`Download audit log for ${displayReference}`}
           title="Download audit log"
         >
-          <Download className="w-3 h-3 text-muted-foreground" />
+          {downloadingAudit ? (
+            <Loader2 className="w-3 h-3 text-muted-foreground animate-spin" />
+          ) : (
+            <Download className="w-3 h-3 text-muted-foreground" />
+          )}
         </button>
       </CardContent>
     </Card>
