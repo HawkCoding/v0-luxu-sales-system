@@ -64,6 +64,9 @@ interface FakeMailboxState {
 interface FakeBehavior {
   failConnect?: boolean
   failMoveToFolder?: string
+  /** UIDs the server yields with no source at all -- a real, observed IMAP behaviour that used to
+   *  make the message vanish without a row. */
+  dropSourceForUids?: number[]
 }
 
 function connectionLostError(): Error {
@@ -124,12 +127,16 @@ class FakeImapClient {
     range: number[],
     _query: unknown,
     _opts?: { uid?: boolean },
-  ): AsyncGenerator<{ uid: number; source: Buffer; internalDate?: Date }> {
+  ): AsyncGenerator<{ uid: number; source?: Buffer; internalDate?: Date }> {
     this.fetchOpen = true
     try {
       for (const uid of range) {
         const message = this.state.inbox.get(uid)
         if (!message) continue
+        if (this.behavior.dropSourceForUids?.includes(uid)) {
+          yield { uid, internalDate: message.internalDate }
+          continue
+        }
         yield { uid, source: message.source, internalDate: message.internalDate }
       }
     } finally {
@@ -187,13 +194,21 @@ import { syncInboundEmailAccount, type EmailSyncSummary } from "./sync"
 // --- Fixtures ----------------------------------------------------------------
 
 /** `date: null` builds a message with no `Date:` header at all -- the case INTERNALDATE covers. */
-function rawEmail(opts: { subject: string; from?: string; date?: Date | null; text?: string }): Buffer {
+function rawEmail(opts: {
+  subject: string
+  from?: string
+  date?: Date | null
+  text?: string
+  /** Omitted by default -- most tests exercise the UID path, not Message-ID dedupe. */
+  messageId?: string
+}): Buffer {
   const date = opts.date === null ? null : opts.date ?? new Date("2026-08-01T10:00:00Z")
   return Buffer.from(
     [
       `From: ${opts.from ?? "Jane Doe <jane@example.com>"}`,
       "To: bookings@example.com",
       `Subject: ${opts.subject}`,
+      ...(opts.messageId ? [`Message-ID: ${opts.messageId}`] : []),
       ...(date ? [`Date: ${date.toUTCString()}`] : []),
       "Content-Type: text/plain; charset=utf-8",
       "",
@@ -384,19 +399,19 @@ describe("syncInboundEmailAccount", () => {
     // A backlog larger than the cap must drain across runs rather than risk a platform timeout
     // mid-run -- and the cursor must land on the last UID of THIS batch, not the last in the inbox,
     // or everything past the cap would be skipped forever.
-    for (let uid = 1; uid <= 130; uid += 1) {
+    for (let uid = 1; uid <= 40; uid += 1) {
       seedMessage(uid, `New enquiry ${uid}`)
     }
 
     const summary = await runSync(accountRow())
 
-    expect(summary.scannedCount).toBe(100)
-    expect(mock.store.rows("inbound_email_messages")).toHaveLength(100)
-    expect(syncMocks.createEmailBookingFromParsedDraft).toHaveBeenCalledTimes(100)
-    expect(mock.store.rows("inbound_email_accounts")[0]?.last_seen_uid).toBe(100)
-    // Uids 101-130 are untouched and still in the inbox for the next run.
-    expect(mailboxState.inbox.has(101)).toBe(true)
-    expect(mailboxState.inbox.has(130)).toBe(true)
+    expect(summary.scannedCount).toBe(25)
+    expect(mock.store.rows("inbound_email_messages")).toHaveLength(25)
+    expect(syncMocks.createEmailBookingFromParsedDraft).toHaveBeenCalledTimes(25)
+    expect(mock.store.rows("inbound_email_accounts")[0]?.last_seen_uid).toBe(25)
+    // Uids 26-40 are untouched and still in the inbox for the next run.
+    expect(mailboxState.inbox.has(26)).toBe(true)
+    expect(mailboxState.inbox.has(40)).toBe(true)
   })
 
   it("imports the rest of the batch when one message fails to import", async () => {
@@ -417,10 +432,108 @@ describe("syncInboundEmailAccount", () => {
     expect(summary.errors).toHaveLength(1)
     expect(summary.errors[0]).toContain("resolver blew up")
 
-    // The failed message left no claim behind (free to retry); the other two imported normally.
+    // Every UID ends the run with a row: the two that imported, and the one that failed. The
+    // failed row is what the retry pass picks up next run -- deleting it (as this used to) put the
+    // UID below the cursor with nothing recorded, and the enquiry was gone for good.
     const rows = mock.store.rows("inbound_email_messages")
-    expect(rows.map((row) => row.uid).sort((a, b) => Number(a) - Number(b))).toEqual([201, 203])
-    expect(rows.every((row) => row.status === "imported_complete")).toBe(true)
+    expect(rows.map((row) => row.uid).sort((a, b) => Number(a) - Number(b))).toEqual([201, 202, 203])
+    const failed = rows.find((row) => row.uid === 202)
+    expect(failed?.status).toBe("failed")
+    expect(failed?.booking_id).toBeNull()
+    expect(failed?.attempts).toBe(1)
+    expect(rows.filter((row) => row.status === "imported_complete")).toHaveLength(2)
+  })
+
+  it("does not re-import the same Message-ID under a new UID", async () => {
+    // Production case: fourteen enquiries left the INBOX, came back with fresh UIDs, and UID-only
+    // dedupe read them as new mail -- fourteen duplicate bookings in one morning.
+    const messageId = "<returning-message@sa-rail.co.za>"
+    mailboxState.inbox.set(501, { uid: 501, source: rawEmail({ subject: "New enquiry: returns", messageId }) })
+    mailboxState.inbox.set(502, { uid: 502, source: rawEmail({ subject: "New enquiry: returns", messageId }) })
+
+    const summary = await runSync(accountRow())
+
+    expect(syncMocks.createEmailBookingFromParsedDraft).toHaveBeenCalledTimes(1)
+    expect(summary.importedCount).toBe(1)
+    expect(summary.duplicateCount).toBe(1)
+
+    const rows = mock.store.rows("inbound_email_messages")
+    const second = rows.find((row) => row.uid === 502)
+    expect(second?.status).toBe("skipped_duplicate_message")
+    expect(second?.booking_id).toBeNull()
+    expect(second?.error).toContain("501")
+    // Not filed -- left where it is, and the cursor moves past it so it is not looked at again.
+    expect(second?.filing_status).toBe("not_applicable")
+    expect(mailboxState.inbox.has(502)).toBe(true)
+    expect(mock.store.rows("inbound_email_accounts")[0]?.last_seen_uid).toBe(502)
+  })
+
+  it("still imports a Message-ID whose only earlier row is a failure", async () => {
+    // A failed row must stay retryable -- treating it as "already handled" would strand the enquiry.
+    const messageId = "<failed-then-returned@sa-rail.co.za>"
+    mailboxState.inbox.set(503, { uid: 503, source: rawEmail({ subject: "New enquiry: retryable", messageId }) })
+    mock.store.tables.inbound_email_messages = [
+      {
+        id: "failed-row",
+        email_account_id: ACCOUNT_ID,
+        uidvalidity: 1000,
+        uid: 490,
+        message_id: messageId,
+        subject: "New enquiry: retryable",
+        status: "failed",
+        filing_status: "not_applicable",
+        booking_id: null,
+        attempts: 3,
+        missing_fields: [],
+        warnings: [],
+      },
+    ]
+
+    const summary = await runSync(accountRow({ last_seen_uid: 500 }))
+
+    expect(summary.importedCount).toBe(1)
+    expect(mock.store.rows("inbound_email_messages").find((row) => row.uid === 503)?.status).toBe(
+      "imported_complete",
+    )
+  })
+
+  it("imports normally when the message carries no Message-ID header", async () => {
+    seedMessage(504, "New enquiry: no message id")
+
+    const summary = await runSync(accountRow())
+
+    expect(summary.importedCount).toBe(1)
+    expect(summary.duplicateCount).toBe(0)
+    expect(mock.store.rows("inbound_email_messages")[0].status).toBe("imported_complete")
+  })
+
+  it("does not treat a retried row as its own duplicate", async () => {
+    const messageId = "<retry-not-duplicate@sa-rail.co.za>"
+    mailboxState.inbox.set(505, { uid: 505, source: rawEmail({ subject: "New enquiry: retry me", messageId }) })
+    mock.store.tables.inbound_email_messages = [
+      {
+        id: "retry-row",
+        email_account_id: ACCOUNT_ID,
+        uidvalidity: 1000,
+        uid: 505,
+        message_id: messageId,
+        subject: "New enquiry: retry me",
+        status: "failed",
+        filing_status: "not_applicable",
+        booking_id: null,
+        attempts: 1,
+        missing_fields: [],
+        warnings: [],
+      },
+    ]
+
+    const summary = await runSync(accountRow({ last_seen_uid: 505 }))
+
+    expect(summary.importedCount).toBe(1)
+    const rows = mock.store.rows("inbound_email_messages")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].status).toBe("imported_complete")
+    expect(rows[0].attempts).toBe(2)
   })
 
   it("does not re-import a UID that already has a row (dedupe)", async () => {
@@ -446,15 +559,119 @@ describe("syncInboundEmailAccount", () => {
     expect(mock.store.rows("inbound_email_messages")).toHaveLength(1)
   })
 
-  it("frees the claimed UID for retry when booking creation itself fails", async () => {
+  it("keeps a failed row (not a deleted claim) when booking creation itself fails", async () => {
     seedMessage(105, "New enquiry: will fail")
     syncMocks.createEmailBookingFromParsedDraft.mockRejectedValue(new Error("resolver blew up"))
 
     const summary = await runSync(accountRow())
 
     expect(summary.errors[0]).toContain("resolver blew up")
-    // No row left behind -- nothing was created, so the next run must be free to retry this UID.
-    expect(mock.store.rows("inbound_email_messages")).toHaveLength(0)
+
+    // The row stays. The cursor advances over recorded UIDs, so a deleted claim meant the next
+    // run's `uid > last_seen_uid` search never saw this UID again -- the enquiry was lost silently.
+    const row = mock.store.rows("inbound_email_messages")[0]
+    expect(row.status).toBe("failed")
+    expect(row.filing_status).toBe("not_applicable")
+    expect(row.booking_id).toBeNull()
+    expect(row.attempts).toBe(1)
+    expect(row.error).toContain("resolver blew up")
+  })
+
+  it("retries a failed UID on the next run even though it sits below the cursor", async () => {
+    seedMessage(105, "New enquiry: fails once")
+    syncMocks.createEmailBookingFromParsedDraft.mockRejectedValueOnce(new Error("resolver blew up"))
+
+    // First run fails and records the UID; the cursor moves past it, exactly as for any other
+    // recorded message.
+    await runSync(accountRow())
+    const afterFirst = mock.store.rows("inbound_email_accounts")[0]
+    expect(afterFirst?.last_seen_uid).toBe(105)
+
+    syncMocks.createEmailBookingFromParsedDraft.mockResolvedValue(bookingResult({ id: "booking-retry" }))
+
+    // Second run: nothing above the cursor, so the message is only reachable via the retry pass.
+    await runSync(accountRow({ last_seen_uid: 105 }))
+
+    const rows = mock.store.rows("inbound_email_messages")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].status).toBe("imported_complete")
+    expect(rows[0].booking_id).toBe("booking-retry")
+    expect(rows[0].attempts).toBe(2)
+  })
+
+  it("stops retrying a UID that has failed MAX_IMPORT_ATTEMPTS times", async () => {
+    seedMessage(105, "New enquiry: always fails")
+    mock.store.tables.inbound_email_messages = [
+      {
+        id: "exhausted-row",
+        email_account_id: ACCOUNT_ID,
+        uidvalidity: 1000,
+        uid: 105,
+        subject: "New enquiry: always fails",
+        status: "failed",
+        filing_status: "not_applicable",
+        booking_id: null,
+        attempts: 3,
+        missing_fields: [],
+        warnings: [],
+      },
+    ]
+
+    await runSync(accountRow({ last_seen_uid: 105 }))
+
+    // Left for a human rather than burning the run budget on it forever.
+    expect(syncMocks.createEmailBookingFromParsedDraft).not.toHaveBeenCalled()
+    expect(mock.store.rows("inbound_email_messages")[0].attempts).toBe(3)
+  })
+
+  it("records a UID the server returns no source for instead of dropping it", async () => {
+    seedMessage(301, "New enquiry: fine")
+    seedMessage(302, "New enquiry: no source")
+    imapBehavior.dropSourceForUids = [302]
+
+    await runSync(accountRow())
+
+    const dropped = mock.store.rows("inbound_email_messages").find((row) => row.uid === 302)
+    expect(dropped?.status).toBe("fetch_failed")
+    expect(dropped?.attempts).toBe(0)
+    // Accounted for, so the cursor is free to move -- the retry pass owns it from here.
+    expect(mock.store.rows("inbound_email_accounts")[0]?.last_seen_uid).toBe(302)
+  })
+
+  it("stops before starting a message it cannot finish and leaves the rest above the cursor", async () => {
+    // Only Date.now is controlled -- faking the timers themselves deadlocks the async IMAP/parser
+    // work this test drives.
+    let clock = Date.now()
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock)
+    try {
+      seedMessage(401, "New enquiry: one")
+      seedMessage(402, "New enquiry: two")
+      seedMessage(403, "New enquiry: three")
+
+      // 20s per booking against the 45s budget and 12s per-message headroom: two fit, the third
+      // must not be started. Being killed mid-message is the failure this budget exists to avoid.
+      let call = 0
+      syncMocks.createEmailBookingFromParsedDraft.mockImplementation(async () => {
+        call += 1
+        clock += 20_000
+        return bookingResult({ id: `booking-${call}` })
+      })
+
+      const summary = await runSync(accountRow())
+
+      expect(summary.importedCount).toBe(2)
+      // UID 403 was never started, so it keeps no row and stays above the cursor for the next run.
+      expect(mock.store.rows("inbound_email_messages").map((row) => row.uid)).toEqual([401, 402])
+      expect(mock.store.rows("inbound_email_accounts")[0]?.last_seen_uid).toBe(402)
+
+      const run = mock.store.rows("inbound_email_sync_runs")[0]
+      expect(run.status).toBe("partial")
+      expect(run.finished_at).not.toBeNull()
+      expect(run.scanned_count).toBe(2)
+      expect(run.error).toContain("run budget")
+    } finally {
+      nowSpy.mockRestore()
+    }
   })
 
   it("does not delete the claim if booking creation succeeds but recording it fails", async () => {

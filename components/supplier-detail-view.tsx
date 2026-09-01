@@ -5315,31 +5315,6 @@ export function SupplierDetailView({
                           placeholder="We have quoted you for the train only. If you would like to request any other services, we offer those as well."
                         />
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
-                        <div className="space-y-2">
-                          <Label htmlFor="supplier-quote-suite-detail">Quote suite detail</Label>
-                          <Select
-                            value={form.quoteSuiteDetail}
-                            onValueChange={(value) =>
-                              updateField("quoteSuiteDetail", value as "type_only" | "full")
-                            }
-                          >
-                            <SelectTrigger id="supplier-quote-suite-detail" className="max-w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="type_only">Suite type only</SelectItem>
-                              <SelectItem value="full">Full configuration</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          How the quote PDF/email itinerary line names the suite: &quot;in a Deluxe
-                          Suite&quot; (type only) or &quot;in a Double bedded Deluxe Suite with a
-                          shower&quot; (full configuration). The voucher&apos;s Suite Type row always
-                          states the full configuration either way.
-                        </p>
-                      </div>
                     </>
                   ) : (
                     <div className="space-y-3">
@@ -5360,23 +5335,56 @@ export function SupplierDetailView({
                           {supplier.trainOnlyNote || "Not set."}
                         </p>
                       </div>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">Quote suite detail</p>
-                          <p className="text-sm text-muted-foreground">
-                            How the quote itinerary line names the suite.
-                          </p>
-                        </div>
-                        <Badge variant="outline">
-                          {supplier.quoteSuiteDetail === "full" ? "Full configuration" : "Suite type only"}
-                        </Badge>
-                      </div>
                     </div>
                   )}
                 </div>
               ) : null}
 
-              <div className="rounded-lg border p-4 space-y-3">
+              {/* Quote suite detail sits with the phrase wording: both decide how a suite is
+                  named to the client, one for the quote line and one for the other documents. */}
+              <div className="rounded-lg border p-4 space-y-4">
+                {(isEditing ? form.kind : supplier.kind) === "train_operator" ? (
+                  isEditing ? (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-quote-suite-detail">Quote suite detail</Label>
+                        <Select
+                          value={form.quoteSuiteDetail}
+                          onValueChange={(value) =>
+                            updateField("quoteSuiteDetail", value as "type_only" | "full")
+                          }
+                        >
+                          <SelectTrigger id="supplier-quote-suite-detail" className="max-w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="type_only">Suite type only</SelectItem>
+                            <SelectItem value="full">Full configuration</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        How the quote PDF/email itinerary line names the suite: &quot;in a Deluxe
+                        Suite&quot; (type only) or &quot;in a Double bedded Deluxe Suite with a
+                        shower&quot; (full configuration). The voucher&apos;s Suite Type row always
+                        states the full configuration either way.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Quote suite detail</p>
+                        <p className="text-sm text-muted-foreground">
+                          How the quote itinerary line names the suite.
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {supplier.quoteSuiteDetail === "full" ? "Full configuration" : "Suite type only"}
+                      </Badge>
+                    </div>
+                  )
+                ) : null}
+
                 {isEditing ? (
                   <>
                     <div className="space-y-2">

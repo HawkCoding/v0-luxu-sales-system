@@ -1956,6 +1956,7 @@ export type Database = {
       inbound_email_messages: {
         Row: {
           alt_body_preview: string | null
+          attempts: number
           body_part: string | null
           booking_id: string | null
           created_at: string
@@ -1978,6 +1979,7 @@ export type Database = {
         }
         Insert: {
           alt_body_preview?: string | null
+          attempts?: number
           body_part?: string | null
           booking_id?: string | null
           created_at?: string
@@ -2000,6 +2002,7 @@ export type Database = {
         }
         Update: {
           alt_body_preview?: string | null
+          attempts?: number
           body_part?: string | null
           booking_id?: string | null
           created_at?: string
