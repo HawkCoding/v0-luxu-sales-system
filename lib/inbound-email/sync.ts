@@ -53,6 +53,14 @@ const PER_MESSAGE_HEADROOM_MS = 12_000
 // cannot consume the whole budget on every run forever.
 const MAX_IMPORT_ATTEMPTS = 3
 
+// How many `skipped_no_rule` rows the reconsider pass will look at in one run. Their subjects can
+// only be matched against the rule list in memory (contains/exact/regex is not expressible as a
+// SQL predicate), so this pass cannot push a LIMIT down to the matching rows themselves -- it has
+// to scan candidates and filter. Newest-first, because a rule is added in response to mail that
+// just arrived; older noise that never matched anything gets scanned once and dropped. Only four
+// small columns are read, so this is cheap even at the ceiling.
+const MAX_NO_RULE_SCAN = 500
+
 export interface SyncDeadline {
   /** Epoch milliseconds after which no further message should be started. */
   readonly endsAt: number
@@ -89,6 +97,9 @@ interface CollectedMessage {
 interface ExistingMessageRow {
   id: string
   attempts: number
+  /** Status the row carried when the retry pass picked it up. Only used to keep the reconsider
+   *  path bounded -- see the skipped_no_rule branch in importCollectedMessages. */
+  status: string
 }
 
 interface CollectedBatch {
@@ -396,6 +407,7 @@ async function collectCandidateMessages(
   runId: string,
   deadline: SyncDeadline,
   settledUids: Set<number>,
+  rules: InboundSubjectRule[],
 ): Promise<CollectedBatch> {
   const client = createImapClient(account)
 
@@ -409,8 +421,9 @@ async function collectCandidateMessages(
     await healStaleClaims(supabase, account)
 
     // Retries come first. They are the only work that can sit below the cursor, and a steady
-    // trickle of new mail must never starve a message that has already failed once.
-    const retries = await collectRetryCandidates(client, supabase, account, uidvalidity, deadline)
+    // trickle of new mail must never starve a message that has already failed once -- or one that
+    // a newly-added rule has only now made importable.
+    const retries = await collectRetryCandidates(client, supabase, account, uidvalidity, deadline, rules)
 
     const rawCandidates = await getCandidateUids(client, account)
     const candidateUids = rawCandidates.slice().sort((a, b) => a - b).slice(0, MAX_UIDS_PER_RUN)
@@ -490,21 +503,24 @@ async function collectCandidateMessages(
   }
 }
 
-// Re-fetches UIDs that a previous run recorded but could not import. Deliberately keyed off the
-// message rows rather than the account cursor: a failed UID is usually already below it, so the
-// normal `uid > last_seen_uid` search would never look at it again.
-async function collectRetryCandidates(
-  client: ImapFlow,
+interface RetryRow {
+  id: string
+  uid: number
+  attempts: number
+  status: string
+}
+
+// Rows an earlier run recorded as an outright failure. Deliberately keyed off the message rows
+// rather than the account cursor: a failed UID is usually already below it, so the normal
+// `uid > last_seen_uid` search would never look at it again.
+async function loadFailedRetryRows(
   supabase: ServiceClient,
   account: AccountRow,
   uidvalidity: number,
-  deadline: SyncDeadline,
-): Promise<CollectedMessage[]> {
-  if (!hasHeadroomForMessage(deadline)) return []
-
-  const { data: rows, error } = await supabase
+): Promise<RetryRow[]> {
+  const { data, error } = await supabase
     .from("inbound_email_messages")
-    .select("id, uid, attempts")
+    .select("id, uid, attempts, status")
     // A row that already points at a booking is never retried -- that would duplicate the booking.
     .is("booking_id", null)
     .eq("email_account_id", account.id)
@@ -515,9 +531,95 @@ async function collectRetryCandidates(
     .limit(MAX_UIDS_PER_RUN)
 
   if (error) throw new Error(`Retry lookup failed: ${error.message}`)
-  if (!rows || rows.length === 0) return []
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    uid: row.uid,
+    attempts: row.attempts ?? 0,
+    status: row.status,
+  }))
+}
 
-  const byUid = new Map(rows.map((row) => [row.uid, { id: row.id, attempts: row.attempts ?? 0 }]))
+/**
+ * Rows recorded as `skipped_no_rule` whose subject matches a rule that is active NOW.
+ *
+ * `skipped_no_rule` is not a verdict about the email -- it records that no active rule claimed the
+ * subject at the moment the message was first seen, and that answer goes stale the instant an admin
+ * adds a rule. It was stored as terminal, so the decision was never re-asked: the row existed, so
+ * `filterAlreadyProcessed` logged the UID as a duplicate on every subsequent run and the enquiry
+ * never landed. Production case: UID 118536 on info@sa-rail.co.za, a Kruger Shalati enquiry that
+ * arrived before its subject rule was created, logged "Duplicate emails ignored" indefinitely.
+ *
+ * Only rows whose recorded subject matches an active rule are handed back, and the subject filter
+ * runs BEFORE any IMAP fetch -- otherwise adding a single rule would drag the mailbox's whole
+ * history of genuine noise mail back over the wire. A row that still matches nothing costs four
+ * columns in a batched read and nothing else.
+ */
+async function loadReconsiderableNoRuleRows(
+  supabase: ServiceClient,
+  account: AccountRow,
+  uidvalidity: number,
+  rules: InboundSubjectRule[],
+  slots: number,
+): Promise<RetryRow[]> {
+  if (slots <= 0 || rules.length === 0) return []
+
+  const { data, error } = await supabase
+    .from("inbound_email_messages")
+    .select("id, uid, attempts, status, subject")
+    .is("booking_id", null)
+    .eq("email_account_id", account.id)
+    .eq("uidvalidity", uidvalidity)
+    .eq("status", "skipped_no_rule")
+    .lt("attempts", MAX_IMPORT_ATTEMPTS)
+    .order("uid", { ascending: false })
+    .limit(MAX_NO_RULE_SCAN)
+
+  if (error) throw new Error(`No-rule reconsider lookup failed: ${error.message}`)
+
+  const matching = (data ?? [])
+    .filter((row) => Boolean(findMatchingInboundSubjectRule(row.subject ?? "", rules)))
+    .slice(0, slots)
+    .map((row) => ({
+      id: row.id,
+      uid: row.uid,
+      attempts: row.attempts ?? 0,
+      status: row.status,
+    }))
+
+  // Scanned newest-first above so a freshly-added rule reaches recent mail; imported oldest-first
+  // so the enquiries land in the order they arrived.
+  return matching.sort((a, b) => a.uid - b.uid)
+}
+
+// Re-fetches UIDs a previous run recorded but did not turn into a booking: outright failures first,
+// then messages that were skipped only because no rule existed yet and now match one. Failures keep
+// first claim on the run's slots -- a mailbox full of newly-matching old mail must never starve a
+// message that has already failed once.
+async function collectRetryCandidates(
+  client: ImapFlow,
+  supabase: ServiceClient,
+  account: AccountRow,
+  uidvalidity: number,
+  deadline: SyncDeadline,
+  rules: InboundSubjectRule[],
+): Promise<CollectedMessage[]> {
+  if (!hasHeadroomForMessage(deadline)) return []
+
+  const failures = await loadFailedRetryRows(supabase, account, uidvalidity)
+  const reconsidered = await loadReconsiderableNoRuleRows(
+    supabase,
+    account,
+    uidvalidity,
+    rules,
+    MAX_UIDS_PER_RUN - failures.length,
+  )
+
+  const rows = [...failures, ...reconsidered]
+  if (rows.length === 0) return []
+
+  const byUid = new Map(
+    rows.map((row) => [row.uid, { id: row.id, attempts: row.attempts, status: row.status }]),
+  )
   const uids = Array.from(byUid.keys())
   const messages: CollectedMessage[] = []
   const seen = new Set<number>()
@@ -543,9 +645,10 @@ async function collectRetryCandidates(
     }
   }
 
-  // A UID the inbox no longer holds cannot be retried by this pass -- it was filed, moved or
+  // A UID the inbox no longer holds cannot be re-imported by this pass -- it was filed, moved or
   // deleted outside of sync. Park it at the retry ceiling with a reason instead of looking it up
-  // on every future run.
+  // on every future run. Status is left as-is: the ceiling alone is what excludes it, and that
+  // works for a reconsidered skipped_no_rule row exactly as it does for a failure.
   if (!truncated) {
     const goneIds = uids.filter((uid) => !seen.has(uid)).map((uid) => byUid.get(uid)?.id).filter((id): id is string => Boolean(id))
     if (goneIds.length > 0) {
@@ -553,7 +656,7 @@ async function collectRetryCandidates(
         .from("inbound_email_messages")
         .update({
           attempts: MAX_IMPORT_ATTEMPTS,
-          error: "Queued for retry but no longer present in the inbox (moved, filed or deleted outside of sync).",
+          error: "Queued for re-import but no longer present in the inbox (moved, filed or deleted outside of sync).",
         })
         .in("id", goneIds)
     }
@@ -679,6 +782,13 @@ async function importCollectedMessages(
               status: "skipped_no_rule",
               filing_status: "not_applicable",
               subject,
+              // Reaching here from a reconsidered skipped_no_rule row means the stored subject
+              // matched a rule but the freshly-parsed one does not -- the two should agree, since
+              // the stored value came from this same parse, so treat a disagreement as a spent
+              // attempt. Without it the row would be re-fetched over IMAP on every run forever.
+              ...(existingRow.status === "skipped_no_rule"
+                ? { attempts: existingRow.attempts + 1 }
+                : {}),
               error: null,
             })
             .eq("id", existingRow.id)
@@ -1009,7 +1119,7 @@ export async function syncInboundEmailAccount(
   const settledUids = new Set<number>()
 
   try {
-    const collected = await collectCandidateMessages(account, supabase, summary, run.id, deadline, settledUids)
+    const collected = await collectCandidateMessages(account, supabase, summary, run.id, deadline, settledUids, rules)
     uidvalidity = collected.uidvalidity
 
     const stoppedImporting = await importCollectedMessages(

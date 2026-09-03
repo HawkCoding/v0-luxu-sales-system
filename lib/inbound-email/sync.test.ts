@@ -128,6 +128,7 @@ class FakeImapClient {
     _query: unknown,
     _opts?: { uid?: boolean },
   ): AsyncGenerator<{ uid: number; source?: Buffer; internalDate?: Date }> {
+    for (const uid of range) fetchedUids.push(uid)
     this.fetchOpen = true
     try {
       for (const uid of range) {
@@ -180,6 +181,9 @@ class FakeImapClient {
 
 let mailboxState: FakeMailboxState
 let imapBehavior: FakeBehavior
+/** Every UID handed to client.fetch() this run. Lets a test assert that a message was ruled out
+ *  before it cost an IMAP round trip, not merely that it produced no booking. */
+let fetchedUids: number[]
 
 vi.mock("imapflow", () => ({
   // `new ImapFlow(...)` requires a real constructor function -- an arrow function passed to
@@ -219,6 +223,9 @@ function rawEmail(opts: {
 }
 
 const ACCOUNT_ID = "account-1"
+
+/** sync.ts keeps MAX_UIDS_PER_RUN private; mirrored here so the starvation test reads as intended. */
+const MAX_UIDS_PER_RUN_FOR_TEST = 25
 
 function accountRow(overrides: Partial<MockRow> = {}): MockRow {
   return {
@@ -263,6 +270,7 @@ beforeEach(() => {
 
   mailboxState = { uidValidity: BigInt(1000), inbox: new Map(), folders: new Map() }
   imapBehavior = {}
+  fetchedUids = []
 
   mock = createSupabaseMock({
     inbound_email_rules: [
@@ -622,6 +630,153 @@ describe("syncInboundEmailAccount", () => {
     // Left for a human rather than burning the run budget on it forever.
     expect(syncMocks.createEmailBookingFromParsedDraft).not.toHaveBeenCalled()
     expect(mock.store.rows("inbound_email_messages")[0].attempts).toBe(3)
+  })
+
+  // --- Reconsidering skipped_no_rule ---------------------------------------
+  //
+  // skipped_no_rule records that no rule claimed the subject WHEN THE MESSAGE WAS FIRST SEEN, not
+  // a verdict about the email. Stored as terminal, a message that arrived before its rule existed
+  // was logged "Duplicate emails ignored" on every run forever -- production UID 118536 on
+  // info@sa-rail.co.za, a Kruger Shalati enquiry.
+
+  function noRuleRow(overrides: Partial<MockRow> = {}): MockRow {
+    return {
+      id: "no-rule-row",
+      email_account_id: ACCOUNT_ID,
+      uidvalidity: 1000,
+      uid: 118536,
+      message_id: null,
+      subject: "New submission from Kruger Shalati Enquiry - Valiallah",
+      status: "skipped_no_rule",
+      filing_status: "not_applicable",
+      booking_id: null,
+      attempts: 0,
+      missing_fields: [],
+      warnings: [],
+      ...overrides,
+    }
+  }
+
+  /** Seeds the stuck message in the inbox below the cursor, as production has it. */
+  function seedStuckShalati(subject = "New submission from Kruger Shalati Enquiry - Valiallah"): void {
+    mailboxState.inbox.set(118536, { uid: 118536, source: rawEmail({ subject }) })
+  }
+
+  const shalatiRule = {
+    id: "rule-shalati",
+    name: "Kruger Shalati",
+    subject_pattern: "New submission from Kruger Shalati",
+    match_type: "contains",
+    active: true,
+    created_at: "2026-09-01T00:00:00Z",
+  }
+
+  it("imports a skipped_no_rule message once a rule matches its subject", async () => {
+    seedStuckShalati()
+    mock.store.tables.inbound_email_rules.push(shalatiRule)
+    mock.store.tables.inbound_email_messages = [noRuleRow()]
+    syncMocks.createEmailBookingFromParsedDraft.mockResolvedValue(bookingResult({ id: "booking-shalati" }))
+
+    // Cursor is already past the UID, so the fresh-mail search cannot reach it -- only the
+    // reconsider pass can.
+    const summary = await runSync(accountRow({ last_seen_uid: 118536 }))
+
+    expect(summary.importedCount).toBe(1)
+    const rows = mock.store.rows("inbound_email_messages")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].status).toBe("imported_complete")
+    expect(rows[0].booking_id).toBe("booking-shalati")
+    expect(rows[0].attempts).toBe(1)
+    expect(mailboxState.folders.get("Processed")?.map((m) => m.uid)).toEqual([118536])
+  })
+
+  it("leaves a skipped_no_rule message alone when no active rule matches, without fetching it", async () => {
+    // The filter has to run before the IMAP fetch: otherwise adding one rule drags the mailbox's
+    // whole history of genuine noise mail back over the wire on every run.
+    seedStuckShalati("Newsletter: September deals")
+    mock.store.tables.inbound_email_rules.push(shalatiRule)
+    mock.store.tables.inbound_email_messages = [noRuleRow({ subject: "Newsletter: September deals" })]
+
+    const summary = await runSync(accountRow({ last_seen_uid: 118536 }))
+
+    expect(summary.importedCount).toBe(0)
+    expect(syncMocks.createEmailBookingFromParsedDraft).not.toHaveBeenCalled()
+    expect(fetchedUids).not.toContain(118536)
+    expect(mock.store.rows("inbound_email_messages")[0].status).toBe("skipped_no_rule")
+    expect(mock.store.rows("inbound_email_messages")[0].attempts).toBe(0)
+  })
+
+  it("never reconsiders a skipped_no_rule row that already points at a booking", async () => {
+    // The booking_id guard is the only thing between a re-import and a duplicate booking.
+    seedStuckShalati()
+    mock.store.tables.inbound_email_rules.push(shalatiRule)
+    mock.store.tables.inbound_email_messages = [noRuleRow({ booking_id: "booking-existing" })]
+
+    await runSync(accountRow({ last_seen_uid: 118536 }))
+
+    expect(syncMocks.createEmailBookingFromParsedDraft).not.toHaveBeenCalled()
+    expect(fetchedUids).not.toContain(118536)
+  })
+
+  it("stops reconsidering a skipped_no_rule row at MAX_IMPORT_ATTEMPTS", async () => {
+    seedStuckShalati()
+    mock.store.tables.inbound_email_rules.push(shalatiRule)
+    mock.store.tables.inbound_email_messages = [noRuleRow({ attempts: 3 })]
+
+    await runSync(accountRow({ last_seen_uid: 118536 }))
+
+    expect(syncMocks.createEmailBookingFromParsedDraft).not.toHaveBeenCalled()
+    expect(fetchedUids).not.toContain(118536)
+  })
+
+  it("never reconsiders a skipped_not_an_enquiry row", async () => {
+    // Rejected on its body, not on rule availability -- re-running it on every rule edit would
+    // reprocess genuine non-enquiries forever.
+    seedStuckShalati()
+    mock.store.tables.inbound_email_rules.push(shalatiRule)
+    mock.store.tables.inbound_email_messages = [noRuleRow({ status: "skipped_not_an_enquiry" })]
+
+    await runSync(accountRow({ last_seen_uid: 118536 }))
+
+    expect(syncMocks.createEmailBookingFromParsedDraft).not.toHaveBeenCalled()
+    expect(fetchedUids).not.toContain(118536)
+    expect(mock.store.rows("inbound_email_messages")[0].status).toBe("skipped_not_an_enquiry")
+  })
+
+  it("lets failures claim the run's slots before newly-matching skipped_no_rule rows", async () => {
+    // A mailbox full of old mail that a new rule suddenly matches must never starve a message
+    // that has already failed once.
+    const failures: MockRow[] = []
+    for (let uid = 1; uid <= MAX_UIDS_PER_RUN_FOR_TEST; uid += 1) {
+      mailboxState.inbox.set(uid, { uid, source: rawEmail({ subject: `New enquiry ${uid}` }) })
+      failures.push({
+        id: `failed-${uid}`,
+        email_account_id: ACCOUNT_ID,
+        uidvalidity: 1000,
+        uid,
+        message_id: null,
+        subject: `New enquiry ${uid}`,
+        status: "failed",
+        filing_status: "not_applicable",
+        booking_id: null,
+        attempts: 1,
+        missing_fields: [],
+        warnings: [],
+      })
+    }
+
+    seedStuckShalati()
+    mock.store.tables.inbound_email_rules.push(shalatiRule)
+    mock.store.tables.inbound_email_messages = [...failures, noRuleRow()]
+
+    await runSync(accountRow({ last_seen_uid: 118536 }))
+
+    // Every slot went to a failure; the reconsidered row waits for the next run and is not fetched.
+    expect(syncMocks.createEmailBookingFromParsedDraft).toHaveBeenCalledTimes(MAX_UIDS_PER_RUN_FOR_TEST)
+    expect(fetchedUids).not.toContain(118536)
+    expect(mock.store.rows("inbound_email_messages").find((row) => row.uid === 118536)?.status).toBe(
+      "skipped_no_rule",
+    )
   })
 
   it("records a UID the server returns no source for instead of dropping it", async () => {
