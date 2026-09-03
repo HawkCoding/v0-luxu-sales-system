@@ -100,7 +100,7 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(7)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(8)
   })
 })
 
