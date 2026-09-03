@@ -64,6 +64,8 @@ function makeSupabase({
   profileData = null as unknown,
   followUpInsertError = null as unknown,
   correspondenceInsertError = null as unknown,
+  lineItemRows = [] as unknown[],
+  supplierRows = [] as unknown[],
 } = {}) {
   const followUpUpdateFn = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
   const followUpInsertSingle = vi.fn(async () =>
@@ -99,6 +101,21 @@ function makeSupabase({
           })),
           insert: followUpInsert,
           update: followUpUpdateFn,
+        }
+      }
+      if (table === "quote_line_items") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          // Ordered by sort_order now — the primary-supplier fallbacks are "first leg in array
+          // order", so the read can't be left to Postgres.
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn(async () => ({ data: lineItemRows, error: null })),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          in: vi.fn(async () => ({ data: supplierRows, error: null })),
         }
       }
       if (table === "bookings") {
@@ -291,5 +308,50 @@ describe("runQuoteFollowUpWorker", () => {
     expect(correspondenceInsert).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "quote_follow_up", status: "sent" }),
     )
+  })
+
+  it("uses the booking's primary supplier's variant when the quote is priced on it", async () => {
+    const SUPPLIER_ID = "00000000-0000-4000-8000-000000000eee"
+    templateMocks.getTemplate.mockImplementation(async (_supabase: unknown, key: string, supplierId?: string) => {
+      if (key === "follow_up" && supplierId === SUPPLIER_ID) {
+        return {
+          key: "follow_up",
+          subject: "Shalati follow-up — {{jobNumber}}",
+          bodyHtml: "<p>Dear {{customerName}}, Kruger Shalati quote {{jobNumber}}.</p>",
+        }
+      }
+      return {
+        key: "follow_up",
+        subject: "Following up on your enquiry — {{jobNumber}}",
+        bodyHtml: "<p>Dear {{customerName}}, quote {{jobNumber}} was sent on {{lastSentDate}}.</p>",
+      }
+    })
+
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking({ primary_supplier_id: SUPPLIER_ID }),
+      lineItemRows: [{ pricing_snapshot: { supplierId: SUPPLIER_ID, supplierKind: "hotel_property" } }],
+      supplierRows: [{ id: SUPPLIER_ID, name: "Kruger Shalati", long_journey_min_days: null, sells_standalone: true }],
+    })
+
+    await runQuoteFollowUpWorker(supabase as never)
+
+    expect(templateMocks.getTemplate).toHaveBeenCalledWith(expect.anything(), "follow_up", SUPPLIER_ID)
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: "Shalati follow-up — RR-2026-0001" }),
+    )
+  })
+
+  it("falls back to the shared template when the quote has no eligible primary supplier", async () => {
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking(),
+      lineItemRows: [],
+    })
+
+    await runQuoteFollowUpWorker(supabase as never)
+
+    expect(templateMocks.getTemplate).toHaveBeenCalledTimes(1)
+    expect(templateMocks.getTemplate).toHaveBeenCalledWith(expect.anything(), "follow_up")
   })
 })

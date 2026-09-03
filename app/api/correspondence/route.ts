@@ -8,8 +8,12 @@ import { resolveSalespersonSender, type ResolvedSenderReason } from "@/lib/email
 import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { staleVersionResponse } from "@/lib/concurrency"
-import { applyTransition, StaleTransitionError } from "@/lib/pipeline/apply-transition"
-import { validateTransition } from "@/lib/pipeline/validate-transition"
+import {
+  applyGatedTransition,
+  decideGatedTransition,
+  loadTransitionContext,
+} from "@/lib/pipeline/run-gated-transition"
+import type { GateFailure } from "@/lib/pipeline/validate-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
@@ -72,6 +76,11 @@ const correspondenceSchema = z
     text: z.string().max(200_000).optional(),
     sentAt: z.string().datetime({ offset: true }).optional(),
     moveStage: z.enum(PIPELINE_STAGE_VALUES).optional(),
+    /** Same three fields PATCH /api/jobs/[id] takes, so a send-and-move can clear a `confirm`
+     * gate or record a deliberate bypass instead of being the way around the gates entirely. */
+    manualConfirmations: z.object({ finalPaymentReceived: z.boolean().optional() }).optional(),
+    override: z.boolean().optional(),
+    overrideReason: z.string().trim().min(1).max(500).optional(),
     to: recipientSchema.optional(),
     attachments: z
       .array(
@@ -112,30 +121,43 @@ function isVoucherSend(kind: string | null | undefined, moveStage: PipelineStage
   return kind?.toLowerCase() === "voucher" || moveStage === "voucher_sent"
 }
 
-// These three "send & move stage" buttons (deposit invoice, reservation-form
-// acknowledgement, voucher) call applyTransition directly instead of the
-// gated PATCH /api/jobs/[id] route, so validateTransition's gates never ran
-// for them — a booking could be moved forward with no invoice number, an
-// incomplete customer record, or an unresolved email-import flag. quote_sent
-// is deliberately excluded: it's the first outbound touch, before customer
-// details are necessarily complete.
-const PRE_SEND_GATED_STAGES = new Set<PipelineStage>(["accepted", "deposit_requested", "voucher_sent"])
-
-// Only these gates are (re-)enforced pre-send: they depend solely on data
-// that exists before this request, never on the send/transition this
-// request itself performs — unlike e.g. "reservation form received" or
-// "voucher correspondence sent", which these very sends are what satisfy.
-// The two quote gates belong here for the same reason: sending a
-// reservation-form acknowledgement is not what puts a quote in front of the
-// customer, so without them a booking could reach Quote Accepted having never
-// had a quote sent — the one invariant the whole ladder rests on.
+// A "send & move stage" request is gated twice, because the two halves ask different questions.
+//
+// Pre-send (this set) are the gates whose evidence must already exist — nothing this request does
+// can satisfy them. Checking them first means an email is never sent for a move that is about to be
+// refused. `deposit_received_confirmation` is the one that matters most and was missing entirely:
+// QA was refused `deposit_paid` by PATCH /api/jobs/[id] for having no payment on file, then made
+// the identical move through this route a second later, because this route only gated three target
+// stages and only five gate ids.
+//
+// Everything else — "the voucher email was sent", "the invoice was sent" — is satisfied *by* this
+// very request, so it can only be judged after the correspondence row exists. That is the full
+// validateTransition run further down, which is now the real enforcement point.
 const PRE_SEND_GATE_IDS = new Set([
   "customer_complete",
   "email_import_review",
   "invoice_number_required",
   "quote_sent_required",
   "quote_sent_or_accepted",
+  // The gate QA got past. A payment on file is not something an email can conjure, so it belongs
+  // here — and `deposit_paid` was not even in the old target-stage list, which is why the move
+  // went through with none.
+  "deposit_received_confirmation",
 ])
+
+// quote_sent is the first outbound touch: the quote gates cannot hold before the send that is
+// itself the sending of the quote, and customer details need not be complete yet. Applied to both
+// checks — an exemption that held only pre-send would just move the same wrong block later.
+const QUOTE_SEND_EXEMPT_GATE_IDS = new Set([
+  "customer_complete",
+  "quote_sent_required",
+  "quote_sent_or_accepted",
+])
+
+function gatesFor(failures: GateFailure[], targetStage: PipelineStage): GateFailure[] {
+  if (targetStage !== "quote_sent") return failures
+  return failures.filter((failure) => !QUOTE_SEND_EXEMPT_GATE_IDS.has(failure.gateId))
+}
 
 export async function POST(req: Request) {
   const auth = await requireRole(["admin", "manager", "consultant"])
@@ -168,40 +190,42 @@ export async function POST(req: Request) {
 
   const customerRecord = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
 
-  if (
-    parsed.data.moveStage &&
-    booking.stage !== parsed.data.moveStage &&
-    PRE_SEND_GATED_STAGES.has(parsed.data.moveStage)
-  ) {
-    // The two quote gates read `input.quotes`, so it has to be loaded here.
-    // Omitting it left the array empty, which reads as "no quote was ever
-    // sent" and blocked every reservation-form acknowledgement on the way to
-    // Quote Accepted. The other pre-send gates run off booking/customer
-    // columns already selected above, so this is the only extra query.
-    const { data: gateQuotes, error: gateQuotesError } = await supabase
-      .from("quotes")
-      .select("status, total, created_at")
-      .eq("booking_id", bookingId)
+  const movingStage = Boolean(parsed.data.moveStage && booking.stage !== parsed.data.moveStage)
+  const transitionBooking = {
+    id: booking.id,
+    stage: booking.stage as PipelineStage,
+    source: booking.source,
+    email_import_needs_review: booking.email_import_needs_review,
+    email_import_review_resolved_at: booking.email_import_review_resolved_at,
+    customer_invoice_number: booking.customer_invoice_number,
+    reservation_form_received_at: booking.reservation_form_received_at,
+    revision_reset_at: booking.revision_reset_at,
+  }
 
-    if (gateQuotesError) return safeSupabaseError("correspondence:load-gate-quotes", gateQuotesError)
+  if (movingStage && parsed.data.moveStage) {
+    // The full evidence set, not just quotes: the gate that refuses `deposit_paid` without a
+    // recorded payment reads `payments`, which this route never loaded, so it could never fire.
+    const gateContext = await loadTransitionContext(supabase, {
+      bookingId,
+      customerId: booking.customer_id,
+      fromStage: booking.stage as PipelineStage,
+      targetStage: parsed.data.moveStage,
+    })
 
-    const gateFailures = validateTransition({
-      booking: {
-        id: booking.id,
-        stage: booking.stage as PipelineStage,
-        source: booking.source,
-        email_import_needs_review: booking.email_import_needs_review,
-        email_import_review_resolved_at: booking.email_import_review_resolved_at,
-        customer_invoice_number: booking.customer_invoice_number,
-        revision_reset_at: booking.revision_reset_at,
-      },
+    const preSendDecision = decideGatedTransition({
+      booking: transitionBooking,
       customer: customerRecord ?? null,
       targetStage: parsed.data.moveStage,
-      quotes: gateQuotes ?? [],
-    }).filter((failure) => PRE_SEND_GATE_IDS.has(failure.gateId))
+      context: gateContext,
+      manualConfirmations: parsed.data.manualConfirmations,
+      override: parsed.data.override,
+    })
+    const gateFailures = gatesFor(preSendDecision.failures, parsed.data.moveStage).filter((failure) =>
+      PRE_SEND_GATE_IDS.has(failure.gateId),
+    )
 
-    if (gateFailures.length > 0) {
-      return jsonError("Stage transition blocked", 400, { failures: gateFailures })
+    if (gateFailures.length > 0 && parsed.data.override !== true) {
+      return jsonError("Stage transition blocked", 400, { failures: gateFailures, canOverride: true })
     }
   }
 
@@ -262,6 +286,8 @@ export async function POST(req: Request) {
       .from("quote_line_items")
       .select("pricing_snapshot")
       .eq("quote_id", parsed.data.quoteId)
+      // Ordered because the primary-supplier fallbacks are "first leg in array order".
+      .order("sort_order", { ascending: true })
 
     if (configLineItemsError) {
       return safeSupabaseError("correspondence:load-quote-config", configLineItemsError)
@@ -272,6 +298,7 @@ export async function POST(req: Request) {
         pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
       })),
       overrides: overridesFromQuoteRow(quoteRow),
+      bookingId,
     })
 
     if (quoteConfig.unresolved.length > 0) {
@@ -478,6 +505,7 @@ export async function POST(req: Request) {
   // client also PATCHes the booking after a successful send; this is the server-side backstop so
   // the pipeline gate at lib/pipeline/validate-transition.ts never depends on that second call
   // landing. Only ever fills a blank — it must not overwrite an earlier, hand-entered date.
+  let reservationFormReceivedAt = booking.reservation_form_received_at
   if (parsed.data.kind === "reservation_received" && !booking.reservation_form_received_at) {
     const { error: receivedStampError } = await supabase
       .from("bookings")
@@ -487,6 +515,11 @@ export async function POST(req: Request) {
 
     if (receivedStampError) {
       console.error("correspondence:stamp-reservation-form-received", receivedStampError)
+    } else {
+      // Carried into the gate check below: sending the acknowledgement is the moment the form is
+      // received, so the `reservation_form_received` gate must judge the booking as it now is, not
+      // as it was when this request started.
+      reservationFormReceivedAt = parsed.data.sentAt ?? now
     }
   }
 
@@ -530,73 +563,73 @@ export async function POST(req: Request) {
     const targetStage = parsed.data.moveStage
     const fromStage = booking.stage as PipelineStage
 
-    const [quotesRes, documentsRes, correspondencesRes, versionRes] = await Promise.all([
-      supabase.from("quotes").select("id, status, total, created_at").eq("booking_id", bookingId),
-      supabase.from("documents").select("id, kind, status, created_at").eq("booking_id", bookingId),
-      supabase
-        .from("correspondences")
-        .select("id, kind, subject, status, created_at")
-        .eq("booking_id", bookingId),
-      // applyTransition guards the write on this stamp, and the send above may
-      // already have bumped it (the reservation-form backstop writes to the
-      // booking), so the version it gets has to be re-read here rather than
-      // carried over from the load at the top of the request.
-      supabase.from("bookings").select("updated_at").eq("id", bookingId).maybeSingle(),
-    ])
+    // Re-loaded now that the correspondence row exists: the gates this send is what satisfies
+    // ("the voucher email was sent", "the invoice was sent") can only see it from here.
+    const context = await loadTransitionContext(supabase, {
+      bookingId,
+      customerId: booking.customer_id,
+      fromStage,
+      targetStage,
+    })
 
-    if (quotesRes.error) return safeSupabaseError("correspondence:load-quotes", quotesRes.error)
-    if (documentsRes.error) return safeSupabaseError("correspondence:load-documents", documentsRes.error)
-    if (correspondencesRes.error) return safeSupabaseError("correspondence:load-correspondences", correspondencesRes.error)
+    // applyTransition guards the write on this stamp, and the send above may already have bumped it
+    // (the reservation-form backstop writes to the booking), so the version it gets has to be
+    // re-read here rather than carried over from the load at the top of the request.
+    const versionRes = await supabase.from("bookings").select("updated_at").eq("id", bookingId).maybeSingle()
     if (versionRes.error) return safeSupabaseError("correspondence:load-booking-version", versionRes.error)
 
-    try {
-      await applyTransition(supabase, {
-        booking: {
-          id: booking.id,
-          booking_number: booking.booking_number,
-          stage: booking.stage,
-          source: booking.source,
-          raw_text: booking.raw_text,
-          updated_at: versionRes.data?.updated_at ?? booking.updated_at,
-          customer_id: booking.customer_id,
-          consultant: booking.consultant,
-          assigned_salesperson_id: booking.assigned_salesperson_id,
-        },
-        departureDate: booking.departure_date,
-        durationNights: booking.duration_nights,
-        targetStage,
-        actorName: profile.actorName,
-        actorUserId: auth.value.user.id,
-        quotes: quotesRes.data ?? [],
-        documents: documentsRes.data ?? [],
-        correspondences: correspondencesRes.data ?? [],
-      })
-    } catch (transitionError) {
-      if (transitionError instanceof StaleTransitionError) {
-        return staleVersionResponse("booking", transitionError.currentUpdatedAt)
-      }
-      return safeSupabaseError("correspondence:apply-transition", transitionError)
+    const decision = decideGatedTransition({
+      booking: { ...transitionBooking, reservation_form_received_at: reservationFormReceivedAt },
+      customer: customerRecord ?? null,
+      targetStage,
+      context,
+      manualConfirmations: parsed.data.manualConfirmations,
+      override: parsed.data.override,
+    })
+
+    if (decision.overriding && !parsed.data.overrideReason?.trim()) {
+      return jsonError("Override reason is required", 400)
     }
 
-    const { error: historyError } = await supabase.from("pipeline_history").insert({
-      booking_id: bookingId,
-      from_stage: fromStage,
-      to_stage: targetStage,
-      moved_by: profile.actorName,
-      moved_by_user_id: auth.value.user.id,
-    })
-    if (historyError) return safeSupabaseError("correspondence:pipeline-history", historyError)
+    // The email is already out — it was the point of the request — so a blocked move reports both
+    // facts rather than pretending the send didn't happen. The stage simply stays where it was.
+    const blockingFailures = gatesFor(decision.failures, targetStage)
+    if (decision.blocked && blockingFailures.length > 0) {
+      return jsonError("Stage transition blocked", 400, {
+        failures: blockingFailures,
+        canOverride: decision.canOverride,
+        correspondenceId: cor.id,
+        emailSent: true,
+      })
+    }
 
-    const { error: auditError } = await writeAuditLog(supabase, {
-      actor: profile.actorName,
+    const result = await applyGatedTransition(supabase, {
+      booking: {
+        id: booking.id,
+        booking_number: booking.booking_number,
+        stage: booking.stage,
+        source: booking.source,
+        raw_text: booking.raw_text,
+        updated_at: versionRes.data?.updated_at ?? booking.updated_at,
+        customer_id: booking.customer_id,
+        consultant: booking.consultant,
+        assigned_salesperson_id: booking.assigned_salesperson_id,
+      },
+      departureDate: booking.departure_date,
+      durationNights: booking.duration_nights,
+      targetStage,
+      actorName: profile.actorName,
       actorUserId: auth.value.user.id,
-      entityType: "Booking",
-      entityId: bookingId,
-      action: "stage_change",
-      before: { stage: fromStage } as Json,
-      after: { stage: targetStage } as Json,
+      decision,
+      context,
+      overrideReason: parsed.data.overrideReason?.trim(),
+      manualConfirmations: parsed.data.manualConfirmations,
     })
-    if (auditError) return safeSupabaseError("correspondence:audit", auditError)
+
+    if (!result.ok) {
+      if (result.reason === "stale") return staleVersionResponse("booking", result.currentUpdatedAt)
+      return safeSupabaseError(`correspondence:transition-${result.step}`, result.error)
+    }
   }
 
   // Draft a scheduled follow-up 48h out — quote emails only, composed from the
@@ -613,6 +646,7 @@ export async function POST(req: Request) {
       },
       blocks: shared.blocks,
       senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
+      templateSupplierId: shared.primarySupplierId,
     })
 
     if (followUp) {

@@ -44,6 +44,24 @@ export function rateCardFares(card: FareRateCard): PassengerFare[] {
 }
 
 /**
+ * Fares for a hotel room's occupants. Same three columns, one deliberate difference: an unset child
+ * or infant price means **free**, never "same as an adult".
+ *
+ * A hotel card prices a bed, not a seat — the child rate is what the hotel charges for a child
+ * sharing the room, and a room type that sets none (Kruger Shalati's Sunset Suite, say) is one where
+ * a child sharing costs nothing extra. Falling back to the adult rate the way `rateCardFares` does
+ * would silently bill a full adult stay for a child, on every room whose child price was simply left
+ * blank.
+ */
+export function hotelRateCardFares(card: FareRateCard): PassengerFare[] {
+  return [
+    { ...FARE_KEYS[0], unitPrice: card.pricePerPerson },
+    { ...FARE_KEYS[1], unitPrice: card.childPrice ?? 0 },
+    { ...FARE_KEYS[2], unitPrice: card.infantPrice ?? 0 },
+  ]
+}
+
+/**
  * Fares for a manual (typed, no rate card) supplier. Here the fallback chain runs the other way —
  * child defaults to the adult price, and infant defaults to the child price — because a manual
  * fare with nothing typed for child/infant is read as "same as the one price the consultant did

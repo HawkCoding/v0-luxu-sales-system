@@ -338,9 +338,10 @@ export default function TemplatesPage() {
     }
   }
 
-  // Per-train variants (e.g. a Rovos-specific quote_email body) reuse their parent's system key,
-  // distinguished only by supplierId. SortableList drags parents only -- a variant's position is
-  // fixed under its parent card, so it is filtered out of the draggable list and grouped by key.
+  // Per-supplier variants (e.g. a Rovos-specific quote_email body, or a Kruger Shalati one) reuse
+  // their parent's system key, distinguished only by supplierId. SortableList drags parents only --
+  // a variant's position is fixed under its parent card, so it is filtered out of the draggable
+  // list and grouped by key.
   const parentTemplates = orderedTemplates.filter((t) => !t.supplierId)
   const variantsByKey = new Map<string, Template[]>()
   for (const t of orderedTemplates) {
@@ -353,8 +354,10 @@ export default function TemplatesPage() {
     list.sort((a, b) => a.name.localeCompare(b.name))
   }
   const supplierNameById = new Map((suppliers ?? []).map((s) => [s.id, s.name]))
-  const trainOperators = (suppliers ?? [])
-    .filter((s) => s.kind === "train_operator")
+  // Any supplier that may head a booking of its own (trains, and standalone stays like Kruger
+  // Shalati) may carry a variant -- not just trains.
+  const primarySuppliers = (suppliers ?? [])
+    .filter((s) => s.sellsStandalone)
     .sort((a, b) => a.name.localeCompare(b.name))
 
   const openAddVariant = (parent: Template) => {
@@ -364,7 +367,7 @@ export default function TemplatesPage() {
 
   const handleCreateVariant = async () => {
     if (!addingVariantFor || !variantSupplierId) return
-    const supplierName = supplierNameById.get(variantSupplierId) ?? "Train"
+    const supplierName = supplierNameById.get(variantSupplierId) ?? "Supplier"
     setCreatingVariant(true)
     try {
       const res = await fetch("/api/templates", {
@@ -491,7 +494,7 @@ export default function TemplatesPage() {
                         <div key={variant.id} className="flex items-center justify-between gap-2 rounded-md bg-secondary/40 px-2.5 py-1.5">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="text-xs font-medium truncate">
-                              {supplierNameById.get(variant.supplierId ?? "") ?? "Unknown train"}
+                              {supplierNameById.get(variant.supplierId ?? "") ?? "Unknown supplier"}
                             </span>
                             <Badge variant="secondary" className="text-[10px]">v{variant.version}</Badge>
                           </div>
@@ -509,7 +512,7 @@ export default function TemplatesPage() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => setPendingDelete(variant)}
-                                aria-label={`Delete ${supplierNameById.get(variant.supplierId ?? "") ?? "train"} variant`}
+                                aria-label={`Delete ${supplierNameById.get(variant.supplierId ?? "") ?? "supplier"} variant`}
                               >
                                 <Trash2 className="w-3.5 h-3.5 text-destructive" />
                               </Button>
@@ -520,7 +523,7 @@ export default function TemplatesPage() {
                       {can("edit:templates") && (
                         <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openAddVariant(t)}>
                           <Plus className="w-3.5 h-3.5 mr-1" />
-                          Add train variant
+                          Add variant
                         </Button>
                       )}
                     </div>
@@ -702,31 +705,32 @@ export default function TemplatesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Train Variant Dialog */}
+      {/* Add Variant Dialog */}
       <Dialog open={!!addingVariantFor} onOpenChange={(open) => !open && setAddingVariantFor(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add train variant</DialogTitle>
+            <DialogTitle>Add variant</DialogTitle>
             <DialogDescription>
               {addingVariantFor
-                ? `Starts as a copy of "${addingVariantFor.name}" — edit it afterwards to diverge in wording. A train with no variant of its own keeps using the shared template.`
+                ? `Starts as a copy of "${addingVariantFor.name}" — edit it afterwards to diverge in wording. A supplier with no variant of its own keeps using the shared template.`
                 : null}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Train</label>
+              <label className="text-xs font-medium text-muted-foreground">Supplier</label>
               <Select value={variantSupplierId} onValueChange={setVariantSupplierId}>
                 <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select a train operator" />
+                  <SelectValue placeholder="Select a supplier" />
                 </SelectTrigger>
                 <SelectContent>
-                  {trainOperators.length === 0 ? (
+                  {primarySuppliers.length === 0 ? (
                     <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      No train operator suppliers found.
+                      No standalone suppliers found. Tick &ldquo;Sold as a standalone booking&rdquo; on a
+                      supplier first.
                     </div>
                   ) : (
-                    trainOperators.map((s) => (
+                    primarySuppliers.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}
                       </SelectItem>

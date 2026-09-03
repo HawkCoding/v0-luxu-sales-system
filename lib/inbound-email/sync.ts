@@ -6,6 +6,7 @@ import { createRawEmailPreview, htmlToPlainText } from "@/lib/inbound-email/html
 import { findMatchingInboundSubjectRule, type InboundSubjectRule } from "@/lib/inbound-email/rules"
 import { assessEnquiryPlausibility, getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
 import { countRequiredComplete, parseEmailDraft, type ParseEmailDraftOptions } from "@/lib/import/parseEmailDraft"
+import type { SupplierMatcher } from "@/lib/suppliers/match-phrases"
 import { createServiceClient } from "@/lib/supabase/server"
 import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
@@ -36,8 +37,38 @@ export interface TestConnectionResult {
 // Bounds how many candidate UIDs a single sync invocation will fetch and import. Keeps the run
 // short (the IMAP connection for the collect phase is only open for the search+fetch below, not
 // for the whole import), and lets a large backlog drain safely across successive cron runs
-// instead of risking a platform timeout mid-run.
-const MAX_UIDS_PER_RUN = 100
+// instead of risking a platform timeout mid-run. The wall-clock budget below is the real guard --
+// this only bounds how much the collect phase downloads before the import phase gets a look in.
+const MAX_UIDS_PER_RUN = 25
+
+// Import measures at roughly 8s/message in production (parse, booking creation, several DB round
+// trips), against the 60s ceiling declared by the cron route. A run that overruns is killed by the
+// platform mid-message, which is exactly the case that used to lose an enquiry -- so stop
+// voluntarily with time to spare, and never start a message we cannot expect to finish.
+const RUN_BUDGET_MS = 45_000
+const PER_MESSAGE_HEADROOM_MS = 12_000
+
+// How many times a UID is re-imported before it is left for a human. Bounded so a message that
+// fails for a reason no retry can fix (an unparseable body, a reference that will never resolve)
+// cannot consume the whole budget on every run forever.
+const MAX_IMPORT_ATTEMPTS = 3
+
+export interface SyncDeadline {
+  /** Epoch milliseconds after which no further message should be started. */
+  readonly endsAt: number
+}
+
+export function createSyncDeadline(budgetMs: number = RUN_BUDGET_MS): SyncDeadline {
+  return { endsAt: Date.now() + budgetMs }
+}
+
+function budgetExhausted(deadline: SyncDeadline): boolean {
+  return Date.now() >= deadline.endsAt
+}
+
+function hasHeadroomForMessage(deadline: SyncDeadline): boolean {
+  return deadline.endsAt - Date.now() >= PER_MESSAGE_HEADROOM_MS
+}
 
 // A claimed-but-never-finished message (process crashed between the claim insert and the booking
 // being recorded) is left at status "processing" forever otherwise -- and, because the dedupe
@@ -50,12 +81,28 @@ interface CollectedMessage {
   /** IMAP INTERNALDATE -- when the message landed in the mailbox. Only used when the message
    * carries no usable `Date:` header of its own. */
   internalDate?: Date
+  /** Present when this message is a retry of a row that already exists, rather than a first
+   * sighting. The import phase updates that row instead of claiming a new one. */
+  existingRow?: ExistingMessageRow
+}
+
+interface ExistingMessageRow {
+  id: string
+  attempts: number
 }
 
 interface CollectedBatch {
   uidvalidity: number
-  highestSeenUid: number
+  /**
+   * Every UID this run took responsibility for, ascending -- both the ones fetched and the ones
+   * already recorded by an earlier run. The cursor may only advance over the leading run of these
+   * that ended with a row (see highestSettledUid), so a UID can never drop below the cursor
+   * unaccounted for.
+   */
+  candidateUids: number[]
   messages: CollectedMessage[]
+  /** The budget cut the fetch short, so there is known work left in the mailbox. */
+  truncated: boolean
 }
 
 function mapRule(row: RuleRow): InboundSubjectRule {
@@ -169,17 +216,23 @@ async function loadActiveRules(supabase: ServiceClient): Promise<InboundSubjectR
   return (data ?? []).map(mapRule)
 }
 
-// Loaded once per sync run (not per message) and threaded into parseEmailDraft so a newly added
-// train operator is recognised without a code change -- see ParseEmailDraftOptions.
-async function loadActiveTrainOperatorNames(supabase: ServiceClient): Promise<string[]> {
+// Loaded once per sync run (not per message) and threaded into parseEmailDraft so a newly ticked
+// supplier is recognised without a code change -- see ParseEmailDraftOptions. Covers every
+// supplier that may head a booking of its own: train operators, and hotels sold standalone such as
+// Kruger Shalati, whose enquiries are stays rather than journeys.
+async function loadStandaloneSupplierMatchers(supabase: ServiceClient): Promise<SupplierMatcher[]> {
   const { data, error } = await supabase
     .from("suppliers")
-    .select("name")
-    .eq("kind", "train_operator")
+    .select("name, kind, email_match_phrases")
+    .eq("sells_standalone", true)
     .eq("active", true)
 
   if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => row.name)
+  return (data ?? []).map((row) => ({
+    name: row.name,
+    kind: row.kind,
+    emailMatchPhrases: row.email_match_phrases,
+  }))
 }
 
 function firstSyncSinceDate(): Date {
@@ -224,6 +277,11 @@ async function healStaleClaims(supabase: ServiceClient, account: AccountRow): Pr
       // created for it, so there's nothing safe to file, and leaving filing_status untouched
       // would let fileOutstandingMessages pick it up and overwrite this diagnostic error.
       filing_status: "not_applicable",
+      // Deliberately exhausted: a stuck claim can sit on either side of booking creation (one
+      // observed in production had a real booking, another had none), so auto-retrying it risks a
+      // duplicate booking. Park it at the retry ceiling instead -- it stays visible as failed and
+      // a human decides.
+      attempts: MAX_IMPORT_ATTEMPTS,
       error: "Stuck in processing for over an hour -- sync likely crashed mid-import. Verify whether a booking was created before retrying.",
     })
     .in("id", stale.map((row) => row.id))
@@ -292,6 +350,22 @@ async function updateRun(
     .eq("id", runId)
 }
 
+/**
+ * The cursor may only move over the leading run of candidate UIDs that ended this run with a row.
+ * Stopping at the first unaccounted UID is what makes truncation safe: whatever the budget cut
+ * short stays above the cursor and is picked up by the next run, instead of being skipped past.
+ * Failed and dropped messages do have rows, so they do not stall the cursor -- the retry pass owns
+ * them from that point on.
+ */
+function highestSettledUid(candidateUids: number[], settledUids: Set<number>, previous: number): number {
+  let cursor = previous
+  for (const uid of candidateUids) {
+    if (!settledUids.has(uid)) break
+    if (uid > cursor) cursor = uid
+  }
+  return cursor
+}
+
 export async function testInboundEmailConnection(account: AccountRow): Promise<TestConnectionResult> {
   const client = createImapClient(account)
 
@@ -319,6 +393,9 @@ async function collectCandidateMessages(
   account: AccountRow,
   supabase: ServiceClient,
   summary: EmailSyncSummary,
+  runId: string,
+  deadline: SyncDeadline,
+  settledUids: Set<number>,
 ): Promise<CollectedBatch> {
   const client = createImapClient(account)
 
@@ -331,40 +408,158 @@ async function collectCandidateMessages(
 
     await healStaleClaims(supabase, account)
 
+    // Retries come first. They are the only work that can sit below the cursor, and a steady
+    // trickle of new mail must never starve a message that has already failed once.
+    const retries = await collectRetryCandidates(client, supabase, account, uidvalidity, deadline)
+
     const rawCandidates = await getCandidateUids(client, account)
     const candidateUids = rawCandidates.slice().sort((a, b) => a - b).slice(0, MAX_UIDS_PER_RUN)
     const freshUids = await filterAlreadyProcessed(supabase, account, uidvalidity, candidateUids, summary)
 
-    let highestSeenUid = account.last_seen_uid ?? 0
-    const messages: CollectedMessage[] = []
+    // Whatever the duplicate check filtered out already has a row, so it is accounted for and the
+    // cursor is free to move over it.
+    const freshUidSet = new Set(freshUids)
+    for (const uid of candidateUids) {
+      if (!freshUidSet.has(uid)) settledUids.add(uid)
+    }
 
-    if (freshUids.length > 0) {
+    const messages: CollectedMessage[] = [...retries]
+    const collected = new Set<number>()
+    let truncated = false
+
+    if (freshUids.length > 0 && !budgetExhausted(deadline)) {
       for await (const message of client.fetch(freshUids, { uid: true, source: true, internalDate: true }, { uid: true })) {
-        if (!message.uid || !message.source) continue
-        // imapflow types internalDate as `string | Date` -- normalise to a Date, dropping anything
-        // unparseable so a bad value can never reach `.toISOString()`.
+        if (message.uid && message.source) {
+          // imapflow types internalDate as `string | Date` -- normalise to a Date, dropping anything
+          // unparseable so a bad value can never reach `.toISOString()`.
+          const internalDate = message.internalDate ? new Date(message.internalDate) : undefined
+          collected.add(message.uid)
+          messages.push({
+            uid: message.uid,
+            source: message.source,
+            internalDate: internalDate && !Number.isNaN(internalDate.getTime()) ? internalDate : undefined,
+          })
+        }
+        if (budgetExhausted(deadline)) {
+          truncated = true
+          break
+        }
+      }
+    } else if (freshUids.length > 0) {
+      truncated = true
+    }
+
+    // A UID the server did not hand back a usable body for is recorded rather than skipped. The
+    // cursor advances over recorded UIDs, so without a row this message would be gone with no
+    // trace anywhere -- which is precisely how enquiries used to disappear. Only do this for a
+    // complete pass: when the budget cut the fetch short the remaining UIDs were never attempted,
+    // and leaving them unsettled is what holds the cursor back for the next run.
+    if (!truncated) {
+      const dropped = freshUids.filter((uid) => !collected.has(uid))
+      for (const uid of dropped) {
+        const { error: dropError } = await supabase.from("inbound_email_messages").insert({
+          email_account_id: account.id,
+          sync_run_id: runId,
+          booking_id: null,
+          uidvalidity,
+          uid,
+          message_id: null,
+          subject: "(message source not returned by server)",
+          from_address: null,
+          received_at: null,
+          status: "fetch_failed",
+          filing_status: "not_applicable",
+          missing_fields: [],
+          warnings: [],
+          raw_preview: null,
+          attempts: 0,
+          error: "IMAP fetch returned no usable source for this UID; queued for retry.",
+        })
+
+        if (dropError && !isUniqueViolation(dropError)) {
+          summary.errors.push(`Failed to record dropped fetch for UID ${uid}: ${dropError.message}`)
+          continue
+        }
+        settledUids.add(uid)
+      }
+    }
+
+    return { uidvalidity, candidateUids, messages, truncated }
+  } finally {
+    await closeImapClient(client)
+  }
+}
+
+// Re-fetches UIDs that a previous run recorded but could not import. Deliberately keyed off the
+// message rows rather than the account cursor: a failed UID is usually already below it, so the
+// normal `uid > last_seen_uid` search would never look at it again.
+async function collectRetryCandidates(
+  client: ImapFlow,
+  supabase: ServiceClient,
+  account: AccountRow,
+  uidvalidity: number,
+  deadline: SyncDeadline,
+): Promise<CollectedMessage[]> {
+  if (!hasHeadroomForMessage(deadline)) return []
+
+  const { data: rows, error } = await supabase
+    .from("inbound_email_messages")
+    .select("id, uid, attempts")
+    // A row that already points at a booking is never retried -- that would duplicate the booking.
+    .is("booking_id", null)
+    .eq("email_account_id", account.id)
+    .eq("uidvalidity", uidvalidity)
+    .in("status", ["failed", "fetch_failed"])
+    .lt("attempts", MAX_IMPORT_ATTEMPTS)
+    .order("uid", { ascending: true })
+    .limit(MAX_UIDS_PER_RUN)
+
+  if (error) throw new Error(`Retry lookup failed: ${error.message}`)
+  if (!rows || rows.length === 0) return []
+
+  const byUid = new Map(rows.map((row) => [row.uid, { id: row.id, attempts: row.attempts ?? 0 }]))
+  const uids = Array.from(byUid.keys())
+  const messages: CollectedMessage[] = []
+  const seen = new Set<number>()
+  let truncated = false
+
+  for await (const message of client.fetch(uids, { uid: true, source: true, internalDate: true }, { uid: true })) {
+    if (message.uid) {
+      seen.add(message.uid)
+      const existingRow = byUid.get(message.uid)
+      if (message.source && existingRow) {
         const internalDate = message.internalDate ? new Date(message.internalDate) : undefined
         messages.push({
           uid: message.uid,
           source: message.source,
           internalDate: internalDate && !Number.isNaN(internalDate.getTime()) ? internalDate : undefined,
+          existingRow,
         })
       }
     }
-
-    // Advance past the whole evaluated batch (not just the messages that fetched cleanly) so a
-    // duplicate or a message dropped mid-fetch doesn't get re-scanned forever. Anything beyond
-    // the MAX_UIDS_PER_RUN cap is left for the next run.
-    if (candidateUids.length > 0) {
-      highestSeenUid = Math.max(highestSeenUid, candidateUids[candidateUids.length - 1])
+    if (budgetExhausted(deadline)) {
+      truncated = true
+      break
     }
-
-    summary.scannedCount += candidateUids.length
-
-    return { uidvalidity, highestSeenUid, messages }
-  } finally {
-    await closeImapClient(client)
   }
+
+  // A UID the inbox no longer holds cannot be retried by this pass -- it was filed, moved or
+  // deleted outside of sync. Park it at the retry ceiling with a reason instead of looking it up
+  // on every future run.
+  if (!truncated) {
+    const goneIds = uids.filter((uid) => !seen.has(uid)).map((uid) => byUid.get(uid)?.id).filter((id): id is string => Boolean(id))
+    if (goneIds.length > 0) {
+      await supabase
+        .from("inbound_email_messages")
+        .update({
+          attempts: MAX_IMPORT_ATTEMPTS,
+          error: "Queued for retry but no longer present in the inbox (moved, filed or deleted outside of sync).",
+        })
+        .in("id", goneIds)
+    }
+  }
+
+  return messages
 }
 
 // Phase B -- import. Runs with no IMAP connection open at all. For each message: claim the UID
@@ -381,9 +576,17 @@ async function importCollectedMessages(
   runId: string,
   uidvalidity: number,
   summary: EmailSyncSummary,
-  trainOperatorNames: string[],
-): Promise<void> {
-  for (const { uid, source, internalDate } of messages) {
+  standaloneSuppliers: SupplierMatcher[],
+  deadline: SyncDeadline,
+  settledUids: Set<number>,
+): Promise<boolean> {
+  for (const { uid, source, internalDate, existingRow } of messages) {
+    // Stop before starting work there is no time to finish. A message abandoned part-way is the
+    // one failure this whole design exists to prevent: the platform kills the function, the row is
+    // left mid-flight and the enquiry has no booking.
+    if (!hasHeadroomForMessage(deadline)) return true
+
+    summary.scannedCount += 1
     const parsedMail = await simpleParser(source)
     const subject = parsedMail.subject?.trim() || "(no subject)"
     const messageId = parsedMail.messageId ?? null
@@ -392,6 +595,75 @@ async function importCollectedMessages(
     // message landed in the mailbox) only rescues mail that arrived without a readable header --
     // without it those imports showed no received time at all.
     const receivedAt = parsedMail.date?.toISOString() ?? internalDate?.toISOString() ?? null
+
+    // A UID is not a stable identity. A message that leaves the INBOX and comes back returns with a
+    // new one, and UID-only dedupe reads that as new mail -- which is how fourteen enquiries were
+    // imported a second time in one morning (LTT-2026-0032..0045). The RFC Message-ID survives a
+    // move, a re-delivery and a UIDVALIDITY reset, so it is checked before anything is claimed.
+    // Only terminal imported rows count as "already handled": a previous failure must stay retryable.
+    if (messageId) {
+      const { data: priorImport, error: priorError } = await supabase
+        .from("inbound_email_messages")
+        .select("id, uid, booking_id")
+        .eq("email_account_id", account.id)
+        .eq("message_id", messageId)
+        .in("status", ["imported_complete", "imported_needs_review"])
+        .neq("uid", uid)
+        .limit(1)
+        .maybeSingle()
+
+      if (priorError) {
+        summary.errors.push(`Duplicate Message-ID check failed for UID ${uid}: ${priorError.message}`)
+        continue
+      }
+
+      if (priorImport) {
+        const note = priorImport.booking_id
+          ? `Same Message-ID as UID ${priorImport.uid} (booking ${priorImport.booking_id}) -- already imported, so no second booking was created.`
+          : `Same Message-ID as UID ${priorImport.uid} -- already imported, so no second booking was created.`
+
+        // Left where it is rather than filed: the cursor advances over it either way, so it is not
+        // re-examined unless the same mail turns up yet again under a third UID.
+        const { error: duplicateError } = existingRow
+          ? await supabase
+              .from("inbound_email_messages")
+              .update({
+                sync_run_id: runId,
+                status: "skipped_duplicate_message",
+                filing_status: "not_applicable",
+                subject,
+                error: note,
+              })
+              .eq("id", existingRow.id)
+          : await supabase.from("inbound_email_messages").insert({
+              email_account_id: account.id,
+              sync_run_id: runId,
+              booking_id: null,
+              uidvalidity,
+              uid,
+              message_id: messageId,
+              subject,
+              from_address: fromAddress,
+              received_at: receivedAt,
+              status: "skipped_duplicate_message",
+              filing_status: "not_applicable",
+              missing_fields: [],
+              warnings: [],
+              raw_preview: null,
+              error: note,
+            })
+
+        if (duplicateError && !isUniqueViolation(duplicateError)) {
+          summary.errors.push(`Failed to record duplicate Message-ID for UID ${uid}: ${duplicateError.message}`)
+          continue
+        }
+
+        summary.duplicateCount += 1
+        settledUids.add(uid)
+        continue
+      }
+    }
+
     const matchingRule = findMatchingInboundSubjectRule(subject, rules)
 
     if (!matchingRule) {
@@ -399,61 +671,112 @@ async function importCollectedMessages(
       // record at all -- and by the time anyone noticed, the sync cursor had already advanced
       // past its UID, making it permanently unrecoverable. Recording a row keeps it visible and
       // makes it count toward the dedupe check like every other message.
-      const { error: skipError } = await supabase.from("inbound_email_messages").insert({
-        email_account_id: account.id,
-        sync_run_id: runId,
-        booking_id: null,
-        uidvalidity,
-        uid,
-        message_id: messageId,
-        subject,
-        from_address: fromAddress,
-        received_at: receivedAt,
-        status: "skipped_no_rule",
-        filing_status: "not_applicable",
-        missing_fields: [],
-        warnings: [],
-        raw_preview: null,
-      })
+      const { error: skipError } = existingRow
+        ? await supabase
+            .from("inbound_email_messages")
+            .update({
+              sync_run_id: runId,
+              status: "skipped_no_rule",
+              filing_status: "not_applicable",
+              subject,
+              error: null,
+            })
+            .eq("id", existingRow.id)
+        : await supabase.from("inbound_email_messages").insert({
+            email_account_id: account.id,
+            sync_run_id: runId,
+            booking_id: null,
+            uidvalidity,
+            uid,
+            message_id: messageId,
+            subject,
+            from_address: fromAddress,
+            received_at: receivedAt,
+            status: "skipped_no_rule",
+            filing_status: "not_applicable",
+            missing_fields: [],
+            warnings: [],
+            raw_preview: null,
+          })
       if (skipError && !isUniqueViolation(skipError)) {
         summary.errors.push(`Failed to record skipped message for UID ${uid}: ${skipError.message}`)
+        continue
       }
+      settledUids.add(uid)
       continue
     }
 
-    const { data: claim, error: claimError } = await supabase
-      .from("inbound_email_messages")
-      .insert({
-        email_account_id: account.id,
-        sync_run_id: runId,
-        booking_id: null,
-        uidvalidity,
-        uid,
-        message_id: messageId,
-        subject,
-        from_address: fromAddress,
-        received_at: receivedAt,
-        status: "processing",
-        filing_status: "filing_failed",
-        missing_fields: [],
-        warnings: [],
-        raw_preview: null,
-      })
-      .select("id")
-      .single()
+    // Attempts are counted at claim time, not on failure: a run killed by the platform between
+    // here and the result would otherwise leave the counter untouched and retry forever.
+    const attempts = (existingRow?.attempts ?? 0) + 1
+    let claimId: string
 
-    if (claimError || !claim) {
-      // A unique violation means another (concurrent) run already claimed this UID -- leave it
-      // for that run to finish. Anything else is a real failure worth surfacing.
-      if (!isUniqueViolation(claimError)) {
-        summary.errors.push(`Failed to claim UID ${uid}: ${claimError?.message ?? "unknown error"}`)
+    if (existingRow) {
+      // Retry of a row an earlier run recorded. Re-claiming it (rather than inserting) keeps the
+      // unique key intact, so the retry still cannot race a concurrent run into a second booking.
+      const { error: reclaimError } = await supabase
+        .from("inbound_email_messages")
+        .update({
+          sync_run_id: runId,
+          status: "processing",
+          filing_status: "filing_failed",
+          attempts,
+          message_id: messageId,
+          subject,
+          from_address: fromAddress,
+          received_at: receivedAt,
+          error: null,
+        })
+        .eq("id", existingRow.id)
+
+      if (reclaimError) {
+        summary.errors.push(`Failed to re-claim UID ${uid}: ${reclaimError.message}`)
+        continue
       }
-      continue
+      claimId = existingRow.id
+    } else {
+      const { data: claim, error: claimError } = await supabase
+        .from("inbound_email_messages")
+        .insert({
+          email_account_id: account.id,
+          sync_run_id: runId,
+          booking_id: null,
+          uidvalidity,
+          uid,
+          message_id: messageId,
+          subject,
+          from_address: fromAddress,
+          received_at: receivedAt,
+          status: "processing",
+          filing_status: "filing_failed",
+          missing_fields: [],
+          warnings: [],
+          raw_preview: null,
+          attempts,
+        })
+        .select("id")
+        .single()
+
+      if (claimError || !claim) {
+        // A unique violation means another (concurrent) run already claimed this UID -- leave it
+        // for that run to finish. A row exists either way, so it stays accounted for. Anything
+        // else is a real failure worth surfacing, and leaves the UID unsettled on purpose.
+        if (!isUniqueViolation(claimError)) {
+          summary.errors.push(`Failed to claim UID ${uid}: ${claimError?.message ?? "unknown error"}`)
+          continue
+        }
+        settledUids.add(uid)
+        continue
+      }
+      claimId = claim.id
     }
 
-    const bodySelection = getMessageBody(parsedMail.text, parsedMail.html, { trainOperatorNames })
+    // The subject travels with the body: a Gravity Forms notification names the form -- and so the
+    // supplier -- only in its subject line, and a Kruger Shalati body never states the property.
+    const parseOptions = { standaloneSuppliers, subject }
+    const bodySelection = getMessageBody(parsedMail.text, parsedMail.html, parseOptions)
     const rawText = bodySelection.body
-    const parsedDraft = parseEmailDraft(rawText, { trainOperatorNames })
+    const parsedDraft = parseEmailDraft(rawText, parseOptions)
     const review = getEmailImportReviewMetadata(parsedDraft)
     const altBodyPreview = bodySelection.altBody ? createRawEmailPreview(bodySelection.altBody) : null
 
@@ -474,12 +797,13 @@ async function importCollectedMessages(
           alt_body_preview: altBodyPreview,
           error: plausibility.reason,
         })
-        .eq("id", claim.id)
+        .eq("id", claimId)
 
       if (skipError) {
         summary.errors.push(`Failed to record non-enquiry for UID ${uid}: ${skipError.message}`)
       }
       summary.skippedNotEnquiryCount += 1
+      settledUids.add(uid)
       continue
     }
 
@@ -495,9 +819,32 @@ async function importCollectedMessages(
         warnings: review.warnings,
       })
     } catch (error) {
-      // Nothing was created -- safe to free the UID so the next sync retries this message.
-      await supabase.from("inbound_email_messages").delete().eq("id", claim.id)
-      summary.errors.push(error instanceof Error ? error.message : `Import failed for UID ${uid}`)
+      // Nothing was created. The row is kept (not deleted) and marked failed: deleting it used to
+      // "free the UID for retry", but the cursor advances past recorded UIDs, so the next run's
+      // `uid > last_seen_uid` search never looked at it again and the enquiry was lost outright.
+      // As a failed row it stays visible and the retry pass owns it.
+      const message = error instanceof Error ? error.message : `Import failed for UID ${uid}`
+      const { error: recordError } = await supabase
+        .from("inbound_email_messages")
+        .update({
+          status: "failed",
+          filing_status: "not_applicable",
+          missing_fields: review.missingFields,
+          warnings: review.warnings,
+          raw_preview: createRawEmailPreview(rawText),
+          body_part: bodySelection.part,
+          alt_body_preview: altBodyPreview,
+          error: message,
+        })
+        .eq("id", claimId)
+
+      if (recordError) {
+        summary.errors.push(`Failed to record import failure for UID ${uid}: ${recordError.message}`)
+        continue
+      }
+
+      summary.errors.push(message)
+      settledUids.add(uid)
       continue
     }
 
@@ -519,11 +866,11 @@ async function importCollectedMessages(
           body_part: bodySelection.part,
           alt_body_preview: altBodyPreview,
         })
-        .eq("id", claim.id)
+        .eq("id", claimId)
 
       if (updateError) throw new Error(updateError.message)
 
-      await supabase.from("bookings").update({ email_import_source_message_id: claim.id }).eq("id", created.id)
+      await supabase.from("bookings").update({ email_import_source_message_id: claimId }).eq("id", created.id)
 
       summary.importedCount += 1
       if (created.needsReview) summary.needsReviewCount += 1
@@ -535,7 +882,11 @@ async function importCollectedMessages(
         `Booking ${created.id} created but failed to record for UID ${uid}: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
+
+    settledUids.add(uid)
   }
+
+  return false
 }
 
 // Phase C -- file. Runs on its own connection, separately from collect/import, and covers both
@@ -626,10 +977,13 @@ async function fileOutstandingMessages(
   }
 }
 
-export async function syncInboundEmailAccount(account: AccountRow): Promise<EmailSyncSummary> {
+export async function syncInboundEmailAccount(
+  account: AccountRow,
+  deadline: SyncDeadline = createSyncDeadline(),
+): Promise<EmailSyncSummary> {
   const supabase = createServiceClient()
   const rules = await loadActiveRules(supabase)
-  const trainOperatorNames = await loadActiveTrainOperatorNames(supabase)
+  const standaloneSuppliers = await loadStandaloneSupplierMatchers(supabase)
   const summary: EmailSyncSummary = {
     scannedCount: 0,
     importedCount: 0,
@@ -650,24 +1004,47 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
   }
 
   let uidvalidity = account.last_uidvalidity ?? 0
+  // Every UID that ended the run with a row of its own. Anything missing from this set is left
+  // above the cursor for the next run rather than being skipped past.
+  const settledUids = new Set<number>()
 
   try {
-    const collected = await collectCandidateMessages(account, supabase, summary)
+    const collected = await collectCandidateMessages(account, supabase, summary, run.id, deadline, settledUids)
     uidvalidity = collected.uidvalidity
 
-    await importCollectedMessages(collected.messages, account, supabase, rules, run.id, uidvalidity, summary, trainOperatorNames)
+    const stoppedImporting = await importCollectedMessages(
+      collected.messages,
+      account,
+      supabase,
+      rules,
+      run.id,
+      uidvalidity,
+      summary,
+      standaloneSuppliers,
+      deadline,
+      settledUids,
+    )
+    const stoppedForBudget = stoppedImporting || collected.truncated
 
     await supabase
       .from("inbound_email_accounts")
       .update({
         last_uidvalidity: uidvalidity,
-        last_seen_uid: collected.highestSeenUid,
+        last_seen_uid: highestSettledUid(collected.candidateUids, settledUids, account.last_seen_uid ?? 0),
         first_sync_completed: true,
         last_synced_at: new Date().toISOString(),
       })
       .eq("id", account.id)
 
-    await updateRun(supabase, run.id, summary.errors.length > 0 ? "partial" : "success", summary)
+    // A run that ran out of budget is honestly a partial one, even with no errors -- there is
+    // known work left behind. Recording that (rather than leaving the row at "running", which is
+    // what a platform kill used to do) is what makes the backlog legible afterwards.
+    const notes = [...summary.errors]
+    if (stoppedForBudget) {
+      notes.push(`Stopped early: run budget of ${RUN_BUDGET_MS}ms reached with messages still to import.`)
+    }
+    const status = summary.errors.length > 0 || stoppedForBudget ? "partial" : "success"
+    await updateRun(supabase, run.id, status, summary, notes.length > 0 ? notes.join("\n") : undefined)
 
     if (summary.errors.length > 0) {
       void logError({ severity: "Critical", source: "inbound-email-sync", message: `Mailbox sync completed with ${summary.errors.length} error(s)`, details: { accountId: account.id, errors: summary.errors } })
@@ -729,9 +1106,13 @@ export async function syncAllEnabledInboundEmailAccounts(): Promise<EmailSyncSum
     errors: [],
   }
 
+  // One budget for the whole invocation, not one per account: the platform ceiling applies to the
+  // request, so a second mailbox must not start a message with the clock already spent.
+  const deadline = createSyncDeadline()
+
   for (const account of accounts ?? []) {
     try {
-      const summary = await syncInboundEmailAccount(account)
+      const summary = await syncInboundEmailAccount(account, deadline)
       total.scannedCount += summary.scannedCount
       total.importedCount += summary.importedCount
       total.needsReviewCount += summary.needsReviewCount

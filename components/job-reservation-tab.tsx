@@ -32,6 +32,8 @@ import {
 } from "@/lib/traveller-prefill"
 import { useJobReservationDetails, useJobTravellers, type JobTraveller } from "@/lib/use-data"
 import type { Customer, PipelineStage } from "@/lib/types"
+import { useSaveOnExit } from "@/hooks/use-save-on-exit"
+import { useUnloadGuard } from "@/hooks/use-unload-guard"
 
 interface JobReservationTabProps {
   bookingId: string
@@ -112,6 +114,29 @@ function travellerFromCustomer(customer: Customer): TravellerDraft {
   }
 }
 
+function travellersValid(rows: TravellerDraft[]): boolean {
+  return rows.every((t) => t.firstName.trim() && t.lastName.trim() && t.idPassport.trim())
+}
+
+/** Snapshot used to detect edits against the last-hydrated/last-saved baseline. */
+function travellersSnapshot(rows: TravellerDraft[]): string {
+  return JSON.stringify(
+    rows.map((t) => ({
+      id: t.id ?? null,
+      prefix: t.prefix,
+      firstName: t.firstName,
+      lastName: t.lastName,
+      idPassport: t.idPassport,
+      dateOfBirth: t.dateOfBirth,
+      residence: t.residence,
+      roomWith: t.roomWith,
+      roomType: t.roomType,
+      isChild: t.isChild,
+      isPrimary: t.isPrimary,
+    })),
+  )
+}
+
 function travellerRowDiffers(a: TravellerDraft, b: TravellerDraft): boolean {
   return (
     a.prefix !== b.prefix ||
@@ -135,8 +160,56 @@ function describeTraveller(t: TravellerDraft): string {
 const SMOKING_NONE = "none"
 const MEAL_SEATING_NONE = "none"
 
+interface DetailsFields {
+  dietary: string
+  medical: string
+  occasion: string
+  smokingPreference: string
+  mealSeating: string
+  voucherSpecialRequests: string
+  agencyName: string
+  agencyAddress: string
+  billingCompanyName: string
+  billingVatNumber: string
+  billingAddressLine1: string
+  billingAddressLine2: string
+  billingCity: string
+  billingProvince: string
+  billingPostalCode: string
+  billingCountry: string
+}
+
+/** Shared by the save request body and the dirty-snapshot comparison, so the two can't drift. */
+function toDetailsPayload(f: DetailsFields) {
+  return {
+    dietary: f.dietary || null,
+    medical: f.medical || null,
+    occasion: f.occasion || null,
+    smokingPreference: f.smokingPreference === SMOKING_NONE ? null : f.smokingPreference,
+    mealSeating: f.mealSeating === MEAL_SEATING_NONE ? null : f.mealSeating,
+    voucherSpecialRequests: f.voucherSpecialRequests || null,
+    agencyName: f.agencyName || null,
+    agencyAddress: f.agencyAddress || null,
+    billingCompanyName: f.billingCompanyName || null,
+    billingVatNumber: f.billingVatNumber || null,
+    billingAddressLine1: f.billingAddressLine1 || null,
+    billingAddressLine2: f.billingAddressLine2 || null,
+    billingCity: f.billingCity || null,
+    billingProvince: f.billingProvince || null,
+    billingPostalCode: f.billingPostalCode || null,
+    billingCountry: f.billingCountry || null,
+  }
+}
+
 function plural(count: number, noun: string, pluralNoun: string): string {
   return `${count} ${count === 1 ? noun : pluralNoun}`
+}
+
+/** Text-only status next to a card title — never color alone, per the UI conventions. */
+function SaveStatus({ saving, dirty }: { saving: boolean; dirty: boolean }) {
+  if (saving) return <span className="text-xs text-muted-foreground">Saving…</span>
+  if (dirty) return <span className="text-xs text-muted-foreground">Unsaved changes</span>
+  return null
 }
 
 /** "2 adults, 1 child, 1 infant" — zero buckets are dropped so the sentence stays readable. */
@@ -178,6 +251,9 @@ export function JobReservationTab({
   const [confirmWipeOpen, setConfirmWipeOpen] = useState(false)
   const travellersHydrated = useRef(false)
   const guestsCardRef = useRef<HTMLDivElement | null>(null)
+  // Snapshot of the last-hydrated-or-saved roster, for the click-out autosave's dirty check. Null
+  // until hydration runs once, so autosave can't fire against an empty baseline.
+  const travellersBaselineRef = useRef<string | null>(null)
 
   /**
    * Runs once the reservation form is marked received. This used to raise a
@@ -202,11 +278,15 @@ export function JobReservationTab({
     setTravellerSeeds(new Map(drafts.map((d) => [d.key, d])))
     if (!customer) {
       setTravellers(drafts)
+      travellersBaselineRef.current = travellersSnapshot(drafts)
       return
     }
+    // Baseline is the post-prefill rows, not the raw saved rows: a prefill is "check, then save"
+    // (see saveTravellers), so a freshly-opened tab must not read as dirty and autosave it unseen.
     const { rows, prefilled } = fillBlanksFromCustomer(drafts, customer, travellerFromCustomer)
     setTravellers(rows)
     setPrefilledFields(prefilled)
+    travellersBaselineRef.current = travellersSnapshot(rows)
   }, [travellersData, customer])
 
   // Only the name seeds from the customer profile — the address does not, since an
@@ -254,17 +334,25 @@ export function JobReservationTab({
   const [billingCountry, setBillingCountry] = useState("")
   const [savingDetails, setSavingDetails] = useState(false)
   const detailsHydrated = useRef(false)
+  // Same idea as travellersBaselineRef, but for the shared reservation-details payload used by
+  // the Company details / Special requests / Agency details cards (and the billing sub-panel).
+  const detailsBaselineRef = useRef<string | null>(null)
+  const detailsInFlightRef = useRef<Promise<void> | null>(null)
+  const companyCardRef = useRef<HTMLDivElement | null>(null)
+  const specialRequestsCardRef = useRef<HTMLDivElement | null>(null)
+  const agencyCardRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!detailsData || detailsHydrated.current) return
     detailsHydrated.current = true
+    const agencyNameValue = detailsData.agencyName || agencySeed.name
     setDietary(detailsData.dietary)
     setMedical(detailsData.medical)
     setOccasion(detailsData.occasion)
     setSmokingPreference(detailsData.smokingPreference ?? SMOKING_NONE)
     setMealSeating(detailsData.mealSeating ?? MEAL_SEATING_NONE)
     setVoucherSpecialRequests(detailsData.voucherSpecialRequests)
-    setAgencyName(detailsData.agencyName || agencySeed.name)
+    setAgencyName(agencyNameValue)
     setAgencyAddress(detailsData.agencyAddress)
     setBillingCompanyName(detailsData.billingCompanyName)
     setBillingVatNumber(detailsData.billingVatNumber)
@@ -274,6 +362,26 @@ export function JobReservationTab({
     setBillingProvince(detailsData.billingProvince)
     setBillingPostalCode(detailsData.billingPostalCode)
     setBillingCountry(detailsData.billingCountry)
+    detailsBaselineRef.current = JSON.stringify(
+      toDetailsPayload({
+        dietary: detailsData.dietary,
+        medical: detailsData.medical,
+        occasion: detailsData.occasion,
+        smokingPreference: detailsData.smokingPreference ?? SMOKING_NONE,
+        mealSeating: detailsData.mealSeating ?? MEAL_SEATING_NONE,
+        voucherSpecialRequests: detailsData.voucherSpecialRequests,
+        agencyName: agencyNameValue,
+        agencyAddress: detailsData.agencyAddress,
+        billingCompanyName: detailsData.billingCompanyName,
+        billingVatNumber: detailsData.billingVatNumber,
+        billingAddressLine1: detailsData.billingAddressLine1,
+        billingAddressLine2: detailsData.billingAddressLine2,
+        billingCity: detailsData.billingCity,
+        billingProvince: detailsData.billingProvince,
+        billingPostalCode: detailsData.billingPostalCode,
+        billingCountry: detailsData.billingCountry,
+      }),
+    )
   }, [detailsData, agencySeed])
 
   // One-shot fill from the customer profile — never overwrites without the salesperson asking,
@@ -384,12 +492,12 @@ export function JobReservationTab({
     void saveTravellers()
   }
 
-  const saveTravellers = async () => {
-    const invalid = travellers.some((t) => !t.firstName.trim() || !t.lastName.trim() || !t.idPassport.trim())
-    if (invalid) {
-      toast.error("Each guest needs a first name, surname, and ID/passport number")
+  const saveTravellers = async (opts?: { silent?: boolean }) => {
+    if (!travellersValid(travellers)) {
+      if (!opts?.silent) toast.error("Each guest needs a first name, surname, and ID/passport number")
       return
     }
+    const snapshot = travellersSnapshot(travellers)
     setSavingTravellers(true)
     try {
       const response = await fetch(`/api/jobs/${bookingId}/travellers`, {
@@ -416,12 +524,13 @@ export function JobReservationTab({
         throw new Error(typeof payload?.error === "string" ? payload.error : "Could not save guests")
       }
       const payload = (await response.json().catch(() => null)) as { warning?: string | null } | null
+      travellersBaselineRef.current = snapshot
       await mutateTravellers()
       await mutateJob()
       // Prefilled values are now stored guest details, so drop the "check, then
       // save" hint.
       setPrefilledFields(new Map())
-      toast.success("Guests saved")
+      if (!opts?.silent) toast.success("Guests saved")
       if (typeof payload?.warning === "string") toast.warning(payload.warning)
       // The billing address sub-panel lives inside this card visually but is
       // stored on booking_reservation_details, so it saves alongside the roster.
@@ -436,42 +545,122 @@ export function JobReservationTab({
   }
 
   const saveDetails = async (opts?: { silent?: boolean }) => {
-    setSavingDetails(true)
-    try {
-      const response = await fetch(`/api/jobs/${bookingId}/reservation-details`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dietary: dietary || null,
-          medical: medical || null,
-          occasion: occasion || null,
-          smokingPreference: smokingPreference === SMOKING_NONE ? null : smokingPreference,
-          mealSeating: mealSeating === MEAL_SEATING_NONE ? null : mealSeating,
-          voucherSpecialRequests: voucherSpecialRequests || null,
-          agencyName: agencyName || null,
-          agencyAddress: agencyAddress || null,
-          billingCompanyName: billingCompanyName || null,
-          billingVatNumber: billingVatNumber || null,
-          billingAddressLine1: billingAddressLine1 || null,
-          billingAddressLine2: billingAddressLine2 || null,
-          billingCity: billingCity || null,
-          billingProvince: billingProvince || null,
-          billingPostalCode: billingPostalCode || null,
-          billingCountry: billingCountry || null,
-        }),
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null)
-        throw new Error(typeof payload?.error === "string" ? payload.error : "Could not save reservation details")
+    const fields: DetailsFields = {
+      dietary,
+      medical,
+      occasion,
+      smokingPreference,
+      mealSeating,
+      voucherSpecialRequests,
+      agencyName,
+      agencyAddress,
+      billingCompanyName,
+      billingVatNumber,
+      billingAddressLine1,
+      billingAddressLine2,
+      billingCity,
+      billingProvince,
+      billingPostalCode,
+      billingCountry,
+    }
+    const snapshot = JSON.stringify(toDetailsPayload(fields))
+    // Two cards can each ask for a flush within the same tick (e.g. clicking from the guests
+    // card's billing panel straight into another card); share the in-flight request instead of
+    // firing a second overlapping PUT.
+    if (detailsInFlightRef.current) await detailsInFlightRef.current
+    const run = (async () => {
+      setSavingDetails(true)
+      try {
+        const response = await fetch(`/api/jobs/${bookingId}/reservation-details`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(toDetailsPayload(fields)),
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null)
+          throw new Error(typeof payload?.error === "string" ? payload.error : "Could not save reservation details")
+        }
+        detailsBaselineRef.current = snapshot
+        await mutateDetails()
+        if (!opts?.silent) toast.success("Reservation details saved")
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not save reservation details")
+      } finally {
+        setSavingDetails(false)
       }
-      await mutateDetails()
-      if (!opts?.silent) toast.success("Reservation details saved")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save reservation details")
+    })()
+    detailsInFlightRef.current = run
+    try {
+      await run
     } finally {
-      setSavingDetails(false)
+      if (detailsInFlightRef.current === run) detailsInFlightRef.current = null
     }
   }
+
+  // Reads the refs live (`.current`, not a captured value) so a check run after an earlier `await`
+  // in the same tick sees whatever the last save already settled — that's what lets the guests
+  // card's exit handler chain travellers-then-details without firing details twice.
+  const computeDetailsSnapshot = () =>
+    JSON.stringify(
+      toDetailsPayload({
+        dietary,
+        medical,
+        occasion,
+        smokingPreference,
+        mealSeating,
+        voucherSpecialRequests,
+        agencyName,
+        agencyAddress,
+        billingCompanyName,
+        billingVatNumber,
+        billingAddressLine1,
+        billingAddressLine2,
+        billingCity,
+        billingProvince,
+        billingPostalCode,
+        billingCountry,
+      }),
+    )
+  const computeTravellersDirty = () =>
+    travellersBaselineRef.current !== null && travellersSnapshot(travellers) !== travellersBaselineRef.current
+  const computeDetailsDirty = () =>
+    detailsBaselineRef.current !== null && computeDetailsSnapshot() !== detailsBaselineRef.current
+
+  const travellersDirty = computeTravellersDirty()
+  const detailsDirty = computeDetailsDirty()
+
+  // Click-out autosave for the guests roster: skips silently on an invalid row (the button still
+  // surfaces that error) and never fires the empty-roster wipe (that stays behind the confirm
+  // dialog only). Returns a promise so the guests card's exit handler can wait for it before
+  // deciding whether details still need a separate save.
+  const flushTravellers = (): Promise<void> => {
+    if (savingTravellers || !computeTravellersDirty()) return Promise.resolve()
+    if (travellers.length === 0 && savedTravellerCount > 0) return Promise.resolve()
+    if (!travellersValid(travellers)) return Promise.resolve()
+    return saveTravellers({ silent: true })
+  }
+
+  // Click-out autosave shared by Company details / Special requests / Agency details, and the
+  // billing sub-panel inside the Guests card.
+  const flushDetails = () => {
+    if (savingDetails || !computeDetailsDirty()) return
+    void saveDetails({ silent: true })
+  }
+
+  useSaveOnExit(
+    guestsCardRef,
+    () => {
+      // saveTravellers already chains a silent saveDetails when it succeeds (the billing panel
+      // lives in this card but is stored on reservation_details) — wait for that before checking
+      // whether details are still dirty, so a plain click-out never fires two overlapping PUTs.
+      void flushTravellers().then(flushDetails)
+    },
+    travellersDirty || detailsDirty,
+  )
+  useSaveOnExit(companyCardRef, flushDetails, detailsDirty)
+  useSaveOnExit(specialRequestsCardRef, flushDetails, detailsDirty)
+  useSaveOnExit(agencyCardRef, flushDetails, detailsDirty)
+  useUnloadGuard(travellersDirty || detailsDirty)
 
   if (travellersError || detailsError) {
     return (
@@ -534,7 +723,10 @@ export function JobReservationTab({
 
       <Card ref={guestsCardRef}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-sm">Guests</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm">Guests</CardTitle>
+            <SaveStatus saving={savingTravellers || savingDetails} dirty={travellersDirty || detailsDirty} />
+          </div>
           <div className="flex gap-2">
             <Button
               type="button"
@@ -796,9 +988,12 @@ export function JobReservationTab({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card ref={companyCardRef}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-sm">Company details</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm">Company details</CardTitle>
+            <SaveStatus saving={savingDetails} dirty={detailsDirty} />
+          </div>
           <Button
             type="button"
             variant="outline"
@@ -846,9 +1041,10 @@ export function JobReservationTab({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card ref={specialRequestsCardRef}>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <CardTitle className="text-sm">Special requests</CardTitle>
+          <SaveStatus saving={savingDetails} dirty={detailsDirty} />
         </CardHeader>
         <CardContent className="space-y-3">
           {additionalServicesDetails ? (
@@ -928,9 +1124,10 @@ export function JobReservationTab({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
+      <Card ref={agencyCardRef}>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <CardTitle className="text-sm">Agency details</CardTitle>
+          <SaveStatus saving={savingDetails} dirty={detailsDirty} />
         </CardHeader>
         <CardContent className="space-y-3">
           <div>

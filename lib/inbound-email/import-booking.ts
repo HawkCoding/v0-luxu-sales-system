@@ -10,7 +10,7 @@ import { allocateJobNumberForBooking } from "@/lib/job-numbering"
 import { createRawEmailPreview } from "@/lib/inbound-email/html"
 import type { Database, Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
-import { resolveTrainSupplierId, findHotelSupplierId } from "@/lib/resolvers/supplier-resolver"
+import { findHotelSupplierId, resolveStandaloneSupplier } from "@/lib/resolvers/supplier-resolver"
 import { findRouteMatch } from "@/lib/resolvers/route-resolver"
 import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
@@ -182,14 +182,27 @@ export async function createEmailBookingFromParsedDraft(
     customerId = newCustomer.id
   }
 
-  const trainSupplierId = await resolveTrainSupplierId(supabase, parsed.trip.supplier)
-  const { routeId, reversed: routeReversed } = await findRouteMatch(supabase, payload.direction, trainSupplierId)
-  const hotelSupplierId = await findHotelSupplierId(supabase, payload.hotelOption)
+  // The supplier this enquiry is FOR: a train operator on a journey, or the hotel itself on a
+  // standalone stay (Kruger Shalati). The parser already decided which by matching the email
+  // against the standalone pool, so the kind travels with the wording rather than being re-guessed.
+  const primarySupplier = await resolveStandaloneSupplier(supabase, parsed.trip.supplier)
+  const isStayImport = primarySupplier?.kind === "hotel_property"
+  // A stay has no direction and no route -- its "route" is a meal plan chosen in Build Booking.
+  const { routeId, reversed: routeReversed } = isStayImport
+    ? { routeId: null, reversed: false }
+    : await findRouteMatch(supabase, payload.direction, isStayImport ? null : primarySupplier?.id ?? null)
+  // On a stay the hotel IS the booking, so it fills the hotel slot rather than being resolved from
+  // a separate "hotel option" the form never asks for.
+  const hotelSupplierId = isStayImport
+    ? primarySupplier.id
+    : await findHotelSupplierId(supabase, payload.hotelOption)
+  const stayNights = isStayImport && payload.nights && payload.nights > 0 ? payload.nights : null
 
-  // Suite resolution needs the supplier's vocabulary, so it can only run once the train operator
-  // is known. Without one, the raw wording is kept but nothing is resolved.
-  const suiteVocabulary = trainSupplierId
-    ? await loadSupplierSuiteVocabulary(supabase, trainSupplierId)
+  // Suite resolution needs the supplier's vocabulary (room types on a stay, suite types on a
+  // journey), so it can only run once the primary supplier is known. Without one, the raw wording
+  // is kept but nothing is resolved.
+  const suiteVocabulary = primarySupplier
+    ? await loadSupplierSuiteVocabulary(supabase, primarySupplier.id)
     : null
   const suiteResolutions = suiteVocabulary
     ? resolveSuitePhrases(parsed.guests.suitePhrases, suiteVocabulary)
@@ -218,6 +231,8 @@ export async function createEmailBookingFromParsedDraft(
     resolvedReferences: {
       routeId,
       hotelSupplierId,
+      supplierId: primarySupplier?.id ?? null,
+      supplierKind: primarySupplier?.kind ?? null,
     },
   } satisfies Json
 
@@ -226,15 +241,15 @@ export async function createEmailBookingFromParsedDraft(
   // mentioned a supplier at all", and one auto-build silently no-ops on, so it must surface here
   // even though it's caught too late to have been part of the pre-resolution review metadata.
   const resolutionFailureReasons: string[] = []
-  if (parsed.trip.supplier && !trainSupplierId) {
+  if (parsed.trip.supplier && !primarySupplier) {
     resolutionFailureReasons.push(REVIEW_REASON.supplierUnmatched)
   }
-  if (payload.direction && !routeId) {
+  if (!isStayImport && payload.direction && !routeId) {
     // Separated so the review screen says WHY: an unresolved operator can't be given a route at
     // all (findRouteMatch refuses to pick between operators), which is a different fix for the
     // consultant than wording that matches no route this operator files.
     resolutionFailureReasons.push(
-      trainSupplierId ? REVIEW_REASON.routeUnmatched : REVIEW_REASON.routeUnresolvedNoOperator,
+      primarySupplier ? REVIEW_REASON.routeUnmatched : REVIEW_REASON.routeUnresolvedNoOperator,
     )
   }
 
@@ -263,9 +278,12 @@ export async function createEmailBookingFromParsedDraft(
     purpose: payload.purpose,
     source: "email",
     stage: "enquiry",
+    // Trip start either way: the departure date on a journey, the check-in date on a stay.
     departure_date: payload.departureDate || null,
+    duration_nights: stayNights,
     route_id: routeId,
     hotel_supplier_id: hotelSupplierId,
+    primary_supplier_id: primarySupplier?.id ?? null,
     // Never defaulted to 1. parseEmailDraft deliberately leaves an unstated count at 0 ("an
     // invented suite count silently manufactures a room nobody asked for") and the importer used
     // to override that honest 0 -- an out-of-office reply was stored as 1 adult + 1 suite with
@@ -284,6 +302,10 @@ export async function createEmailBookingFromParsedDraft(
     extend_stay: payload.extendStay ?? false,
     additional_services: payload.additionalServices,
     additional_services_details: payload.additionalServicesDetails || null,
+    // Parsed by parseEmailDraft and carried on the payload, but never written here -- the
+    // discount a customer was promised on the form ("Promotion Code - GET 5% DISCOUNT")
+    // was silently dropped on every imported enquiry, and no screen can put it back.
+    promotion_code: payload.promotionCode || null,
     // Low confidence alone no longer forces a review -- it's still shown as a warning, but a
     // consultant glancing over a correctly-parsed enquiry shouldn't be blocked by a date format
     // guess. Review is reserved for things actually missing, unresolved, or a possible duplicate.
@@ -341,11 +363,13 @@ export async function createEmailBookingFromParsedDraft(
   try {
     const autoBuildResult = await autoBuildBookingServices(supabase, {
       bookingId: booking.id,
-      trainSupplierId,
+      primarySupplierId: primarySupplier?.id ?? null,
+      primarySupplierKind: primarySupplier?.kind ?? null,
       hotelSupplierId,
       routeId,
       routeReversed,
       departureDate: payload.departureDate || null,
+      nights: stayNights,
       hotelPhase: payload.hotelPhase ?? null,
     })
     if (autoBuildResult.servicesCreated > 0 || autoBuildResult.skipped.length > 0) {

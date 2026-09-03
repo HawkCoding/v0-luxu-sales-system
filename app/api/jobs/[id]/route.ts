@@ -26,7 +26,11 @@ import { firstRecord } from "@/lib/utils"
 import type { PipelineStage, SupplierKind } from "@/lib/types"
 import { buildEnquiryReadiness } from "@/lib/enquiry/build-readiness"
 import { extractRoleFromJwt } from "@/lib/role-utils"
-import { applyTransition, StaleTransitionError } from "@/lib/pipeline/apply-transition"
+import {
+  applyGatedTransition,
+  decideGatedTransition,
+  loadTransitionContext,
+} from "@/lib/pipeline/run-gated-transition"
 import { calculateRefund } from "@/lib/invoices/calculate-refund"
 import { resolveDepositAmount } from "@/lib/invoices/resolve-deposit-amount"
 import { getDepositRefundable } from "@/lib/settings-access"
@@ -42,8 +46,7 @@ function isPostgrestError(error: unknown): error is PostgrestError {
     "hint" in error
   )
 }
-import { isReopenFromCancelled, isSameStage, isTerminalPipelineStage, validateTransition } from "@/lib/pipeline/validate-transition"
-import { loadTransitionLegReferences } from "@/lib/pipeline/transition-leg-references"
+import { isReopenFromCancelled, isSameStage, isTerminalPipelineStage } from "@/lib/pipeline/validate-transition"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 import { updateInvoiceNumber } from "@/lib/bookings/invoice-number"
@@ -807,29 +810,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const overrideReason = body.overrideReason?.trim() ?? ""
     const lostContext = { ...body.lostContext }
 
-    const [
-      { data: customer },
-      { data: quotes },
-      { data: documents },
-      { data: invoices },
-      { data: correspondences },
-      { data: payments },
-    ] = await Promise.all([
-      supabase
-        .from("customers")
-        .select("first_name, last_name, email, phone, country")
-        .eq("id", booking.customer_id)
-        .maybeSingle(),
-      supabase
-        .from("quotes")
-        .select("id, status, total, created_at")
-        .eq("booking_id", id)
-        .order("created_at", { ascending: false }),
-      supabase.from("documents").select("id, kind, status, created_at").eq("booking_id", id),
-      supabase.from("invoices").select("id, kind, status").eq("booking_id", id),
-      supabase.from("correspondences").select("id, kind, subject, status, created_at").eq("booking_id", id),
-      supabase.from("payments").select("amount").eq("booking_id", id),
-    ])
+    // Shared with POST /api/correspondence and the auto-close cron, which used to load a different
+    // (or empty) evidence set and therefore enforced different gates than this route did.
+    const context = await loadTransitionContext(supabase, {
+      bookingId: id,
+      customerId: booking.customer_id,
+      fromStage,
+      targetStage,
+    })
 
     const validationBooking = {
       id: booking.id,
@@ -848,141 +836,78 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           : booking.reservation_form_received_at,
       revision_reset_at: booking.revision_reset_at,
     }
-    // Fails open: the generate/send readiness check still blocks a voucher with missing
-    // references, so a lookup hiccup here costs a clearer message, never a wrongly-permitted move.
-    let legReferences: Awaited<ReturnType<typeof loadTransitionLegReferences>> = []
-    try {
-      legReferences = await loadTransitionLegReferences(supabase, id, fromStage, targetStage)
-    } catch (error) {
-      console.error("jobs/[id]:leg-references", error)
-    }
 
-    const failures = validateTransition({
+    const decision = decideGatedTransition({
       booking: validationBooking,
-      customer,
+      customer: context.customer,
       targetStage,
-      quotes: quotes ?? [],
-      documents: documents ?? [],
-      invoices: invoices ?? [],
-      correspondences: correspondences ?? [],
-      payments: payments ?? [],
-      legReferences,
+      context,
       manualConfirmations: body.manualConfirmations,
       lostContext,
+      override: body.override,
     })
 
     // An override reason is only required when there is something to override —
     // `override: true` sent alongside a clean transition is a no-op, not a bypass.
-    if (body.override === true && failures.length > 0) {
-      if (!overrideReason) {
-        return NextResponse.json({ error: "Override reason is required" }, { status: 400 })
-      }
-    } else if (body.override !== true && failures.length > 0) {
+    if (decision.overriding && !overrideReason) {
+      return NextResponse.json({ error: "Override reason is required" }, { status: 400 })
+    }
+    if (decision.blocked) {
       return NextResponse.json(
-        { error: "Stage transition blocked", details: { failures, canOverride } },
+        { error: "Stage transition blocked", details: { failures: decision.failures, canOverride } },
         { status: 400 },
       )
     }
 
-    try {
-      const transition = await applyTransition(supabase, {
-        booking: {
-          id: booking.id,
-          booking_number: booking.booking_number,
-          stage: booking.stage,
-          source: booking.source,
-          raw_text: booking.raw_text,
-          updated_at: booking.updated_at,
-          customer_id: booking.customer_id,
-          consultant: booking.consultant,
-        },
-        departureDate: booking.departure_date,
-        durationNights: booking.duration_nights,
-        targetStage,
-        actorName,
-        actorUserId: user.id,
-        expectedUpdatedAt: body.expectedUpdatedAt,
-        manualConfirmations: body.manualConfirmations,
-        lostContext,
-        quotes: quotes ?? [],
-        documents: documents ?? [],
-        correspondences: correspondences ?? [],
-      })
-
-      stageUpdated = transition.updated
-      if (body.expectedUpdatedAt) {
-        body.expectedUpdatedAt = transition.updated.updated_at
-      }
-    } catch (error) {
-      if (error instanceof StaleTransitionError) {
-        return staleVersionResponse("booking", error.currentUpdatedAt)
-      }
-      if (isPostgrestError(error)) {
-        return (
-          mapPostgrestError("jobs/[id]:transition", error) ??
-          safeSupabaseError("jobs/[id]:transition", error, "Stage update failed")
-        )
-      }
-      console.error("jobs/[id]:transition", error)
-      return NextResponse.json({ error: "Stage update failed" }, { status: 500 })
-    }
-
-    const historyInsert = await supabase.from("pipeline_history").insert({
-      booking_id: id,
-      from_stage: fromStage,
-      to_stage: targetStage,
-      moved_by: actorName,
-      moved_by_user_id: user.id,
+    const result = await applyGatedTransition(supabase, {
+      booking: {
+        id: booking.id,
+        booking_number: booking.booking_number,
+        stage: booking.stage,
+        source: booking.source,
+        raw_text: booking.raw_text,
+        updated_at: booking.updated_at,
+        customer_id: booking.customer_id,
+        consultant: booking.consultant,
+      },
+      departureDate: booking.departure_date,
+      durationNights: booking.duration_nights,
+      targetStage,
+      actorName,
+      actorUserId: user.id,
+      decision,
+      context,
+      overrideReason,
+      expectedUpdatedAt: body.expectedUpdatedAt,
+      manualConfirmations: body.manualConfirmations,
+      lostContext,
     })
-    if (historyInsert.error) {
-      return safeSupabaseError("jobs/[id]:pipeline_history", historyInsert.error, "Failed to record stage change")
-    }
 
-    const stageAudit = await supabase.from("audit_logs").insert({
-      actor: actorName,
-      actor_user_id: user.id,
-      entity_type: "Booking",
-      entity_id: id,
-      action: "stage_change",
-      before_json: { stage: fromStage },
-      after_json: { stage: targetStage },
-      meta_json: {
-        payments_seen: payments?.length ?? 0,
-        manual_confirmations: body.manualConfirmations ?? null,
-      } as Json,
-    })
-    if (stageAudit.error) {
-      return safeSupabaseError("jobs/[id]:audit_logs", stageAudit.error, "Failed to record stage change")
-    }
-
-    // Only a real bypass gets an override audit row — `override: true` sent on
-    // a transition that had nothing to bypass is just a normal move.
-    if (body.override === true && failures.length > 0) {
-      const overrideAudit = await supabase.from("audit_logs").insert({
-        actor: actorName,
-        actor_user_id: user.id,
-        entity_type: "Booking",
-        entity_id: id,
-        action: "stage_change_override",
-        before_json: { stage: fromStage, gates_failed: failures.map((failure) => failure.gateId) },
-        after_json: { stage: targetStage },
-        override_reason: overrideReason,
-        overridden_by: user.id,
-        meta_json: {
-          failures: failures.map((failure) => ({
-            gateId: failure.gateId,
-            message: failure.message,
-            fixHint: failure.fixHint,
-            severity: failure.severity,
-            autoFixable: failure.autoFixable ?? null,
-          })),
-        } as Json,
-      })
-      if (overrideAudit.error) {
-        return safeSupabaseError("jobs/[id]:audit_logs", overrideAudit.error, "Failed to record override")
+    if (!result.ok) {
+      if (result.reason === "stale") {
+        return staleVersionResponse("booking", result.currentUpdatedAt)
       }
+      if (result.step === "apply") {
+        if (isPostgrestError(result.error)) {
+          return (
+            mapPostgrestError("jobs/[id]:transition", result.error) ??
+            safeSupabaseError("jobs/[id]:transition", result.error, "Stage update failed")
+          )
+        }
+        console.error("jobs/[id]:transition", result.error)
+        return NextResponse.json({ error: "Stage update failed" }, { status: 500 })
+      }
+      return safeSupabaseError(
+        `jobs/[id]:${result.step}`,
+        result.error,
+        result.step === "history" ? "Failed to record stage change" : "Failed to record stage change",
+      )
     }
 
+    stageUpdated = result.updated
+    if (body.expectedUpdatedAt) {
+      body.expectedUpdatedAt = result.updated.updated_at
+    }
   }
 
   if (body.assignedSalespersonId !== undefined) {

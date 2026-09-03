@@ -8,12 +8,17 @@ import { createServiceClient } from "@/lib/supabase/server"
 import { requireSettingsWrite } from "@/lib/settings-access"
 
 const DEMO_ACCOUNT_ID = "00000000-0000-0000-0000-00000000ea01"
-const FIXTURE_PATH = path.join(
-  process.cwd(),
-  "supabase/seeds/inbound-email-fixtures/new-enquiry.json",
-)
+const FIXTURE_DIR = path.join(process.cwd(), "supabase/seeds/inbound-email-fixtures")
+const DEFAULT_FIXTURE = "new-enquiry"
 
-export async function POST(): Promise<NextResponse> {
+/** Fixture name from the request body, restricted to a bare file stem so the path can't escape
+ *  the fixture directory. Anything else falls back to the default. */
+function resolveFixturePath(name: unknown): string {
+  const stem = typeof name === "string" && /^[a-z0-9-]+$/i.test(name) ? name : DEFAULT_FIXTURE
+  return path.join(FIXTURE_DIR, `${stem}.json`)
+}
+
+export async function POST(req: Request): Promise<NextResponse> {
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
@@ -24,7 +29,13 @@ export async function POST(): Promise<NextResponse> {
   const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
-  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, "utf8")) as {
+  const body = await req.json().catch(() => ({}) as Record<string, unknown>)
+  const fixturePath = resolveFixturePath((body as { fixture?: unknown }).fixture)
+  if (!fs.existsSync(fixturePath)) {
+    return NextResponse.json({ error: "Fixture not found" }, { status: 404 })
+  }
+
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8")) as {
     from: string
     to: string
     subject: string
@@ -34,15 +45,22 @@ export async function POST(): Promise<NextResponse> {
   }
 
   const supabase = createServiceClient()
-  const { data: trainOperators } = await supabase
+  // Same pool and the same subject scan the real sync path uses -- a fixture whose supplier is
+  // named only in the subject (every Kruger Shalati enquiry) must behave here as it does live.
+  const { data: standaloneSupplierRows } = await supabase
     .from("suppliers")
-    .select("name")
-    .eq("kind", "train_operator")
+    .select("name, kind, email_match_phrases")
+    .eq("sells_standalone", true)
     .eq("active", true)
 
   const rawText = fixture.text || ""
   const parsedDraft = parseEmailDraft(rawText, {
-    trainOperatorNames: (trainOperators ?? []).map((row) => row.name),
+    subject: fixture.subject,
+    standaloneSuppliers: (standaloneSupplierRows ?? []).map((row) => ({
+      name: row.name,
+      kind: row.kind,
+      emailMatchPhrases: row.email_match_phrases,
+    })),
   })
   const review = getEmailImportReviewMetadata(parsedDraft)
 

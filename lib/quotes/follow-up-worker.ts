@@ -6,7 +6,9 @@ import { logError } from "@/lib/error-log"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { sendEmail } from "@/lib/email/transport"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
-import { getTemplate } from "@/lib/templates/get-template"
+import { getTemplate, type EmailTemplate } from "@/lib/templates/get-template"
+import { loadQuoteConfig } from "@/lib/quotes/load-quote-config"
+import type { PricingSnapshot } from "@/lib/types"
 
 export interface FollowUpWorkerResult {
   processed: number
@@ -14,6 +16,8 @@ export interface FollowUpWorkerResult {
   skipped: number
   failed: number
 }
+
+const NO_OVERRIDES = { journeyClass: null, rateAudience: null, showTrainOnlyNote: null }
 
 export async function runQuoteFollowUpWorker(
   supabase: SupabaseClient<Database>,
@@ -24,10 +28,22 @@ export async function runQuoteFollowUpWorker(
     return { processed: 0, sent: 0, skipped: 0, failed: 0 }
   }
 
-  // Single fetch per run — every follow-up in this run uses the same template.
-  const template = await getTemplate(supabase, "follow_up")
-  if (!template) {
+  // Default (shared) template — the fallback every quote without a variant of its own uses.
+  const defaultTemplateRow = await getTemplate(supabase, "follow_up")
+  if (!defaultTemplateRow) {
     throw new Error("Follow-up template could not be resolved")
+  }
+  const defaultTemplate: EmailTemplate = defaultTemplateRow
+  // A supplier-tagged variant is fetched at most once per distinct primary supplier in this run,
+  // not once per quote -- most runs only ever see one or two trains.
+  const templateBySupplierId = new Map<string, EmailTemplate>([["", defaultTemplate]])
+  async function templateFor(primarySupplierId: string | null): Promise<EmailTemplate> {
+    const key = primarySupplierId ?? ""
+    const cached = templateBySupplierId.get(key)
+    if (cached) return cached
+    const resolved = (await getTemplate(supabase, "follow_up", primarySupplierId)) ?? defaultTemplate
+    templateBySupplierId.set(key, resolved)
+    return resolved
   }
 
   const today = new Date()
@@ -93,7 +109,7 @@ export async function runQuoteFollowUpWorker(
     const { data: booking } = await supabase
       .from("bookings")
       .select(
-        "id, booking_number, stage, outcome, assigned_salesperson_id, customers!inner(title, first_name, last_name, email)",
+        "id, booking_number, stage, outcome, assigned_salesperson_id, primary_supplier_id, customers!inner(title, first_name, last_name, email)",
       )
       .eq("id", quote.booking_id)
       .single()
@@ -165,6 +181,23 @@ export async function runQuoteFollowUpWorker(
         if (profile?.email) fromAddress = profile.email
       }
     }
+
+    // Resolved once per quote (not per due-day) -- the primary supplier, and the template
+    // variant that follows it, cannot change between a quote's own catch-up sends.
+    const { data: lineItemRows } = await supabase
+      .from("quote_line_items")
+      .select("pricing_snapshot")
+      .eq("quote_id", quote.id)
+      // Ordered because the primary-supplier fallbacks are "first leg in array order".
+      .order("sort_order", { ascending: true })
+    const quoteConfig = await loadQuoteConfig(supabase, {
+      lineItems: (lineItemRows ?? []).map((li) => ({
+        pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
+      })),
+      overrides: NO_OVERRIDES,
+      bookingPrimarySupplierId: booking.primary_supplier_id ?? null,
+    })
+    const template = await templateFor(quoteConfig.primarySupplierId)
 
     for (const day of dueDays) {
       const scheduledFor = new Date(sentDate)

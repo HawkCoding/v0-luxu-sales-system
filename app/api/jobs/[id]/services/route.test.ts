@@ -36,6 +36,10 @@ function makeParams(id = BOOKING_ID) {
 interface MockState {
   validServiceIds?: string[]
   serviceKinds?: Record<string, string>
+  serviceNames?: Record<string, string>
+  /** bookings.primary_supplier_id -- the supplier whose leg is the core one. Null falls back to
+   *  the train rule; see isCoreBookingLeg. */
+  primarySupplierId?: string | null
   /** booking_services.service_date as stored — the departure date a flight's arrival is checked
    * against when the payload omits serviceDate. */
   serviceDates?: Record<string, string | null>
@@ -82,6 +86,9 @@ function buildSupabase(state: MockState = {}) {
                     no_of_adults: state.noOfAdults ?? 2,
                     no_of_children: state.noOfChildren ?? 1,
                     child_ages: state.childAges ?? [6],
+                    // The booking's core leg. Null keeps the pre-existing train rule, which is
+                    // what every case in this file exercises unless it says otherwise.
+                    primary_supplier_id: state.primarySupplierId ?? null,
                   },
                   error: null,
                 }
@@ -94,7 +101,7 @@ function buildSupabase(state: MockState = {}) {
       if (table === "booking_services") {
         return {
           select: vi.fn((columns: string) => {
-            if (columns.includes("suppliers(kind)")) {
+            if (columns.includes("suppliers(kind, name)")) {
               return {
                 eq: vi.fn(() => ({
                   in: vi.fn(async () => ({
@@ -103,7 +110,10 @@ function buildSupabase(state: MockState = {}) {
                       supplier_id: `${serviceId}-supplier`,
                       updated_at: state.serviceUpdatedAt ?? "2026-08-14T10:00:00.000Z",
                       service_date: state.serviceDates?.[serviceId] ?? null,
-                      suppliers: { kind: state.serviceKinds?.[serviceId] ?? "train_operator" },
+                      suppliers: {
+                        kind: state.serviceKinds?.[serviceId] ?? "train_operator",
+                        name: state.serviceNames?.[serviceId] ?? "The Blue Train",
+                      },
                     })),
                     error: null,
                   })),
@@ -595,10 +605,12 @@ describe("PATCH /api/jobs/[id]/services", () => {
             {
               packageLegId: SERVICE_A,
               units: [
+                // Hotel rooms carry occupancy now (rates are per person per night), and it has to
+                // reconcile against the booking's travellers like any other sleeping slot.
                 // Untouched: keeps the original stamp.
-                { id: UNIT_A, suiteTypeId: SUITE_A, manualRoomPrice: 3600 },
+                { id: UNIT_A, suiteTypeId: SUITE_A, manualRoomPrice: 3600, adultCount: 2 },
                 // Changed: re-stamped with this save's actor.
-                { id: UNIT_B, suiteTypeId: SUITE_A, manualRoomPrice: 5000 },
+                { id: UNIT_B, suiteTypeId: SUITE_A, manualRoomPrice: 5000, childCount: 1 },
               ],
             },
           ],
@@ -636,7 +648,12 @@ describe("PATCH /api/jobs/[id]/services", () => {
         method: "PATCH",
         body: JSON.stringify({
           selections: [
-            { packageLegId: SERVICE_A, units: [{ id: UNIT_A, suiteTypeId: SUITE_A, manualRoomPrice: null }] },
+            {
+              packageLegId: SERVICE_A,
+              units: [
+                { id: UNIT_A, suiteTypeId: SUITE_A, manualRoomPrice: null, adultCount: 2, childCount: 1 },
+              ],
+            },
           ],
         }),
       }),
@@ -806,11 +823,33 @@ describe("PATCH /api/jobs/[id]/services", () => {
 
     expect(res.status).toBe(400)
     const body = await res.json()
-    expect(body.error).toMatch(/train journey/i)
+    expect(body.error).toMatch(/cannot be excluded/i)
     expect(built.updateCalls).toHaveLength(0)
   })
 
-  it("still allows an optional leg to be deselected", async () => {
+  // A standalone hotel booking (Kruger Shalati) has no train at all: its hotel leg IS the booking
+  // and gets the same protection the train leg has always had.
+  it("refuses to deselect the hotel leg of a standalone stay", async () => {
+    const built = mockAuth({
+      serviceKinds: { [`${SERVICE_A}`]: "hotel_property" },
+      serviceNames: { [`${SERVICE_A}`]: "Kruger Shalati - Train on the Bridge" },
+      primarySupplierId: `${SERVICE_A}-supplier`,
+    })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, selected: false }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/Kruger Shalati/i)
+    expect(built.updateCalls).toHaveLength(0)
+  })
+
+  it("still allows an add-on hotel leg to be deselected", async () => {
     const built = mockAuth({ serviceKinds: { [SERVICE_A]: "hotel_property" } })
     const res = await PATCH(
       new Request("http://localhost", {

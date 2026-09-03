@@ -1,4 +1,5 @@
 import { resolveEntity } from "@/lib/matching/resolve-entity"
+import type { SupplierKind } from "@/lib/types"
 import type { createServiceClient } from "@/lib/supabase/server"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
@@ -33,4 +34,57 @@ export async function resolveTrainSupplierId(supabase: ServiceClient, supplierNa
 
 export async function findHotelSupplierId(supabase: ServiceClient, hotelOption: unknown): Promise<string | null> {
   return resolveSupplierIdByKind(supabase, "hotel_property", hotelOption)
+}
+
+/** A booking's primary supplier: the train operator, or the hotel on a standalone hotel booking. */
+export interface PrimarySupplier {
+  id: string
+  kind: SupplierKind
+  name: string
+}
+
+/**
+ * Resolve free-text wording against every supplier that may head a booking of its own
+ * (suppliers.sells_standalone) -- both train operators and standalone hotels such as Kruger
+ * Shalati. Same never-guess rule as above: ambiguous wording resolves to null.
+ *
+ * Deliberately a wider pool than resolveTrainSupplierId, which stays for the add-on paths where a
+ * hotel must never be mistaken for the journey.
+ */
+export async function resolveStandaloneSupplier(
+  supabase: ServiceClient,
+  freeText: unknown,
+): Promise<PrimarySupplier | null> {
+  if (typeof freeText !== "string" || !freeText.trim()) return null
+
+  const { data: suppliers } = await supabase
+    .from("suppliers")
+    .select("id, name, kind")
+    .eq("sells_standalone", true)
+    .eq("active", true)
+
+  const matchedId = resolveEntity(freeText, suppliers ?? []).value
+  if (!matchedId) return null
+
+  const matched = (suppliers ?? []).find((supplier) => supplier.id === matchedId)
+  return matched ? { id: matched.id, kind: matched.kind, name: matched.name } : null
+}
+
+/**
+ * Load a supplier the caller already has an id for -- used when the review modal sends a resolved
+ * supplierId and the server still needs its kind to decide how to shape the booking.
+ */
+export async function loadPrimarySupplier(
+  supabase: ServiceClient,
+  supplierId: unknown,
+): Promise<PrimarySupplier | null> {
+  if (typeof supplierId !== "string" || !supplierId.trim()) return null
+
+  const { data: supplier } = await supabase
+    .from("suppliers")
+    .select("id, name, kind")
+    .eq("id", supplierId)
+    .maybeSingle()
+
+  return supplier ? { id: supplier.id, kind: supplier.kind, name: supplier.name } : null
 }

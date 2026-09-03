@@ -183,6 +183,10 @@ export async function POST(req: Request) {
       // unchanged here).
       pricing_mode: parsed.kind === "airline" ? "manual" : "rate_card",
       name: parsed.name.trim(),
+      // A train operator always heads its own bookings, so it is standalone from the start.
+      // Anything else is an add-on until someone ticks it on the supplier page -- which is how
+      // a hotel sold on its own (Kruger Shalati) becomes selectable on New Enquiry.
+      sells_standalone: parsed.kind === "train_operator",
       slug,
       email: parsed.email || null,
       phone: parsed.phone || null,
@@ -198,7 +202,7 @@ export async function POST(req: Request) {
       active: false,
       status: "temporary",
     })
-    .select("id, slug, kind, pricing_mode, transfer_pricing_basis, status, name, email, phone, website, location, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, parent_supplier_id, long_journey_min_days, train_only_note, quote_suite_detail, suite_phrase_pattern, created_at, updated_at")
+    .select("id, slug, kind, pricing_mode, transfer_pricing_basis, status, name, email, phone, website, location, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, parent_supplier_id, long_journey_min_days, train_only_note, quote_suite_detail, suite_phrase_pattern, sells_standalone, email_match_phrases, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {

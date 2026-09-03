@@ -154,6 +154,21 @@ export function isReopenFromCancelled(stage: PipelineStage): boolean {
 }
 
 /**
+ * True when a booking has reached `stage` or gone past it on the forward ladder — the question
+ * "is this booking committed yet?", asked by guards outside the transition system itself (Build
+ * Booking refuses to delete legs from `deposit_paid` on, because by then suppliers are booked and
+ * the itinerary is contractual).
+ *
+ * `lost` sits off the ladder and answers false for every target; callers that must also refuse a
+ * cancelled booking pair this with `isTerminalPipelineStage`.
+ */
+export function isAtOrPastStage(stage: PipelineStage, target: PipelineStage): boolean {
+  const from = stageIndex(stage)
+  const to = stageIndex(target)
+  return from !== -1 && to !== -1 && from >= to
+}
+
+/**
  * `lost` and `closed` are permanently terminal by product decision (F12-4,
  * 2026-08-21): once a booking is cancelled or closed it stays that way — no
  * reopening, start a fresh enquiry instead. `apply-transition.ts` and the

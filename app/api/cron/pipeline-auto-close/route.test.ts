@@ -137,7 +137,7 @@ describe("pipeline auto-close cron", () => {
     const response = await GET(authedRequest())
     const body = await response.json()
 
-    expect(body).toEqual({ thankYousScheduled: 1, autoClosed: 0 })
+    expect(body).toMatchObject({ thankYousScheduled: 1, autoClosed: 0, autoCloseSkipped: 0 })
     expect(insertOperations).toContainEqual(
       expect.objectContaining({
         table: "correspondences",
@@ -157,7 +157,7 @@ describe("pipeline auto-close cron", () => {
     const response = await GET(authedRequest())
     const body = await response.json()
 
-    expect(body).toEqual({ thankYousScheduled: 0, autoClosed: 0 })
+    expect(body).toMatchObject({ thankYousScheduled: 0, autoClosed: 0, autoCloseSkipped: 0 })
     expect(insertOperations).not.toContainEqual(
       expect.objectContaining({
         table: "correspondences",
@@ -171,7 +171,7 @@ describe("pipeline auto-close cron", () => {
     const response = await GET(authedRequest())
     const body = await response.json()
 
-    expect(body).toEqual({ thankYousScheduled: 0, autoClosed: 1 })
+    expect(body).toMatchObject({ thankYousScheduled: 0, autoClosed: 1, autoCloseSkipped: 0 })
     expect(insertOperations).not.toContainEqual(
       expect.objectContaining({
         table: "correspondences",

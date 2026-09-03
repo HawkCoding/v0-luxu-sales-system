@@ -60,10 +60,11 @@ const templateCreateSchema = z.object({
   subject: z.string().trim().min(1, "Subject is required").max(500),
   bodyHtml: z.string().max(200_000).default(""),
   /**
-   * Set only to create a per-train variant of a system template (e.g. a Rovos-specific
-   * quote_email body) -- `key` names the system key to vary and `supplierId` the train_operator
-   * supplier it applies to. Uniqueness is (key, supplierId) at the DB level, not the slugified-name
-   * scheme below, which is for standalone custom templates only.
+   * Set only to create a per-supplier variant of a system template (e.g. a Rovos-specific or a
+   * Kruger Shalati-specific quote_email body) -- `key` names the system key to vary and
+   * `supplierId` the supplier (any supplier with sells_standalone = true) it applies to.
+   * Uniqueness is (key, supplierId) at the DB level, not the slugified-name scheme below, which is
+   * for standalone custom templates only.
    */
   key: z.enum(SYSTEM_TEMPLATE_KEYS).optional(),
   supplierId: z.string().uuid().optional(),
@@ -165,7 +166,7 @@ export async function POST(req: Request) {
 
   if (error || !created) {
     if (error?.code === "23505") {
-      return jsonError("A variant already exists for this template and train.", 409)
+      return jsonError("A variant already exists for this template and supplier.", 409)
     }
     return safeSupabaseError("templates:create", error)
   }

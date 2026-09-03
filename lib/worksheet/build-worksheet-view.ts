@@ -73,7 +73,7 @@ export async function buildWorksheetView(
     supabase
       .from("bookings")
       .select(
-        `id, booking_number, customer_invoice_number, assigned_salesperson_id, departure_date, trip_end_date, no_of_adults, no_of_children,
+        `id, booking_number, customer_invoice_number, assigned_salesperson_id, departure_date, trip_end_date, no_of_adults, no_of_children, primary_supplier_id,
          voucher_sent_at, deposit_paid_at, final_paid_at, invoice_balance,
          customer:customers(title, first_name, last_name, email, phone, country)`,
       )
@@ -175,19 +175,23 @@ export async function buildWorksheetView(
     transportRequests: transportRows,
   })
 
-  // The header's "Service" cell names the rail operator this job is built around — in practice
-  // The Blue Train or Rovos Rail — and stays blank on a booking with no train. The same leg also
-  // supplies the header's "Departure Date"; a multi-train booking is resolved by earliest
+  // The header's "Service" cell names what this job is built around, and the same leg supplies the
+  // header's "Departure Date". That is the rail operator on a journey — in practice The Blue Train
+  // or Rovos Rail — and the property itself on a standalone stay (Kruger Shalati), which has no
+  // train at all and used to leave both cells blank. A multi-leg booking is resolved by earliest
   // service_date rather than by query order, so both cells stay stable across reloads.
-  const trainServices = serviceRows.filter(
-    (row) => firstRecord(row.suppliers)?.kind === "train_operator",
-  )
-  const datedTrains = trainServices
+  const coreServices = serviceRows.filter((row) => {
+    const supplier = firstRecord(row.suppliers)
+    return bookingRaw.primary_supplier_id
+      ? row.supplier_id === bookingRaw.primary_supplier_id
+      : supplier?.kind === "train_operator"
+  })
+  const datedCoreServices = coreServices
     .filter((row) => Boolean(row.service_date))
     .sort((a, b) => (a.service_date ?? "").localeCompare(b.service_date ?? ""))
-  // A train leg with no date still names the Service cell — it just cannot supply a departure date.
-  const serviceName = firstRecord((datedTrains[0] ?? trainServices[0])?.suppliers)?.name ?? null
-  const trainDepartureDate = datedTrains[0]?.service_date ?? null
+  // A core leg with no date still names the Service cell — it just cannot supply a departure date.
+  const serviceName = firstRecord((datedCoreServices[0] ?? coreServices[0])?.suppliers)?.name ?? null
+  const trainDepartureDate = datedCoreServices[0]?.service_date ?? null
 
   const paymentRows: WorksheetPayment[] = (payments ?? []).map((p) => ({
     date: p.received_at,

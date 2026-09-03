@@ -63,7 +63,7 @@ export async function POST(req: Request) {
     const { data: supplier } = await supabase
       .from("suppliers")
       .select("name")
-      .eq("kind", "train_operator")
+      .eq("sells_standalone", true)
       .eq("active", true)
       .order("name")
       .limit(1)

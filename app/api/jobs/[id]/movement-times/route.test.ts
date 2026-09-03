@@ -177,7 +177,11 @@ function buildSupabase(state: MockState = {}) {
       if (table === "quote_line_items") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(async () => ({ data: state.quoteLineItems ?? [], error: null })),
+            // `.order("sort_order")` is now always applied — the primary-supplier fallbacks are
+            // "first leg in array order", so an unordered read let Postgres pick the answer.
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: state.quoteLineItems ?? [], error: null })),
+            })),
           })),
         }
       }

@@ -1,5 +1,5 @@
 import {
-  isOptionalPackageLegKind,
+  isCoreBookingLeg,
   isTypePricedSupplier,
   resolveSupplierPriceLabel,
   SUPPLIER_VOCABULARY,
@@ -28,7 +28,13 @@ import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
 import { calculateQuoteTotals } from "@/lib/quotes/pricing-engine"
 import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
-import { manualFares, overriddenFares, rateCardFares, type PassengerFare } from "@/lib/pricing/passenger-fares"
+import {
+  hotelRateCardFares,
+  manualFares,
+  overriddenFares,
+  rateCardFares,
+  type PassengerFare,
+} from "@/lib/pricing/passenger-fares"
 import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
@@ -225,7 +231,7 @@ export async function buildPackageQuoteLineItems({
   ] = await Promise.all([
     supabase
       .from("bookings")
-      .select("id, no_of_adults, no_of_children, no_of_suites, child_ages, departure_date")
+      .select("id, no_of_adults, no_of_children, no_of_suites, child_ages, departure_date, primary_supplier_id")
       .eq("id", jobId)
       .single(),
     supabase
@@ -271,6 +277,10 @@ export async function buildPackageQuoteLineItems({
   if (jobError || !job) {
     throw new Error("Job not found")
   }
+
+  // Narrowed once here: the hoisted helpers below close over it, and a function declaration loses
+  // the narrowing applied to the binding it captures.
+  const bookingPrimarySupplierId = job.primary_supplier_id ?? null
 
   // Batch-resolve display names for whoever set a transport price override, same source as the
   // hotel room override's "set by" note — read once here rather than per request below. Depends
@@ -672,9 +682,17 @@ export async function buildPackageQuoteLineItems({
     lineItems.push(lineItem)
   }
 
+  /** The leg the booking exists for -- never optional, always priced. On a rail journey that is
+   *  the train; on a standalone stay (Kruger Shalati) it is the hotel. */
+  function isCoreLeg(leg: PackageDetail["legs"][number]): boolean {
+    return isCoreBookingLeg(
+      { supplierId: leg.supplierId ?? null, supplierKind: leg.supplierKind },
+      bookingPrimarySupplierId,
+    )
+  }
+
   function getLegSelection(leg: PackageDetail["legs"][number]) {
-    const isOptional = isOptionalPackageLegKind(leg.supplierKind)
-    return selectionMap.get(leg.id) ?? { legId: leg.id, selected: !isOptional }
+    return selectionMap.get(leg.id) ?? { legId: leg.id, selected: isCoreLeg(leg) }
   }
 
   function getRequiredRouteId(
@@ -792,7 +810,7 @@ export async function buildPackageQuoteLineItems({
   if (packageDetail.fixedPricePerPerson !== null) {
     for (const leg of packageDetail.legs) {
       const selection = getLegSelection(leg)
-      const isOptional = isOptionalPackageLegKind(leg.supplierKind)
+      const isOptional = !isCoreLeg(leg)
       if (isOptional && !selection.selected) continue
       // Zero-priced on purpose: the leg is an inclusion of the package, and the
       // whole price sits on the "Package Total" line below. The snapshot marks
@@ -843,7 +861,7 @@ export async function buildPackageQuoteLineItems({
       const isTour = leg.supplierKind === "tour_operator"
       const isTransfer = leg.supplierKind === "transfers"
       const isVehicleRental = leg.supplierKind === "vehicle_rental"
-      const isOptional = isOptionalPackageLegKind(leg.supplierKind)
+      const isOptional = !isCoreLeg(leg)
 
       if (isOptional && !selection.selected) {
         continue
@@ -988,9 +1006,35 @@ export async function buildPackageQuoteLineItems({
           throw new Error(`No room type selected for leg: ${legLabel}`)
         }
         // Nights is a leg-level stay length (a booking's stay doesn't split per room); rooms is
-        // implicitly units.length — each unit is an independent room, its own suite/bed/layout/
-        // bathroom, priced qty = nights so qty × unitPrice = total stays correct per room.
+        // implicitly units.length — each unit is an independent room with its own suite/bed/layout/
+        // bathroom and its own occupants.
         const nights = Math.max(1, selection.nights ?? 1)
+
+        // Hotel rates are per person per night, so a room's price depends on who is in it. The
+        // occupancy split has to add up to the booking's travellers, exactly as it does for a train
+        // — every guest sleeps in exactly one room. Rooms used to price at one flat card rate each,
+        // which billed a double room as though one person were in it.
+        const hotelTotals = countsForBuckets(bucketsForLeg(leg))
+        const hotelSummed = units.reduce(
+          (acc, unitSelection) => ({
+            adultCount: acc.adultCount + (unitSelection.adultCount ?? 0),
+            childCount: acc.childCount + (unitSelection.childCount ?? 0),
+            infantCount: acc.infantCount + (unitSelection.infantCount ?? 0),
+          }),
+          { adultCount: 0, childCount: 0, infantCount: 0 },
+        )
+        if (
+          hotelSummed.adultCount !== hotelTotals.adultCount ||
+          hotelSummed.childCount !== hotelTotals.childCount ||
+          hotelSummed.infantCount !== hotelTotals.infantCount
+        ) {
+          throw new Error(
+            `${legLabel}: rooms hold ${hotelSummed.adultCount} adults, ${hotelSummed.childCount} children, ` +
+              `${hotelSummed.infantCount} infants but the booking is for ${hotelTotals.adultCount} adults, ` +
+              `${hotelTotals.childCount} children, ${hotelTotals.infantCount} infants. Update the booking's ` +
+              `travellers, or adjust who is in each room.`,
+          )
+        }
 
         for (const unitSelection of units) {
           // 0 is a real override (a comped room), so this is a null check, not a truthiness one.
@@ -1006,6 +1050,9 @@ export async function buildPackageQuoteLineItems({
           const chargedNights = nights - giftedNights
           const complimentary = giftedNights > 0 ? { nights: giftedNights, stayNights: nights } : null
 
+          // A typed room price stays a room price: it replaces the whole room's nightly rate
+          // whoever is in it, so it emits one line rather than a per-person breakdown. That is what
+          // the consultant typed, and it keeps the comped-room case (a deliberate R0) intact.
           if (overridePrice !== null) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } =
               resolveOverriddenUnit(unitSelection.suiteTypeId)
@@ -1042,20 +1089,64 @@ export async function buildPackageQuoteLineItems({
           )
           activeRateCard = validRateCard
           activeRateCardInherited = rateTypeInherited
-          addLineItem({
-            description,
-            qty: chargedNights,
-            unitPrice: validRateCard.pricePerPerson,
-            supplierDescription,
-            suiteTypeId: unitSelection.suiteTypeId,
-            suiteTypeName,
-            variantNames: specificUnitVariantNames(unitSelection),
-            selectedVariantGroups: specificUnitVariantGroups(unitSelection),
-            unit,
-            hideRoomConfig: true,
-            sourceCurrency: validRateCard.currency,
-            complimentary,
-          })
+
+          // One line per passenger kind in this room, priced off this room's own card: child rates
+          // differ by room type, so which room a child sleeps in is what decides the price. A kind
+          // with nobody in it, or with no rate to charge, emits nothing — an unset child price on a
+          // hotel card means the child shares free (see hotelRateCardFares).
+          const occupancy = {
+            adultCount: unitSelection.adultCount ?? 0,
+            childCount: unitSelection.childCount ?? 0,
+            infantCount: unitSelection.infantCount ?? 0,
+          }
+          const roomFares = hotelRateCardFares(validRateCard)
+          let pricedAnyKind = false
+
+          for (const fare of roomFares) {
+            const headcount = occupancy[fare.key]
+            if (headcount === 0) continue
+            // A free occupant still gets a line. Skipping it would drop a room whose only guest is
+            // a child sharing free out of the itinerary altogether, and the client should see that
+            // the child was counted and cost nothing rather than not appear.
+            pricedAnyKind = true
+            addLineItem({
+              description,
+              // Per person per night: three guests for four nights is twelve person-nights.
+              qty: headcount * chargedNights,
+              unitPrice: fare.unitPrice,
+              supplierDescription,
+              suiteTypeId: unitSelection.suiteTypeId,
+              suiteTypeName,
+              variantNames: specificUnitVariantNames(unitSelection),
+              selectedVariantGroups: specificUnitVariantGroups(unitSelection),
+              unit,
+              hideRoomConfig: true,
+              passengerLabel: fare.label,
+              passengerKind: fare.kind,
+              sourceCurrency: validRateCard.currency,
+              complimentary,
+            })
+          }
+
+          // A room whose every night was gifted still has to reach the quote — the client documents
+          // read their itinerary off the priced legs, so a room that emitted no line at all would
+          // drop out of the stay entirely.
+          if (!pricedAnyKind && complimentary) {
+            addLineItem({
+              description,
+              qty: 0,
+              unitPrice: validRateCard.pricePerPerson,
+              supplierDescription,
+              suiteTypeId: unitSelection.suiteTypeId,
+              suiteTypeName,
+              variantNames: specificUnitVariantNames(unitSelection),
+              selectedVariantGroups: specificUnitVariantGroups(unitSelection),
+              unit,
+              hideRoomConfig: true,
+              sourceCurrency: validRateCard.currency,
+              complimentary,
+            })
+          }
         }
       } else if (isTransfer || isVehicleRental) {
         const serviceType = isVehicleRental ? "rental" : "transfer"

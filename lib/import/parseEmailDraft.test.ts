@@ -366,8 +366,11 @@ John Smith
       },
       trip: {
         supplier: "Rovos Rail",
+        supplierKind: "",
         route: "Pretoria To Cape Town",
         departureDate: "2026-05-15",
+        checkOutDate: "",
+        nights: null,
         purpose: "quote",
         packageOption: "",
         hotelOption: "",
@@ -391,6 +394,8 @@ John Smith
         direction: "Pretoria To Cape Town",
         supplier: "Rovos Rail",
         departureDateRaw: "2026-05-15",
+        checkOutDateRaw: "",
+        promotionCode: "",
         suitePhrases: ["Royal Double Suite"],
         childAges: [],
         hotelPhase: "",
@@ -840,5 +845,128 @@ Departure Date
     const draft = parseEmailDraft("We want to travel between Pretoria and Victoria Falls.")
 
     expect(draft.trip.route).toBe("Pretoria To Victoria Falls")
+  })
+})
+
+/**
+ * Kruger Shalati is a stationary train carriage let per room per night: a stay, not a journey.
+ * Its Gravity form states check-in/check-out and rooms where a rail form states a direction,
+ * departure date and suites -- and it names the supplier only in the email's subject.
+ */
+describe("standalone hotel (stay) enquiries", () => {
+  const SUPPLIERS = [
+    { name: "The Blue Train", kind: "train_operator" as const },
+    { name: "Rovos Rail", kind: "train_operator" as const },
+    { name: "Kruger Shalati - Train on the Bridge", kind: "hotel_property" as const },
+  ]
+
+  const SHALATI_BODY = [
+    "Please indicate the purpose of your request",
+    " \t Quote",
+    "Contact Information",
+    "Title",
+    " \t Mrs",
+    "Name",
+    " \t Kristy",
+    "Surname",
+    " \t Kluever",
+    "Contact Number",
+    " \t 4125279919",
+    "Email",
+    " \t kristykluever@gmail.com",
+    "Country",
+    " \t USA",
+    "Reservation Information",
+    "Check-in Date",
+    " \t 05/05/2026",
+    "Check-out Date",
+    " \t 07/05/2026",
+    "No of Rooms",
+    " \t 1",
+    "Room Type 1",
+    " \t Bridge House - Room Double",
+    "No of Adults",
+    " \t 2",
+    "Consent",
+    " \t I have read and accept the Terms and Conditions",
+  ].join("\n")
+
+  const SHALATI_SUBJECT = "New submission from Kruger Shalati Enquiry - Kluever"
+
+  function parseShalati(overrides?: { subject?: string; body?: string }) {
+    return parseEmailDraft(overrides?.body ?? SHALATI_BODY, {
+      subject: overrides?.subject ?? SHALATI_SUBJECT,
+      standaloneSuppliers: SUPPLIERS,
+    })
+  }
+
+  it("resolves the supplier from the subject when the body never names it", () => {
+    expect(SHALATI_BODY).not.toContain("Shalati")
+
+    const draft = parseShalati()
+
+    expect(draft.trip.supplier).toBe("Kruger Shalati - Train on the Bridge")
+    expect(draft.trip.supplierKind).toBe("hotel_property")
+    expect(draft.confidence["trip.supplier"]).toBe("high")
+  })
+
+  it("reads check-in, check-out and the nights between them", () => {
+    const draft = parseShalati()
+
+    expect(draft.trip.departureDate).toBe("2026-05-05")
+    expect(draft.trip.checkOutDate).toBe("2026-05-07")
+    expect(draft.trip.nights).toBe(2)
+  })
+
+  it("reads the room count and room type wording", () => {
+    const draft = parseShalati()
+
+    expect(draft.guests.suites).toBe(1)
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.guests.suitePhrases).toEqual(["Bridge House - Room Double"])
+  })
+
+  // The customer's free text mentions "travel from Pretoria to Kruger". A stay has no direction,
+  // and inventing one from prose would hand the booking a route it can never have.
+  it("never invents a route from prose on a stay", () => {
+    const draft = parseShalati({
+      body: `${SHALATI_BODY}\nAdditional Comments\n \t I am looking to travel from Pretoria to Kruger.`,
+    })
+
+    expect(draft.trip.route).toBe("")
+  })
+
+  it("requires check-in and check-out instead of a route and departure date", () => {
+    const draft = parseShalati()
+
+    expect(validateDraft(draft).isValid).toBe(true)
+    expect(validateDraft(draft).missingRequired).not.toContain("Route / Direction")
+    expect(countRequiredComplete(draft)).toEqual({ completed: 9, total: 9 })
+  })
+
+  it("reports a missing check-out, since nights is the whole price", () => {
+    const draft = parseShalati({ body: SHALATI_BODY.replace(" \t 07/05/2026", " \t") })
+
+    expect(draft.trip.checkOutDate).toBe("")
+    expect(validateDraft(draft).missingRequired).toEqual(["Check-out date"])
+  })
+
+  it("reads the promotion code the Shalati form carries", () => {
+    const draft = parseShalati({
+      body: `${SHALATI_BODY}\nPromotion Code - GET 5% DISCOUNT (KS2025)\n \t KS2025`,
+    })
+
+    expect(draft.formFields.promotionCode).toBe("KS2025")
+  })
+
+  // A rail enquiry from a customer surnamed Kruger must not be handed to Kruger Shalati.
+  it("keeps a Rovos enquiry from a customer surnamed Kruger on Rovos", () => {
+    const draft = parseEmailDraft("Direction\n \t Pretoria to Cape Town\nNo of Suites\n \t 1", {
+      subject: "New submission from Rovos Rail SA Specials 2026 - Kruger",
+      standaloneSuppliers: SUPPLIERS,
+    })
+
+    expect(draft.trip.supplier).toBe("Rovos Rail")
+    expect(draft.trip.supplierKind).toBe("train_operator")
   })
 })

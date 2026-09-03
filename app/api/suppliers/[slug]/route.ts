@@ -987,6 +987,10 @@ export async function PATCH(
     // Every kind may word its full suite/room phrase, not just trains -- see
     // lib/templates/suite-phrase-pattern.ts.
     suite_phrase_pattern: normalizeOptionalText(parsed.suitePhrasePattern),
+    // A train operator always heads its own bookings; every other kind is opt-in, which is
+    // how a hotel sold on its own (Kruger Shalati) reaches the New Enquiry supplier list.
+    sells_standalone: parsed.sellsStandalone ?? parsed.kind === "train_operator",
+    email_match_phrases: normalizeOptionalText(parsed.emailMatchPhrases),
     base_rate_type_id: requestedBaseRateTypeId,
     // Normalised: nominating the base rate is the same as nominating nothing.
     quote_rate_type_id: rateTiers.quoteRateTypeId,

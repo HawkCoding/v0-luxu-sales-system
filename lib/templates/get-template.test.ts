@@ -1,6 +1,116 @@
 import { describe, expect, it } from "vitest"
-import { DEFAULT_TEMPLATES } from "./get-template"
+import { DEFAULT_TEMPLATES, getTemplate } from "./get-template"
 import { SYSTEM_TEMPLATE_KEYS, getTokenSpecs } from "./registry"
+
+const SUPPLIER_ID = "00000000-0000-4000-8000-000000000fff"
+
+interface TemplateRow {
+  key: string
+  subject: string
+  body_html: string
+  supplier_id: string | null
+  active: boolean
+}
+
+// Minimal fluent stand-in for the supabase chain getTemplate builds: any number of
+// .eq()/.is() calls narrow the candidate rows, then .maybeSingle() resolves.
+function makeSupabase(rows: TemplateRow[]) {
+  return {
+    from(table: string) {
+      if (table !== "templates") throw new Error(`Unexpected table: ${table}`)
+      const filters: { field: string; value: unknown }[] = []
+      const builder = {
+        select: () => builder,
+        eq: (field: string, value: unknown) => {
+          filters.push({ field, value })
+          return builder
+        },
+        is: (field: string, value: unknown) => {
+          filters.push({ field, value })
+          return builder
+        },
+        maybeSingle: async () => {
+          const match = rows.find((row) =>
+            filters.every((f) => (row as unknown as Record<string, unknown>)[f.field] === f.value),
+          )
+          return { data: match ?? null, error: null }
+        },
+      }
+      return builder
+    },
+  }
+}
+
+describe("getTemplate — supplier variants", () => {
+  it("resolves the (key, supplierId) variant when one exists and is active", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+      {
+        key: "quote_email",
+        subject: "Shalati subject",
+        body_html: "<p>Shalati</p>",
+        supplier_id: SUPPLIER_ID,
+        active: true,
+      },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email", SUPPLIER_ID)
+    expect(result).toEqual({ key: "quote_email", subject: "Shalati subject", bodyHtml: "<p>Shalati</p>" })
+  })
+
+  it("falls back to the shared (supplier_id IS NULL) row when no variant matches the supplier", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email", SUPPLIER_ID)
+    expect(result).toEqual({ key: "quote_email", subject: "Shared subject", bodyHtml: "<p>Shared</p>" })
+  })
+
+  it("falls back to the shared row when the matching variant is inactive", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+      {
+        key: "quote_email",
+        subject: "Shalati subject",
+        body_html: "<p>Shalati</p>",
+        supplier_id: SUPPLIER_ID,
+        active: false,
+      },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email", SUPPLIER_ID)
+    expect(result).toEqual({ key: "quote_email", subject: "Shared subject", bodyHtml: "<p>Shared</p>" })
+  })
+
+  it("resolves the shared row directly when no supplierId is given", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+      {
+        key: "quote_email",
+        subject: "Shalati subject",
+        body_html: "<p>Shalati</p>",
+        supplier_id: SUPPLIER_ID,
+        active: true,
+      },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email")
+    expect(result).toEqual({ key: "quote_email", subject: "Shared subject", bodyHtml: "<p>Shared</p>" })
+  })
+
+  it("falls back to the code-level default for a system key when no row exists at all", async () => {
+    const supabase = makeSupabase([])
+    const result = await getTemplate(supabase as never, "quote_email", SUPPLIER_ID)
+    expect(result).toEqual({
+      key: "quote_email",
+      subject: DEFAULT_TEMPLATES.quote_email.subject,
+      bodyHtml: DEFAULT_TEMPLATES.quote_email.bodyHtml,
+    })
+  })
+
+  it("returns null for an unknown custom key with no matching row", async () => {
+    const supabase = makeSupabase([])
+    const result = await getTemplate(supabase as never, "not_a_real_key", SUPPLIER_ID)
+    expect(result).toBeNull()
+  })
+})
 
 // Regression test for the double-Rand bug: money tokens (amountDue,
 // depositAmount, etc.) are resolved via Intl.NumberFormat ZAR currency

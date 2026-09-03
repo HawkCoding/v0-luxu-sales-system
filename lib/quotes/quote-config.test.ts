@@ -47,7 +47,7 @@ describe("resolveQuoteConfig — journey class", () => {
     const result = resolveQuoteConfig(
       input({
         lineItems: [{ pricingSnapshot: snapshot({}) }],
-        suppliers: { "sup-rovos": { longJourneyMinDays: 9 } },
+        suppliers: { "sup-rovos": { longJourneyMinDays: 9, sellsStandalone: false } },
         routes: { "route-1": { durationDays: 9 } },
       }),
     )
@@ -60,7 +60,7 @@ describe("resolveQuoteConfig — journey class", () => {
     const result = resolveQuoteConfig(
       input({
         lineItems: [{ pricingSnapshot: snapshot({}) }],
-        suppliers: { "sup-rovos": { longJourneyMinDays: 9 } },
+        suppliers: { "sup-rovos": { longJourneyMinDays: 9, sellsStandalone: false } },
         routes: { "route-1": { durationDays: 4 } },
       }),
     )
@@ -71,7 +71,7 @@ describe("resolveQuoteConfig — journey class", () => {
     const result = resolveQuoteConfig(
       input({
         lineItems: [{ pricingSnapshot: snapshot({ supplierId: "sup-bt", supplierName: "The Blue Train" }) }],
-        suppliers: { "sup-bt": { longJourneyMinDays: null } },
+        suppliers: { "sup-bt": { longJourneyMinDays: null, sellsStandalone: false } },
         routes: { "route-1": { durationDays: 3 } },
       }),
     )
@@ -83,7 +83,7 @@ describe("resolveQuoteConfig — journey class", () => {
     const result = resolveQuoteConfig(
       input({
         lineItems: [{ pricingSnapshot: snapshot({}) }],
-        suppliers: { "sup-rovos": { longJourneyMinDays: 9 } },
+        suppliers: { "sup-rovos": { longJourneyMinDays: 9, sellsStandalone: false } },
         routes: { "route-1": { durationDays: null, name: "Dar Es Salaam Journey" } },
       }),
     )
@@ -95,7 +95,7 @@ describe("resolveQuoteConfig — journey class", () => {
     const result = resolveQuoteConfig(
       input({
         lineItems: [{ pricingSnapshot: snapshot({}) }],
-        suppliers: { "sup-rovos": { longJourneyMinDays: 9 } },
+        suppliers: { "sup-rovos": { longJourneyMinDays: 9, sellsStandalone: false } },
         routes: { "route-1": { durationDays: 4 } },
         overrides: { ...NO_OVERRIDES, journeyClass: "long" },
       }),
@@ -223,5 +223,89 @@ describe("resolveQuoteConfig — primary ids", () => {
     const result = resolveQuoteConfig(input({ lineItems: [{ pricingSnapshot: snapshot({}) }] }))
     expect(result.primarySupplierId).toBe("sup-rovos")
     expect(result.primaryRouteId).toBe("route-1")
+    expect(result.primarySupplierSource).toBe("train")
+    expect(result.primaryCandidateIds).toEqual([])
+  })
+})
+
+describe("resolveQuoteConfig — standalone primary and ambiguity", () => {
+  it("a standalone hotel (Kruger Shalati) resolves as the primary via the booking hint", () => {
+    const result = resolveQuoteConfig(
+      input({
+        lineItems: [
+          { pricingSnapshot: snapshot({ supplierId: "sup-rovos", supplierKind: "train_operator" }) },
+          {
+            pricingSnapshot: snapshot({
+              supplierId: "sup-shalati",
+              supplierName: "Kruger Shalati",
+              supplierKind: "hotel_property",
+              routeId: "meal-plan-1",
+              routeName: "Half Board",
+            }),
+          },
+        ],
+        suppliers: {
+          "sup-rovos": { longJourneyMinDays: 9, sellsStandalone: true, name: "Rovos Rail" },
+          "sup-shalati": { longJourneyMinDays: null, sellsStandalone: true, name: "Kruger Shalati" },
+        },
+        bookingPrimarySupplierId: "sup-shalati",
+      }),
+    )
+    expect(result.primarySupplierId).toBe("sup-shalati")
+    expect(result.primarySupplierSource).toBe("booking")
+    expect(result.unresolved).toEqual([])
+  })
+
+  it("flags an ambiguous pick when two standalone-capable suppliers are priced with no booking hint", () => {
+    const result = resolveQuoteConfig(
+      input({
+        lineItems: [
+          { pricingSnapshot: snapshot({ supplierId: "sup-rovos", supplierKind: "train_operator" }) },
+          {
+            pricingSnapshot: snapshot({
+              supplierId: "sup-shalati",
+              supplierKind: "hotel_property",
+              routeId: "meal-plan-1",
+              routeName: "Half Board",
+            }),
+          },
+        ],
+        suppliers: {
+          "sup-rovos": { longJourneyMinDays: null, sellsStandalone: true, name: "Rovos Rail" },
+          "sup-shalati": { longJourneyMinDays: null, sellsStandalone: true, name: "Kruger Shalati" },
+        },
+      }),
+    )
+    expect(result.primarySupplierId).toBe("sup-rovos")
+    expect(result.primarySupplierSource).toBe("standalone")
+    expect(result.primaryCandidateIds).toEqual(["sup-rovos", "sup-shalati"])
+    expect(result.unresolved).toEqual([
+      "Two standalone products are priced on this quote (Rovos Rail, Kruger Shalati) -- using Rovos Rail. " +
+        "Set the booking's primary supplier to change this.",
+    ])
+  })
+
+  it("does not flag ambiguity when the booking hint decided it", () => {
+    const result = resolveQuoteConfig(
+      input({
+        lineItems: [
+          { pricingSnapshot: snapshot({ supplierId: "sup-rovos", supplierKind: "train_operator" }) },
+          {
+            pricingSnapshot: snapshot({
+              supplierId: "sup-shalati",
+              supplierKind: "hotel_property",
+              routeId: "meal-plan-1",
+              routeName: "Half Board",
+            }),
+          },
+        ],
+        suppliers: {
+          "sup-rovos": { longJourneyMinDays: 9, sellsStandalone: true, name: "Rovos Rail" },
+          "sup-shalati": { longJourneyMinDays: null, sellsStandalone: true, name: "Kruger Shalati" },
+        },
+        bookingPrimarySupplierId: "sup-shalati",
+      }),
+    )
+    expect(result.unresolved).toEqual([])
   })
 })

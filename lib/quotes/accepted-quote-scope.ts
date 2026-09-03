@@ -17,6 +17,12 @@ export interface AcceptedQuoteScope {
   /** Client-facing name per priced leg, for error messages that have to name a leg whose builder
    * row is gone. Keyed by leg id. */
   legLabels: Map<string, string>
+  /** Legs the supplier comped outright (manualRoomPrice of 0). */
+  complimentaryLegIds: Set<string>
+  /** Legs where the first night was gifted and the rest charged. */
+  firstNightComplimentaryLegIds: Set<string>
+  /** Transport requests marked complimentary — per request, not per leg. */
+  complimentaryTransportRequestIds: Set<string>
   /** False when the booking has no accepted quote at all. */
   hasAcceptedQuote: boolean
 }
@@ -118,6 +124,9 @@ export async function resolveAcceptedQuoteScope(
     quoteNumber: null,
     legIds: new Set<string>(),
     legLabels: new Map<string, string>(),
+    complimentaryLegIds: new Set<string>(),
+    firstNightComplimentaryLegIds: new Set<string>(),
+    complimentaryTransportRequestIds: new Set<string>(),
     hasAcceptedQuote: false,
   }
 
@@ -137,14 +146,23 @@ export async function resolveAcceptedQuoteScope(
     .from("quote_line_items")
     .select("pricing_snapshot")
     .eq("quote_id", quote.id)
+    // Ordered so `legLabels` keeps the itinerary's own order rather than Postgres's.
+    .order("sort_order", { ascending: true })
 
   if (lineItemsError) throw lineItemsError
 
+  // The comp sets travel with the scope rather than being re-extracted per caller. Leaving them out
+  // is what let the voucher print no COMPLIMENTARY callouts at all while the quote PDF and the
+  // quote email both printed them: `voucher/generate` builds its blocks from this scope, and the
+  // scope simply had nothing to tell it.
   return {
     quoteId: quote.id,
     quoteNumber: quote.quote_number,
     legIds: legIdsFromLineItems(lineItems),
     legLabels: legLabelsFromLineItems(lineItems),
+    complimentaryLegIds: complimentaryLegIdsFromLineItems(lineItems),
+    firstNightComplimentaryLegIds: firstNightComplimentaryLegIdsFromLineItems(lineItems),
+    complimentaryTransportRequestIds: complimentaryTransportRequestIdsFromLineItems(lineItems),
     hasAcceptedQuote: true,
   }
 }

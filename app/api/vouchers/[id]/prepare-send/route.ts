@@ -10,7 +10,7 @@ import {
 } from "@/lib/quotes/accepted-quote-scope"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
-import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { isPlaceholderToken, resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
@@ -212,7 +212,11 @@ export async function POST(_req: Request, { params }: RouteParams) {
       ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
-      direction: resolveBookingRouteName(route, booking.route_reversed) ?? "your journey",
+      // See the note in the quote email preview: a standalone stay has no route, and the
+      // shared token already carries the stay's length in its place.
+      direction:
+        resolveBookingRouteName(route, booking.route_reversed) ??
+        (isPlaceholderToken(shared.tokens.direction) ? "your journey" : shared.tokens.direction),
       voucherNumber: voucher.voucher_number,
       departureDate: formatDisplayDateLong(booking.departure_date),
       consultantName: booking.consultant ?? "",
@@ -220,6 +224,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     },
     blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
+    templateSupplierId: shared.primarySupplierId,
   })
 
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)

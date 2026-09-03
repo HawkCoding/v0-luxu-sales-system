@@ -11,6 +11,13 @@ import {
 
 const BOOKING_ID = "00000000-0000-4000-8000-00000000bbbb"
 
+/** Spread into scope fixtures whose subject under test is leg filtering, not the comp callouts. */
+const NO_COMPLIMENTARY = {
+  complimentaryLegIds: new Set<string>(),
+  firstNightComplimentaryLegIds: new Set<string>(),
+  complimentaryTransportRequestIds: new Set<string>(),
+}
+
 interface QuoteRow {
   id: string
   quote_number: string | null
@@ -108,6 +115,7 @@ describe("scopeLegIdsFilter", () => {
       quoteNumber: null,
       legIds: new Set(),
       legLabels: new Map(),
+      ...NO_COMPLIMENTARY,
       hasAcceptedQuote: true,
     }
     expect(scopeLegIdsFilter(scope)).toBeUndefined()
@@ -119,6 +127,7 @@ describe("scopeLegIdsFilter", () => {
       quoteNumber: null,
       legIds: new Set(["leg-train"]),
       legLabels: new Map(),
+      ...NO_COMPLIMENTARY,
       hasAcceptedQuote: true,
     }
     expect(scopeLegIdsFilter(scope)).toEqual(new Set(["leg-train"]))
@@ -185,6 +194,7 @@ describe("findMissingQuotedLegs", () => {
       quoteNumber: "Q1",
       legIds: new Set(legIds),
       legLabels: new Map(Object.entries(labels)),
+      ...NO_COMPLIMENTARY,
       hasAcceptedQuote: true,
     }
   }

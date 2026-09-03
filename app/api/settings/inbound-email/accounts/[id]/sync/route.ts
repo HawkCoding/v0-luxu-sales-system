@@ -2,6 +2,9 @@ import { NextResponse } from "next/server"
 import { syncInboundEmailAccount } from "@/lib/inbound-email/sync"
 import { requireSettingsWrite } from "@/lib/settings-access"
 
+// Same ceiling the cron route declares -- the sync's own wall-clock budget is sized against it.
+export const maxDuration = 60
+
 const INBOUND_EMAIL_ACCOUNT_COLUMNS =
   "created_at, email, enabled, first_sync_completed, host, id, inbox_folder, last_seen_uid, last_synced_at, last_uidvalidity, needs_review_folder, password_encrypted, port, processed_folder, tls_mode, updated_at, username"
 

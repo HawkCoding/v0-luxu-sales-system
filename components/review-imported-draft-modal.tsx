@@ -7,12 +7,25 @@ import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react"
-import { type ParsedDraft, validateDraft, countRequiredComplete } from "@/lib/import/parseEmailDraft"
+import {
+  countRequiredComplete,
+  nightsBetween,
+  validateDraft,
+  type ParsedDraft,
+} from "@/lib/import/parseEmailDraft"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import {
   applySuiteResolutions,
@@ -24,6 +37,11 @@ import {
 import { suiteVocabularyFromSupplierDetail, type SuiteAxis } from "@/lib/suites/suite-vocabulary"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { resolveDraftSupplierId } from "@/lib/import/resolve-draft-supplier"
+import {
+  SUPPLIER_KIND_LABELS,
+  getSupplierVocabulary,
+  type SupplierKind,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
@@ -38,7 +56,7 @@ import { useUnloadGuard } from "@/hooks/use-unload-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 /** Bump whenever the persisted shape below changes -- see lib/drafts/draft-storage.ts. */
-const ENQUIRY_DRAFT_SCHEMA_VERSION = 1
+const ENQUIRY_DRAFT_SCHEMA_VERSION = 2
 const ENQUIRY_DRAFT_KEY = draftStorageKey("enquiry", "new")
 const ENQUIRY_DRAFT_DEBOUNCE_MS = 1500
 
@@ -223,24 +241,41 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
   useUnloadGuard(open && hasEdits)
 
   const { data: suppliers = [] } = useActiveSuppliers()
-  const trainSuppliers = useMemo(
-    () => suppliers.filter((supplier) => supplier.kind === "train_operator" && supplier.active),
+  // Suppliers that may head a booking of their own -- every train operator, plus a hotel sold
+  // standalone (Kruger Shalati, a stationary train carriage let per room per night). The add-on
+  // hotels a rail journey hangs a stay off are excluded: they are legs, never the booking.
+  const primarySuppliers = useMemo(
+    () => suppliers.filter((supplier) => supplier.sellsStandalone && supplier.active),
     [suppliers],
   )
+  const primarySupplierGroups = useMemo(() => {
+    const groups = new Map<SupplierKind, typeof primarySuppliers>()
+    for (const supplier of primarySuppliers) {
+      groups.set(supplier.kind, [...(groups.get(supplier.kind) ?? []), supplier])
+    }
+    return [...groups.entries()]
+  }, [primarySuppliers])
   const selectedSupplier = useMemo(() => {
     if (!draft) return null
 
     const supplierId = draft.trip.supplierId
     if (supplierId) {
-      return trainSuppliers.find((supplier) => supplier.id === supplierId) ?? null
+      return primarySuppliers.find((supplier) => supplier.id === supplierId) ?? null
     }
 
     // The parser only ever produces wording ("Blue Train"), never an id, so fall back to the same
     // never-guess matcher the server uses. An exact-string comparison here silently failed on every
     // real-world variant ("The Blue Train"), leaving the required Supplier select empty.
-    const matchedId = resolveDraftSupplierId(draft.trip.supplier, trainSuppliers)
-    return matchedId ? trainSuppliers.find((supplier) => supplier.id === matchedId) ?? null : null
-  }, [draft, trainSuppliers])
+    const matchedId = resolveDraftSupplierId(draft.trip.supplier, primarySuppliers)
+    return matchedId ? primarySuppliers.find((supplier) => supplier.id === matchedId) ?? null : null
+  }, [draft, primarySuppliers])
+  // A stay is a different shape of enquiry, not a different screen: check-in/check-out instead of
+  // route + departure, rooms instead of suites. The vocabulary supplies every label so a future
+  // standalone kind needs no further branching here.
+  const isStay = selectedSupplier?.kind === "hotel_property"
+  const vocabulary = getSupplierVocabulary(selectedSupplier?.kind ?? "train_operator")
+  const unitNounPluralLabel =
+    vocabulary.unitNounPlural.charAt(0).toUpperCase() + vocabulary.unitNounPlural.slice(1)
   const { data: supplierDetailPayload, isLoading: supplierDetailLoading } = useSupplierDetail(selectedSupplier?.slug ?? "")
   const supplierDetail = supplierDetailPayload && !("error" in supplierDetailPayload) ? supplierDetailPayload : null
   const activeSuiteTypes = useMemo(
@@ -270,6 +305,9 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
           ...prev.trip,
           supplier: selectedSupplier.name,
           supplierId: selectedSupplier.id,
+          // The kind decides the whole shape of this form -- journey or stay -- so it must travel
+          // with the selection, not be re-derived by every reader.
+          supplierKind: selectedSupplier.kind,
         },
       }
     })
@@ -514,7 +552,9 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     {tripExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     Trip Details
                   </CardTitle>
-                  {!draft.trip.supplierId || !draft.trip.route || !draft.trip.departureDate ? (
+                  {!draft.trip.supplierId ||
+                  !draft.trip.departureDate ||
+                  (isStay ? !draft.trip.checkOutDate : !draft.trip.route) ? (
                     <Badge variant="destructive" className="text-xs">Incomplete</Badge>
                   ) : (
                     <CheckCircle2 className="w-4 h-4 text-green-600" />
@@ -531,7 +571,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     <Select
                       value={selectedSupplier?.slug ?? ""}
                       onValueChange={(slug) => {
-                        const supplier = trainSuppliers.find((item) => item.slug === slug)
+                        const supplier = primarySuppliers.find((item) => item.slug === slug)
                         if (!supplier) return
 
                         setDraft((prev) => {
@@ -543,6 +583,13 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                               ...prev.trip,
                               supplier: supplier.name,
                               supplierId: supplier.id,
+                              supplierKind: supplier.kind,
+                              // Switching between a journey and a stay drops the fields the other
+                              // shape owns, so a half-filled route can't ride along on a hotel
+                              // enquiry (or a check-out on a train one) and reach the API.
+                              route: supplier.kind === "hotel_property" ? "" : prev.trip.route,
+                              checkOutDate: supplier.kind === "hotel_property" ? prev.trip.checkOutDate : "",
+                              nights: supplier.kind === "hotel_property" ? prev.trip.nights : null,
                             },
                           }
                         })
@@ -552,37 +599,80 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                         <SelectValue placeholder="Select supplier" />
                       </SelectTrigger>
                       <SelectContent>
-                        {trainSuppliers.map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.slug}>
-                            {supplier.name}
-                          </SelectItem>
+                        {primarySupplierGroups.map(([kind, group]) => (
+                          <SelectGroup key={kind}>
+                            <SelectLabel>{SUPPLIER_KIND_LABELS[kind]}</SelectLabel>
+                            {group.map((supplier) => (
+                              <SelectItem key={supplier.id} value={supplier.slug}>
+                                {supplier.name}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
+                  {!isStay && (
+                    <div className="space-y-1.5">
+                      <Label className="text-sm flex items-center gap-1.5">
+                        Route / Direction <span className="text-destructive">*</span>
+                        <FieldFlags confidence={draft.confidence['trip.route']} dirty={dirtyFields.has('trip.route')} />
+                      </Label>
+                      <Input
+                        value={draft.trip.route}
+                        onChange={(e) => updateDraft('trip.route', e.target.value)}
+                        placeholder="e.g., Pretoria to Cape Town"
+                        className={!draft.trip.route ? 'border-destructive' : ''}
+                      />
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
-                      Route / Direction <span className="text-destructive">*</span>
-                      <FieldFlags confidence={draft.confidence['trip.route']} dirty={dirtyFields.has('trip.route')} />
-                    </Label>
-                    <Input
-                      value={draft.trip.route}
-                      onChange={(e) => updateDraft('trip.route', e.target.value)}
-                      placeholder="e.g., Pretoria to Cape Town"
-                      className={!draft.trip.route ? 'border-destructive' : ''}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm flex items-center gap-1.5">
-                      Departure Date <span className="text-destructive">*</span>
+                      {isStay ? 'Check-in Date' : 'Departure Date'} <span className="text-destructive">*</span>
                       <FieldFlags confidence={draft.confidence['trip.departureDate']} dirty={dirtyFields.has('trip.departureDate')} />
                     </Label>
                     <DatePicker
                       value={draft.trip.departureDate}
-                      onChange={(value) => updateDraft('trip.departureDate', value ?? '')}
+                      onChange={(value) =>
+                        mutateDraft(['trip.departureDate', 'trip.nights'], (prev) => ({
+                          ...prev,
+                          trip: {
+                            ...prev.trip,
+                            departureDate: value ?? '',
+                            nights: nightsBetween(value ?? '', prev.trip.checkOutDate),
+                          },
+                        }))
+                      }
                       buttonClassName={!draft.trip.departureDate ? 'border-destructive' : ''}
                     />
                   </div>
+                  {isStay && (
+                    <div className="space-y-1.5">
+                      <Label className="text-sm flex items-center gap-1.5">
+                        Check-out Date <span className="text-destructive">*</span>
+                        <FieldFlags confidence={draft.confidence['trip.checkOutDate']} dirty={dirtyFields.has('trip.checkOutDate')} />
+                      </Label>
+                      <DatePicker
+                        value={draft.trip.checkOutDate}
+                        onChange={(value) =>
+                          mutateDraft(['trip.checkOutDate', 'trip.nights'], (prev) => ({
+                            ...prev,
+                            trip: {
+                              ...prev.trip,
+                              checkOutDate: value ?? '',
+                              nights: nightsBetween(prev.trip.departureDate, value ?? ''),
+                            },
+                          }))
+                        }
+                        buttonClassName={!draft.trip.checkOutDate ? 'border-destructive' : ''}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {draft.trip.nights
+                          ? `${draft.trip.nights} ${draft.trip.nights === 1 ? 'night' : 'nights'} - the stay is priced per room per night.`
+                          : 'Check-out must fall after check-in.'}
+                      </p>
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label className="text-sm">Package Option</Label>
                     <Input
@@ -591,14 +681,16 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       placeholder="Package option"
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Hotel Option</Label>
-                    <Input
-                      value={draft.trip.hotelOption}
-                      onChange={(e) => updateDraft('trip.hotelOption', e.target.value)}
-                      placeholder="Hotel option"
-                    />
-                  </div>
+                  {!isStay && (
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">Hotel Option</Label>
+                      <Input
+                        value={draft.trip.hotelOption}
+                        onChange={(e) => updateDraft('trip.hotelOption', e.target.value)}
+                        placeholder="Hotel option"
+                      />
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label className="text-sm">Flight Booking</Label>
@@ -688,7 +780,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
-                      Number of Suites <span className="text-destructive">*</span>
+                      Number of {unitNounPluralLabel} <span className="text-destructive">*</span>
                       <FieldFlags confidence={draft.confidence['guests.suites']} dirty={dirtyFields.has('guests.suites')} />
                     </Label>
                     <Input
@@ -699,14 +791,14 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                         const suiteCount = parseInt(e.target.value) || 0
                         mutateDraft('guests.suites', (prev) => updateDraftSuiteCount(prev, suiteCount))
                       }}
-                      placeholder="Number of suites"
+                      placeholder={`Number of ${vocabulary.unitNounPlural}`}
                       className={!draft.guests.suites ? 'border-destructive' : ''}
                     />
                   </div>
                   <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between gap-3">
                       <Label className="text-sm flex items-center gap-1.5">
-                        Suites &amp; Configuration
+                        {vocabulary.suiteTypePlural} &amp; Configuration
                       </Label>
                       {supplierDetailLoading && selectedSupplier ? (
                         <Badge variant="secondary" className="text-xs">Loading suites</Badge>
@@ -714,9 +806,13 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     </div>
 
                     {!selectedSupplier ? (
-                      <p className="text-xs text-muted-foreground">Select a supplier before choosing suite types.</p>
+                      <p className="text-xs text-muted-foreground">
+                        Select a supplier before choosing {vocabulary.suiteTypePlural.toLowerCase()}.
+                      </p>
                     ) : !supplierDetailLoading && activeSuiteTypes.length === 0 ? (
-                      <p className="text-xs text-destructive">This supplier has no active suite types configured.</p>
+                      <p className="text-xs text-destructive">
+                        This supplier has no active {vocabulary.suiteTypePlural.toLowerCase()} configured.
+                      </p>
                     ) : null}
 
                     {suiteUnits.map((unit, index) => {

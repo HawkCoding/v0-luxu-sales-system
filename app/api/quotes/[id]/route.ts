@@ -3,7 +3,13 @@ import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
-import { calculateQuoteTotals, isMissingPricing, isPricingEngineLineItem, roundMoney } from "@/lib/quotes/pricing-engine"
+import {
+  calculateQuoteTotals,
+  isMissingPricing,
+  isPricingEngineLineItem,
+  resolveLineTotal,
+  roundMoney,
+} from "@/lib/quotes/pricing-engine"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
 import type { Json } from "@/lib/supabase/types"
 import type { QuoteLineItem } from "@/lib/types"
@@ -63,7 +69,12 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, booking_id, subtotal, total, status, updated_at, override_reason, agent_commission")
+    // The booking is joined rather than fetched separately: syncBookingRoute needs the booking's own
+    // primary supplier, or a transfer extra wins the route (see resolvePrimaryRoute). Kept as one
+    // string literal — supabase-js infers the row type from the literal and gives up on a concat.
+    .select(
+      "id, booking_id, subtotal, total, status, updated_at, override_reason, agent_commission, booking:bookings(primary_supplier_id)",
+    )
     .eq("id", id)
     .single()
 
@@ -87,14 +98,19 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     )
   }
 
-  const normalizedLineItems: QuoteLineItem[] = parsed.lineItems.map((li) => ({
-    description: li.description,
-    supplierDescription: li.supplierDescription ?? null,
-    qty: li.qty,
-    unitPrice: li.unitPrice,
-    total: roundMoney(li.unitPrice * li.qty),
-    pricingSnapshot: li.pricingSnapshot as QuoteLineItem["pricingSnapshot"],
-  }))
+  const normalizedLineItems: QuoteLineItem[] = parsed.lineItems.map((li) => {
+    const normalized = {
+      description: li.description,
+      supplierDescription: li.supplierDescription ?? null,
+      qty: li.qty,
+      unitPrice: li.unitPrice,
+      pricingSnapshot: li.pricingSnapshot as QuoteLineItem["pricingSnapshot"],
+    }
+    // The client's own `total` is still discarded — it is not a trustworthy figure — but the
+    // recompute runs through resolveLineTotal so a comped transfer's R0 is not turned back into a
+    // charge that then flows into the deposit and final invoices.
+    return { ...normalized, total: resolveLineTotal(normalized) }
+  })
 
   const { data: previousLineItems, error: previousLineItemsError } = await supabase
     .from("quote_line_items")
@@ -161,7 +177,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Failed to replace line items" }, { status: 500 })
   }
 
-  const { error: routeSyncError } = await syncBookingRoute(supabase, quote.booking_id, normalizedLineItems)
+  const quoteBooking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
+  const { error: routeSyncError } = await syncBookingRoute(
+    supabase,
+    quote.booking_id,
+    normalizedLineItems,
+    quoteBooking?.primary_supplier_id ?? null,
+  )
   if (routeSyncError) {
     return NextResponse.json({ error: routeSyncError }, { status: 500 })
   }

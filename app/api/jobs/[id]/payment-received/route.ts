@@ -151,6 +151,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       bankingDetails: buildBankingDetailsBlock(banking, buildPaymentReference(displayInvoiceNumber, customer?.last_name)),
     },
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
+    templateSupplierId: shared.primarySupplierId,
   })
 
   if (!composed) return jsonError("Payment-received template could not be resolved", 500)

@@ -22,7 +22,7 @@ import { REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
-import { findHotelSupplierId, resolveTrainSupplierId } from "@/lib/resolvers/supplier-resolver"
+import { findHotelSupplierId, loadPrimarySupplier, resolveStandaloneSupplier } from "@/lib/resolvers/supplier-resolver"
 import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
 import { findRouteMatch } from "@/lib/resolvers/route-resolver"
@@ -252,6 +252,9 @@ const enquiryBodySchema = z.object({
   supplier: z.string().trim().max(255).nullish(),
   purpose: z.enum(["quote", "availability", "reservation"]).nullish().catch(null),
   departureDate: z.string().trim().max(40).nullish(),
+  // Stay enquiries (a standalone hotel booking) state a length rather than a route duration.
+  // Stored on bookings.duration_nights; check-out is always derived from it.
+  nights: z.number().int().min(1).max(365).nullish().catch(null),
   noOfAdults: z.number().int().min(0).max(500).nullish().catch(null),
   noOfChildren: z.number().int().min(0).max(500).nullish().catch(null),
   noOfSuites: z.number().int().min(0).max(500).nullish().catch(null),
@@ -461,22 +464,39 @@ export async function POST(req: Request) {
   const incomingSuiteUnits: IncomingSuiteUnit[] = Array.isArray(body.suiteUnits) && body.suiteUnits.length > 0
     ? (body.suiteUnits as IncomingSuiteUnit[])
     : legacySuiteNamesToUnits(Array.isArray(body.suiteTypes) ? body.suiteTypes : [])
-  // Gaps worth flagging that the parser can't fabricate its way out of.
-  const suiteReviewMissingFields: string[] = []
-  if (!body.noOfSuites) suiteReviewMissingFields.push(REVIEW_REASON.numberOfSuites)
-  if (!normalizeNullableText(body.direction)) suiteReviewMissingFields.push(REVIEW_REASON.direction)
-
   // A consultant typing an enquiry they took over the phone is not a web form submission --
   // recording it as one is what made lead-source reporting wrong. An authenticated staff session
   // may therefore stamp the real lead source; the public webhook never can, so the form it owns
   // stays web_form and a paste import stays paste_import.
   const source = user && body.source ? body.source : body.rawText ? "paste_import" : "web_form"
-  // body.supplier is free text (the web form can't know internal supplier UUIDs); resolve it the
-  // same never-guess way findHotelSupplierId already resolves body.hotelOption below, rather than
-  // silently dropping every request that arrives without a client-resolved id.
-  const trainSupplierId = body.supplierId ?? (await resolveTrainSupplierId(supabase, body.supplier))
-  const { routeId, reversed: routeReversed } = await findRouteMatch(supabase, body.direction, trainSupplierId)
-  const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
+  // The booking's primary supplier: the train operator on a journey enquiry, or the hotel itself
+  // on a standalone stay (Kruger Shalati). body.supplier is free text -- the public web form
+  // can't know internal supplier UUIDs -- so it is resolved with the same never-guess matcher
+  // rather than silently dropping every request that arrives without a client-resolved id.
+  const primarySupplier = body.supplierId
+    ? await loadPrimarySupplier(supabase, body.supplierId)
+    : await resolveStandaloneSupplier(supabase, body.supplier)
+  const isStayEnquiry = primarySupplier?.kind === "hotel_property"
+  const trainSupplierId = isStayEnquiry ? null : primarySupplier?.id ?? null
+  // A stay has no direction to match a route against -- its "route" is a meal plan, chosen in
+  // Build Booking, not something an enquiry can state.
+  const { routeId, reversed: routeReversed } = isStayEnquiry
+    ? { routeId: null, reversed: false }
+    : await findRouteMatch(supabase, body.direction, trainSupplierId)
+  // On a stay the hotel IS the booking, so it fills the hotel slot too rather than being resolved
+  // from a separate "hotel option" the form never asks for.
+  const hotelSupplierId = isStayEnquiry
+    ? primarySupplier.id
+    : await findHotelSupplierId(supabase, body.hotelOption)
+  const stayNights = isStayEnquiry && body.nights && body.nights > 0 ? body.nights : null
+
+  // Gaps worth flagging that the parser can't fabricate its way out of. Read after the supplier
+  // resolves, since a stay is never missing a direction -- it has none to state.
+  const suiteReviewMissingFields: string[] = []
+  if (!body.noOfSuites) suiteReviewMissingFields.push(REVIEW_REASON.numberOfSuites)
+  if (!isStayEnquiry && !normalizeNullableText(body.direction)) {
+    suiteReviewMissingFields.push(REVIEW_REASON.direction)
+  }
   let jobNumberAllocation: JobNumberAllocation
   try {
     jobNumberAllocation = await allocateJobNumberForBooking(supabase)
@@ -494,7 +514,10 @@ export async function POST(req: Request) {
     resolvedReferences: {
       routeId,
       hotelSupplierId,
-      supplierId: trainSupplierId,
+      // Kept for readers written before bookings.primary_supplier_id existed. It now carries the
+      // primary supplier whatever its kind, with the kind alongside it.
+      supplierId: primarySupplier?.id ?? null,
+      supplierKind: primarySupplier?.kind ?? null,
     },
   }
 
@@ -510,9 +533,12 @@ export async function POST(req: Request) {
       purpose: body.purpose || "quote",
       source,
       stage: "enquiry",
+      // Trip start either way: the departure date on a journey, the check-in date on a stay.
       departure_date: body.departureDate || null,
+      duration_nights: stayNights,
       route_id: routeId,
       hotel_supplier_id: hotelSupplierId,
+      primary_supplier_id: primarySupplier?.id ?? null,
       no_of_adults: body.noOfAdults ?? 1,
       no_of_children: body.noOfChildren ?? 0,
       no_of_adults_original: body.noOfAdults ?? 1,
@@ -553,7 +579,8 @@ export async function POST(req: Request) {
   // that arrived unresolved but carries raw wording is resolved here.
   const { units: resolvedSuiteUnits, vocabulary: suiteVocabulary } = await resolveEnquirySuiteUnits(
     supabase,
-    trainSupplierId,
+    // Room types on a stay, suite types on a journey -- both hang off the primary supplier.
+    primarySupplier?.id ?? null,
     incomingSuiteUnits,
   )
   const unresolvedSuiteCount = resolvedSuiteUnits.filter((unit) => !unit.suiteTypeId).length
@@ -637,11 +664,13 @@ export async function POST(req: Request) {
   try {
     const autoBuildResult = await autoBuildBookingServices(supabase, {
       bookingId: booking.id,
-      trainSupplierId,
+      primarySupplierId: primarySupplier?.id ?? null,
+      primarySupplierKind: primarySupplier?.kind ?? null,
       hotelSupplierId,
       routeId,
       routeReversed,
       departureDate: body.departureDate || null,
+      nights: stayNights,
       hotelPhase: body.hotelPhase ?? null,
     })
     if (autoBuildResult.servicesCreated > 0 || autoBuildResult.skipped.length > 0) {

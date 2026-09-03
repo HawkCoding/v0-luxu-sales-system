@@ -510,8 +510,34 @@ export function isTypePricedSupplier(kind: SupplierKind): boolean {
   return kind === "tour_operator"
 }
 
+/**
+ * Catalogue-package default: which legs of a package template start opt-in. A package has no
+ * booking behind it, so there is no primary supplier to compare against and the kind is all there
+ * is to go on. Anything scoped to a real booking must use {@link isCoreBookingLeg} instead.
+ */
 export function isOptionalPackageLegKind(kind: SupplierKind): boolean {
   return kind !== "train_operator"
+}
+
+/**
+ * The one leg a booking cannot be sold without -- auto-selected, and refused if a consultant tries
+ * to exclude it from the quote or voucher.
+ *
+ * It used to be "the train leg", because every booking was a rail journey and a hotel was only ever
+ * a pre- or post-stay hanging off one. A standalone hotel booking (Kruger Shalati) has no train at
+ * all and its hotel leg IS the journey, so the test is now the leg's role rather than its kind: the
+ * leg supplied by the booking's primary supplier is the core one.
+ *
+ * Falls back to the old train rule when a booking has no primary supplier recorded -- bookings
+ * predating the column whose backfill found nothing behave exactly as they did before.
+ */
+export function isCoreBookingLeg(
+  leg: { supplierId: string | null; supplierKind: SupplierKind },
+  primarySupplierId: string | null,
+): boolean {
+  return primarySupplierId
+    ? leg.supplierId === primarySupplierId
+    : leg.supplierKind === "train_operator"
 }
 
 export interface Location {
@@ -945,6 +971,17 @@ export interface Supplier {
    * Crosswise". Null uses the default grammar. Never applied to the quote itinerary sentence
    * unless quoteSuiteDetail is 'full'. See lib/templates/suite-phrase-pattern.ts. */
   suitePhrasePattern: string | null
+  /**
+   * Whether this supplier may be a booking's primary product -- the thing the enquiry is FOR.
+   * True for every train operator, and for a hotel sold on its own (Kruger Shalati, a stationary
+   * train carriage let per room per night). The add-on hotels a rail journey hangs a pre- or
+   * post-stay on stay false: they are legs, never the booking. Gates the New Enquiry supplier
+   * dropdown, the inbound-email supplier scan, and which required fields an enquiry has.
+   */
+  sellsStandalone: boolean
+  /** Comma-separated wording to look for in an enquiry email's subject or body. Null derives the
+   * phrases from the name -- see lib/suppliers/match-phrases.ts. */
+  emailMatchPhrases: string | null
   /** Printed under this supplier's heading on the voucher, alongside phone/location. */
   streetAddress: string | null
   emergencyPhone: string | null

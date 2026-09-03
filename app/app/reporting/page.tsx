@@ -67,11 +67,12 @@ export default function ReportingPage() {
   const { can } = useRole()
   const canExport = can("export:reporting")
 
-  // Product means the train operator actually booked, so the filter lists train
-  // operators rather than a hardcoded pair — a new operator needs no code change.
+  // Product means the thing actually booked, so the filter lists every supplier that can head a
+  // booking of its own — both train operators and a hotel sold standalone (Kruger Shalati) —
+  // rather than a hardcoded pair. Ticking a new product needs no code change.
   const { data: suppliers } = useActiveSuppliers()
-  const trainOperators = useMemo(
-    () => (suppliers ?? []).filter((s) => s.kind === "train_operator"),
+  const productSuppliers = useMemo(
+    () => (suppliers ?? []).filter((s) => s.sellsStandalone),
     [suppliers],
   )
 
@@ -483,7 +484,7 @@ export default function ReportingPage() {
               className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="">All</option>
-              {trainOperators.map((supplier) => (
+              {productSuppliers.map((supplier) => (
                 <option key={supplier.id} value={supplier.id}>
                   {supplier.name}
                 </option>

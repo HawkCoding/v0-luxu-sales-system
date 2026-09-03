@@ -209,6 +209,10 @@ export async function POST(req: Request) {
       // manually-priced by default, same as the backfill for existing ones.
       pricing_mode: parsed.kind === "airline" ? "manual" : "rate_card",
       name: supplierName,
+      // A train operator always heads its own bookings, so it is standalone from the start.
+      // Anything else is an add-on until someone ticks it on the supplier page -- which is how
+      // a hotel sold on its own (Kruger Shalati) becomes selectable on New Enquiry.
+      sells_standalone: parsed.kind === "train_operator",
       slug,
       email: normalizedEmails[0]?.email ?? null,
       phone: parsed.phone.trim() || null,

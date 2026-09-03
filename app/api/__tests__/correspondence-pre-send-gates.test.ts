@@ -17,7 +17,12 @@ const emailMocks = vi.hoisted(() => ({
 }))
 
 const transitionMocks = vi.hoisted(() => ({
-  applyTransition: vi.fn(async () => undefined),
+  // Returns the shape the caller actually reads — the transition result is now used to record the
+  // move (pipeline_history, audit), not fired and forgotten.
+  applyTransition: vi.fn(async () => ({
+    updated: { id: "booking-1", stage: "accepted", updated_at: "2026-05-01T00:00:00.000Z" },
+    crossedStages: ["accepted"],
+  })),
 }))
 
 vi.mock("@/lib/api/auth", () => ({ requireRole: authMocks.requireRole }))
@@ -171,5 +176,78 @@ describe("POST /api/correspondence pre-send gates", () => {
     expect(res.status).toBe(400)
     expect(body.details?.failures?.map((failure) => failure.gateId)).toEqual(["customer_complete"])
     expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+  })
+})
+
+// The gate system was advisory: PATCH /api/jobs/[id] correctly refused `deposit_paid` with no
+// payment recorded, and the identical move went straight through this route one call later, because
+// it only gated three target stages against five gate ids and never loaded `payments` at all.
+describe("POST /api/correspondence stage gates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    emailMocks.sendEmail.mockResolvedValue({ success: true, error: null, providerMessageId: "msg-1" })
+    emailMocks.isFallbackSendingUnavailable.mockReturnValue(false)
+    emailMocks.resolveSalespersonSender.mockResolvedValue({
+      salespersonCredentialId: "cred-1",
+      fromAddress: "consultant@example.test",
+      reason: "ok" as const,
+    })
+  })
+
+  function depositPaidRequest() {
+    return new Request("http://localhost/api/correspondence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bookingId: BOOKING_ID,
+        kind: "payment_received",
+        subject: "Deposit received",
+        bodyHtml: "<p>Thank you, your deposit is received.</p>",
+        moveStage: "deposit_paid",
+      }),
+    })
+  }
+
+  it("refuses to mark the deposit paid when no payment is on file, and sends nothing", async () => {
+    const mock = seedStore([
+      { id: "quote-1", booking_id: BOOKING_ID, status: "accepted", total: 1000, created_at: "2026-05-02T00:00:00.000Z" },
+    ])
+    mockAuthOk(mock.supabase)
+
+    const res = await sendCorrespondence(depositPaidRequest())
+    const body = (await res.json()) as { error: string; details?: { failures?: Array<{ gateId: string }> } }
+
+    expect(res.status).toBe(400)
+    expect(body.details?.failures?.map((failure) => failure.gateId)).toContain("deposit_received_confirmation")
+    // A payment is not something an email can conjure, so the block lands before the send.
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+    expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+    expect(mock.store.rows("bookings")[0].stage).toBe("quote_sent")
+  })
+
+  it("allows the same move once a payment exists", async () => {
+    const mock = seedStore([
+      { id: "quote-1", booking_id: BOOKING_ID, status: "accepted", total: 1000, created_at: "2026-05-02T00:00:00.000Z" },
+    ])
+    // Everything the ladder demands on the way to deposit_paid, since crossing a stage means
+    // clearing every gate between here and there — not just the target's own.
+    mock.store.tables.bookings[0].reservation_form_received_at = "2026-05-02T00:00:00.000Z"
+    mock.store.tables.payments.push({ id: "pay-1", booking_id: BOOKING_ID, amount: 250 })
+    mock.store.tables.invoices.push({ id: "inv-1", booking_id: BOOKING_ID, kind: "deposit", status: "sent" })
+    mock.store.tables.correspondences.push({
+      id: "cor-existing",
+      booking_id: BOOKING_ID,
+      kind: "invoice",
+      subject: "Your deposit invoice",
+      status: "sent",
+      created_at: "2026-05-03T00:00:00.000Z",
+    })
+    mockAuthOk(mock.supabase)
+
+    const res = await sendCorrespondence(depositPaidRequest())
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalledTimes(1)
+    expect(transitionMocks.applyTransition).toHaveBeenCalledTimes(1)
   })
 })

@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
-import { calculateQuoteTotals, roundMoney } from "@/lib/quotes/pricing-engine"
+import { calculateQuoteTotals, resolveLineTotal } from "@/lib/quotes/pricing-engine"
 import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
 import type { Json } from "@/lib/supabase/types"
@@ -54,18 +54,22 @@ export async function POST(req: Request) {
   const body = parsed.data
   const bookingId = (body.bookingId ?? body.jobId) as string
   const lineItems = body.lineItems ?? []
-  const normalizedLineItems: QuoteLineItem[] = lineItems.map((li) => ({
-    description: li.description,
-    supplierDescription: li.supplierDescription ?? null,
-    qty: li.qty ?? 1,
-    unitPrice: li.unitPrice ?? 0,
-    total: roundMoney((li.unitPrice ?? 0) * (li.qty ?? 1)),
-    pricingSnapshot: (li.pricingSnapshot ?? null) as QuoteLineItem["pricingSnapshot"],
-  }))
+  const normalizedLineItems: QuoteLineItem[] = lineItems.map((li) => {
+    const normalized = {
+      description: li.description,
+      supplierDescription: li.supplierDescription ?? null,
+      qty: li.qty ?? 1,
+      unitPrice: li.unitPrice ?? 0,
+      pricingSnapshot: (li.pricingSnapshot ?? null) as QuoteLineItem["pricingSnapshot"],
+    }
+    // Recomputed rather than trusting the client's figure, but via the helper so a comped
+    // transfer's deliberate R0 survives instead of being re-charged.
+    return { ...normalized, total: resolveLineTotal(normalized) }
+  })
   const calculatedTotals = calculateQuoteTotals(normalizedLineItems)
 
   const [{ data: booking, error: bookingError }, { data: existingQuotes, error: existingQuotesError }, { data: validitySetting }] = await Promise.all([
-    supabase.from("bookings").select("booking_number").eq("id", bookingId).single(),
+    supabase.from("bookings").select("booking_number, primary_supplier_id").eq("id", bookingId).single(),
     supabase.from("quotes").select("quote_number").eq("booking_id", bookingId),
     supabase.from("app_settings").select("value").eq("key", "quote_validity_days").maybeSingle(),
   ])
@@ -113,7 +117,12 @@ export async function POST(req: Request) {
     )
     if (lineError) return safeSupabaseError("quotes:insert-line-items", lineError)
 
-    const { error: routeSyncError } = await syncBookingRoute(supabase, bookingId, normalizedLineItems)
+    const { error: routeSyncError } = await syncBookingRoute(
+      supabase,
+      bookingId,
+      normalizedLineItems,
+      booking.primary_supplier_id ?? null,
+    )
     if (routeSyncError) return jsonError(routeSyncError, 500)
   }
 

@@ -136,6 +136,12 @@ export async function POST(req: Request) {
   // because the kind is baked into the row and the email template.
   const kindMismatch = existingInvoice !== null && existingInvoice.kind !== invoiceKind
   const stalePricing = existingInvoice !== null && existingInvoice.quote_id !== quote.id
+  // A re-issue at a different deposit percentage is an amend, not a no-op. Without this the reuse
+  // branch below returned the untouched invoice with a 200, so a caller asking for 30% on a live
+  // 25% draft got "success" and an unchanged amount — the per-job deposit override quietly not
+  // working. Full-payment invoices store a null percentage and are settled by `kindMismatch`.
+  const percentageChanged =
+    existingInvoice !== null && !isFullPayment && existingInvoice.deposit_percentage !== depositPercentage
 
   // Resolves to the requested method, else the invoice's own prior method
   // (an amend keeps its bank details unless the salesperson changes them),
@@ -147,7 +153,13 @@ export async function POST(req: Request) {
   )
 
   const invoice = await (async () => {
-    if (existingInvoice && !kindMismatch && !stalePricing && parsed.data.paymentMethodId === undefined) {
+    if (
+      existingInvoice &&
+      !kindMismatch &&
+      !stalePricing &&
+      !percentageChanged &&
+      parsed.data.paymentMethodId === undefined
+    ) {
       return existingInvoice
     }
 
@@ -292,6 +304,7 @@ export async function POST(req: Request) {
           }),
         },
         senderProfileId: booking.assigned_salesperson_id ?? user.id,
+        templateSupplierId: shared.primarySupplierId,
       })
     : await composeEmail(supabase, "deposit_request", {
         tokens: {
@@ -317,6 +330,7 @@ export async function POST(req: Request) {
           }),
         },
         senderProfileId: booking.assigned_salesperson_id ?? user.id,
+        templateSupplierId: shared.primarySupplierId,
       })
 
   if (!composed) return jsonError("Invoice email template could not be resolved", 500)

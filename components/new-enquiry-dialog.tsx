@@ -60,12 +60,12 @@ const ENQUIRY_SAVE_STEPS = [
 function emptyDraft(): ParsedDraft {
   return {
     customer: { title: "", firstName: "", surname: "", email: "", phone: "", country: "", province: "" },
-    trip: { supplier: "", route: "", departureDate: "", purpose: "quote", packageOption: "", hotelOption: "", hotelPhase: "", extendStay: null, flightBooking: "", flightDepartureDate: "" },
+    trip: { supplier: "", supplierKind: "", route: "", departureDate: "", checkOutDate: "", nights: null, purpose: "quote", packageOption: "", hotelOption: "", hotelPhase: "", extendStay: null, flightBooking: "", flightDepartureDate: "" },
     guests: { adults: 0, children: 0, childAges: [], suites: 0, suitePhrases: [], suiteType: "" },
     additionalServices: { requested: false, details: "" },
     termsAccepted: true,
     notes: "",
-    formFields: { title: "", country: "", province: "", packageOption: "", hotelOption: "", flightBooking: "", flightDepartureDate: "", direction: "", supplier: "", departureDateRaw: "", suitePhrases: [], childAges: [], hotelPhase: "", extendStay: null, additionalServicesDetails: "" },
+    formFields: { title: "", country: "", province: "", packageOption: "", hotelOption: "", flightBooking: "", flightDepartureDate: "", direction: "", supplier: "", departureDateRaw: "", checkOutDateRaw: "", promotionCode: "", suitePhrases: [], childAges: [], hotelPhase: "", extendStay: null, additionalServicesDetails: "" },
     confidence: {},
     rawText: "",
   }
@@ -109,9 +109,16 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
   const [saveError, setSaveError] = useState<string | null>(null)
   const [failedDraft, setFailedDraft] = useState<ParsedDraft | null>(null)
   const { data: suppliers } = useSuppliers()
-  const trainOperatorNames = (suppliers ?? [])
-    .filter((supplier) => supplier.kind === "train_operator" && supplier.active)
-    .map((supplier) => supplier.name)
+  // Every supplier that may head a booking of its own -- both train operators and standalone
+  // hotels (Kruger Shalati). The parser needs each one's kind, since that decides whether the
+  // pasted email describes a journey or a stay.
+  const standaloneSuppliers = (suppliers ?? [])
+    .filter((supplier) => supplier.sellsStandalone && supplier.active)
+    .map((supplier) => ({
+      name: supplier.name,
+      kind: supplier.kind,
+      emailMatchPhrases: supplier.emailMatchPhrases,
+    }))
 
   useEffect(() => {
     if (!open) return
@@ -181,7 +188,9 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
 
   const handlePasteImport = () => {
     if (!pasteText.trim()) return
-    setParsedDraft(parseEmailDraft(pasteText, { trainOperatorNames }))
+    // A consultant usually pastes the body alone, so the subject that names the supplier may be
+    // absent -- the supplier dropdown in the review modal is the fallback, as it has always been.
+    setParsedDraft(parseEmailDraft(pasteText, { standaloneSuppliers }))
     setScreen("review")
   }
 

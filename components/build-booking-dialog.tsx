@@ -685,6 +685,7 @@ export function BuildBookingDialog({
       // Legs seed with no rate type: pricing then walks the supplier's quoted rate, its base rate,
       // and finally the system default. Picking one by hand makes it a hard contract instead.
       const stateOptions = {
+        primarySupplierId: savedState?.primarySupplierId ?? null,
         tripStartDate: savedState?.tripStartDate ?? travelDate ?? null,
         totalsBySupplierId: totals,
         // A new leg types its fares in the quote's own currency until told otherwise.
@@ -1233,6 +1234,7 @@ export function BuildBookingDialog({
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
                         flightAnchorContext={transferAnchorContext(leg.id)}
+                        primarySupplierId={savedState?.primarySupplierId ?? null}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
                         fxRates={fxRates}

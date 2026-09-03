@@ -91,6 +91,8 @@ import {
   shouldPromptChildUpdate,
 } from "@/lib/suppliers/auto-child-price"
 import { shouldSendRoute } from "@/lib/suppliers/itinerary-payload"
+import { deriveSupplierMatchPhrases } from "@/lib/suppliers/match-phrases"
+import { Checkbox } from "@/components/ui/checkbox"
 import { formatSuitePhrase } from "@/lib/templates/suite-description"
 import { readSupplierDraft, serializeSupplierDraft } from "@/lib/suppliers/supplier-draft-storage"
 import { AgeRangeChip } from "@/components/ui/age-range-chip"
@@ -254,6 +256,8 @@ export interface SupplierFormState {
   /** Optional per-supplier word order for the full suite/room phrase -- see
    * lib/templates/suite-phrase-pattern.ts. Empty string = default grammar. */
   suitePhrasePattern: string
+  sellsStandalone: boolean
+  emailMatchPhrases: string
   /** This supplier's base rate -- the baseline its rate adjustments are measured off. */
   baseRateTypeId: string | null
   /** The rate its quotes use; null means "quote at the base rate". */
@@ -477,6 +481,8 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     trainOnlyNote: supplier.trainOnlyNote ?? "",
     quoteSuiteDetail: supplier.quoteSuiteDetail ?? "type_only",
     suitePhrasePattern: supplier.suitePhrasePattern ?? "",
+    sellsStandalone: supplier.sellsStandalone ?? false,
+    emailMatchPhrases: supplier.emailMatchPhrases ?? "",
     baseRateTypeId: supplier.baseRateTypeId ?? null,
     quoteRateTypeId: supplier.quoteRateTypeId ?? null,
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
@@ -4280,6 +4286,8 @@ export function SupplierDetailView({
           trainOnlyNote: form.kind === "train_operator" ? form.trainOnlyNote.trim() || null : null,
           quoteSuiteDetail: form.kind === "train_operator" ? form.quoteSuiteDetail : "type_only",
           suitePhrasePattern: form.suitePhrasePattern.trim() || null,
+          sellsStandalone: form.sellsStandalone,
+          emailMatchPhrases: form.emailMatchPhrases.trim() || null,
           rateAdjustments: form.rateAdjustments,
           baseRateTypeId: form.baseRateTypeId,
           quoteRateTypeId: form.quoteRateTypeId,
@@ -5315,31 +5323,6 @@ export function SupplierDetailView({
                           placeholder="We have quoted you for the train only. If you would like to request any other services, we offer those as well."
                         />
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
-                        <div className="space-y-2">
-                          <Label htmlFor="supplier-quote-suite-detail">Quote suite detail</Label>
-                          <Select
-                            value={form.quoteSuiteDetail}
-                            onValueChange={(value) =>
-                              updateField("quoteSuiteDetail", value as "type_only" | "full")
-                            }
-                          >
-                            <SelectTrigger id="supplier-quote-suite-detail" className="max-w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="type_only">Suite type only</SelectItem>
-                              <SelectItem value="full">Full configuration</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          How the quote PDF/email itinerary line names the suite: &quot;in a Deluxe
-                          Suite&quot; (type only) or &quot;in a Double bedded Deluxe Suite with a
-                          shower&quot; (full configuration). The voucher&apos;s Suite Type row always
-                          states the full configuration either way.
-                        </p>
-                      </div>
                     </>
                   ) : (
                     <div className="space-y-3">
@@ -5360,23 +5343,56 @@ export function SupplierDetailView({
                           {supplier.trainOnlyNote || "Not set."}
                         </p>
                       </div>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">Quote suite detail</p>
-                          <p className="text-sm text-muted-foreground">
-                            How the quote itinerary line names the suite.
-                          </p>
-                        </div>
-                        <Badge variant="outline">
-                          {supplier.quoteSuiteDetail === "full" ? "Full configuration" : "Suite type only"}
-                        </Badge>
-                      </div>
                     </div>
                   )}
                 </div>
               ) : null}
 
-              <div className="rounded-lg border p-4 space-y-3">
+              {/* Quote suite detail sits with the phrase wording: both decide how a suite is
+                  named to the client, one for the quote line and one for the other documents. */}
+              <div className="rounded-lg border p-4 space-y-4">
+                {(isEditing ? form.kind : supplier.kind) === "train_operator" ? (
+                  isEditing ? (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-quote-suite-detail">Quote suite detail</Label>
+                        <Select
+                          value={form.quoteSuiteDetail}
+                          onValueChange={(value) =>
+                            updateField("quoteSuiteDetail", value as "type_only" | "full")
+                          }
+                        >
+                          <SelectTrigger id="supplier-quote-suite-detail" className="max-w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="type_only">Suite type only</SelectItem>
+                            <SelectItem value="full">Full configuration</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        How the quote PDF/email itinerary line names the suite: &quot;in a Deluxe
+                        Suite&quot; (type only) or &quot;in a Double bedded Deluxe Suite with a
+                        shower&quot; (full configuration). The voucher&apos;s Suite Type row always
+                        states the full configuration either way.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Quote suite detail</p>
+                        <p className="text-sm text-muted-foreground">
+                          How the quote itinerary line names the suite.
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {supplier.quoteSuiteDetail === "full" ? "Full configuration" : "Suite type only"}
+                      </Badge>
+                    </div>
+                  )
+                ) : null}
+
                 {isEditing ? (
                   <>
                     <div className="space-y-2">
@@ -5427,6 +5443,86 @@ export function SupplierDetailView({
                       </p>
                     </div>
                     <Badge variant="outline">{supplier.suitePhrasePattern || "Default"}</Badge>
+                  </div>
+                )}
+              </div>
+
+              {/* What this supplier can be sold as. A train operator always heads its own
+                  bookings; a hotel is normally an add-on stay hanging off one, except Kruger
+                  Shalati -- a stationary train carriage let per room per night, which is the whole
+                  booking. Ticking this is what puts a supplier in the New Enquiry dropdown and in
+                  the inbound-email supplier scan. */}
+              <div className="rounded-lg border p-4 space-y-4">
+                {isEditing ? (
+                  <>
+                    <div className="flex items-start gap-3">
+                      <Checkbox
+                        id="supplier-sells-standalone"
+                        checked={form.sellsStandalone}
+                        onCheckedChange={(checked) => updateField("sellsStandalone", checked === true)}
+                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="supplier-sells-standalone">Sold as a standalone booking</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Lets this supplier head a booking of its own: it appears in the New
+                          Enquiry supplier list, and enquiry emails naming it are imported against
+                          it. Leave off for suppliers that are only ever added to someone else&apos;s
+                          trip.
+                        </p>
+                      </div>
+                    </div>
+
+                    {form.sellsStandalone ? (
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-email-match-phrases">Match in enquiry emails</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Wording to look for in an enquiry email&apos;s subject or body, separated
+                          by commas. Leave blank to use the supplier&apos;s own name and the part of
+                          it before a dash — which is usually what the enquiry form calls itself.
+                        </p>
+                        <BufferedInput
+                          id="supplier-email-match-phrases"
+                          value={form.emailMatchPhrases}
+                          onValueChange={(value) => updateField("emailMatchPhrases", value)}
+                          placeholder={deriveSupplierMatchPhrases({
+                            name: form.name || "Supplier",
+                            kind: form.kind as SupplierKind,
+                          }).join(", ")}
+                        />
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">
+                            {form.emailMatchPhrases.trim() ? "Matching: " : "Default: "}
+                          </span>
+                          <span className="font-medium text-foreground">
+                            {deriveSupplierMatchPhrases({
+                              name: form.name || "Supplier",
+                              kind: form.kind as SupplierKind,
+                              emailMatchPhrases: form.emailMatchPhrases.trim() || null,
+                            }).join(", ") || "—"}
+                          </span>
+                        </p>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Standalone booking</p>
+                      <p className="text-sm text-muted-foreground">
+                        {supplier.sellsStandalone
+                          ? "Can head a booking of its own; enquiry emails naming it import against it."
+                          : "Only added to a booking headed by another supplier."}
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      {supplier.sellsStandalone
+                        ? deriveSupplierMatchPhrases({
+                            name: supplier.name,
+                            kind: supplier.kind,
+                            emailMatchPhrases: supplier.emailMatchPhrases,
+                          }).join(", ")
+                        : "No"}
+                    </Badge>
                   </div>
                 )}
               </div>
