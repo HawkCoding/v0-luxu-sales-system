@@ -21,9 +21,10 @@ Ship all current work on this branch as a PR against `dev` — checks, commit, p
 
 6. **Push** — `git push -u origin HEAD`.
 
-7. **PR** — run `gh pr view` for the current branch:
-   - If a PR already exists, the push already updated it — report its URL and stop.
-   - If none exists, run `gh pr create --base dev` using `.github/pull_request_template.md` as the body structure: a `## Summary` with 1-3 bullets from the commit(s), and the `## Test plan` checklist with items checked based on which pre-flight checks actually ran and passed. Leave the "CI passed on dev" box unchecked — that's for the dev→main promotion PR only.
+7. **PR** — run `gh pr view --json state,url` for the current branch (or `gh pr list --head <branch> --state all --json number,state,url` if `gh pr view` finds nothing):
+   - If a PR exists and its `state` is `OPEN`, the push already updated it — report its URL and stop.
+   - If a PR exists but is `MERGED` or `CLOSED`, it is stale — a same-named branch pushed again after merge does NOT reopen or update it. Treat this as "none exists": create a new PR for the new commits.
+   - If none exists (or only closed/merged ones do), run `gh pr create --base dev` using `.github/pull_request_template.md` as the body structure: a `## Summary` with 1-3 bullets from the commit(s), and the `## Test plan` checklist with items checked based on which pre-flight checks actually ran and passed. Leave the "CI passed on dev" box unchecked — that's for the dev→main promotion PR only.
 
 8. Report the PR URL as the final output.
 
@@ -34,5 +35,6 @@ Ship all current work on this branch as a PR against `dev` — checks, commit, p
 - Never `git add -A` / `git add .` — stage named files after reviewing `git status`.
 - Pre-flight check failure is a hard stop — the one confirmation gate that survives auto-run mode.
 - If there's nothing staged/unstaged and no unpushed commits, report "nothing to ship" and stop — don't open an empty PR.
+- Never treat a `MERGED`/`CLOSED` PR as the target for new commits — check `state`, not just existence, before deciding to update vs. create.
 - Bump `APP_VERSION` at most once per invocation; skip if the diff already touches `lib/version.ts`.
 - Use `pnpm`, never `npm`/`yarn`, for any script invocation.

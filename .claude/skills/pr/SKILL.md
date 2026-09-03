@@ -11,6 +11,6 @@ If this file is loaded directly, use these core rules:
 - Run `pnpm lint`, `pnpm typecheck`, `pnpm test:ci` first; hard-stop on any failure, even in auto-run mode.
 - Bump `APP_VERSION` via `pnpm app:version:bump` if code changed and it isn't already bumped this session.
 - Stage named files only (never `git add -A`/`.`); exclude `.env*`/secrets.
-- One Conventional Commits commit, then `git push -u origin HEAD`, then `gh pr create --base dev` using `.github/pull_request_template.md` (skip if a PR already exists for the branch — just report its URL).
+- One Conventional Commits commit, then `git push -u origin HEAD`, then `gh pr create --base dev` using `.github/pull_request_template.md` (skip only if an **OPEN** PR already exists for the branch — just report its URL; a `MERGED`/`CLOSED` PR is stale and does not get new commits, open a new one).
 - Never force-push, skip hooks, or use interactive git flags.
 - Nothing to ship → report and stop, don't open an empty PR.
