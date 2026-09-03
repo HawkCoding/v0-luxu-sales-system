@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
-import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { decideGatedTransition, loadTransitionContext } from "@/lib/pipeline/run-gated-transition"
+import { isPlaceholderToken, resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { createServiceClient } from "@/lib/supabase/server"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import type { PipelineStage, Source } from "@/lib/types"
@@ -97,6 +98,8 @@ export async function GET(request: Request) {
   const thankYouBookingIds = new Set((existingThankYous ?? []).map((row) => row.booking_id))
   let thankYousScheduled = 0
   let autoClosed = 0
+  /** Bookings whose auto-close a gate refused — reported so a silent skip is still visible. */
+  const autoCloseSkipped: { bookingId: string; bookingNumber: string; gateIds: string[] }[] = []
 
   for (const booking of maintenanceBookings) {
     if (!booking.departure_date) continue
@@ -123,12 +126,16 @@ export async function GET(request: Request) {
           ...shared.tokens,
           customerName: booking.customer?.first_name ?? "Valued Guest",
           jobNumber: booking.booking_number,
-          routeName: resolveBookingRouteName(booking) ?? "your journey",
+          // See the note in the quote email preview: a standalone stay has no route.
+          routeName:
+            resolveBookingRouteName(booking) ??
+            (isPlaceholderToken(shared.tokens.routeName) ? "your journey" : shared.tokens.routeName),
           tripEndDate: formatDisplayDateLong(tripEndDate),
           consultantName: booking.consultant ?? "The Luxus team",
         },
         blocks: shared.blocks,
         senderProfileId: booking.assigned_salesperson_id,
+        templateSupplierId: shared.primarySupplierId,
       })
       if (!composed) {
         return NextResponse.json({ error: "Thank-you template could not be resolved" }, { status: 500 })
@@ -162,6 +169,41 @@ export async function GET(request: Request) {
     }
 
     if (closeDueDate < today) {
+      // The cron used to call applyTransition directly, so it was a third way past the gates —
+      // and the only one nobody was watching. A booking that still fails a gate is left where it
+      // is and counted, rather than being closed anyway or 500-ing the whole run.
+      const context = await loadTransitionContext(supabase, {
+        bookingId: booking.id,
+        customerId: booking.customer_id,
+        fromStage: booking.stage as PipelineStage,
+        targetStage: "closed",
+      })
+      const decision = decideGatedTransition({
+        booking: {
+          id: booking.id,
+          stage: booking.stage as PipelineStage,
+          source: booking.source,
+        },
+        customer: context.customer,
+        targetStage: "closed",
+        context,
+      })
+
+      // `customer_complete` is a data-quality gate for moving a booking *up* the ladder — it asks
+      // whether we know enough about the customer to keep selling to them. Archiving a trip that
+      // has already been taken is not that, and letting a missing phone number stall auto-close
+      // would silently leave finished bookings open forever.
+      const closingFailures = decision.failures.filter((failure) => failure.gateId !== "customer_complete")
+
+      if (decision.blocked && closingFailures.length > 0) {
+        autoCloseSkipped.push({
+          bookingId: booking.id,
+          bookingNumber: booking.booking_number,
+          gateIds: closingFailures.map((failure) => failure.gateId),
+        })
+        continue
+      }
+
       const transition = await applyTransition(supabase, {
         booking: {
           id: booking.id,
@@ -204,5 +246,10 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ thankYousScheduled, autoClosed })
+  return NextResponse.json({
+    thankYousScheduled,
+    autoClosed,
+    autoCloseSkipped: autoCloseSkipped.length,
+    autoCloseSkippedDetail: autoCloseSkipped,
+  })
 }

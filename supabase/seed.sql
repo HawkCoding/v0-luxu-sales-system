@@ -366,6 +366,15 @@ on conflict (id) do update set kind=excluded.kind,name=excluded.name,email=exclu
 
 update public.suppliers set active = true where id in ('002b438f-df83-483a-9274-f17e9fef7f35','100f03b0-fefd-4d50-85e7-64a715914c47','d6de79b1-07f9-4d5d-a122-35df6e7b93e6','683e71eb-eb88-4c85-8b0a-4b1edb1c138d','87cbbf54-5085-4146-afe7-172f522b3325','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','a034fb5e-10fc-48bb-be41-9a2c5ec8e681','287e3a06-46fc-4676-a5c2-5faaa576bfe7','c3c2de5c-c68d-41c5-b04a-053708edca5a','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9','53278302-6b75-4a49-9f16-cd8cf6d4fef6','e16883b1-4dc4-4700-a8ed-3f6238d57fe9','4ec1e87e-a7f5-401a-9b04-0807b1f34f9c','a78f401b-90c9-402d-8d35-0cf3dc79710c','7dafbd36-5230-4a89-b587-4c37d409edaf');
 
+-- Standalone products: which suppliers may head a booking of their own. Mirrors the backfill in
+-- 20260902090000_standalone_suppliers.sql, which runs before this seed on a fresh reset and so
+-- finds no rows to tick. Kruger Shalati is a hotel sold on its own; every other hotel here is an
+-- add-on stay hanging off a rail journey.
+update public.suppliers
+set sells_standalone = true
+where kind = 'train_operator'
+   or slug = 'kruger-shalati-train-on-the-bridge';
+
 -- SUPPLIER EMAILS & LABELS (from production)
 insert into public.supplier_emails (id,supplier_id,email,label,created_at) values
   ('5e4b3ef2-1205-42d2-aab9-e8e37dee5f00','87cbbf54-5085-4146-afe7-172f522b3325','info@citysightseeing.co.za','General','2026-07-01T08:26:01.108868+00:00'),

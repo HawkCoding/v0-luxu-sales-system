@@ -5,7 +5,9 @@ import {
   complimentaryNights,
   hasComplimentaryNight,
   isComplimentaryTransport,
+  isFreeHotelOccupant,
   isMissingPricing,
+  resolveLineTotal,
   stayNights,
 } from "@/lib/quotes/pricing-engine"
 
@@ -165,5 +167,64 @@ describe("complimentary nights", () => {
       } as QuoteLineItem["pricingSnapshot"],
     })
     expect(isMissingPricing(wholeStayGifted)).toBe(false)
+  })
+})
+
+describe("resolveLineTotal", () => {
+  it("recomputes an ordinary line from qty x unitPrice, ignoring whatever total arrived", () => {
+    expect(
+      resolveLineTotal({ qty: 3, unitPrice: 1200, pricingSnapshot: null }),
+    ).toBe(3600)
+  })
+
+  // The defect this exists for: every quote write recomputed qty x unitPrice, which turned a comped
+  // transfer's deliberate R0 back into a charge that then flowed into the deposit and final
+  // invoices — while the line's own description still read "COMPLIMENTARY".
+  it("keeps a comped transfer at zero while its unitPrice still shows what the trip was worth", () => {
+    const comped = {
+      qty: 1,
+      unitPrice: 1800,
+      pricingSnapshot: { isComplimentaryTransport: true } as QuoteLineItem["pricingSnapshot"],
+    }
+    expect(resolveLineTotal(comped)).toBe(0)
+    expect(comped.unitPrice).toBe(1800)
+  })
+
+  it("does not treat an ordinary transfer line as comped", () => {
+    expect(
+      resolveLineTotal({
+        qty: 2,
+        unitPrice: 900,
+        pricingSnapshot: { isComplimentaryTransport: false } as QuoteLineItem["pricingSnapshot"],
+      }),
+    ).toBe(1800)
+  })
+
+  it("rounds to cents rather than carrying a float artefact into the invoice", () => {
+    expect(resolveLineTotal({ qty: 3, unitPrice: 0.1, pricingSnapshot: null })).toBe(0.3)
+  })
+})
+
+describe("isFreeHotelOccupant", () => {
+  function hotelLine(passengerKind: "adult" | "child" | "infant"): QuoteLineItem {
+    return {
+      description: "Kruger Shalati",
+      qty: 3,
+      unitPrice: 0,
+      total: 0,
+      pricingSnapshot: { supplierKind: "hotel_property", passengerKind } as QuoteLineItem["pricingSnapshot"],
+    }
+  }
+
+  // A hotel room type that sets no child rate is one where a child sharing costs nothing extra.
+  // The line is still emitted so the guest appears on the itinerary, and it is finished, not
+  // waiting on a number.
+  it("treats a zero-priced child or infant on a hotel line as deliberate", () => {
+    expect(isMissingPricing(hotelLine("child"))).toBe(false)
+    expect(isMissingPricing(hotelLine("infant"))).toBe(false)
+  })
+
+  it("still flags a zero-priced adult, which is a room nobody has priced", () => {
+    expect(isMissingPricing(hotelLine("adult"))).toBe(true)
   })
 })

@@ -222,6 +222,12 @@ export async function POST(req: Request) {
     const built = await buildVoucherServiceBlocks(supabase, {
       bookingId: booking.id,
       legIds: scopedLegIds,
+      // Without these the voucher printed no COMPLIMENTARY callout at all, while the quote PDF and
+      // the quote email both printed one off the same accepted quote — three documents, three
+      // answers about the same comped service.
+      complimentaryLegIds: quoteScope.complimentaryLegIds,
+      firstNightComplimentaryLegIds: quoteScope.firstNightComplimentaryLegIds,
+      complimentaryTransportRequestIds: quoteScope.complimentaryTransportRequestIds,
       includeUnlinkedTransportRequests: false,
       inclusionFilter: { journeyClass: quoteConfig.journeyClass, rateAudience: quoteConfig.rateAudience },
       reservationDetails: reservationDetails
@@ -521,6 +527,7 @@ export async function POST(req: Request) {
     },
     blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
+    templateSupplierId: shared.primarySupplierId,
   })
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)
 

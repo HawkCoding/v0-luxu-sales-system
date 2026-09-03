@@ -24,7 +24,7 @@ import {
 import type { PackageLeg, RateType, ServiceDateAnchor, SupplierRateCard } from "@/lib/types"
 import {
   getSupplierVocabulary,
-  isOptionalPackageLegKind,
+  isCoreBookingLeg,
   isTypePricedSupplier,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -521,6 +521,9 @@ interface SuiteLegEditorProps {
    *  transfer legs), same resolver a transfer's pickup date anchors to. Absent when nothing dated
    *  precedes it. */
   flightAnchorContext?: TransferAnchorContext | null
+  /** The booking's primary supplier. This leg is the core one when they match: always part of
+   *  the booking, never untickable. Null falls back to the train rule -- see isCoreBookingLeg. */
+  primarySupplierId?: string | null
   /** Active (non-archived) rate types — shows the per-leg rate type selector when non-empty. */
   rateTypes?: RateType[]
   /** The quote's currency. Typed fares in another currency are previewed converted into it. */
@@ -558,6 +561,7 @@ export function SuiteLegEditor({
   expectedTotals,
   anchorContext,
   flightAnchorContext,
+  primarySupplierId = null,
   rateTypes = [],
   quoteCurrency = BASE_CURRENCY,
   fxRates = { [BASE_CURRENCY]: 1 },
@@ -566,7 +570,7 @@ export function SuiteLegEditor({
   const isTour = leg.supplierKind === "tour_operator"
   const isAirline = leg.supplierKind === "airline"
   const vocab = getSupplierVocabulary(leg.supplierKind)
-  const optional = isOptionalPackageLegKind(leg.supplierKind)
+  const optional = !isCoreBookingLeg(leg, primarySupplierId)
   // A non-optional leg is always part of the booking, whatever a legacy row has stored.
   const included = optional ? value.selected : true
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)

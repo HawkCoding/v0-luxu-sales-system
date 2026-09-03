@@ -12,8 +12,8 @@ import {
   deriveJourneyFromBlocks,
   deriveTrainDepartureFromBlocks,
 } from "@/lib/quotes/quote-presentation"
-import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
-import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { resolvePrimaryRoute } from "@/lib/quotes/resolve-primary-route"
+import { isPlaceholderToken, resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import {
   complimentaryLegIdsFromLineItems,
   complimentaryTransportRequestIdsFromLineItems,
@@ -83,18 +83,36 @@ export async function POST(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Quote must have line items before it can be sent" }, { status: 400 })
   }
 
-  // The quoted journey's route (from line-item snapshots) beats the booking's
-  // route_id, which may still point at the enquiry-time route.
   const snapshotCarriers = lineItems.map((li) => ({
     pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
   }))
-  const { routeName: quotedRouteName } = resolvePrimaryRoute(snapshotCarriers)
+
+  // Which journey/rate bullets to show, and whether the train-only note applies -- resolved once
+  // so the email, the PDF stapled to it, and the voucher/itinerary later can never disagree.
+  //
+  // Resolved here, before anything reads a supplier or a route, because this is the only resolution
+  // that consults the booking's own primary_supplier_id. Naming the supplier by the naive
+  // "first non-hotel leg wins" rule instead made a Kruger Shalati quote with a transfer extra open
+  // with "your most valued Ulysses Tours & Transfers enquiry", and picked the template variant by a
+  // different rule than the name printed inside it.
+  const quoteConfig = await loadQuoteConfig(supabase, {
+    lineItems: snapshotCarriers,
+    overrides: overridesFromQuoteRow(quote),
+    bookingId: quote.booking_id,
+  })
+  const quoteDisplayTokens = await loadQuoteDisplayTokens(supabase, quoteConfig)
+
+  // The quoted journey's route (from line-item snapshots) beats the booking's
+  // route_id, which may still point at the enquiry-time route.
+  const { routeName: quotedRouteName } = resolvePrimaryRoute(snapshotCarriers, {
+    primarySupplierId: quoteConfig.primarySupplierId,
+  })
 
   // The supplier is named to the customer exactly as it is spelled in Suppliers,
   // so the name is read live off the record rather than from the booking's
   // enquiry-time route (a fuzzy text match that often points at another
   // supplier) or the snapshot's frozen copy of the name.
-  const quotedSupplierId = resolvePrimarySupplierId(snapshotCarriers)
+  const quotedSupplierId = quoteConfig.primarySupplierId
   let quotedSupplierName: string | null = null
   if (quotedSupplierId) {
     const { data: quotedSupplier } = await supabase
@@ -126,14 +144,6 @@ export async function POST(req: Request, { params }: RouteParams) {
   const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
   const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
   const complimentaryTransportRequestIds = complimentaryTransportRequestIdsFromLineItems(lineItems)
-
-  // Which journey/rate bullets to show, and whether the train-only note applies -- resolved once
-  // so the email, the PDF stapled to it, and the voucher/itinerary later can never disagree.
-  const quoteConfig = await loadQuoteConfig(supabase, {
-    lineItems: snapshotCarriers,
-    overrides: overridesFromQuoteRow(quote),
-  })
-  const quoteDisplayTokens = await loadQuoteDisplayTokens(supabase, quoteConfig)
 
   // Itinerary degrades to an omitted section rather than failing the preview.
   let itineraryBlocks: VoucherServiceBlock[] = []
@@ -215,7 +225,14 @@ export async function POST(req: Request, { params }: RouteParams) {
       tripStartDate: formatDisplayDateLong(journey.start) || "To be confirmed",
       departureDate: formatDisplayDateLong(trainDeparture ?? journey.start) || "To be confirmed",
       departureDateShort: formatDisplayDateLong(trainDeparture ?? journey.start) || "TBC",
-      direction: quotedRouteName ?? route?.name ?? "your journey",
+      // The quoted route wins, then the booking's own. Falling straight to "your journey"
+      // from there threw away resolveSharedEmailTokens' answer -- which on a standalone stay
+      // (no route at all) is the stay's length, and produced "On the your journey departure"
+      // in a client's inbox. The shared token is already PLACEHOLDER when it has nothing.
+      direction:
+        quotedRouteName ??
+        route?.name ??
+        (isPlaceholderToken(shared.tokens.direction) ? "your journey" : shared.tokens.direction),
       supplierName,
       clientSurname,
       total: formatMoney(quote.total, quote.currency),

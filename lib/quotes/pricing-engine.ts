@@ -60,6 +60,26 @@ export function isComplimentaryTransport(lineItem: QuoteLineItem): boolean {
 }
 
 /**
+ * The money a quote line actually charges.
+ *
+ * Every write path recomputes a line's total from qty × unitPrice rather than trusting the figure a
+ * browser sent — but a comped transfer is the one line whose total is deliberately decoupled from
+ * its price: it keeps the real rate on `unitPrice` so the quote can still show what the trip would
+ * have cost, and carries the R0 on `total` alone (see build-from-package.ts). Recomputing it blindly
+ * re-charged the client for comped trips all the way through to the deposit and final invoices,
+ * while the line's own description still read "COMPLIMENTARY".
+ *
+ * The other two comp kinds need no special case: a comped room is a genuine unitPrice of 0, and a
+ * gifted night is a reduced qty.
+ */
+export function resolveLineTotal(
+  lineItem: Pick<QuoteLineItem, "qty" | "unitPrice" | "pricingSnapshot">,
+): number {
+  if (lineItem.pricingSnapshot?.isComplimentaryTransport === true) return 0
+  return roundMoney(lineItem.unitPrice * lineItem.qty)
+}
+
+/**
  * Nights of a hotel room's stay the supplier gifted. Today the "Mark first night complimentary"
  * action in suite-leg-editor.tsx only ever gifts one, but the count is what the line's qty was
  * derived from, so it is read back as a number rather than a flag.
@@ -90,6 +110,19 @@ export function isFreeInfant(lineItem: QuoteLineItem): boolean {
 }
 
 /**
+ * True when a hotel line prices a child or infant sharing a room at nothing.
+ *
+ * Hotel rates are per person per night, and a room type that sets no child rate is one where a
+ * child sharing costs nothing extra (see hotelRateCardFares). The line is still emitted so the guest
+ * appears on the itinerary — it is a finished line at R0, not one waiting on a number.
+ */
+export function isFreeHotelOccupant(lineItem: QuoteLineItem): boolean {
+  const snapshot = lineItem.pricingSnapshot
+  if (snapshot?.supplierKind !== "hotel_property") return false
+  return snapshot.passengerKind === "child" || snapshot.passengerKind === "infant"
+}
+
+/**
  * True when the Commission line was deliberately set to 0 rather than left unconfigured — a
  * breakdown only exists once a type was chosen in Build Booking (see buildCommissionBreakdown),
  * so its presence distinguishes "commission of 0" from "no commission set yet".
@@ -110,6 +143,7 @@ export function isMissingPricing(lineItem: QuoteLineItem): boolean {
     !hasComplimentaryNight(lineItem) &&
     !isComplimentaryTransport(lineItem) &&
     !isFreeInfant(lineItem) &&
+    !isFreeHotelOccupant(lineItem) &&
     !isDeliberateZeroCommission(lineItem)
   )
 }

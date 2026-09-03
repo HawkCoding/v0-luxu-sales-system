@@ -1,46 +1,28 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import type { PricingSnapshot } from "@/lib/types"
-import { resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { firstRecord } from "@/lib/utils"
 
 /**
- * Resolves the supplier name shown to the customer for {{supplierName}} in
- * any email. Prefers the booking's most recent quote's primary supplier
- * (quoted train leg, same precedence as resolvePrimarySupplierId), falling
- * back to the booking's route supplier, then its hotel supplier.
+ * Resolves the supplier name shown to the customer for {{supplierName}} in any email.
+ *
+ * `primarySupplierId`, when given, is trusted as-is (it should be the same id a caller passes to
+ * composeEmail's templateSupplierId, e.g. via resolveSharedEmailTokens) so the name shown and the
+ * template variant rendered can never disagree. Falls back to the booking's route supplier, then
+ * its hotel supplier, when no primary is known (a booking predating primary_supplier_id with no
+ * quote yet).
  */
 export async function resolveBookingSupplierName(
   supabase: SupabaseClient<Database>,
   bookingId: string,
+  primarySupplierId?: string | null,
 ): Promise<string> {
-  const { data: quotes } = await supabase
-    .from("quotes")
-    .select("id, created_at")
-    .eq("booking_id", bookingId)
-
-  const latestQuoteId = (quotes ?? [])
-    .slice()
-    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0]?.id
-
-  if (latestQuoteId) {
-    const { data: lineItems } = await supabase
-      .from("quote_line_items")
-      .select("pricing_snapshot")
-      .eq("quote_id", latestQuoteId)
-
-    const supplierId = resolvePrimarySupplierId(
-      (lineItems ?? []).map((li) => ({ pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null })),
-    )
-
-    if (supplierId) {
-      const { data: supplier } = await supabase
-        .from("suppliers")
-        .select("name")
-        .eq("id", supplierId)
-        .maybeSingle()
-      if (supplier?.name) return supplier.name
-    }
+  if (primarySupplierId) {
+    const { data: supplier } = await supabase
+      .from("suppliers")
+      .select("name")
+      .eq("id", primarySupplierId)
+      .maybeSingle()
+    if (supplier?.name) return supplier.name
   }
 
   const { data: booking } = await supabase

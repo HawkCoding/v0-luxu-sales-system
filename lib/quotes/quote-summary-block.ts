@@ -97,6 +97,13 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const pax = { adults: input.adults, children: input.children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(input.journeyStart, input.journeyEnd)
+  // A standalone hotel booking (Kruger Shalati) is a stay, not a journey -- nothing in it
+  // travels anywhere. Any transport at all makes it a journey again.
+  const journeyLabel =
+    input.itineraryBlocks.length > 0 &&
+    input.itineraryBlocks.every((block) => block.serviceType === "hotel")
+      ? "Stay"
+      : "Journey"
   const agentCommission = input.agentCommission ?? 0
   const hasAgentCommission = agentCommission > 0
   // Per-person rate is always the gross rate — the discount is the agency's cut, not the
@@ -113,7 +120,7 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     ...(QUOTE_VALIDITY_ENABLED
       ? [`<p style="${summaryLine}"><strong>Valid until:</strong> ${formatQuoteDate(input.validUntil)}</p>`]
       : []),
-    `<p style="${summaryLine}"><strong>Journey:</strong> ${escapeHtml(journeyRange ?? "To be confirmed")}</p>`,
+    `<p style="${summaryLine}"><strong>${journeyLabel}:</strong> ${escapeHtml(journeyRange ?? "To be confirmed")}</p>`,
   ]
   if (paxLabel) {
     metaLines.push(`<p style="${summaryLine}"><strong>Guests:</strong> ${escapeHtml(paxLabel)}</p>`)

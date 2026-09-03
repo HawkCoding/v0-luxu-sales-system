@@ -24,7 +24,10 @@ export interface EnquiryImportPayload {
   email: string
   country: string
   direction: string
+  /** Trip start: the departure date on a journey, the check-in date on a stay. */
   departureDate: string
+  /** Stay enquiries only -- nights is what gets stored, check-out is derived from it. */
+  nights?: number
   supplierId?: string
   noOfSuites: number
   noOfAdults: number
@@ -33,6 +36,7 @@ export interface EnquiryImportPayload {
   suiteUnits: EnquirySuiteUnitPayload[]
   packageOption?: string
   hotelOption?: string
+  promotionCode?: string
   hotelPhase?: 'pre' | 'post' | 'none'
   extendStay?: boolean
   additionalServices: boolean
@@ -102,6 +106,9 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     // become a Pretoria-Cape Town enquiry.
     direction: draft.trip.route,
     departureDate: draft.trip.departureDate,
+    // A stay's length is the whole price, so it travels as a fact rather than as two dates the
+    // server would have to re-derive it from.
+    nights: draft.trip.nights ?? undefined,
     supplierId: draft.trip.supplierId || undefined,
     noOfSuites: draft.guests.suites,
     noOfAdults: draft.guests.adults,
@@ -112,6 +119,7 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     suiteUnits,
     packageOption: draft.trip.packageOption || undefined,
     hotelOption: draft.trip.hotelOption || undefined,
+    promotionCode: draft.formFields.promotionCode || undefined,
     hotelPhase: draft.trip.hotelPhase || undefined,
     extendStay: draft.trip.extendStay ?? undefined,
     additionalServices: draft.additionalServices.requested,

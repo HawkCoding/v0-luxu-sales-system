@@ -67,6 +67,14 @@ const QUOTE_ID = "00000000-0000-4000-8000-00000000bbbb"
 
 interface AuthOptions {
   bookingStage?: string
+  /** Rows the stage gates read. Empty by default — the gates that need them are exercised
+   * explicitly rather than standing in the way of every other test. */
+  invoiceRows?: { id: string; kind: string; status: string }[]
+  paymentRows?: { amount: number }[]
+  /** Quotes the stage gates see. A send-and-move past `quote_sent` needs one that was sent. */
+  contextQuotes?: { id: string; status: string; total: number; created_at: string }[]
+  /** Documents the stage gates see — e.g. the voucher_pdf a voucher send always has by then. */
+  documentRows?: { id: string; kind: string; status: string; created_at: string }[]
   customerEmail?: string | null
   customerFirstName?: string | null
   departureDate?: string | null
@@ -93,6 +101,10 @@ function buildAuth(options: AuthOptions = {}) {
   // The quote status the send gate reads. Draft by default so it never stands in the way of
   // tests exercising other behaviour — set "pricing_incomplete" to exercise the gate itself.
   const quoteStatus = options.quoteStatus ?? "draft"
+  const invoiceRows = options.invoiceRows ?? []
+  const paymentRows = options.paymentRows ?? []
+  const contextQuotes = options.contextQuotes ?? []
+  const documentRows = options.documentRows ?? []
 
   const correspondenceInsertResult = vi.fn(async () => ({
     data: {
@@ -118,8 +130,12 @@ function buildAuth(options: AuthOptions = {}) {
   }))
 
   const followUpInsert = vi.fn(async () => ({ error: null }))
+  // The stage gates re-read correspondences after the send, so the row this request just wrote is
+  // part of the evidence — that is how "the voucher email was sent" becomes true. A mock that
+  // always returned [] would make every send-and-move look like it had never sent anything.
+  const sentCorrespondences: { id: string; kind: string | null; subject: string; status: string; created_at: string }[] = []
   const correspondenceSelect = vi.fn(() => ({
-    eq: vi.fn(async () => ({ data: [], error: null })),
+    eq: vi.fn(async () => ({ data: sentCorrespondences, error: null })),
   }))
 
   const quoteUpdate = vi.fn(() => ({
@@ -162,20 +178,31 @@ function buildAuth(options: AuthOptions = {}) {
       }
     }
     // Chainable and awaitable: shared email tokens await after .eq(), while the accepted-quote
-    // scope lookup chains .eq().eq().order().limit().maybeSingle(). No quotes in these fixtures,
-    // so both resolve empty and the voucher readiness gate stays unscoped.
+    // scope lookup chains .eq().eq().order().limit().maybeSingle().
+    //
+    // The stage gates load quotes with `.order()` and no `.limit()`, and that read is the one that
+    // decides whether a quote was ever sent — so it resolves `contextQuotes` while every other
+    // path stays empty and leaves the voucher readiness gate unscoped.
     const self: Record<string, unknown> = {}
     self.eq = vi.fn(() => self)
-    self.order = vi.fn(() => self)
     self.limit = vi.fn(() => self)
     self.maybeSingle = vi.fn(async () => ({ data: null, error: null }))
     self.then = (resolve: (value: unknown) => unknown) =>
       Promise.resolve({ data: [], error: null }).then(resolve)
+    self.order = vi.fn(() => {
+      const ordered: Record<string, unknown> = {
+        limit: vi.fn(() => ordered),
+        maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+        then: (resolve: (value: unknown) => unknown) =>
+          Promise.resolve({ data: contextQuotes, error: null }).then(resolve),
+      }
+      return ordered
+    })
     return self
   })
 
   const documentSelect = vi.fn(() => ({
-    eq: vi.fn(async () => ({ data: [], error: null })),
+    eq: vi.fn(async () => ({ data: documentRows, error: null })),
   }))
 
   const pipelineHistoryInsert = vi.fn(async () => ({ error: null }))
@@ -227,7 +254,17 @@ function buildAuth(options: AuthOptions = {}) {
         return {
           insert: vi.fn((...args: unknown[]) => {
             correspondenceInsertCount += 1
-            if (correspondenceInsertCount === 1) return correspondenceInsertChain(...(args as []))
+            if (correspondenceInsertCount === 1) {
+              const values = (args[0] ?? {}) as { kind?: string | null; subject?: string; status?: string }
+              sentCorrespondences.push({
+                id: "cor-1",
+                kind: values.kind ?? null,
+                subject: values.subject ?? "",
+                status: values.status ?? "sent",
+                created_at: "2026-05-01T00:00:00.000Z",
+              })
+              return correspondenceInsertChain(...(args as []))
+            }
             return followUpInsert()
           }),
           select: correspondenceSelect,
@@ -241,6 +278,41 @@ function buildAuth(options: AuthOptions = {}) {
       }
       if (table === "documents") {
         return { select: documentSelect }
+      }
+      // The stage gates now read the full evidence set, not just quotes — the gate that refuses
+      // `deposit_paid` without a recorded payment reads `payments`, which this route never used to
+      // load and so could never enforce.
+      if (table === "customers") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: {
+                  first_name: customerFirstName,
+                  last_name: "Doe",
+                  email: customerEmail,
+                  phone: "+27821234567",
+                  country: "South Africa",
+                },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === "invoices") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: invoiceRows, error: null })),
+          })),
+        }
+      }
+      if (table === "payments") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: paymentRows, error: null })),
+          })),
+        }
       }
       if (table === "pipeline_history") {
         return { insert: pipelineHistoryInsert }
@@ -269,7 +341,15 @@ function buildAuth(options: AuthOptions = {}) {
       if (table === "quote_line_items") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(async () => ({ data: [], error: null })),
+            // Chainable and awaitable: reads are ordered by sort_order now (the primary-supplier
+            // fallbacks are "first leg in array order"), while resolve-shared-tokens still awaits
+            // straight after .eq().
+            eq: vi.fn(() => {
+              const result = Promise.resolve({ data: [], error: null })
+              return Object.assign(result, {
+                order: vi.fn(async () => ({ data: [], error: null })),
+              })
+            }),
           })),
         }
       }
@@ -474,7 +554,12 @@ describe("POST /api/correspondence", () => {
   })
 
   it("on successful quote_sent: updates quote, applies transition, writes pipeline_history and audit", async () => {
-    const mocks = buildAuth()
+    // The send itself is what puts the quote in front of the customer, so by the time the stage
+    // moves there is a sent quote on file — the gates now read it rather than taking the move on
+    // trust.
+    const mocks = buildAuth({
+      contextQuotes: [{ id: QUOTE_ID, status: "sent", total: 1000, created_at: "2026-05-01T00:00:00.000Z" }],
+    })
     const res = await POST(
       postJson({
         bookingId: BOOKING_ID,
@@ -532,7 +617,17 @@ describe("POST /api/correspondence", () => {
   })
 
   it("sends a voucher email and applies the voucher_sent transition", async () => {
-    const mocks = buildAuth({ bookingStage: "final_paid" })
+    // A voucher send only ever happens after the voucher PDF was generated and the invoices were
+    // raised and paid, so the gates see all three.
+    const mocks = buildAuth({
+      bookingStage: "final_paid",
+      contextQuotes: [{ id: QUOTE_ID, status: "accepted", total: 1000, created_at: "2026-05-01T00:00:00.000Z" }],
+      documentRows: [
+        { id: "doc-voucher", kind: "voucher_pdf", status: "generated", created_at: "2026-05-01T00:00:00.000Z" },
+      ],
+      invoiceRows: [{ id: "inv-1", kind: "full", status: "paid" }],
+      paymentRows: [{ amount: 1000 }],
+    })
     const res = await POST(
       postJson({
         bookingId: BOOKING_ID,
@@ -669,7 +764,14 @@ describe("POST /api/correspondence", () => {
   })
 
   it("allows a deposit-invoice send once the invoice number is set", async () => {
-    buildAuth({ bookingStage: "accepted", customerInvoiceNumber: "INV-0042" })
+    // The invoice is generated before the email that sends it, so the invoice_document gate has
+    // something to see by the time the stage moves.
+    buildAuth({
+      bookingStage: "accepted",
+      customerInvoiceNumber: "INV-0042",
+      contextQuotes: [{ id: QUOTE_ID, status: "accepted", total: 1000, created_at: "2026-05-01T00:00:00.000Z" }],
+      invoiceRows: [{ id: "inv-1", kind: "deposit", status: "draft" }],
+    })
     const res = await POST(
       postJson({
         bookingId: BOOKING_ID,
@@ -688,7 +790,10 @@ describe("POST /api/correspondence", () => {
   })
 
   it("does not gate quote_sent on customer completeness (first outbound touch)", async () => {
-    buildAuth({ customerFirstName: null })
+    buildAuth({
+      customerFirstName: null,
+      contextQuotes: [{ id: QUOTE_ID, status: "sent", total: 1000, created_at: "2026-05-01T00:00:00.000Z" }],
+    })
     const res = await POST(
       postJson({
         bookingId: BOOKING_ID,

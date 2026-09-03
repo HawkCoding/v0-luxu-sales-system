@@ -1131,6 +1131,7 @@ export type Database = {
           overpaid_amount: number
           owner_user_id: string | null
           package_travel_date: string | null
+          primary_supplier_id: string | null
           promotion_code: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
           quote_sent_at: string | null
@@ -1205,6 +1206,7 @@ export type Database = {
           overpaid_amount?: number
           owner_user_id?: string | null
           package_travel_date?: string | null
+          primary_supplier_id?: string | null
           promotion_code?: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
           quote_sent_at?: string | null
@@ -1279,6 +1281,7 @@ export type Database = {
           overpaid_amount?: number
           owner_user_id?: string | null
           package_travel_date?: string | null
+          primary_supplier_id?: string | null
           promotion_code?: string | null
           purpose?: Database["public"]["Enums"]["booking_purpose"]
           quote_sent_at?: string | null
@@ -1335,6 +1338,13 @@ export type Database = {
             columns: ["outcome_reason_id"]
             isOneToOne: false
             referencedRelation: "outcome_reasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_primary_supplier_id_fkey"
+            columns: ["primary_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
           {
@@ -3695,6 +3705,7 @@ export type Database = {
           default_time_start: string | null
           description: string | null
           email: string | null
+          email_match_phrases: string | null
           emergency_phone: string | null
           exclusions: string[]
           id: string
@@ -3712,6 +3723,7 @@ export type Database = {
           pricing_mode: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id: string | null
           quote_suite_detail: string
+          sells_standalone: boolean
           single_supplement_pct: number
           slug: string
           status: string
@@ -3732,6 +3744,7 @@ export type Database = {
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          email_match_phrases?: string | null
           emergency_phone?: string | null
           exclusions?: string[]
           id?: string
@@ -3749,6 +3762,7 @@ export type Database = {
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id?: string | null
           quote_suite_detail?: string
+          sells_standalone?: boolean
           single_supplement_pct?: number
           slug: string
           status?: string
@@ -3769,6 +3783,7 @@ export type Database = {
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          email_match_phrases?: string | null
           emergency_phone?: string | null
           exclusions?: string[]
           id?: string
@@ -3786,6 +3801,7 @@ export type Database = {
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id?: string | null
           quote_suite_detail?: string
+          sells_standalone?: boolean
           single_supplement_pct?: number
           slug?: string
           status?: string

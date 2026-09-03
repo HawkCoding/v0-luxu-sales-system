@@ -464,6 +464,10 @@ export const supplierSaveSchema = z.object({
    * 'type_only' when omitted. */
   quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
   suitePhrasePattern: suitePhrasePatternSchema,
+  /** Whether this supplier may head a booking of its own -- see suppliers.sells_standalone. */
+  sellsStandalone: z.boolean().optional(),
+  /** Comma-separated wording to match in an enquiry email. Null/blank derives it from the name. */
+  emailMatchPhrases: z.string().trim().max(500).nullable().optional(),
   active: z.boolean(),
   /** The sibling record (same company, different category) this supplier inherits its contact
    * details from. `null` unlinks and keeps the last mirrored values as this record's own. Omit the
@@ -633,6 +637,10 @@ export const supplierDraftSaveSchema = z.object({
    * 'type_only' when omitted. */
   quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
   suitePhrasePattern: suitePhrasePatternSchema,
+  /** Whether this supplier may head a booking of its own -- see suppliers.sells_standalone. */
+  sellsStandalone: z.boolean().optional(),
+  /** Comma-separated wording to match in an enquiry email. Null/blank derives it from the name. */
+  emailMatchPhrases: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().default(true),
   /** See `parentSupplierId` on supplierSaveSchema. */
   parentSupplierId: z.string().uuid().nullable().optional(),

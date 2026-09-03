@@ -51,6 +51,10 @@ export async function loadQuoteConfig(
   input: {
     lineItems: readonly QuoteConfigLineItem[]
     overrides?: QuoteConfigOverrides
+    /** Booking id to read bookings.primary_supplier_id from. Omit `bookingPrimarySupplierId`
+     * entirely when the caller already has it (saves a query). */
+    bookingId?: string
+    bookingPrimarySupplierId?: string | null
   },
 ): Promise<QuoteConfig> {
   const supplierIds = new Set<string>()
@@ -69,11 +73,29 @@ export async function loadQuoteConfig(
   if (supplierIds.size > 0) {
     const { data } = await supabase
       .from("suppliers")
-      .select("id, long_journey_min_days")
+      .select("id, name, long_journey_min_days, sells_standalone")
       .in("id", [...supplierIds])
     for (const row of data ?? []) {
-      suppliers[row.id] = { longJourneyMinDays: row.long_journey_min_days }
+      suppliers[row.id] = {
+        longJourneyMinDays: row.long_journey_min_days,
+        sellsStandalone: row.sells_standalone ?? false,
+        name: row.name,
+      }
     }
+  }
+
+  // `== null` on purpose, not `=== undefined`: three callers pass `booking?.primary_supplier_id ?? null`,
+  // so a booking they failed to load arrives here as an explicit null. Treating that as "the caller
+  // told me there is none" silently dropped the hint and let a transfer extra win the primary
+  // supplier. A caller that already has the id passes it and skips the query as before.
+  let bookingPrimarySupplierId = input.bookingPrimarySupplierId ?? null
+  if (input.bookingId && input.bookingPrimarySupplierId == null) {
+    const { data: bookingRow } = await supabase
+      .from("bookings")
+      .select("primary_supplier_id")
+      .eq("id", input.bookingId)
+      .maybeSingle()
+    bookingPrimarySupplierId = bookingRow?.primary_supplier_id ?? null
   }
 
   const routes: Record<string, QuoteConfigRouteLookup> = {}
@@ -99,11 +121,14 @@ export async function loadQuoteConfig(
     routes,
     rateTypes,
     overrides: input.overrides ?? NO_OVERRIDES,
+    bookingPrimarySupplierId,
   })
 }
 
 const NEUTRAL_CONFIG: QuoteConfig = {
   primarySupplierId: null,
+  primarySupplierSource: "none",
+  primaryCandidateIds: [],
   primaryRouteId: null,
   primaryTrainRateTypeId: null,
   journeyClass: null,
@@ -137,10 +162,14 @@ export async function loadQuoteConfigForBooking(
     .from("quote_line_items")
     .select("pricing_snapshot")
     .eq("quote_id", quote.id)
+    // Ordered because resolvePrimarySupplier's fallbacks are "first leg in array order" — an
+    // unordered read lets Postgres decide who the primary supplier is, differently between calls.
+    .order("sort_order", { ascending: true })
 
   return loadQuoteConfig(supabase, {
     lineItems: (lineItems ?? []).map((li) => ({ pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null })),
     overrides: overridesFromQuoteRow(quote),
+    bookingId,
   })
 }
 

@@ -1,5 +1,7 @@
 import { REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import type { DraftSuiteUnit } from "@/lib/suites/draft-suite-unit"
+import { matchSupplierInText, type SupplierMatcher } from "@/lib/suppliers/match-phrases"
+import type { SupplierKind } from "@/lib/types"
 
 export interface ParsedDraft {
   customer: {
@@ -14,8 +16,21 @@ export interface ParsedDraft {
   trip: {
     supplierId?: string
     supplier: string
+    /**
+     * What kind of product the matched supplier is, which decides the shape of the whole enquiry:
+     * a train_operator enquiry is a journey (route + departure date), a hotel_property enquiry is a
+     * stay (check-in + check-out). '' when no supplier was matched and the shape is still unknown.
+     */
+    supplierKind: SupplierKind | ''
     route: string
+    /** Doubles as the check-in date on a hotel enquiry -- the trip's start day either way. */
     departureDate: string
+    /** Hotel enquiries only. Not stored on the booking: nights is the fact, check-out is derived
+     *  from it, so the two can never disagree. */
+    checkOutDate: string
+    /** Nights between check-in and check-out. Null on a journey enquiry, where the route's
+     *  duration decides the length instead of the customer. */
+    nights: number | null
     purpose: 'quote' | 'availability' | 'reservation'
     packageOption: string
     hotelOption: string
@@ -72,6 +87,8 @@ export interface ParsedDraft {
     direction: string
     supplier: string
     departureDateRaw: string
+    checkOutDateRaw: string
+    promotionCode: string
     suitePhrases: string[]
     childAges: number[]
     hotelPhase: 'pre' | 'post' | 'none' | ''
@@ -124,22 +141,22 @@ export interface ParseEmailDraftOptions {
    * with, so callers that can't reach the DB (or existing tests) keep working unchanged.
    */
   trainOperatorNames?: string[]
+  /**
+   * Every supplier that may head a booking of its own (suppliers.sells_standalone) -- train
+   * operators plus standalone hotels such as Kruger Shalati. Supersedes trainOperatorNames, which
+   * is kept for callers that only ever dealt with operators. Each entry carries its kind, so the
+   * match decides whether this enquiry is a journey or a stay.
+   */
+  standaloneSuppliers?: SupplierMatcher[]
+  /**
+   * The email's subject line, scanned ahead of the body. Gravity Forms names the form (and so the
+   * supplier) only in the subject -- "New submission from Kruger Shalati Enquiry - Kluever" -- and
+   * a Shalati body never says "Kruger Shalati" anywhere at all.
+   */
+  subject?: string
 }
 
 const DEFAULT_TRAIN_OPERATOR_NAMES = ['Rovos Rail', 'Blue Train']
-
-/**
- * Word-boundary matcher for an operator name that treats a leading definite article as optional on
- * both sides: the supplier row reads "The Blue Train" but every Blue Train enquiry writes plain
- * "Blue Train", and an exact `\bThe Blue Train\b` scan matched none of them -- a whole operator's
- * traffic landed in Needs Review for a supplier this parser could already name. The article is the
- * only tolerance allowed here; anything looser starts guessing between operators.
- */
-function buildOperatorPattern(name: string): RegExp {
-  const bare = name.trim().replace(/^the\s+/i, '')
-  const escaped = bare.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`\\b(?:the\\s+)?${escaped}\\b`, 'i')
-}
 
 export interface ValidateDraftOptions {
   /**
@@ -184,6 +201,13 @@ const FORM_FIELD_LABEL_PATTERNS = [
   /^(?:contact\s*number|phone|telephone|mobile|cell(?:phone)?)$/i,
   /^(?:no\.?|number)\s*of\s*suites?$/i,
   /^suite\s*type(?:\s*\d+)?$/i,
+  // A standalone hotel enquiry (Kruger Shalati) states a stay, not a journey: rooms rather than
+  // suites, check-in/check-out rather than a departure date.
+  /^(?:no\.?|number)\s*of\s*rooms?$/i,
+  /^room\s*type(?:\s*\d+)?$/i,
+  /^check[\s-]*in\s*date$/i,
+  /^check[\s-]*out\s*date$/i,
+  /^promotion\s*code.*$/i,
   /^package\s*options?$/i,
   /^package$/i,
   /^hotel$/i,
@@ -202,6 +226,14 @@ const FORM_FIELD_LABEL_PATTERNS = [
   // swallow the terms sentence as trip detail. Reading its value is deliberately not wired up.
   /^consent$/i,
   /^please\s+indicate\s+the\s+purpose\s+of\s+your\s+request$/i,
+  // Boundary only -- the Shalati form lists a guest manifest ("Guest 1:", "ID / Passport
+  // Number:", "Date of Birth") between the room details and the travel-services section. Reading
+  // these values is deliberately not wired up; they are listed so a block reader stops at them
+  // instead of swallowing the manifest into the field above it.
+  /^guest\s*details$/i,
+  /^guest\s*\d+$/i,
+  /^id\s*\/?\s*passport\s*number$/i,
+  /^date\s*of\s*birth$/i,
   /^contact\s+information$/i,
   /^.+\s+information$/i,
   /^additional\s+pre\s+and\s+post\s+train\s+travel\s+services$/i,
@@ -398,8 +430,9 @@ function cleanSuitePhrase(value: string): string {
 
 /**
  * Pulls the customer's raw suite wording out of the email. Structured `Suite Type` / `Suite Type 2`
- * labels win (the Gravity Forms shape); otherwise falls back to a sentence-scoped capture around
- * the word "suite" for prose enquiries. Returns wording exactly as written -- never a DB name.
+ * labels win (the Gravity Forms shape); a hotel form words the same field `Room Type 1`, so both
+ * nouns are read. Otherwise falls back to a sentence-scoped capture around the word "suite" for
+ * prose enquiries. Returns wording exactly as written -- never a DB name.
  */
 function extractSuitePhrases(text: string): string[] {
   const phrases: string[] = []
@@ -407,13 +440,13 @@ function extractSuitePhrases(text: string): string[] {
   const lines = text.split(/\r?\n/)
   for (let index = 0; index < lines.length; index += 1) {
     const sameLineMatch = lines[index].trim().match(/^(.+?)\s*[:|]\s*(.+)$/)
-    if (sameLineMatch && /^suite\s*type(?:\s*\d+)?$/i.test(stripGluedSectionHeader(normalizeLabel(sameLineMatch[1])))) {
+    if (sameLineMatch && /^(?:suite|room)\s*type(?:\s*\d+)?$/i.test(stripGluedSectionHeader(normalizeLabel(sameLineMatch[1])))) {
       const cleaned = cleanSuitePhrase(sameLineMatch[2])
       if (cleaned) phrases.push(cleaned)
       continue
     }
 
-    if (!/^suite\s*type(?:\s*\d+)?$/i.test(stripGluedSectionHeader(normalizeLabel(lines[index])))) continue
+    if (!/^(?:suite|room)\s*type(?:\s*\d+)?$/i.test(stripGluedSectionHeader(normalizeLabel(lines[index])))) continue
 
     const value = lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0)
     if (value && !isFormFieldLabel(value)) {
@@ -602,6 +635,20 @@ function extractDateString(text: string): string {
 }
 
 /**
+ * Whole nights between two ISO dates, or null when either is missing or the range is not forward.
+ * A stay's length is the fact worth keeping: check-out is derived from it everywhere downstream,
+ * so a check-out on or before check-in yields no nights rather than a nonsense stay.
+ */
+export function nightsBetween(checkIn: string, checkOut: string): number | null {
+  if (!checkIn || !checkOut) return null
+  const start = Date.parse(`${checkIn}T00:00:00Z`)
+  const end = Date.parse(`${checkOut}T00:00:00Z`)
+  if (Number.isNaN(start) || Number.isNaN(end)) return null
+  const nights = Math.round((end - start) / 86_400_000)
+  return nights > 0 ? nights : null
+}
+
+/**
  * Same date parse as `extractDateString`, but for scanning the whole message body rather than a
  * labelled field's value -- an unambiguous ISO date found anywhere is high confidence, but a date
  * inferred from prose ("Mar 15, 2026", "15/03/2026") is not.
@@ -764,37 +811,38 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
     confidence['trip.purpose'] = 'high'
   }
   
-  // Extract supplier (high confidence). Scans against the caller-supplied active train-operator
-  // list (falls back to the historical two operators when none is supplied) rather than a
-  // hardcoded name check, so a newly added operator is recognised without editing this parser --
-  // see ParseEmailDraftOptions.
-  const trainOperatorNames = options?.trainOperatorNames?.length
-    ? options.trainOperatorNames
-    : DEFAULT_TRAIN_OPERATOR_NAMES
-  let supplier = ''
-  // Longest bare name first (article stripped, since it no longer participates in the match) so a
-  // longer operator name still wins over a shorter one it contains.
-  const bareLength = (name: string) => name.trim().replace(/^the\s+/i, '').length
-  for (const name of [...trainOperatorNames].sort((a, b) => bareLength(b) - bareLength(a))) {
-    const pattern = buildOperatorPattern(name)
-    if (pattern.test(text)) {
-      supplier = name
-      confidence['trip.supplier'] = 'high'
-      break
-    }
-  }
+  // Extract supplier (high confidence). Scans against the caller-supplied pool of suppliers that
+  // may head a booking of their own -- train operators plus standalone hotels -- rather than a
+  // hardcoded name check, so a newly ticked supplier is recognised without editing this parser.
+  // Falls back to the historical two operators when the caller has no DB access. See
+  // ParseEmailDraftOptions.
+  const standaloneSuppliers: SupplierMatcher[] = options?.standaloneSuppliers?.length
+    ? options.standaloneSuppliers
+    : (options?.trainOperatorNames?.length ? options.trainOperatorNames : DEFAULT_TRAIN_OPERATOR_NAMES).map(
+        (name) => ({ name, kind: 'train_operator' as const }),
+      )
+  // Subject first: a Gravity Forms notification names the form -- and so the supplier -- only in
+  // its subject line, and a Kruger Shalati body never states the property anywhere at all. The
+  // body still wins nothing it didn't already win, since both are scanned in one pass.
+  const supplierScanText = [options?.subject ?? '', text].filter(Boolean).join('\n')
+  const supplierMatch = matchSupplierInText(supplierScanText, standaloneSuppliers)
+  const supplier = supplierMatch?.name ?? ''
+  const supplierKind: SupplierKind | '' = supplierMatch?.kind ?? ''
+  if (supplierMatch) confidence['trip.supplier'] = 'high'
+  // A stay, not a journey: no route, no departure, and the customer states its length directly.
+  const isStay = supplierKind === 'hotel_property'
 
   // Extract route/direction (high confidence). The labelled "Direction" field wins when present --
   // trusted verbatim (title-cased) whatever route pair it names, so a new route added to the
   // operator's book is recognised without editing this parser. Falls back to scanning free-form
   // prose for an "X to Y" pattern when no such label exists (e.g. a "Route:" label, or an
   // unstructured enquiry).
-  const directionLabelValue = getLabeledFieldValue(text, [/^direction$/i])
+  const directionLabelValue = isStay ? '' : getLabeledFieldValue(text, [/^direction$/i])
   let route = ''
   if (directionLabelValue) {
     route = titleCase(directionLabelValue)
     confidence['trip.route'] = 'high'
-  } else {
+  } else if (!isStay) {
     const proseRoute = extractProseRoute(text)
     if (proseRoute) {
       route = proseRoute
@@ -807,6 +855,9 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   // for dates inferred from free-form prose, not for a form field the customer filled in directly.
   const departureDateLabelValue = getLabeledFieldValue(text, [
     /^departure\s*date$/i,
+    // A stay states its start as a check-in date. Same field on the draft either way -- the trip's
+    // first day -- only the label the consultant sees differs.
+    /^check[\s-]*in\s*date$/i,
     // Some templates (Rovos) glue the direction into the date label itself, e.g.
     // "Date: Pretoria to Cape Town" with the actual date on the next line -- the generic same-line
     // splitter would otherwise misread "Pretoria to Cape Town" as the value. Scoped to labels that
@@ -836,6 +887,20 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
       confidence['trip.departureDate'] = 'low'
     }
   }
+
+  // Check-out (stay enquiries only). Nights is what actually gets stored -- see the note on
+  // ParsedDraft.trip.checkOutDate -- so a check-out earlier than check-in yields no nights rather
+  // than a negative stay, and is left for the consultant to correct.
+  const checkOutLabelValue = getLabeledFieldValue(text, [/^check[\s-]*out\s*date$/i])
+  const checkOutDate = checkOutLabelValue ? extractDateString(checkOutLabelValue) : ''
+  if (checkOutDate) confidence['trip.checkOutDate'] = 'high'
+  const nights = nightsBetween(departureDate, checkOutDate)
+
+  // The Shalati form carries a promotion code field ("Promotion Code - GET 5% DISCOUNT (KS2025)").
+  // bookings.promotion_code already exists end to end; without reading it here the discount the
+  // customer was promised is silently dropped at intake.
+  const promotionCode = getLabeledFieldValue(text, [/^promotion\s*code.*$/i])
+  if (promotionCode) confidence['trip.promotionCode'] = 'high'
 
   // Extract adults (high confidence if explicit)
   let adults = 0
@@ -907,6 +972,10 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   const suitesLabelValue = getLabeledFieldValue(text, [
     /^(?:no\.?|number)\s*of\s*suites?$/i,
     /^suites?$/i,
+    // Same count, hotel wording. A stay's unit is a room; SUPPLIER_VOCABULARY decides the label
+    // the consultant sees, and bookings.no_of_suites stores both.
+    /^(?:no\.?|number)\s*of\s*rooms?$/i,
+    /^rooms?$/i,
   ])
   const suitesInlineMatch = text.match(/(\d+)[ \t]+(?:x[ \t]+)?(?:[A-Za-z-]+[ \t]+){0,3}suite/i)
   if (/^\d+$/.test(suitesLabelValue)) {
@@ -952,8 +1021,11 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
     },
     trip: {
       supplier,
+      supplierKind,
       route,
       departureDate,
+      checkOutDate,
+      nights,
       purpose,
       packageOption,
       hotelOption,
@@ -987,6 +1059,8 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
       direction: route,
       supplier,
       departureDateRaw: departureDate,
+      checkOutDateRaw: checkOutDate,
+      promotionCode,
       suitePhrases,
       childAges,
       hotelPhase,
@@ -1007,6 +1081,15 @@ function hasSupplier(draft: ParsedDraft, options?: ValidateDraftOptions): boolea
   return options?.requireResolvedSupplier ? Boolean(draft.trip.supplierId) : Boolean(draft.trip.supplier)
 }
 
+/**
+ * Whether this enquiry is a stay rather than a journey -- a standalone hotel booking such as Kruger
+ * Shalati, which is priced per room per night and has no route or departure date to state. Both
+ * shapes have exactly nine required fields; which nine is all that differs.
+ */
+export function isStayDraft(draft: ParsedDraft): boolean {
+  return draft.trip.supplierKind === "hotel_property"
+}
+
 export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions): ValidationResult {
   const missingRequired: string[] = []
   const warnings: string[] = []
@@ -1019,10 +1102,21 @@ export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions
     missingRequired.push(REVIEW_REASON.contact)
   }
   if (!hasSupplier(draft, options)) missingRequired.push(REVIEW_REASON.supplier)
-  if (!draft.trip.route) missingRequired.push(REVIEW_REASON.route)
-  if (!draft.trip.departureDate) missingRequired.push(REVIEW_REASON.departureDate)
+  // A stay has no route and no departure: its shape is check-in, check-out, rooms. Nights is the
+  // whole price, so check-out is required here exactly as a route is on a journey. Same nine
+  // fields, same order -- only which three of them differ.
+  const stay = isStayDraft(draft)
+  if (stay) {
+    if (!draft.trip.departureDate) missingRequired.push(REVIEW_REASON.checkIn)
+    if (!draft.trip.checkOutDate) missingRequired.push(REVIEW_REASON.checkOut)
+  } else {
+    if (!draft.trip.route) missingRequired.push(REVIEW_REASON.route)
+    if (!draft.trip.departureDate) missingRequired.push(REVIEW_REASON.departureDate)
+  }
   if (!draft.guests.adults || draft.guests.adults < 1) missingRequired.push(REVIEW_REASON.adults)
-  if (!draft.guests.suites || draft.guests.suites < 1) missingRequired.push(REVIEW_REASON.suites)
+  if (!draft.guests.suites || draft.guests.suites < 1) {
+    missingRequired.push(stay ? REVIEW_REASON.rooms : REVIEW_REASON.suites)
+  }
 
   // Suite type is reported but NOT required: an enquiry saves with it blank rather than being
   // blocked, and the hard gate stays where it already was -- quote build, which refuses to price
@@ -1063,8 +1157,13 @@ export function countRequiredComplete(
   if (draft.customer.email || draft.customer.phone) completed++
   if (draft.customer.country) completed++
   if (hasSupplier(draft, options)) completed++
-  if (draft.trip.route) completed++
-  if (draft.trip.departureDate) completed++
+  if (isStayDraft(draft)) {
+    if (draft.trip.departureDate) completed++
+    if (draft.trip.checkOutDate) completed++
+  } else {
+    if (draft.trip.route) completed++
+    if (draft.trip.departureDate) completed++
+  }
   if (draft.guests.adults > 0) completed++
   if (draft.guests.suites > 0) completed++
   

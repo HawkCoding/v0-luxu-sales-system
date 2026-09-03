@@ -34,6 +34,8 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     trainOnlyNote: "",
     quoteSuiteDetail: "type_only",
     suitePhrasePattern: "",
+    sellsStandalone: true,
+    emailMatchPhrases: "",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     rateAdjustments: [],
@@ -89,6 +91,8 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "singleSupplementPct",
         "stationAddresses",
         "streetAddress",
+        "sellsStandalone",
+        "emailMatchPhrases",
         "suitePhrasePattern",
         "suiteTypes",
         "trainOnlyNote",
@@ -96,7 +100,7 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(6)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(7)
   })
 })
 

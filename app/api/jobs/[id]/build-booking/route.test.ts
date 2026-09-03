@@ -44,7 +44,17 @@ function makeParams(id = BOOKING_ID) {
 
 interface MockState {
   bookingExists?: boolean
-  existingServices?: { id: string; supplier_id: string; sort_order: number }[]
+  existingServices?: {
+    id: string
+    supplier_id: string
+    sort_order: number
+    label?: string | null
+    supplier?: { kind: string; name: string } | null
+  }[]
+  /** Where the booking sits on the ladder — a rebuild may not delete legs from deposit_paid on. */
+  stage?: string
+  /** The booking's core leg. Its service can never be removed, at any stage. */
+  primarySupplierId?: string | null
 }
 
 function buildSupabase(state: MockState) {
@@ -72,7 +82,15 @@ function buildSupabase(state: MockState) {
               maybeSingle: vi.fn(async () =>
                 state.bookingExists === false
                   ? { data: null, error: null }
-                  : { data: { id: BOOKING_ID, booking_number: "BT-2026-0001" }, error: null },
+                  : {
+                      data: {
+                        id: BOOKING_ID,
+                        booking_number: "BT-2026-0001",
+                        stage: state.stage ?? "enquiry",
+                        primary_supplier_id: state.primarySupplierId ?? null,
+                      },
+                      error: null,
+                    },
               ),
             })),
           })),
@@ -420,5 +438,129 @@ describe("GET /api/jobs/[id]/build-booking", () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.packageDetail).toEqual(detail)
+  })
+})
+
+// A rebuild removes a leg by omitting it, and nothing here used to look at the booking's stage or
+// at which leg the booking exists to sell. The QA run stripped every leg off a closed, paid,
+// vouchered booking and got a 200 back.
+describe("POST /api/jobs/[id]/build-booking — removal guards", () => {
+  beforeEach(() => {
+    authMocks.requireRole.mockReset()
+    authMocks.requireUser.mockReset()
+    auditMocks.writeAuditLog.mockClear()
+  })
+
+  const hotelCoreLeg = {
+    id: SERVICE_A,
+    supplier_id: SUPPLIER_A,
+    sort_order: 0,
+    label: "Kruger Shalati",
+    supplier: { kind: "hotel_property", name: "Kruger Shalati" },
+  }
+  const transferLeg = {
+    id: "00000000-0000-4000-8000-0000000000a2",
+    supplier_id: SUPPLIER_B,
+    sort_order: 1,
+    label: "Airport transfer",
+    supplier: { kind: "transfers", name: "Ulysses Tours & Transfers" },
+  }
+
+  function rebuildWithout(removed: string[], state: MockState) {
+    const built = mockAuth(state)
+    const keep = (state.existingServices ?? []).filter((service) => !removed.includes(service.id))
+    return {
+      built,
+      request: POST(
+        new Request("http://localhost", {
+          method: "POST",
+          body: JSON.stringify({
+            services: keep.map((service) => ({
+              legId: service.id,
+              supplierId: service.supplier_id,
+              supplierKind: service.supplier?.kind ?? "transfers",
+            })),
+          }),
+        }),
+        makeParams(),
+      ),
+    }
+  }
+
+  it("refuses to drop a leg once the deposit is paid, and deletes nothing", async () => {
+    const { built, request } = rebuildWithout([transferLeg.id], {
+      stage: "deposit_paid",
+      primarySupplierId: SUPPLIER_A,
+      existingServices: [hotelCoreLeg, transferLeg],
+    })
+
+    const res = await request
+    expect(res.status).toBe(409)
+    expect(built.serviceDelete).not.toHaveBeenCalled()
+    expect(built.transportDelete).not.toHaveBeenCalled()
+  })
+
+  it("still allows the same removal before the deposit is paid", async () => {
+    const { built, request } = rebuildWithout([transferLeg.id], {
+      stage: "accepted",
+      primarySupplierId: SUPPLIER_A,
+      existingServices: [hotelCoreLeg, transferLeg],
+    })
+
+    const res = await request
+    expect(res.status).toBe(200)
+    expect(built.serviceDelete).toHaveBeenCalled()
+  })
+
+  // Now that a hotel can be the core leg, this is the case most likely to lose a booking its
+  // reason for existing.
+  it("refuses to drop the core leg even while the booking is still editable", async () => {
+    const { built, request } = rebuildWithout([hotelCoreLeg.id], {
+      stage: "accepted",
+      primarySupplierId: SUPPLIER_A,
+      existingServices: [hotelCoreLeg, transferLeg],
+    })
+
+    const res = await request
+    const body = (await res.json()) as { error: string }
+
+    expect(res.status).toBe(400)
+    expect(body.error).toMatch(/cannot be excluded/)
+    expect(built.serviceDelete).not.toHaveBeenCalled()
+  })
+
+  // Supplier references and admin dates still have to be editable late in the booking, so a build
+  // that removes nothing is never blocked.
+  it("allows a rebuild that removes nothing on a closed booking", async () => {
+    const { built, request } = rebuildWithout([], {
+      stage: "closed",
+      primarySupplierId: SUPPLIER_A,
+      existingServices: [hotelCoreLeg, transferLeg],
+    })
+
+    const res = await request
+    expect(res.status).toBe(200)
+    expect(built.serviceDelete).not.toHaveBeenCalled()
+  })
+
+  it("records what was removed by name, not only by id", async () => {
+    const { request } = rebuildWithout([transferLeg.id], {
+      stage: "accepted",
+      primarySupplierId: SUPPLIER_A,
+      existingServices: [hotelCoreLeg, transferLeg],
+    })
+
+    await request
+
+    expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "booking_services_built",
+        meta: expect.objectContaining({
+          removed_service_ids: [transferLeg.id],
+          removed_service_labels: ["Airport transfer"],
+        }),
+      }),
+    )
   })
 })

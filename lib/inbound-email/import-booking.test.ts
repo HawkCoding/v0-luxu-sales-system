@@ -39,6 +39,9 @@ interface MockTrainSupplier {
   name: string
   kind: string
   active: boolean
+  /** Only suppliers that may head a booking of their own are scanned for -- see
+   *  resolveStandaloneSupplier. Both operators here qualify. */
+  sells_standalone: boolean
 }
 
 interface MockRoute {
@@ -60,8 +63,8 @@ const DEFAULT_LOCATIONS: MockLocation[] = [
 ]
 
 const DEFAULT_TRAIN_SUPPLIERS: MockTrainSupplier[] = [
-  { id: "sup-rovos", name: "Rovos Rail", kind: "train_operator", active: true },
-  { id: "sup-blue", name: "Blue Train", kind: "train_operator", active: true },
+  { id: "sup-rovos", name: "Rovos Rail", kind: "train_operator", active: true, sells_standalone: true },
+  { id: "sup-blue", name: "Blue Train", kind: "train_operator", active: true, sells_standalone: true },
 ]
 
 const DEFAULT_ROUTES: MockRoute[] = [
@@ -445,6 +448,32 @@ describe("createEmailBookingFromParsedDraft customer matching", () => {
         customer_id: "customer-existing",
         is_repeat_client_at_creation: false,
       }),
+    )
+  })
+
+  // The discount the customer was promised on the form used to be parsed, carried onto the
+  // payload, and then silently dropped at the insert -- with no screen able to put it back.
+  it("stores the promotion code the enquiry form carried", async () => {
+    const state = createState()
+
+    importBookingMocks.createServiceClient.mockReturnValue(createSupabase(state))
+    const draft = parsedFixture("promo@example.com")
+    const withPromo = {
+      ...draft,
+      formFields: { ...draft.formFields, promotionCode: "KS2025" },
+    }
+    await createEmailBookingFromParsedDraft(withPromo, {
+      emailAccountId: "account-1",
+      mailboxEmail: "bookings@example.com",
+      subject: "Blue Train enquiry",
+      receivedAt: "2026-05-17T10:00:00.000Z",
+      rawText: draft.rawText,
+      missingFields: [],
+      warnings: [],
+    })
+
+    expect(state.bookingInsertRows[0]).toEqual(
+      expect.objectContaining({ promotion_code: "KS2025" }),
     )
   })
 

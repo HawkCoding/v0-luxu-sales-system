@@ -48,11 +48,24 @@ const PLACEHOLDER = "—"
 export interface SharedEmailTokens {
   tokens: Record<string, string>
   blocks: Record<string, string>
+  /** The booking's resolved primary (train, or standalone hotel) supplier -- pass this straight
+   * through as composeEmail's templateSupplierId so every system email, not just the quote email,
+   * can carry a per-supplier variant. Null when nothing could be resolved. */
+  primarySupplierId: string | null
 }
 
 function orPlaceholder(value: string | null | undefined): string {
   const trimmed = value?.trim()
   return trimmed ? trimmed : PLACEHOLDER
+}
+
+/**
+ * Whether a shared token is the "nothing to say" placeholder rather than a real value. Callers that
+ * override a token with their own wording ("your journey") need this to tell a token worth keeping
+ * from one that never resolved.
+ */
+export function isPlaceholderToken(value: string | null | undefined): boolean {
+  return !value?.trim() || value.trim() === PLACEHOLDER
 }
 
 function latestByCreatedAt<T extends { created_at: string | null }>(rows: T[] | null): T | null {
@@ -106,7 +119,9 @@ interface BookingRow {
   trip_end_date: string | null
   no_of_adults: number | null
   no_of_children: number | null
+  duration_nights: number | null
   route_reversed: boolean | null
+  primary_supplier_id: string | null
   customer: { title: string | null; first_name: string | null; last_name: string | null; email: string | null } | { title: string | null; first_name: string | null; last_name: string | null; email: string | null }[] | null
   route:
     | {
@@ -169,13 +184,13 @@ export async function resolveSharedEmailTokens(
   supabase: SupabaseClient<Database>,
   bookingId: string,
 ): Promise<SharedEmailTokens> {
-  const [booking, quotes, invoices, vouchers, correspondences, travellers, suiteSelections, paymentMethod, supplierName] =
+  const [booking, quotes, invoices, vouchers, correspondences, travellers, suiteSelections, paymentMethod] =
     await Promise.all([
       safeQuery<BookingRow>(() =>
         supabase
           .from("bookings")
           .select(
-            "id, booking_number, customer_invoice_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, route_reversed, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
+            "id, booking_number, customer_invoice_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, duration_nights, route_reversed, primary_supplier_id, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
           )
           .eq("id", bookingId)
           .maybeSingle(),
@@ -207,17 +222,22 @@ export async function resolveSharedEmailTokens(
         () => getPaymentMethod(supabase, null),
         { id: "", name: "", enabled: true, isDefault: false, sortOrder: 0, banking: {} as Awaited<ReturnType<typeof getPaymentMethod>>["banking"] },
       ),
-      safely(() => resolveBookingSupplierName(supabase, bookingId), "Supplier"),
     ])
 
   const customer = firstRecord(booking?.customer)
   const route = firstRecord(booking?.route)
   const origin = firstRecord(route?.origin)
   const destination = firstRecord(route?.destination)
+  // A standalone stay (Kruger Shalati) has no route and so no direction, which left the quote
+  // email subject reading "Kruger Shalati/Kluever--05May26". Its length is the closest thing a
+  // stay has to a direction, and it is what a consultant scanning a mailbox actually wants.
+  const stayNights = booking?.duration_nights ?? null
   const direction =
     route && origin?.name && destination?.name
       ? resolveDirectedRouteName(origin.name, destination.name, booking?.route_reversed ?? false)
-      : null
+      : stayNights && stayNights > 0
+        ? `${stayNights} ${stayNights === 1 ? "Night" : "Nights"}`
+        : null
   const departureDate = formatDisplayDateLong(booking?.departure_date ?? null)
 
   const guestTravellers = (travellers ?? []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
@@ -259,12 +279,19 @@ export async function resolveSharedEmailTokens(
   let rateLabel: string | null = null
   let trainOnlyNote: string | null = null
   let trainDepartureDate: string | null = null
+  // Resolved off the same quote-line snapshots as the rest of this quote's config, so the
+  // {{supplierName}} token and the template variant a caller passes to composeEmail (see
+  // resolveSharedEmailTokens' return) can never name two different suppliers. Falls back to the
+  // booking's own primary_supplier_id pre-quote (reservation/follow-up sends).
+  let primarySupplierId: string | null = booking?.primary_supplier_id ?? null
   if (latestQuote) {
     try {
       const { data: lineItems } = await supabase
         .from("quote_line_items")
         .select("unit_price, pricing_snapshot")
         .eq("quote_id", latestQuote.id)
+        // Ordered because the primary-supplier fallbacks are "first leg in array order".
+        .order("sort_order", { ascending: true })
 
       const legIds = legIdsFromLineItems(lineItems)
       const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
@@ -276,7 +303,9 @@ export async function resolveSharedEmailTokens(
           pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
         })),
         overrides: overridesFromQuoteRow(latestQuote),
+        bookingPrimarySupplierId: booking?.primary_supplier_id ?? null,
       })
+      primarySupplierId = quoteConfig.primarySupplierId ?? primarySupplierId
       const displayTokens = await loadQuoteDisplayTokens(supabase, quoteConfig)
       rateLabel = displayTokens.rateLabel
       trainOnlyNote = displayTokens.trainOnlyNote
@@ -320,6 +349,11 @@ export async function resolveSharedEmailTokens(
       quoteSummaryTable = PLACEHOLDER
     }
   }
+
+  const supplierName = await safely(
+    () => resolveBookingSupplierName(supabase, bookingId, primarySupplierId),
+    "Supplier",
+  )
 
   let receivedAmount = PLACEHOLDER
   let outstandingAmount = PLACEHOLDER
@@ -405,5 +439,5 @@ export async function resolveSharedEmailTokens(
     trainOnlyNote: trainOnlyNote ?? "",
   }
 
-  return { tokens, blocks }
+  return { tokens, blocks, primarySupplierId }
 }

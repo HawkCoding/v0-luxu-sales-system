@@ -6,7 +6,7 @@ import type {
   ServiceDateAnchor,
   SupplierKind,
 } from "@/lib/types"
-import { isTypePricedSupplier, SUPPLIER_VOCABULARY } from "@/lib/types"
+import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_VOCABULARY } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import type { AnchoredStay, HotelStayDates } from "@/lib/packages/hotel-dates"
 import { findAnchorTrainLeg, resolveChainedHotelStayDates } from "@/lib/packages/hotel-dates"
@@ -40,17 +40,29 @@ import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
  */
 
 export const TRANSPORT_SUPPLIER_KINDS = new Set<SupplierKind>(["transfers", "vehicle_rental"])
-/** Kinds whose units show their own per-unit Adults/Children/Infants inputs. */
+/** Kinds whose units show their own per-unit Adults/Children/Infants inputs.
+ *
+ * Hotels are here because their rates are per person per night and their child rate varies by room
+ * type — which room a child sleeps in is what decides the price, so a leg-level headcount cannot
+ * express it. */
 export const PASSENGER_SPLIT_SUPPLIER_KINDS = new Set<SupplierKind>([
   "train_operator",
   "tour_operator",
   "airline",
+  "hotel_property",
 ])
 /** Kinds where the per-unit counts must sum to the booking's traveller totals -- each unit is a
  * sleeping/seating slot, so every traveller has to land in exactly one of them. A tour operator's
  * units are independent activities the same travellers can all join, so it's excluded here even
  * though it still shows the per-unit inputs (PASSENGER_SPLIT_SUPPLIER_KINDS above). */
-export const PASSENGER_SUM_SUPPLIER_KINDS = new Set<SupplierKind>(["train_operator", "airline"])
+export const PASSENGER_SUM_SUPPLIER_KINDS = new Set<SupplierKind>([
+  "train_operator",
+  "airline",
+  // A hotel room is a sleeping slot like a cabin: every guest is in exactly one of them, so the
+  // per-room split has to reconcile against the booking's travellers or somebody is billed twice
+  // or not at all.
+  "hotel_property",
+])
 
 export interface SuiteUnitState {
   /** Persisted unit uuid, or a `draft-` key for units added in the dialog. */
@@ -233,6 +245,9 @@ export interface SavedSelectionRow {
 
 export interface SavedPackageState {
   packageId: string | null
+  /** The supplier this booking is for; its leg is the core one. Absent on a catalogue
+   *  selection, where there is no booking and the train rule stands in. */
+  primarySupplierId?: string | null
   tripStartDate: string | null
   tripEndDate: string | null
   selections: SavedSelectionRow[]
@@ -367,6 +382,9 @@ export function isRouteReversible(leg: PackageLeg | undefined, routeId: string |
 
 export interface BuildDefaultLegStatesOptions {
   tripStartDate: string | null
+  /** The booking's primary supplier, whose leg starts selected and cannot be removed.
+   *  Null on a catalogue package, where the train rule stands in -- see isCoreBookingLeg. */
+  primarySupplierId?: string | null
   /** Booking-level totals per supplier — seeds the first unit's passenger split on split legs. */
   totalsBySupplierId?: Record<string, PassengerTotals>
   /** The quote's currency, used as the default for a new leg's hand-typed prices. */
@@ -390,7 +408,7 @@ function buildRawDefaultLegStates(
         kind: "transport",
         legId: leg.id,
         supplierKind: leg.supplierKind,
-        selected: leg.supplierKind === "train_operator",
+        selected: isCoreBookingLeg(leg, options.primarySupplierId ?? null),
         routeId: defaultRouteId(leg),
         rateTypeId: null,
         // A new leg types its prices in whatever the quote is denominated in; changing it is an
@@ -423,7 +441,7 @@ function buildRawDefaultLegStates(
       kind: "suite",
       legId: leg.id,
       supplierKind: leg.supplierKind,
-      selected: leg.supplierKind === "train_operator",
+      selected: isCoreBookingLeg(leg, options.primarySupplierId ?? null),
       routeId,
       reversed: false,
       serviceDate: options.tripStartDate,

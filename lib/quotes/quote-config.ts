@@ -9,7 +9,11 @@
 // primarySupplierId, and lib/templates/get-template.ts does the (key, supplierId)
 // lookup, because that requires knowing which template rows actually exist.
 
-import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
+import {
+  resolvePrimaryRoute,
+  resolvePrimarySupplier,
+  type PrimarySupplierSource,
+} from "@/lib/quotes/resolve-primary-route"
 import type { PricingSnapshot, SupplierKind } from "@/lib/types"
 
 export type JourneyClass = "short" | "long"
@@ -24,6 +28,11 @@ export interface QuoteConfigLineItem {
 /** Per-supplier rule: suppliers.long_journey_min_days. Null = no short/long concept. */
 export interface QuoteConfigSupplierLookup {
   longJourneyMinDays: number | null
+  /** suppliers.sells_standalone -- may this supplier head a booking (and carry its own template
+   * variant) rather than only ever being an add-on leg. */
+  sellsStandalone: boolean
+  /** Display name, for the ambiguous-primary message only. */
+  name?: string | null
 }
 
 /** Per-route fact: routes.duration_days. Null = not recorded. */
@@ -55,11 +64,21 @@ export interface QuoteConfigInput {
   /** Keyed by rate type id. */
   rateTypes: Readonly<Record<string, QuoteConfigRateTypeLookup>>
   overrides: QuoteConfigOverrides
+  /** bookings.primary_supplier_id -- wins the primary-supplier resolution outright when that
+   * supplier is actually priced on this quote. Null on bookings predating the column, or when the
+   * caller has no booking context (e.g. the Templates preview). */
+  bookingPrimarySupplierId?: string | null
 }
 
 export interface QuoteConfig {
   /** The train (or other primary) supplier the journey/rate axes resolve against. */
   primarySupplierId: string | null
+  /** Where primarySupplierId came from -- lets a caller explain an ambiguous pick rather than
+   * silently guessing. See resolvePrimarySupplier. */
+  primarySupplierSource: PrimarySupplierSource
+  /** Every distinct standalone-capable supplier actually priced on the quote. Length > 1 means the
+   * primary was ambiguous (e.g. a Rovos + Kruger Shalati combined booking). */
+  primaryCandidateIds: string[]
   primaryRouteId: string | null
   /** The rate type priced on the primary train leg, if any -- lets a caller resolve the
    * client-facing {{rateLabel}} token (rate_types.client_label) without re-deriving it. */
@@ -93,13 +112,30 @@ function pricedSupplierKinds(snapshots: readonly PricingSnapshot[]): Set<Supplie
 }
 
 export function resolveQuoteConfig(input: QuoteConfigInput): QuoteConfig {
-  const { lineItems, suppliers, routes, rateTypes, overrides } = input
+  const { lineItems, suppliers, routes, rateTypes, overrides, bookingPrimarySupplierId } = input
   const unresolved: string[] = []
 
   const snapshots = snapshotsOf(lineItems)
   const mutableLineItems = [...lineItems]
-  const primarySupplierId = resolvePrimarySupplierId(mutableLineItems)
-  const primaryRouteId = resolvePrimaryRoute(mutableLineItems).routeId
+  const standaloneSupplierIds = new Set(
+    Object.entries(suppliers)
+      .filter(([, info]) => info.sellsStandalone)
+      .map(([id]) => id),
+  )
+  const primary = resolvePrimarySupplier(mutableLineItems, {
+    bookingPrimarySupplierId: bookingPrimarySupplierId ?? null,
+    standaloneSupplierIds,
+  })
+  const primarySupplierId = primary.supplierId
+  const primaryRouteId = resolvePrimaryRoute(mutableLineItems, { primarySupplierId }).routeId
+
+  if (primary.candidateIds.length > 1 && primary.source !== "booking") {
+    const names = primary.candidateIds.map((id) => suppliers[id]?.name ?? id)
+    unresolved.push(
+      `Two standalone products are priced on this quote (${names.join(", ")}) -- using ${names[0]}. ` +
+        "Set the booking's primary supplier to change this.",
+    )
+  }
 
   // Train-only: every priced, non-service leg is a train_operator leg.
   const kinds = pricedSupplierKinds(snapshots)
@@ -125,11 +161,12 @@ export function resolveQuoteConfig(input: QuoteConfigInput): QuoteConfig {
   const journeyClassAuto = overrides.journeyClass == null
   const journeyClass = overrides.journeyClass ?? derivedJourneyClass
 
-  // Rate audience: the primary train leg's rate type, defaulting to international.
-  const primaryTrainSnapshot = snapshots.find(
-    (snapshot) => snapshot.supplierId === primarySupplierId && snapshot.supplierKind === "train_operator",
-  )
-  const rateTypeId = primaryTrainSnapshot?.rateTypeId ?? null
+  // Rate audience: the primary leg's rate type, defaulting to international. Read off whatever
+  // kind the primary supplier is -- a standalone stay (Kruger Shalati) has no train leg at all,
+  // and pinning this to train_operator silently ignored its rate type and priced every such quote
+  // as international.
+  const primaryLegSnapshot = snapshots.find((snapshot) => snapshot.supplierId === primarySupplierId)
+  const rateTypeId = primaryLegSnapshot?.rateTypeId ?? null
   const derivedRateAudience: RateAudience =
     (rateTypeId ? rateTypes[rateTypeId]?.audience : null) ?? DEFAULT_RATE_AUDIENCE
   const rateAudienceAuto = overrides.rateAudience == null
@@ -137,6 +174,8 @@ export function resolveQuoteConfig(input: QuoteConfigInput): QuoteConfig {
 
   return {
     primarySupplierId,
+    primarySupplierSource: primary.source,
+    primaryCandidateIds: primary.candidateIds,
     primaryRouteId,
     primaryTrainRateTypeId: rateTypeId,
     journeyClass,

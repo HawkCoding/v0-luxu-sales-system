@@ -6,6 +6,7 @@ import { createRawEmailPreview, htmlToPlainText } from "@/lib/inbound-email/html
 import { findMatchingInboundSubjectRule, type InboundSubjectRule } from "@/lib/inbound-email/rules"
 import { assessEnquiryPlausibility, getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
 import { countRequiredComplete, parseEmailDraft, type ParseEmailDraftOptions } from "@/lib/import/parseEmailDraft"
+import type { SupplierMatcher } from "@/lib/suppliers/match-phrases"
 import { createServiceClient } from "@/lib/supabase/server"
 import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
@@ -215,17 +216,23 @@ async function loadActiveRules(supabase: ServiceClient): Promise<InboundSubjectR
   return (data ?? []).map(mapRule)
 }
 
-// Loaded once per sync run (not per message) and threaded into parseEmailDraft so a newly added
-// train operator is recognised without a code change -- see ParseEmailDraftOptions.
-async function loadActiveTrainOperatorNames(supabase: ServiceClient): Promise<string[]> {
+// Loaded once per sync run (not per message) and threaded into parseEmailDraft so a newly ticked
+// supplier is recognised without a code change -- see ParseEmailDraftOptions. Covers every
+// supplier that may head a booking of its own: train operators, and hotels sold standalone such as
+// Kruger Shalati, whose enquiries are stays rather than journeys.
+async function loadStandaloneSupplierMatchers(supabase: ServiceClient): Promise<SupplierMatcher[]> {
   const { data, error } = await supabase
     .from("suppliers")
-    .select("name")
-    .eq("kind", "train_operator")
+    .select("name, kind, email_match_phrases")
+    .eq("sells_standalone", true)
     .eq("active", true)
 
   if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => row.name)
+  return (data ?? []).map((row) => ({
+    name: row.name,
+    kind: row.kind,
+    emailMatchPhrases: row.email_match_phrases,
+  }))
 }
 
 function firstSyncSinceDate(): Date {
@@ -569,7 +576,7 @@ async function importCollectedMessages(
   runId: string,
   uidvalidity: number,
   summary: EmailSyncSummary,
-  trainOperatorNames: string[],
+  standaloneSuppliers: SupplierMatcher[],
   deadline: SyncDeadline,
   settledUids: Set<number>,
 ): Promise<boolean> {
@@ -764,9 +771,12 @@ async function importCollectedMessages(
       claimId = claim.id
     }
 
-    const bodySelection = getMessageBody(parsedMail.text, parsedMail.html, { trainOperatorNames })
+    // The subject travels with the body: a Gravity Forms notification names the form -- and so the
+    // supplier -- only in its subject line, and a Kruger Shalati body never states the property.
+    const parseOptions = { standaloneSuppliers, subject }
+    const bodySelection = getMessageBody(parsedMail.text, parsedMail.html, parseOptions)
     const rawText = bodySelection.body
-    const parsedDraft = parseEmailDraft(rawText, { trainOperatorNames })
+    const parsedDraft = parseEmailDraft(rawText, parseOptions)
     const review = getEmailImportReviewMetadata(parsedDraft)
     const altBodyPreview = bodySelection.altBody ? createRawEmailPreview(bodySelection.altBody) : null
 
@@ -973,7 +983,7 @@ export async function syncInboundEmailAccount(
 ): Promise<EmailSyncSummary> {
   const supabase = createServiceClient()
   const rules = await loadActiveRules(supabase)
-  const trainOperatorNames = await loadActiveTrainOperatorNames(supabase)
+  const standaloneSuppliers = await loadStandaloneSupplierMatchers(supabase)
   const summary: EmailSyncSummary = {
     scannedCount: 0,
     importedCount: 0,
@@ -1010,7 +1020,7 @@ export async function syncInboundEmailAccount(
       run.id,
       uidvalidity,
       summary,
-      trainOperatorNames,
+      standaloneSuppliers,
       deadline,
       settledUids,
     )

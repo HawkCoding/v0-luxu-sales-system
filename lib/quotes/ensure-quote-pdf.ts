@@ -73,7 +73,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, primary_supplier_id, customer:customers(title, first_name, last_name))",
     )
     .eq("id", quoteId)
     .single()
@@ -139,6 +139,7 @@ export async function ensureQuotePdf(
   const quoteConfig = await loadQuoteConfig(supabase, {
     lineItems: (lineItems ?? []).map((li) => ({ pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null })),
     overrides: overridesFromQuoteRow(quote),
+    bookingPrimarySupplierId: booking?.primary_supplier_id ?? null,
   })
 
   // A train whose journey length or rate audience can't be resolved must not silently pick a

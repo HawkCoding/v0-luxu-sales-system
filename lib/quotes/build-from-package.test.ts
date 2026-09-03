@@ -837,13 +837,147 @@ describe("buildPackageQuoteLineItems", () => {
           selected: true,
           routeId: "route-bb",
           nights: 3,
-          units: [{ suiteTypeId: "room-std" }, { suiteTypeId: "room-std" }],
+          // Hotel rates are per person per night, so who is in each room is what prices it.
+          units: [
+            { suiteTypeId: "room-std", adultCount: 2 },
+            { suiteTypeId: "room-std", childCount: 1 },
+          ],
         },
       ],
     })
 
     expect(lineItems).toHaveLength(2)
-    expect(lineItems.every((li) => li.qty === 3 && li.unitPrice === 1200)).toBe(true)
+
+    const [adults, child] = lineItems
+    // Two adults for three nights is six person-nights, not one room-rate per night.
+    expect(adults.qty).toBe(6)
+    expect(adults.unitPrice).toBe(1200)
+    expect(adults.total).toBe(7200)
+
+    // The card sets no child price, so the child shares free — still a line, so the room appears.
+    expect(child.qty).toBe(3)
+    expect(child.unitPrice).toBe(0)
+    expect(isMissingPricing(child)).toBe(false)
+  })
+
+  // Kruger Shalati's real shape: rates are per adult per night, and the child rate lives on the
+  // room type — a Bridge House Room charges for a child sharing, a Sunset Suite does not. Which room
+  // a child sleeps in is therefore what prices them, and a leg-level headcount could not express it.
+  it("prices each room's children off that room's own child rate", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [
+        suiteType("room-bridge", "supplier-leg-hotel", "Bridge House Room"),
+        suiteType("room-sunset", "supplier-leg-hotel", "Sunset Suite"),
+      ],
+      rateCards: [
+        rateCard({
+          id: "rc-bridge",
+          routeId: "route-bb",
+          suiteTypeId: "room-bridge",
+          pricePerPerson: 15520,
+          childPrice: 3880,
+        }),
+        // No child rate: a child sharing this room costs nothing extra.
+        rateCard({ id: "rc-sunset", routeId: "route-bb", suiteTypeId: "room-sunset", pricePerPerson: 18190 }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          units: [
+            { suiteTypeId: "room-bridge", adultCount: 1, childCount: 1 },
+            { suiteTypeId: "room-sunset", adultCount: 1 },
+          ],
+        },
+      ],
+    })
+
+    const [bridgeAdult, bridgeChild, sunsetAdult] = lineItems
+
+    // One adult, two nights, at the room type's per-person rate.
+    expect(bridgeAdult.qty).toBe(2)
+    expect(bridgeAdult.unitPrice).toBe(15520)
+    expect(bridgeAdult.total).toBe(31040)
+
+    // The child in the Bridge House Room is charged that room's own child rate.
+    expect(bridgeChild.qty).toBe(2)
+    expect(bridgeChild.unitPrice).toBe(3880)
+    expect(bridgeChild.total).toBe(7760)
+    expect(bridgeChild.pricingSnapshot?.passengerKind).toBe("child")
+
+    expect(sunsetAdult.unitPrice).toBe(18190)
+    expect(sunsetAdult.total).toBe(36380)
+  })
+
+  it("charges two adults sharing a room twice the nightly rate, not once", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 15520 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 1,
+          units: [{ suiteTypeId: "room-std", adultCount: 2, childCount: 1 }],
+        },
+      ],
+    })
+
+    const adults = lineItems.find((li) => li.pricingSnapshot?.passengerKind === "adult")
+    expect(adults?.qty).toBe(2)
+    expect(adults?.total).toBe(31040)
+  })
+
+  it("refuses to price a stay whose room occupancy does not add up to the booking's travellers", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    await expect(
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            // The booking is for 2 adults and 1 child; this room holds one adult.
+            units: [{ suiteTypeId: "room-std", adultCount: 1 }],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/rooms hold 1 adults, 0 children/)
   })
 
   it("prices a hotel room off its typed override instead of the rate card, and says so internally", async () => {
@@ -872,9 +1006,10 @@ describe("buildPackageQuoteLineItems", () => {
               manualRoomPrice: 3600,
               manualRoomPriceSetAt: "2026-08-14T09:00:00Z",
               manualRoomPriceSetByName: "Carmen de Jager",
+              // An overridden room prices as a room whatever its occupancy, so it needs none.
             },
             // Second room keeps the card price: the override is per room, not per leg.
-            { suiteTypeId: "room-std" },
+            { suiteTypeId: "room-std", adultCount: 2, childCount: 1 },
           ],
         },
       ],
@@ -887,9 +1022,14 @@ describe("buildPackageQuoteLineItems", () => {
     expect(overridden.pricingSnapshot?.manualRoomPrice).toBe(3600)
     expect(overridden.pricingSnapshot?.manualRoomPriceBase).toBe(4000)
     expect(overridden.pricingSnapshot?.manualRoomPriceSetByName).toBe("Carmen de Jager")
-    // The client-facing description must stay exactly what an un-overridden room shows.
-    expect(overridden.description).toBe(standard.description)
+    // The client-facing description must still say nothing about the override. An overridden room
+    // prices as a whole room, so it carries no passenger suffix, while a card-priced room now
+    // breaks down per occupant — the room wording either side of that suffix has to match.
+    expect(overridden.description).toBe("Supplier leg-hotel - B&B — Standard")
+    expect(standard.description).toBe("Supplier leg-hotel - B&B — Standard - Adult")
 
+    // The un-overridden room prices per person: two adults for three nights.
+    expect(standard.qty).toBe(6)
     expect(standard.unitPrice).toBe(4000)
     expect(standard.pricingSnapshot?.manualRoomPrice).toBeUndefined()
   })
@@ -915,7 +1055,7 @@ describe("buildPackageQuoteLineItems", () => {
           routeId: "route-bb",
           nights: 2,
           priceCurrency: "ZAR",
-          units: [{ suiteTypeId: "room-std", manualRoomPrice: 5000 }],
+          units: [{ suiteTypeId: "room-std", manualRoomPrice: 5000, adultCount: 2, childCount: 1 }],
         },
       ],
     })
@@ -945,7 +1085,7 @@ describe("buildPackageQuoteLineItems", () => {
           selected: true,
           routeId: "route-bb",
           nights: 2,
-          units: [{ suiteTypeId: "room-std", manualRoomPrice: 0 }],
+          units: [{ suiteTypeId: "room-std", manualRoomPrice: 0, adultCount: 2, childCount: 1 }],
         },
       ],
     })
@@ -975,23 +1115,24 @@ describe("buildPackageQuoteLineItems", () => {
           routeId: "route-bb",
           nights: 2,
           units: [
-            { suiteTypeId: "room-std", complimentaryFirstNight: true },
-            { suiteTypeId: "room-std" },
+            { suiteTypeId: "room-std", complimentaryFirstNight: true, adultCount: 2 },
+            { suiteTypeId: "room-std", childCount: 1 },
           ],
         },
       ],
     })
 
     const [gifted, charged] = lineItems
-    expect(gifted.qty).toBe(1)
+    // The gift covers everyone in the room: two adults, one charged night each.
+    expect(gifted.qty).toBe(2)
     expect(gifted.unitPrice).toBe(4000)
-    expect(gifted.total).toBe(4000)
+    expect(gifted.total).toBe(8000)
     expect(gifted.pricingSnapshot?.complimentaryNights).toBe(1)
     expect(gifted.pricingSnapshot?.stayNights).toBe(2)
 
-    // The gift is per room: the second room pays for both its nights.
+    // The gift is per room: the second room pays for both its nights (a child sharing free here).
     expect(charged.qty).toBe(2)
-    expect(charged.total).toBe(8000)
+    expect(charged.total).toBe(0)
     expect(charged.pricingSnapshot?.complimentaryNights).toBeUndefined()
   })
 
@@ -1015,7 +1156,9 @@ describe("buildPackageQuoteLineItems", () => {
           selected: true,
           routeId: "route-bb",
           nights: 2,
-          units: [{ suiteTypeId: "room-std", manualRoomPrice: 3000, complimentaryFirstNight: true }],
+          units: [
+            { suiteTypeId: "room-std", manualRoomPrice: 3000, complimentaryFirstNight: true, adultCount: 2, childCount: 1 },
+          ],
         },
       ],
     })
@@ -1046,15 +1189,15 @@ describe("buildPackageQuoteLineItems", () => {
           selected: true,
           routeId: "route-bb",
           nights: 1,
-          units: [{ suiteTypeId: "room-std", complimentaryFirstNight: true }],
+          units: [{ suiteTypeId: "room-std", complimentaryFirstNight: true, adultCount: 2, childCount: 1 }],
         },
       ],
     })
 
-    // Dropping the line would drop the hotel from the itinerary, which is scoped to priced legs.
-    expect(lineItems).toHaveLength(1)
-    expect(lineItems[0].qty).toBe(0)
-    expect(lineItems[0].total).toBe(0)
+    // Dropping the lines would drop the hotel from the itinerary, which is scoped to priced legs.
+    // One line per occupant kind in the room, each charging nothing.
+    expect(lineItems).toHaveLength(2)
+    expect(lineItems.every((li) => li.qty === 0 && li.total === 0)).toBe(true)
     expect(lineItems[0].pricingSnapshot?.stayNights).toBe(1)
   })
 

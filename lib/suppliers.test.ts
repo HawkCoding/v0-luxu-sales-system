@@ -52,6 +52,8 @@ const supplierRow: SupplierRow = {
   train_only_note: null,
   quote_suite_detail: "type_only",
   suite_phrase_pattern: null,
+  sells_standalone: true,
+  email_match_phrases: null,
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-02T11:30:00.000Z",
 }

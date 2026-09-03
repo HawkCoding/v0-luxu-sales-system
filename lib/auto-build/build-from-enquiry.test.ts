@@ -10,7 +10,8 @@ const ROUTE_ID = "route-1"
 function baseInput(overrides: Partial<AutoBuildInput> = {}): AutoBuildInput {
   return {
     bookingId: BOOKING_ID,
-    trainSupplierId: TRAIN_SUPPLIER_ID,
+    primarySupplierId: TRAIN_SUPPLIER_ID,
+    primarySupplierKind: "train_operator",
     hotelSupplierId: null,
     routeId: null,
     departureDate: "2026-09-01",
@@ -28,20 +29,53 @@ function baseSeed(overrides: Record<string, unknown[]> = {}) {
     booking_suites: [],
     suite_types: [],
     booking_service_units: [],
+    routes: [],
     ...overrides,
   }
 }
 
+/** A standalone stay: the hotel is the booking, not an add-on hanging off a train. */
+function stayInput(overrides: Partial<AutoBuildInput> = {}): AutoBuildInput {
+  return baseInput({
+    primarySupplierId: HOTEL_SUPPLIER_ID,
+    primarySupplierKind: "hotel_property",
+    departureDate: "2026-05-05",
+    nights: 2,
+    ...overrides,
+  })
+}
+
 describe("autoBuildBookingServices", () => {
-  it("builds nothing when no train supplier resolved", async () => {
+  it("builds nothing when no primary supplier resolved", async () => {
     const { supabase, store } = createSupabaseMock(baseSeed())
-    const result = await autoBuildBookingServices(supabase as never, baseInput({ trainSupplierId: null }))
+    const result = await autoBuildBookingServices(
+      supabase as never,
+      baseInput({ primarySupplierId: null, primarySupplierKind: null }),
+    )
 
     expect(result).toEqual({
       servicesCreated: 0,
       unitsCreated: 0,
-      skipped: ["No train operator resolved — nothing built"],
+      skipped: ["No primary supplier resolved — nothing built"],
     })
+    expect(store.rows("booking_services")).toHaveLength(0)
+  })
+
+  // A train enquiry whose operator didn't resolve must still stop dead rather than quietly
+  // building whatever hotel it did match -- the reason hotel-only bookings need an explicit
+  // primary supplier rather than being inferred from "a hotel resolved and a train didn't".
+  it("builds nothing when only an add-on hotel resolved", async () => {
+    const { supabase, store } = createSupabaseMock(baseSeed())
+    const result = await autoBuildBookingServices(
+      supabase as never,
+      baseInput({
+        primarySupplierId: null,
+        primarySupplierKind: null,
+        hotelSupplierId: HOTEL_SUPPLIER_ID,
+      }),
+    )
+
+    expect(result.servicesCreated).toBe(0)
     expect(store.rows("booking_services")).toHaveLength(0)
   })
 
@@ -195,7 +229,74 @@ describe("autoBuildBookingServices", () => {
     const result = await autoBuildBookingServices(supabase as never, baseInput())
 
     expect(result.servicesCreated).toBe(0)
-    expect(result.skipped).toContain("Resolved train supplier id no longer matches an active supplier")
+    expect(result.skipped).toContain("Resolved primary supplier id no longer matches an active supplier")
     expect(store.rows("booking_services")).toHaveLength(0)
+  })
+})
+
+/**
+ * Kruger Shalati: a stationary train carriage let per room per night. The booking has no train
+ * leg at all, so the hotel is the core leg -- selected, dated from its own check-in, and given the
+ * supplier's meal plan so the quote can actually be priced.
+ */
+describe("autoBuildBookingServices for a standalone stay", () => {
+  const MEAL_PLAN_ID = "route-all-inclusive"
+
+  it("builds one selected hotel leg with the stay's own nights and check-in", async () => {
+    const { supabase, store } = createSupabaseMock(
+      baseSeed({ routes: [{ id: MEAL_PLAN_ID, supplier_id: HOTEL_SUPPLIER_ID, active: true }] }),
+    )
+    const result = await autoBuildBookingServices(supabase as never, stayInput())
+
+    expect(result.servicesCreated).toBe(1)
+    const services = store.rows("booking_services")
+    expect(services).toHaveLength(1)
+    expect(services[0]).toMatchObject({
+      supplier_id: HOTEL_SUPPLIER_ID,
+      selected: true,
+      nights: 2,
+      service_date: "2026-05-05",
+      // Nothing to anchor to, so the stay owns its dates outright.
+      date_anchor: "custom",
+      route_id: MEAL_PLAN_ID,
+      origin: "auto",
+    })
+  })
+
+  // One meal plan is not a guess; three is. A hotel leg cannot be priced without one, so filling
+  // the unambiguous case is what stops every Shalati booking stalling on a manual pick.
+  it("leaves the meal plan unset when the supplier files more than one", async () => {
+    const { supabase, store } = createSupabaseMock(
+      baseSeed({
+        routes: [
+          { id: MEAL_PLAN_ID, supplier_id: HOTEL_SUPPLIER_ID, active: true },
+          { id: "route-bb", supplier_id: HOTEL_SUPPLIER_ID, active: true },
+        ],
+      }),
+    )
+    const result = await autoBuildBookingServices(supabase as never, stayInput())
+
+    expect(store.rows("booking_services")[0]).toMatchObject({ route_id: null })
+    expect(result.skipped.join(" ")).toMatch(/meal plan/i)
+  })
+
+  it("falls back to one night when the enquiry never stated a length", async () => {
+    const { supabase, store } = createSupabaseMock(baseSeed())
+    await autoBuildBookingServices(supabase as never, stayInput({ nights: null }))
+
+    expect(store.rows("booking_services")[0]).toMatchObject({ nights: 1 })
+  })
+
+  // The hotel is already the booking -- resolving it a second time as an "add-on" would build the
+  // same leg twice.
+  it("does not build the same hotel twice when it is also passed as the add-on", async () => {
+    const { supabase, store } = createSupabaseMock(baseSeed())
+    const result = await autoBuildBookingServices(
+      supabase as never,
+      stayInput({ hotelSupplierId: HOTEL_SUPPLIER_ID }),
+    )
+
+    expect(result.servicesCreated).toBe(1)
+    expect(store.rows("booking_services")).toHaveLength(1)
   })
 })

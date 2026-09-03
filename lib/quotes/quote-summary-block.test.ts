@@ -49,6 +49,23 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("Guests:</strong> 2 Adults")
   })
 
+  // A standalone hotel booking (Kruger Shalati) is a stay -- nothing in it travels anywhere, so
+  // "Journey:" was simply the wrong word on a client's quote.
+  it("labels a hotel-only quote a stay rather than a journey", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks: [itineraryBlocks[1]],
+    })
+    expect(html).toContain("Stay:</strong> 18 – 22 July 2026")
+    expect(html).not.toContain("Journey:")
+  })
+
+  it("still says journey as soon as anything travels", () => {
+    const html = buildQuoteSummaryBlock({ ...base, itineraryBlocks })
+    expect(html).toContain("Journey:</strong>")
+    expect(html).not.toContain("Stay:</strong>")
+  })
+
   it("omits the quote number and quote date while the reference is hidden", () => {
     // Salespeople never reference either, so they are noise to the customer.
     // QUOTE_REFERENCE_ENABLED is false; flipping it restores both lines.

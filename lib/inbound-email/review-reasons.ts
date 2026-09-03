@@ -24,6 +24,12 @@ export const REVIEW_REASON = {
   departureDate: "Departure date",
   adults: "Adults",
   suites: "Suites",
+  // A standalone hotel enquiry (Kruger Shalati) states a stay instead of a journey, so it is
+  // missing check-in/check-out rather than a route and a departure date. Same nine required
+  // fields either way -- these three stand in for route, departure date and suites.
+  checkIn: "Check-in date",
+  checkOut: "Check-out date",
+  rooms: "Rooms",
   // Parsed fine, but matched no active row once the DB lookups ran (lib/inbound-email/import-booking.ts).
   suiteType: SUITE_TYPE_MISSING_FIELD,
   supplierUnmatched: "Train operator not matched to an active supplier",
@@ -78,7 +84,7 @@ export const REVIEW_REASON_DETAIL: Record<ReviewReason, ReviewReasonDetail> = {
     fixHint: "Add a contact channel before replying to this enquiry.",
   },
   [REVIEW_REASON.supplier]: {
-    label: "The email never named a train operator",
+    label: "The email never named a supplier we sell",
     fixHint: "Set the supplier on the enquiry tab.",
   },
   [REVIEW_REASON.route]: {
@@ -96,6 +102,18 @@ export const REVIEW_REASON_DETAIL: Record<ReviewReason, ReviewReasonDetail> = {
   [REVIEW_REASON.suites]: {
     label: "No suite count was found in the email",
     fixHint: "Set how many suites the party needs.",
+  },
+  [REVIEW_REASON.checkIn]: {
+    label: "No check-in date was found in the email",
+    fixHint: "Add the arrival date from the original email before quoting.",
+  },
+  [REVIEW_REASON.checkOut]: {
+    label: "No check-out date was found in the email",
+    fixHint: "Set the departure date -- the stay is priced per night, so its length decides the total.",
+  },
+  [REVIEW_REASON.rooms]: {
+    label: "No room count was found in the email",
+    fixHint: "Set how many rooms the party needs.",
   },
   [REVIEW_REASON.suiteType]: {
     label: "A suite type could not be identified from the wording used",

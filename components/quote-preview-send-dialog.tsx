@@ -420,7 +420,7 @@ export function QuotePreviewSendDialog({
                   </div>
                   {config.primarySupplierName && (
                     <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Train</span>
+                      <span className="text-muted-foreground">Primary</span>
                       <span className="font-medium">{config.primarySupplierName}</span>
                     </div>
                   )}

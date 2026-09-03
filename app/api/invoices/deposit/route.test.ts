@@ -277,12 +277,31 @@ describe("POST /api/invoices/deposit", () => {
     const { supabase, store } = seedSupabase([ACCEPTED_QUOTE], undefined, [invoiceRow({})])
     mockAuthOk(supabase)
 
-    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 50 }))
+    // Same percentage the draft already carries: nothing to decide, so nothing is rewritten and the
+    // PDF is not regenerated.
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))
     const body = (await res.json()) as { invoice: { id: string; amount: number } }
 
     expect(res.status).toBe(200)
     expect(body.invoice).toEqual(expect.objectContaining({ id: "invoice-1", amount: 250 }))
     expect(store.rows("invoices")).toHaveLength(1)
+  })
+
+  // The reuse branch used to compare kind, quote and payment method but not the percentage, so a
+  // re-issue at a different deposit percentage returned 200 with the old amount untouched — the
+  // per-job override quietly doing nothing.
+  it("amends a live draft when a different deposit percentage is requested", async () => {
+    const { supabase, store } = seedSupabase([ACCEPTED_QUOTE], undefined, [invoiceRow({})])
+    mockAuthOk(supabase)
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 50 }))
+    const body = (await res.json()) as { invoice: { id: string; amount: number } }
+
+    expect(res.status).toBe(200)
+    expect(body.invoice).toEqual(expect.objectContaining({ id: "invoice-1", amount: 500 }))
+    // Amended in place, not voided and re-raised: the booking keeps one live invoice.
+    expect(store.rows("invoices")).toHaveLength(1)
+    expect(store.rows("invoices")[0].deposit_percentage).toBe(50)
   })
 })
 

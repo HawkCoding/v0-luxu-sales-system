@@ -23,7 +23,7 @@ export const runtime = "nodejs"
  * hydrateFromSaved, SavedPackageState) are shared unmodified between both flows.
  */
 
-import { isOptionalPackageLegKind, type SupplierKind } from "@/lib/types"
+import { isCoreBookingLeg, type SupplierKind } from "@/lib/types"
 import { normaliseCurrency } from "@/lib/money"
 import { PASSENGER_SUM_SUPPLIER_KINDS } from "@/lib/packages/apply-dialog-state"
 
@@ -240,7 +240,9 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, trip_start_date, trip_end_date, services_confirmed_at, services_confirmed_by")
+    .select(
+      "id, trip_start_date, trip_end_date, services_confirmed_at, services_confirmed_by, primary_supplier_id",
+    )
     .eq("id", id)
     .maybeSingle()
 
@@ -278,6 +280,9 @@ export async function GET(_req: Request, { params }: RouteParams) {
   return Response.json({
     // No catalogue package concept here; the presence of service rows is the signal instead.
     packageId: serviceRows.length > 0 ? id : null,
+    // Which leg the booking exists for -- the one step 2 refuses to let a consultant
+    // untick. A train on a journey, the hotel on a standalone stay.
+    primarySupplierId: booking.primary_supplier_id,
     tripStartDate: booking.trip_start_date,
     tripEndDate: booking.trip_end_date,
     servicesConfirmedAt: booking.services_confirmed_at,
@@ -316,7 +321,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, no_of_adults, no_of_children, child_ages")
+    .select("id, no_of_adults, no_of_children, child_ages, primary_supplier_id")
     .eq("id", id)
     .maybeSingle()
 
@@ -326,7 +331,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const serviceIds = parsed.data.selections.map((selection) => selection.packageLegId)
   const { data: validServices, error: servicesLoadError } = await supabase
     .from("booking_services")
-    .select("id, supplier_id, updated_at, service_date, booking_date, suppliers(kind)")
+    .select("id, supplier_id, updated_at, service_date, booking_date, suppliers(kind, name)")
     .eq("booking_id", id)
     .in("id", serviceIds)
 
@@ -362,17 +367,24 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     )
   }
 
-  // `selected` drives voucher inclusion but is a no-op for pricing on a non-optional leg
+  // `selected` drives voucher inclusion but is a no-op for pricing on the core leg
   // (lib/quotes/build-from-package.ts), so unticking the train used to leave the customer paying
-  // for a journey the voucher never mentions. The leg is part of every booking: refuse instead.
+  // for a journey the voucher never mentions. The core leg is the booking: refuse instead. On a
+  // standalone stay the core leg is the hotel, not a train -- see isCoreBookingLeg.
   for (const selection of parsed.data.selections) {
     if (selection.selected !== false) continue
     const service = serviceById.get(selection.packageLegId)
     const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
     const supplierKind = supplier?.kind as SupplierKind | undefined
-    if (supplierKind && !isOptionalPackageLegKind(supplierKind)) {
+    if (
+      supplierKind &&
+      isCoreBookingLeg(
+        { supplierId: service?.supplier_id ?? null, supplierKind },
+        booking.primary_supplier_id,
+      )
+    ) {
       return jsonError(
-        "The train journey is part of every booking and cannot be excluded from the quote or the voucher.",
+        `${supplier?.name ?? "This service"} is what this booking is for and cannot be excluded from the quote or the voucher.`,
         400,
         { packageLegId: selection.packageLegId, supplierKind },
       )
