@@ -148,17 +148,25 @@ export function deriveJourneyFromBlocks(blocks: VoucherServiceBlock[]): QuoteJou
 }
 
 /**
- * Train leg's own departure date — the earliest serviceType === "train" block's
- * departureDate — distinct from deriveJourneyFromBlocks, which mixes in hotel
- * pre-nights and other leg kinds. Mirrors the worksheet's top-right "Departure
- * Date" cell (lib/worksheet/build-worksheet-view.ts), which isolates the train
- * leg the same way via suppliers.kind === "train_operator".
- * Returns null when the booking has no dated train leg.
+ * The main product's own start date — the earliest block of that service type, by its
+ * departureDate — distinct from deriveJourneyFromBlocks, which mixes in hotel pre-nights and other
+ * leg kinds. Mirrors the worksheet's top-right date cell (lib/worksheet/build-worksheet-view.ts),
+ * which isolates the same leg.
+ *
+ * `serviceType` defaults to "train" so every caller written before bookings could be headed by
+ * something else keeps its exact behaviour. A caller that knows the booking's primary product
+ * should pass that product's service type, or {{departureDate}} silently falls back to the
+ * enquiry-time booking date on anything that is not a train.
+ *
+ * Returns null when the booking has no dated leg of that type.
  */
-export function deriveTrainDepartureFromBlocks(blocks: VoucherServiceBlock[]): string | null {
+export function deriveTrainDepartureFromBlocks(
+  blocks: VoucherServiceBlock[],
+  serviceType: VoucherServiceBlock["serviceType"] = "train",
+): string | null {
   const dates: string[] = []
   for (const block of blocks) {
-    if (block.serviceType !== "train") continue
+    if (block.serviceType !== serviceType) continue
     const parsed = parseIsoDate(block.serviceData.departureDate)
     if (parsed) dates.push(toIsoDateString(parsed))
   }

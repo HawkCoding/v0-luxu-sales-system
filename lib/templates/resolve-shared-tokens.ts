@@ -8,7 +8,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import type { PricingSnapshot } from "@/lib/types"
+import type { PricingSnapshot, SupplierKind } from "@/lib/types"
 import { formatDisplayDateLong, formatDisplayDateShort } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { firstRecord } from "@/lib/utils"
@@ -37,7 +37,7 @@ import {
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
-import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
+import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
 import { getPaymentMethod } from "@/lib/payment-methods"
 import { getDocumentTextSettings } from "@/lib/settings-access"
 import {
@@ -111,6 +111,18 @@ async function safely<T>(run: () => Promise<T>, fallback: T): Promise<T> {
   } catch {
     return fallback
   }
+}
+
+/** The supplier's kind, for deciding which leg dates the trip and what a document calls it. */
+async function loadSupplierKind(
+  supabase: SupabaseClient<Database>,
+  supplierId: string | null,
+): Promise<SupplierKind | null> {
+  if (!supplierId) return null
+  const row = await safeQuery<{ kind: SupplierKind }>(() =>
+    supabase.from("suppliers").select("kind").eq("id", supplierId).maybeSingle(),
+  )
+  return row?.kind ?? null
 }
 
 interface BookingRow {
@@ -280,7 +292,9 @@ export async function resolveSharedEmailTokens(
     children: booking?.no_of_children ?? 0,
   })
 
-  const suiteTokens = buildSuiteTokens(suiteSelections)
+  // Resolved after the quote block below sets primarySupplierKind, so {{suiteType}} names what the
+  // booking is actually for rather than whichever leg the fixed kind ranking prefers.
+  let suiteTokens = buildSuiteTokens(suiteSelections)
 
   const lastQuoteSentAt = latestByCreatedAt(
     (correspondences ?? [])
@@ -307,6 +321,7 @@ export async function resolveSharedEmailTokens(
   // resolveSharedEmailTokens' return) can never name two different suppliers. Falls back to the
   // booking's own primary_supplier_id pre-quote (reservation/follow-up sends).
   let primarySupplierId: string | null = booking?.primary_supplier_id ?? null
+  let primarySupplierKind: SupplierKind | null = null
   if (latestQuote) {
     try {
       const { data: lineItems } = await supabase
@@ -343,8 +358,17 @@ export async function resolveSharedEmailTokens(
         inclusionFilter: { journeyClass: quoteConfig.journeyClass, rateAudience: quoteConfig.rateAudience },
       })
 
+      // The primary product's kind decides both which leg dates the trip and what the summary line
+      // calls it. Without it {{departureDate}} silently fell back to the enquiry-time booking date
+      // on anything that is not a train.
+      primarySupplierKind = await loadSupplierKind(supabase, primarySupplierId)
+      suiteTokens = buildSuiteTokens(suiteSelections, primarySupplierKind)
+
       const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
-      trainDepartureDate = deriveTrainDepartureFromBlocks(itineraryBlocks)
+      trainDepartureDate = deriveTrainDepartureFromBlocks(
+        itineraryBlocks,
+        mapSupplierKindToServiceType(primarySupplierKind),
+      )
       const documentText = await getDocumentTextSettings(supabase)
 
       quoteSummaryTable = buildQuoteSummaryBlock({
@@ -358,6 +382,7 @@ export async function resolveSharedEmailTokens(
         total: latestQuote.total ?? 0,
         currency: quoteCurrency,
         itineraryBlocks,
+        primarySupplierKind,
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,

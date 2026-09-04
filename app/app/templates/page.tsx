@@ -19,9 +19,9 @@ import { toast } from "sonner"
 import { Edit3, Eye, BookOpen, ChevronDown, ChevronRight, Mail, Plus, Trash2 } from "lucide-react"
 import {
   getTokenSpecs,
+  isUniversalToken,
   TEMPLATE_TOKENS,
-  tokenGroup,
-  type TemplateTokenGroup,
+  tokenKinds,
   type TemplateTokenSpec,
 } from "@/lib/templates/registry"
 import {
@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/select"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
-import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
+import { SUPPLIER_KIND_LABELS, VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 import { BrandBlockSettingsEditor } from "@/components/brand-block-settings-editor"
 import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
@@ -84,7 +84,12 @@ const ALL_BLOCK_TOKENS: string[] = (() => {
 
 // Union of all system-template tokens for the reference dialog — the token
 // registry (lib/templates/registry.ts) is the source of truth.
-const EMAIL_PLACEHOLDERS: { token: string; description: string; group: TemplateTokenGroup }[] = (() => {
+const EMAIL_PLACEHOLDERS: {
+  token: string
+  description: string
+  universal: boolean
+  kinds: SupplierKind[]
+}[] = (() => {
   const seen = new Map<string, TemplateTokenSpec>()
   for (const specs of Object.values(TEMPLATE_TOKENS)) {
     for (const spec of specs) {
@@ -94,15 +99,24 @@ const EMAIL_PLACEHOLDERS: { token: string; description: string; group: TemplateT
   return [...seen.values()].map((spec) => ({
     token: `{{${spec.name}}}`,
     description: spec.description,
-    group: tokenGroup(spec),
+    universal: isUniversalToken(spec),
+    kinds: tokenKinds(spec),
   }))
 })()
 
-const GROUP_HEADINGS: Record<TemplateTokenGroup, string> = {
-  always: "Always available",
-  rail: "Journeys — trains",
-  stay: "Stays — properties",
-}
+/** Reference-dialog sections: the shared vocabulary, then one per product type. A token that suits
+ *  several products is listed under each of them. */
+const PLACEHOLDER_SECTIONS: { key: string; heading: string; universal: boolean }[] = [
+  { key: "always", heading: "Always available", universal: true },
+  ...(Object.keys(SUPPLIER_KIND_LABELS) as SupplierKind[]).map((kind) => ({
+    key: kind,
+    heading: SUPPLIER_KIND_LABELS[kind],
+    universal: false,
+  })),
+]
+
+/** The three sections a variant's chip list is split into. */
+type ChipSection = "always" | "product" | "other"
 
 interface TokenChipsProps {
   specs: TemplateTokenSpec[]
@@ -119,18 +133,30 @@ interface TokenChipsProps {
  * date token in front of them.
  */
 function TokenChips({ specs, supplierKind, onInsert }: TokenChipsProps) {
-  const relevant: TemplateTokenGroup = supplierKind === "hotel_property" ? "stay" : "rail"
-  const [expanded, setExpanded] = useState<TemplateTokenGroup | null>(relevant)
+  const [expanded, setExpanded] = useState<ChipSection | null>("product")
 
-  const byGroup = new Map<TemplateTokenGroup, TemplateTokenSpec[]>()
-  for (const spec of specs) {
-    const group = tokenGroup(spec)
-    byGroup.set(group, [...(byGroup.get(group) ?? []), spec])
+  // The untagged parent template serves every product, so it has no one kind to open on. It falls
+  // back to the rail vocabulary, which is what it did before per-kind variants existed.
+  const relevantKind: SupplierKind = supplierKind ?? "train_operator"
+  const headings: Record<ChipSection, string> = {
+    always: "Always available",
+    product: SUPPLIER_KIND_LABELS[relevantKind],
+    other: "Other products",
   }
-  // Always first, then whichever of rail/stay this template is actually for.
-  const order: TemplateTokenGroup[] = ["always", relevant, relevant === "stay" ? "rail" : "stay"]
 
-  const chips = (group: TemplateTokenGroup) => (
+  const byGroup = new Map<ChipSection, TemplateTokenSpec[]>()
+  for (const spec of specs) {
+    const section: ChipSection = isUniversalToken(spec)
+      ? "always"
+      : tokenKinds(spec).includes(relevantKind)
+        ? "product"
+        : "other"
+    byGroup.set(section, [...(byGroup.get(section) ?? []), spec])
+  }
+  // Always first, then the words for what this template is actually selling.
+  const order: ChipSection[] = ["always", "product", "other"]
+
+  const chips = (group: ChipSection) => (
     <div className="flex flex-wrap gap-1.5">
       {(byGroup.get(group) ?? []).map((spec) => (
         <button
@@ -165,12 +191,12 @@ function TokenChips({ specs, supplierKind, onInsert }: TokenChipsProps) {
                 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring rounded"
               >
                 {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                {GROUP_HEADINGS[group]}
+                {headings[group]}
                 <span className="font-normal normal-case">({groupSpecs.length})</span>
               </button>
             ) : (
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-                {GROUP_HEADINGS[group]}
+                {headings[group]}
               </p>
             )}
             {isOpen && chips(group)}
@@ -975,14 +1001,16 @@ export default function TemplatesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
-            {(["always", "rail", "stay"] as TemplateTokenGroup[]).map((group) => {
-              const entries = EMAIL_PLACEHOLDERS.filter((p) => p.group === group)
+            {PLACEHOLDER_SECTIONS.map((section) => {
+              const entries = EMAIL_PLACEHOLDERS.filter((p) =>
+                section.universal ? p.universal : !p.universal && p.kinds.includes(section.key as SupplierKind),
+              )
               if (entries.length === 0) return null
               return (
-                <div key={group}>
+                <div key={section.key}>
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                    {GROUP_HEADINGS[group]}{" "}
-                    {group === "always" && (
+                    {section.heading}{" "}
+                    {section.universal && (
                       <span className="font-normal normal-case">— double curly braces</span>
                     )}
                   </h3>

@@ -755,7 +755,8 @@ export async function buildPackageQuoteLineItems({
       // A tour operator prices the tour type, not the itinerary — its rate cards carry no route,
       // so a leg with zero (or several) itineraries is still priceable without one selected.
       if (isTypePricedSupplier(leg.supplierKind)) return null
-      return `No ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"} selected for leg: ${legLabel}`
+      // Each kind's own word for the same table: a route, a meal plan, a rental route.
+      return `No ${SUPPLIER_VOCABULARY[leg.supplierKind].route.toLowerCase()} selected for leg: ${legLabel}`
     }
     if (!leg.routes.some((route) => route.id === routeId)) {
       return `Selected route is not available for leg: ${legLabel}`

@@ -1260,10 +1260,12 @@ export function validateConfigureState(
     // with zero itineraries is still priceable and must not be blocked here (matches the pricing
     // engine's own rule in lib/quotes/build-from-package.ts).
     if (state.kind !== "transport" && !isTypePricedSupplier(state.supplierKind)) {
+      // Each kind's own word for the same table: routes, meal plans, itineraries.
+      const routeVocabulary = SUPPLIER_VOCABULARY[leg.supplierKind]
       if (leg.routes.length === 0) {
-        errors.push(`${legLabel}: no ${leg.supplierKind === "hotel_property" ? "meal plans" : "routes"} configured for this supplier — add one in Suppliers first`)
+        errors.push(`${legLabel}: no ${routeVocabulary.routePlural.toLowerCase()} configured for this supplier — add one in Suppliers first`)
       } else if (leg.routes.length > 1 && !state.routeId) {
-        errors.push(`${legLabel}: select a ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"}`)
+        errors.push(`${legLabel}: select a ${routeVocabulary.route.toLowerCase()}`)
       }
     }
 
