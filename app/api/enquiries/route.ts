@@ -24,6 +24,7 @@ import type { Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 import { findHotelSupplierId, loadPrimarySupplier, resolveStandaloneSupplier } from "@/lib/resolvers/supplier-resolver"
 import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
+import { primaryProductOf } from "@/lib/enquiry/primary-product"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
 import { findRouteMatch } from "@/lib/resolvers/route-resolver"
 
@@ -490,25 +491,33 @@ export async function POST(req: Request) {
   const primarySupplier = body.supplierId
     ? await loadPrimarySupplier(supabase, body.supplierId)
     : await resolveStandaloneSupplier(supabase, body.supplier)
-  const isStayEnquiry = primarySupplier?.kind === "hotel_property"
-  const trainSupplierId = isStayEnquiry ? null : primarySupplier?.id ?? null
-  // A stay has no direction to match a route against -- its "route" is a meal plan, chosen in
-  // Build Booking, not something an enquiry can state.
-  const { routeId, reversed: routeReversed } = isStayEnquiry
-    ? { routeId: null, reversed: false }
-    : await findRouteMatch(supabase, body.direction, trainSupplierId)
+  // What this enquiry states is decided by the primary supplier's kind, not by a hotel check: a
+  // cruise line filed under Tours has no direction either, and states its length in days.
+  const primaryProduct = primaryProductOf(primarySupplier?.kind ?? null)
+  const routeSupplierId = primaryProduct.routeFieldLabel !== null ? primarySupplier?.id ?? null : null
+  // A kind whose "route" is a meal plan or an itinerary has no direction to match a route against
+  // -- that is chosen in Build Booking, not something an enquiry can state.
+  const { routeId, reversed: routeReversed } =
+    primaryProduct.routeFieldLabel !== null
+      ? await findRouteMatch(supabase, body.direction, routeSupplierId)
+      : { routeId: null, reversed: false }
   // On a stay the hotel IS the booking, so it fills the hotel slot too rather than being resolved
   // from a separate "hotel option" the form never asks for.
-  const hotelSupplierId = isStayEnquiry
-    ? primarySupplier.id
-    : await findHotelSupplierId(supabase, body.hotelOption)
-  const stayNights = isStayEnquiry && body.nights && body.nights > 0 ? body.nights : null
+  const hotelSupplierId =
+    !primaryProduct.capturesHotelOption && primarySupplier
+      ? primarySupplier.id
+      : await findHotelSupplierId(supabase, body.hotelOption)
+  // duration_nights holds the span whatever the kind counts it in -- nights for a stay, days for a
+  // tour or a rental. Kinds that state no end date store none.
+  const stayNights = primaryProduct.durationUnit && body.nights && body.nights > 0 ? body.nights : null
 
   // Gaps worth flagging that the parser can't fabricate its way out of. Read after the supplier
   // resolves, since a stay is never missing a direction -- it has none to state.
   const suiteReviewMissingFields: string[] = []
-  if (!body.noOfSuites) suiteReviewMissingFields.push(REVIEW_REASON.numberOfSuites)
-  if (!isStayEnquiry && !normalizeNullableText(body.direction)) {
+  if (primaryProduct.capturesUnitCount && !body.noOfSuites) {
+    suiteReviewMissingFields.push(REVIEW_REASON.numberOfSuites)
+  }
+  if (primaryProduct.routeFieldLabel !== null && !normalizeNullableText(body.direction)) {
     suiteReviewMissingFields.push(REVIEW_REASON.direction)
   }
   let jobNumberAllocation: JobNumberAllocation

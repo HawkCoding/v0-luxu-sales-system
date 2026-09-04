@@ -11,6 +11,7 @@ import { createRawEmailPreview } from "@/lib/inbound-email/html"
 import type { Database, Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 import { findHotelSupplierId, resolveStandaloneSupplier } from "@/lib/resolvers/supplier-resolver"
+import { primaryProductOf } from "@/lib/enquiry/primary-product"
 import { findRouteMatch } from "@/lib/resolvers/route-resolver"
 import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
@@ -186,17 +187,22 @@ export async function createEmailBookingFromParsedDraft(
   // standalone stay (Kruger Shalati). The parser already decided which by matching the email
   // against the standalone pool, so the kind travels with the wording rather than being re-guessed.
   const primarySupplier = await resolveStandaloneSupplier(supabase, parsed.trip.supplier)
-  const isStayImport = primarySupplier?.kind === "hotel_property"
-  // A stay has no direction and no route -- its "route" is a meal plan chosen in Build Booking.
-  const { routeId, reversed: routeReversed } = isStayImport
-    ? { routeId: null, reversed: false }
-    : await findRouteMatch(supabase, payload.direction, isStayImport ? null : primarySupplier?.id ?? null)
+  // The kind decides the shape, so a cruise line filed under Tours is treated on its own terms
+  // rather than as "not a hotel, therefore a train".
+  const primaryProduct = primaryProductOf(primarySupplier?.kind ?? null)
+  const capturesRoute = primaryProduct.routeFieldLabel !== null
+  // A kind whose "route" is a meal plan or an itinerary has no direction and no route to match --
+  // it is chosen in Build Booking instead.
+  const { routeId, reversed: routeReversed } = capturesRoute
+    ? await findRouteMatch(supabase, payload.direction, primarySupplier?.id ?? null)
+    : { routeId: null, reversed: false }
   // On a stay the hotel IS the booking, so it fills the hotel slot rather than being resolved from
   // a separate "hotel option" the form never asks for.
-  const hotelSupplierId = isStayImport
-    ? primarySupplier.id
-    : await findHotelSupplierId(supabase, payload.hotelOption)
-  const stayNights = isStayImport && payload.nights && payload.nights > 0 ? payload.nights : null
+  const hotelSupplierId =
+    !primaryProduct.capturesHotelOption && primarySupplier
+      ? primarySupplier.id
+      : await findHotelSupplierId(supabase, payload.hotelOption)
+  const stayNights = primaryProduct.durationUnit && payload.nights && payload.nights > 0 ? payload.nights : null
 
   // Suite resolution needs the supplier's vocabulary (room types on a stay, suite types on a
   // journey), so it can only run once the primary supplier is known. Without one, the raw wording
@@ -244,7 +250,7 @@ export async function createEmailBookingFromParsedDraft(
   if (parsed.trip.supplier && !primarySupplier) {
     resolutionFailureReasons.push(REVIEW_REASON.supplierUnmatched)
   }
-  if (!isStayImport && payload.direction && !routeId) {
+  if (capturesRoute && payload.direction && !routeId) {
     // Separated so the review screen says WHY: an unresolved operator can't be given a route at
     // all (findRouteMatch refuses to pick between operators), which is a different fix for the
     // consultant than wording that matches no route this operator files.
