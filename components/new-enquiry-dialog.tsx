@@ -65,6 +65,7 @@ function emptyDraft(): ParsedDraft {
     additionalServices: { requested: false, details: "" },
     termsAccepted: true,
     notes: "",
+    customerComments: "",
     formFields: { title: "", country: "", province: "", packageOption: "", hotelOption: "", flightBooking: "", flightDepartureDate: "", direction: "", supplier: "", departureDateRaw: "", checkOutDateRaw: "", promotionCode: "", suitePhrases: [], childAges: [], hotelPhase: "", extendStay: null, additionalServicesDetails: "" },
     confidence: {},
     rawText: "",

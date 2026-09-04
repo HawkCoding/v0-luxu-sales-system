@@ -24,6 +24,7 @@ interface SupplierJoin {
   base_rate_type_id: string | null
   quote_rate_type_id: string | null
   transfer_pricing_basis: "per_vehicle" | "per_person"
+  accommodation_pricing_basis: "per_person" | "per_room"
 }
 
 interface BookingServiceWithSupplier extends BookingServiceRow {
@@ -64,7 +65,7 @@ export async function loadBookingServicesPackageDetail(
     supabase
       .from("booking_services")
       .select(
-        "*, suppliers(name, description, kind, pricing_mode, base_rate_type_id, quote_rate_type_id, transfer_pricing_basis)",
+        "*, suppliers(name, description, kind, pricing_mode, base_rate_type_id, quote_rate_type_id, transfer_pricing_basis, accommodation_pricing_basis)",
       )
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
@@ -158,6 +159,7 @@ export async function loadBookingServicesPackageDetail(
       supplierKind,
       supplierPricingMode: supplier?.pricing_mode ?? "rate_card",
       supplierTransferPricingBasis: supplier?.transfer_pricing_basis ?? "per_vehicle",
+      supplierAccommodationPricingBasis: supplier?.accommodation_pricing_basis ?? "per_person",
       supplierBaseRateTypeId: rateTiers.baseRateTypeId,
       supplierQuoteRateTypeId: rateTiers.quoteRateTypeId,
       supplierInheritedRateTypeName: rateTiers.inheritedRateTypeName,
@@ -255,6 +257,11 @@ export function bookingServicesToLegSelections(
       routeReversed: service.route_reversed,
       units: unitSelections,
       nights: service.nights ?? undefined,
+      // The stay's own basis, which outranks the supplier's current default so a quoted stay
+      // keeps the basis it was priced under. NULL only for a row that predates the column or
+      // somehow escaped the stamping trigger; the pricer falls back to the supplier, then to
+      // per_person.
+      accommodationPricingBasis: service.accommodation_pricing_basis ?? undefined,
       // Only meaningful for manual-pricing legs and transfer/rental price overrides; a
       // rate-card leg takes its currency from the card instead and ignores this.
       priceCurrency: service.price_currency,

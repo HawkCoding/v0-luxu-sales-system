@@ -35,6 +35,7 @@ import {
   rateCardFares,
   type PassengerFare,
 } from "@/lib/pricing/passenger-fares"
+import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
@@ -98,6 +99,10 @@ export interface PackageLegSelection {
   /** Hotel legs only: number of nights stayed (default 1). Independent of journey duration, and
    * shared across all units on the leg — a stay's night count doesn't split per room. */
   nights?: number
+  /** Hotel legs only: this stay's own pricing basis, which always wins over the supplier's
+   * default (leg.accommodationPricingBasis) so a stay keeps the basis it was quoted under even
+   * after the property is switched. See lib/pricing/accommodation-basis.ts. */
+  accommodationPricingBasis?: "per_person" | "per_room" | null
   /** Manual-pricing legs and transfer/rental price overrides only: the currency the typed fares
    * on this leg are denominated in. Rate-card legs take their currency from the card instead. */
   priceCurrency?: string | null
@@ -525,6 +530,10 @@ export async function buildPackageQuoteLineItems({
      * three lines (and any surviving per-vehicle sibling on the same leg) are explicable in the
      * internal quote view. See lib/pricing/transfer-basis.ts. */
     transferPricingBasis?: "per_vehicle" | "per_person" | null
+    /** Hotels only: which basis this stay priced under, so a stay quoted before its supplier
+     * switched stays explicable next to one quoted after. See
+     * lib/pricing/accommodation-basis.ts. */
+    accommodationPricingBasis?: "per_person" | "per_room" | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -556,6 +565,7 @@ export async function buildPackageQuoteLineItems({
     isComplimentaryTransport,
     transportRequestId,
     transferPricingBasis,
+    accommodationPricingBasis,
   }: AddLineItemOptions) {
     // A stay whose every night was gifted still has to reach the quote: the client documents read
     // their itinerary off the priced legs, so dropping the line would drop the hotel entirely.
@@ -676,6 +686,7 @@ export async function buildPackageQuoteLineItems({
             }
           : {}),
         ...(transferPricingBasis ? { transferPricingBasis } : {}),
+        ...(accommodationPricingBasis ? { accommodationPricingBasis } : {}),
       }
     }
 
@@ -1010,10 +1021,25 @@ export async function buildPackageQuoteLineItems({
         // bathroom and its own occupants.
         const nights = Math.max(1, selection.nights ?? 1)
 
-        // Hotel rates are per person per night, so a room's price depends on who is in it. The
-        // occupancy split has to add up to the booking's travellers, exactly as it does for a train
-        // — every guest sleeps in exactly one room. Rooms used to price at one flat card rate each,
-        // which billed a double room as though one person were in it.
+        // Which way this stay prices. The stay's own basis wins over the property's current
+        // default, so flipping a hotel to per-room never re-prices a stay already quoted per
+        // person (and vice versa) -- the same carry-forward rule transfers use.
+        const accommodationBasis = resolveAccommodationPricingBasis({
+          supplierKind: leg.supplierKind,
+          rowBasis: selection.accommodationPricingBasis,
+          supplierBasis: leg.accommodationPricingBasis,
+        })
+        // The label the internal quote view renders beside the qty. The static vocabulary label
+        // says "per room per night" for every hotel, which was wrong for the per-person stays
+        // that were the only kind before this basis existed.
+        const hotelUnit = resolveSupplierPriceLabel(leg.supplierKind, {
+          accommodationPricingBasis: accommodationBasis,
+        })
+
+        // Occupancy has to add up to the booking's travellers in BOTH bases -- every guest sleeps
+        // in exactly one room, and the voucher and worksheet read who is in which room off these
+        // counts. Under per_person it also decides the price; under per_room it does not, which is
+        // the only difference.
         const hotelTotals = countsForBuckets(bucketsForLeg(leg))
         const hotelSummed = units.reduce(
           (acc, unitSelection) => ({
@@ -1053,6 +1079,10 @@ export async function buildPackageQuoteLineItems({
           // A typed room price stays a room price: it replaces the whole room's nightly rate
           // whoever is in it, so it emits one line rather than a per-person breakdown. That is what
           // the consultant typed, and it keeps the comped-room case (a deliberate R0) intact.
+          //
+          // This path is identical under both bases -- it was already per-room maths, which is
+          // why overriding a room in a per-person stay quietly switched that one room's basis
+          // before per_room existed as a thing a consultant could state outright.
           if (overridePrice !== null) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } =
               resolveOverriddenUnit(unitSelection.suiteTypeId)
@@ -1070,9 +1100,10 @@ export async function buildPackageQuoteLineItems({
               suiteTypeName,
               variantNames: specificUnitVariantNames(unitSelection),
               selectedVariantGroups: specificUnitVariantGroups(unitSelection),
-              unit,
+              unit: hotelUnit,
               hideRoomConfig: true,
               sourceCurrency: overrideCurrency,
+              accommodationPricingBasis: accommodationBasis,
               roomOverride: {
                 price: overridePrice,
                 basePrice: validRateCard?.pricePerPerson ?? null,
@@ -1089,6 +1120,32 @@ export async function buildPackageQuoteLineItems({
           )
           activeRateCard = validRateCard
           activeRateCardInherited = rateTypeInherited
+
+          // Per-room: the card's price is the whole room's nightly rate, so the room emits one
+          // line at qty = nights whoever sleeps in it. price_per_person is reused as that rate
+          // (the same column the per-person path reads as an adult fare), which is why the
+          // supplier form nulls the child/infant fares and warns to re-check the amounts when the
+          // basis is switched -- see app/api/suppliers/[slug]/route.ts.
+          if (accommodationBasis === "per_room") {
+            addLineItem({
+              description,
+              qty: chargedNights,
+              unitPrice: validRateCard.pricePerPerson,
+              supplierDescription,
+              suiteTypeId: unitSelection.suiteTypeId,
+              suiteTypeName,
+              variantNames: specificUnitVariantNames(unitSelection),
+              selectedVariantGroups: specificUnitVariantGroups(unitSelection),
+              unit: hotelUnit,
+              hideRoomConfig: true,
+              sourceCurrency: validRateCard.currency,
+              accommodationPricingBasis: accommodationBasis,
+              complimentary,
+            })
+            // No zero-qty fallback needed below: this path always emits exactly one line per room,
+            // so a fully gifted room already reaches the quote at qty 0.
+            continue
+          }
 
           // One line per passenger kind in this room, priced off this room's own card: child rates
           // differ by room type, so which room a child sleeps in is what decides the price. A kind
@@ -1119,11 +1176,12 @@ export async function buildPackageQuoteLineItems({
               suiteTypeName,
               variantNames: specificUnitVariantNames(unitSelection),
               selectedVariantGroups: specificUnitVariantGroups(unitSelection),
-              unit,
+              unit: hotelUnit,
               hideRoomConfig: true,
               passengerLabel: fare.label,
               passengerKind: fare.kind,
               sourceCurrency: validRateCard.currency,
+              accommodationPricingBasis: accommodationBasis,
               complimentary,
             })
           }
@@ -1141,9 +1199,10 @@ export async function buildPackageQuoteLineItems({
               suiteTypeName,
               variantNames: specificUnitVariantNames(unitSelection),
               selectedVariantGroups: specificUnitVariantGroups(unitSelection),
-              unit,
+              unit: hotelUnit,
               hideRoomConfig: true,
               sourceCurrency: validRateCard.currency,
+              accommodationPricingBasis: accommodationBasis,
               complimentary,
             })
           }

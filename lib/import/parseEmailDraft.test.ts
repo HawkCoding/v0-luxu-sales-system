@@ -383,6 +383,7 @@ John Smith
       additionalServices: { requested: false, details: "" },
       termsAccepted: true,
       notes: "",
+      customerComments: "",
       formFields: {
         title: "",
         country: "South Africa",
@@ -887,6 +888,15 @@ describe("standalone hotel (stay) enquiries", () => {
     " \t Bridge House - Room Double",
     "No of Adults",
     " \t 2",
+    // The real notification runs these four fields together with no blank line between them --
+    // see supabase/seeds/inbound-email-fixtures/kruger-shalati-quote.json.
+    "Additional Travel Services",
+    "Do you require airport transfer?",
+    " \t No",
+    "Do you require additional travel services?",
+    " \t No",
+    "Additional Comments",
+    " \t Halaal food",
     "Consent",
     " \t I have read and accept the Terms and Conditions",
   ].join("\n")
@@ -934,6 +944,35 @@ describe("standalone hotel (stay) enquiries", () => {
     })
 
     expect(draft.trip.route).toBe("")
+  })
+
+  // Production LTT-2026-0064 read "Additional Services: Yes" off a form that said No: the block
+  // reader ran past the unlisted "Additional Comments" label and swept it, plus the customer's
+  // comment, into the services answer -- which then looked like free-text detail rather than a flag.
+  it("keeps the Additional Comments box out of the travel-services answer", () => {
+    const draft = parseShalati()
+
+    expect(draft.additionalServices.requested).toBe(false)
+    expect(draft.additionalServices.details).toBe("")
+  })
+
+  it("reads the Additional Comments box as the customer's own comment", () => {
+    const draft = parseShalati()
+
+    expect(draft.customerComments).toBe("Halaal food")
+    // The consultant's own box stays theirs.
+    expect(draft.notes).toBe("")
+  })
+
+  it("still reads a Yes on the same form", () => {
+    const draft = parseShalati({
+      body: SHALATI_BODY.replace(
+        "Do you require additional travel services?\n \t No",
+        "Do you require additional travel services?\n \t Yes",
+      ),
+    })
+
+    expect(draft.additionalServices.requested).toBe(true)
   })
 
   it("requires check-in and check-out instead of a route and departure date", () => {

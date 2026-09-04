@@ -12,6 +12,7 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     kind: "train_operator",
     pricingMode: "rate_card",
     transferPricingBasis: "per_vehicle",
+    accommodationPricingBasis: "per_person",
     emails: [{ id: "email-1", email: "res@rovos.test", label: "Reservations" }],
     phone: "",
     website: "",
@@ -62,6 +63,7 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
   it("is bumped whenever the persisted form shape changes", () => {
     expect(Object.keys(buildFallback()).sort()).toEqual(
       [
+        "accommodationPricingBasis",
         "active",
         "baseRateTypeId",
         "bathroomTypes",
@@ -100,7 +102,7 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(8)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(9)
   })
 })
 

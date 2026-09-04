@@ -29,6 +29,7 @@ function draft(overrides: Partial<ParsedDraft> = {}): ParsedDraft {
     additionalServices: { requested: false, details: "" },
     termsAccepted: true,
     notes: "",
+    customerComments: "",
     formFields: {
       title: "",
       country: "",

@@ -40,6 +40,7 @@ function makeDraft(overrides: Partial<ParsedDraft["guests"]> = {}): ParsedDraft 
     additionalServices: { requested: false, details: "" },
     termsAccepted: true,
     notes: "",
+    customerComments: "",
     formFields: {
       title: "",
       country: "",

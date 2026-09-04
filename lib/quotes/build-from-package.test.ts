@@ -73,6 +73,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierDescription: null,
     pricingMode: "rate_card",
     transferPricingBasis: "per_vehicle",
+    accommodationPricingBasis: "per_person",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,
@@ -949,6 +950,305 @@ describe("buildPackageQuoteLineItems", () => {
     const adults = lineItems.find((li) => li.pricingSnapshot?.passengerKind === "adult")
     expect(adults?.qty).toBe(2)
     expect(adults?.total).toBe(31040)
+  })
+
+  // The direct counterpart to the test above: the same room, the same occupancy, the same card,
+  // and the property quoting a flat room rate instead of a per-head one.
+  it("charges a per_room stay one nightly rate per room, whoever is sleeping in it", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      accommodationPricingBasis: "per_room",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      // childPrice is set precisely so the test fails if the per-person path is taken.
+      rateCards: [
+        rateCard({
+          id: "rc-room",
+          routeId: "route-bb",
+          suiteTypeId: "room-std",
+          pricePerPerson: 4000,
+          childPrice: 2000,
+        }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 3,
+          units: [{ suiteTypeId: "room-std", adultCount: 2, childCount: 1 }],
+        },
+      ],
+    })
+
+    // One line for the room, not three for its occupants.
+    expect(lineItems).toHaveLength(1)
+    const [room] = lineItems
+    expect(room.qty).toBe(3)
+    expect(room.unitPrice).toBe(4000)
+    expect(room.total).toBe(12000)
+    // No passenger kind: a room line is not about any one guest, which is also what keeps the
+    // "(Child)" / " - Adult" suffixes off it downstream.
+    expect(room.pricingSnapshot?.passengerKind).toBe("adult")
+    expect(room.description).not.toMatch(/ - (Adult|Child|Infant)$/)
+  })
+
+  it("gives each room in a per_room stay its own line at its own room type's rate", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      accommodationPricingBasis: "per_room",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [
+        suiteType("room-std", "supplier-leg-hotel", "Standard"),
+        suiteType("room-suite", "supplier-leg-hotel", "Suite"),
+      ],
+      rateCards: [
+        rateCard({ id: "rc-std", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 }),
+        rateCard({ id: "rc-suite", routeId: "route-bb", suiteTypeId: "room-suite", pricePerPerson: 7500 }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          units: [
+            { suiteTypeId: "room-std", adultCount: 2 },
+            { suiteTypeId: "room-suite", childCount: 1 },
+          ],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(2)
+    expect(lineItems.map((li) => li.total)).toEqual([8000, 15000])
+  })
+
+  // The regression that protects a quoted booking: a property that switches to per-room must not
+  // silently re-price the stays it already quoted per person. Same rule as the transfer basis.
+  it("keeps a stay on the basis it was quoted under after the property switches", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      // The property has since switched to per-room...
+      accommodationPricingBasis: "per_room",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          // ...but this stay was saved before that, and says so.
+          accommodationPricingBasis: "per_person",
+          units: [{ suiteTypeId: "room-std", adultCount: 2, childCount: 1 }],
+        },
+      ],
+    })
+
+    const adults = lineItems.find((li) => li.pricingSnapshot?.passengerKind === "adult")
+    expect(adults?.qty).toBe(4)
+    expect(adults?.total).toBe(16000)
+    expect(adults?.pricingSnapshot?.accommodationPricingBasis).toBe("per_person")
+  })
+
+  it("labels each hotel line with the basis that actually priced it", async () => {
+    const hotelLeg = (basis: "per_person" | "per_room") =>
+      leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        accommodationPricingBasis: basis,
+        routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+        suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+        rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+      })
+
+    const price = async (basis: "per_person" | "per_room") =>
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg(basis)]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [{ suiteTypeId: "room-std", adultCount: 2, childCount: 1 }],
+          },
+        ],
+      })
+
+    const perRoom = await price("per_room")
+    expect(perRoom.lineItems[0].pricingSnapshot?.unit).toBe("per room per night")
+    expect(perRoom.lineItems[0].pricingSnapshot?.accommodationPricingBasis).toBe("per_room")
+
+    // Before the basis existed this said "per room per night" too, on a line priced per head.
+    const perPerson = await price("per_person")
+    expect(perPerson.lineItems[0].pricingSnapshot?.unit).toBe("per person per night")
+    expect(perPerson.lineItems[0].pricingSnapshot?.accommodationPricingBasis).toBe("per_person")
+  })
+
+  it("charges nights - 1 for a per_room stay whose first night the hotel gifted", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      accommodationPricingBasis: "per_room",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 4,
+          units: [{ suiteTypeId: "room-std", adultCount: 2, childCount: 1, complimentaryFirstNight: true }],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].qty).toBe(3)
+    expect(lineItems[0].total).toBe(12000)
+    expect(lineItems[0].pricingSnapshot?.complimentaryNights).toBe(1)
+    expect(lineItems[0].pricingSnapshot?.stayNights).toBe(4)
+  })
+
+  // The per-person path needs an explicit zero-qty fallback for this case; the per-room path emits
+  // one line per room unconditionally, so the room reaches the quote on its own.
+  it("still emits a line for a one-night per_room stay whose only night was gifted", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      accommodationPricingBasis: "per_room",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 1,
+          units: [{ suiteTypeId: "room-std", adultCount: 2, childCount: 1, complimentaryFirstNight: true }],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].qty).toBe(0)
+    expect(lineItems[0].total).toBe(0)
+  })
+
+  // A typed room price was always per-room maths, so it means the same thing in either basis --
+  // the reason overriding a room in a per-person stay used to switch that room's basis by stealth.
+  it("prices a typed room override identically under both bases", async () => {
+    const priceWith = async (basis: "per_person" | "per_room") =>
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([
+          leg({
+            id: "leg-hotel",
+            supplierKind: "hotel_property",
+            accommodationPricingBasis: basis,
+            routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+            suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+            rateCards: [
+              rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 }),
+            ],
+          }),
+        ]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [{ suiteTypeId: "room-std", adultCount: 2, childCount: 1, manualRoomPrice: 3600 }],
+          },
+        ],
+      })
+
+    const perPerson = await priceWith("per_person")
+    const perRoom = await priceWith("per_room")
+
+    expect(perPerson.lineItems).toHaveLength(1)
+    expect(perPerson.lineItems[0].total).toBe(7200)
+    expect(perRoom.lineItems.map((li) => li.total)).toEqual(perPerson.lineItems.map((li) => li.total))
+  })
+
+  it("still requires a per_room stay's rooms to hold the booking's travellers", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      accommodationPricingBasis: "per_room",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    // Occupancy no longer decides the price here, but it still decides the voucher's guest rows
+    // and the worksheet, so a room holding nobody is still a mistake worth stopping on.
+    await expect(
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [{ suiteTypeId: "room-std", adultCount: 1 }],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/rooms hold 1 adults, 0 children/)
   })
 
   it("refuses to price a stay whose room occupancy does not add up to the booking's travellers", async () => {

@@ -601,6 +601,9 @@ export type Database = {
       }
       booking_services: {
         Row: {
+          accommodation_pricing_basis:
+            | Database["public"]["Enums"]["accommodation_pricing_basis"]
+            | null
           arrival_airport_code: string | null
           arrival_date: string | null
           arrival_time: string | null
@@ -638,6 +641,9 @@ export type Database = {
           voucher_footnote: string | null
         }
         Insert: {
+          accommodation_pricing_basis?:
+            | Database["public"]["Enums"]["accommodation_pricing_basis"]
+            | null
           arrival_airport_code?: string | null
           arrival_date?: string | null
           arrival_time?: string | null
@@ -675,6 +681,9 @@ export type Database = {
           voucher_footnote?: string | null
         }
         Update: {
+          accommodation_pricing_basis?:
+            | Database["public"]["Enums"]["accommodation_pricing_basis"]
+            | null
           arrival_airport_code?: string | null
           arrival_date?: string | null
           arrival_time?: string | null
@@ -3696,6 +3705,7 @@ export type Database = {
       }
       suppliers: {
         Row: {
+          accommodation_pricing_basis: Database["public"]["Enums"]["accommodation_pricing_basis"]
           active: boolean
           base_rate_type_id: string | null
           child_max_age: number | null
@@ -3735,6 +3745,7 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          accommodation_pricing_basis?: Database["public"]["Enums"]["accommodation_pricing_basis"]
           active?: boolean
           base_rate_type_id?: string | null
           child_max_age?: number | null
@@ -3774,6 +3785,7 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          accommodation_pricing_basis?: Database["public"]["Enums"]["accommodation_pricing_basis"]
           active?: boolean
           base_rate_type_id?: string | null
           child_max_age?: number | null
@@ -4197,6 +4209,7 @@ export type Database = {
       restore_backup_snapshot: { Args: { snapshot: Json }; Returns: undefined }
     }
     Enums: {
+      accommodation_pricing_basis: "per_person" | "per_room"
       booking_purpose: "quote" | "availability" | "reservation"
       correspondence_status: "sent" | "failed" | "scheduled" | "cancelled"
       document_kind:
@@ -4390,6 +4403,7 @@ export const Constants = {
   },
   public: {
     Enums: {
+      accommodation_pricing_basis: ["per_person", "per_room"],
       booking_purpose: ["quote", "availability", "reservation"],
       correspondence_status: ["sent", "failed", "scheduled", "cancelled"],
       document_kind: [

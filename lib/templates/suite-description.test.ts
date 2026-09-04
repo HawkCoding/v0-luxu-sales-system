@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { PricingSnapshot } from "@/lib/types"
 import {
+  buildRoomTokens,
   buildSuiteTokens,
   formatSuitePhrase,
   suiteSelectionsFromSnapshots,
@@ -319,5 +320,65 @@ describe("suiteSelectionsFromSnapshots", () => {
     const selections = suiteSelectionsFromSnapshots([snapshot({ supplierId: null })], patterns)
 
     expect(selections[0].phrasePattern).toBeNull()
+  })
+})
+
+/**
+ * buildSuiteTokens ranks trains first, so on a booking carrying both it names the train's suite.
+ * The stay templates need the room regardless of what else is on the booking.
+ */
+describe("buildRoomTokens", () => {
+  const shalatiRoom: SuiteSelection = {
+    suiteTypeName: "Bridge House",
+    bedroomType: "Twin",
+    bathroomType: "En-suite bathroom",
+    supplierKind: "hotel_property",
+  }
+  const rovosSuite: SuiteSelection = {
+    suiteTypeName: "Deluxe",
+    bedroomType: "Double",
+    bathroomType: "Shower",
+    supplierKind: "train_operator",
+  }
+
+  it("names the room with the hotel noun, not the train noun", () => {
+    const tokens = buildRoomTokens([shalatiRoom])
+
+    expect(tokens.suiteType).toBe("Bridge House Room")
+    expect(tokens.suiteDescription).toBe("a Twin bedded Bridge House Room with an en-suite bathroom")
+  })
+
+  it("picks the hotel unit on a mixed rail + hotel booking, where buildSuiteTokens picks the train", () => {
+    expect(buildSuiteTokens([rovosSuite, shalatiRoom]).suiteType).toBe("Deluxe Suite")
+    expect(buildRoomTokens([rovosSuite, shalatiRoom]).suiteType).toBe("Bridge House Room")
+  })
+
+  it("returns empty strings for a rail-only booking", () => {
+    expect(buildRoomTokens([rovosSuite])).toEqual({
+      suiteType: "",
+      suiteConfiguration: "",
+      suiteDescription: "",
+    })
+  })
+
+  it("collapses repeated identical rooms to one entry", () => {
+    expect(buildRoomTokens([shalatiRoom, shalatiRoom]).suiteType).toBe("Bridge House Room")
+  })
+})
+
+describe("indefinite article on the bathroom clause", () => {
+  it("uses 'an' before a vowel-initial bathroom type", () => {
+    // Kruger Shalati files its bathroom as "En-suite bathroom with shower and bath".
+    const tokens = buildSuiteTokens([
+      { suiteTypeName: "Bridge House", bathroomType: "En-suite bathroom", supplierKind: "hotel_property" },
+    ])
+
+    expect(tokens.suiteDescription).toBe("a Bridge House Room with an en-suite bathroom")
+  })
+
+  it("still uses 'a' before a consonant-initial bathroom type", () => {
+    expect(buildSuiteTokens([{ suiteTypeName: "Deluxe Suite", bathroomType: "Shower" }]).suiteDescription).toBe(
+      "a Deluxe Suite with a shower",
+    )
   })
 })

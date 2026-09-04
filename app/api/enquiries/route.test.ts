@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { mergeEnquiryFormFields, resolveEnquiryCustomer } from "./route"
+import { mergeEnquiryFormFields, readYesNoFlag, resolveEnquiryCustomer } from "./route"
 import { createSupabaseMock } from "@/lib/testing/supabase-mock"
 import {
   legacySuiteNamesToUnits,
@@ -457,5 +457,30 @@ describe("POST /api/enquiries customer CRM matching", () => {
         communication_preferences: expect.anything(),
       }),
     )
+  })
+})
+
+describe("readYesNoFlag", () => {
+  // The schema accepts a string here, and additional_services used to be read with a bare `!!`:
+  // a website posting the form's own wording stored every "No" as an affirmative.
+  it("reads a declined string answer as false", () => {
+    expect(readYesNoFlag("No")).toBe(false)
+    expect(readYesNoFlag("no")).toBe(false)
+    expect(readYesNoFlag("false")).toBe(false)
+  })
+
+  it("reads an affirmative string answer as true, whatever its casing", () => {
+    expect(readYesNoFlag("yes")).toBe(true)
+    expect(readYesNoFlag("Yes")).toBe(true)
+    expect(readYesNoFlag(" YES ")).toBe(true)
+    expect(readYesNoFlag("true")).toBe(true)
+  })
+
+  it("passes a real boolean through and treats nothing as false", () => {
+    expect(readYesNoFlag(true)).toBe(true)
+    expect(readYesNoFlag(false)).toBe(false)
+    expect(readYesNoFlag(null)).toBe(false)
+    expect(readYesNoFlag(undefined)).toBe(false)
+    expect(readYesNoFlag("")).toBe(false)
   })
 })

@@ -488,15 +488,26 @@ export function isTransportSupplier(kind: SupplierKind): boolean {
  * SUPPLIER_VOCABULARY.priceLabel stays static per kind ("per vehicle" for every transfer
  * supplier) because it's a Record indexed by SupplierKind alone, and a couple of call sites
  * (e.g. components/supplier-detail-view.tsx's `vocabulary.priceLabel === "per day"` rental
- * check) rely on that Record never changing shape. A transfer supplier's actual label depends
- * on its per-supplier (or per-leg) pricing basis too, so this is the one place that resolves
- * both together — everywhere else keeps reading SUPPLIER_VOCABULARY[kind].priceLabel directly.
+ * check) rely on that Record never changing shape. A transfer or hotel supplier's actual label
+ * depends on its per-supplier (or per-leg) pricing basis too, so this is the one place that
+ * resolves them together — everywhere else keeps reading SUPPLIER_VOCABULARY[kind].priceLabel
+ * directly.
+ *
+ * The hotel arm also corrects a long-standing mislabelling: the static hotel_property label is
+ * "per room per night", but hotels have always priced per person per night, so every hotel quote
+ * line said the wrong thing until the basis was resolved here.
  */
 export function resolveSupplierPriceLabel(
   kind: SupplierKind,
-  opts?: { transferPricingBasis?: "per_vehicle" | "per_person" | null },
+  opts?: {
+    transferPricingBasis?: "per_vehicle" | "per_person" | null
+    accommodationPricingBasis?: "per_person" | "per_room" | null
+  },
 ): string {
   if (kind === "transfers" && opts?.transferPricingBasis === "per_person") return "per person"
+  if (kind === "hotel_property" && opts?.accommodationPricingBasis === "per_person") {
+    return "per person per night"
+  }
   return SUPPLIER_VOCABULARY[kind].priceLabel
 }
 
@@ -788,6 +799,11 @@ export interface PricingSnapshot {
    *  per-vehicle row (unswitched) and a per-person row (switched, same leg) stays explicable in
    *  the internal quote view. See lib/pricing/transfer-basis.ts. */
   transferPricingBasis?: "per_vehicle" | "per_person" | null
+  /** Hotels only: which pricing basis this specific line priced under, so a stay quoted before its
+   *  supplier switched stays explicable next to one quoted after. `unit` above carries the label
+   *  the UI renders; this is the machine-readable companion. See
+   *  lib/pricing/accommodation-basis.ts. */
+  accommodationPricingBasis?: "per_person" | "per_room" | null
   /** Tour legs only: the consultant-typed flat price that replaced the rate card for this unit,
    *  in sourceCurrency. Internal-only, same posture as manualRoomPrice/manualTransportPrice. */
   manualTourPrice?: number | null
@@ -843,6 +859,12 @@ export interface PackageLeg {
    * set, always wins over this -- see lib/pricing/transfer-basis.ts resolveTransferPricingBasis.
    * Ignored for every other supplier kind. */
   transferPricingBasis: "per_vehicle" | "per_person"
+  /** Hotels only: this supplier's default pricing basis (adult/child/infant fares per night, or
+   * one flat nightly rate for the whole room). A booking_services row's own
+   * accommodation_pricing_basis, once set, always wins over this -- see
+   * lib/pricing/accommodation-basis.ts resolveAccommodationPricingBasis. Ignored for every other
+   * supplier kind. */
+  accommodationPricingBasis: "per_person" | "per_room"
   label: string | null
   sortOrder: number
   /** Hotel legs only: pre-stay (night(s) before departure) or post-stay (from train arrival). */
@@ -929,6 +951,10 @@ export interface Supplier {
    * PackageLeg.transferPricingBasis and lib/pricing/transfer-basis.ts. Always 'per_vehicle' for
    * every other supplier kind. */
   transferPricingBasis: "per_vehicle" | "per_person"
+  /** Hotels only: default pricing basis for this supplier's newly created stays. See
+   * PackageLeg.accommodationPricingBasis and lib/pricing/accommodation-basis.ts. Always
+   * 'per_person' for every other supplier kind. */
+  accommodationPricingBasis: "per_person" | "per_room"
   name: string
   email: string | null
   phone: string | null
@@ -1184,7 +1210,8 @@ export interface Enquiry {
   direction: string
   /** False when `direction` is the customer's raw wording, not a route the system could resolve. */
   directionResolved?: boolean
-  /** Train operator name, resolved if possible, otherwise the raw wording the customer used. */
+  /** Supplier name — the train operator, or the hotel on a standalone stay — resolved if possible,
+   * otherwise the raw wording the customer used. */
   supplier?: string
   supplierResolved?: boolean
   departureDate: string

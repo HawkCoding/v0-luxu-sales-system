@@ -7,6 +7,16 @@
 
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 
+/**
+ * Which product a token describes. Luxus sells two shapes — a journey (Rovos, Blue Train) and a
+ * stay (Kruger Shalati, a stationary carriage sold as a hotel) — and each has vocabulary the other
+ * cannot use: a stay has no route or departure, a journey has no check-out or meal plan. Every
+ * token still resolves in every template; the group only decides how the editor's chip list is
+ * ordered and headed, so an author writing the Kruger Shalati variant reaches for the stay words
+ * first instead of hunting through rail ones.
+ */
+export type TemplateTokenGroup = "always" | "rail" | "stay"
+
 export interface TemplateTokenSpec {
   /** Token name as written in the template, without braces (e.g. "customerName"). */
   name: string
@@ -18,6 +28,13 @@ export interface TemplateTokenSpec {
   kind: "scalar" | "block"
   /** Sample value used for template previews. */
   sample: string
+  /** Presentation only — see {@link TemplateTokenGroup}. Defaults to "always" when unset. */
+  group?: TemplateTokenGroup
+}
+
+/** A token's group, with the "always" default applied. */
+export function tokenGroup(spec: TemplateTokenSpec): TemplateTokenGroup {
+  return spec.group ?? "always"
 }
 
 export const SYSTEM_TEMPLATE_KEYS = [
@@ -83,6 +100,7 @@ const suiteType: TemplateTokenSpec = {
   description: "Selected suite type, without configuration options",
   kind: "scalar",
   sample: "Deluxe Suite and Luxury Suite",
+  group: "rail",
 }
 const suiteConfiguration: TemplateTokenSpec = {
   name: "suiteConfiguration",
@@ -90,12 +108,30 @@ const suiteConfiguration: TemplateTokenSpec = {
     "Configuration options only (bedding, bathroom, layout). Pairs with the wrong suite once a booking has more than one — prefer suiteDescription",
   kind: "scalar",
   sample: "Twin bedded, with a shower",
+  group: "rail",
 }
 const suiteDescription: TemplateTokenSpec = {
   name: "suiteDescription",
   description: "Every selected suite with its own configuration, as one sentence. Includes the article",
   kind: "scalar",
   sample: "a Twin bedded Deluxe Suite with a shower and a Double bedded Luxury Suite with a full bath",
+  group: "rail",
+}
+// Stay tokens. On a booking carrying both a train and a hotel these name the hotel, where
+// suiteType/suiteDescription above name the train — that is the whole point of the pair.
+const roomType: TemplateTokenSpec = {
+  name: "roomType",
+  description: "Selected room type at the property, without configuration options",
+  kind: "scalar",
+  sample: "Bridge House Room",
+  group: "stay",
+}
+const roomDescription: TemplateTokenSpec = {
+  name: "roomDescription",
+  description: "Every selected room with its own configuration, as one sentence. Includes the article",
+  kind: "scalar",
+  sample: "a Twin bedded Bridge House Room with an en-suite bathroom",
+  group: "stay",
 }
 const supplierName: TemplateTokenSpec = {
   name: "supplierName",
@@ -124,6 +160,7 @@ const rateLabel: TemplateTokenSpec = {
     "Client-facing name of the rate quoted on the train leg (rate_types.client_label, falling back to its internal name)",
   kind: "scalar",
   sample: "SADC Resident special",
+  group: "rail",
 }
 const trainOnlyNote: TemplateTokenSpec = {
   name: "trainOnlyNote",
@@ -132,6 +169,7 @@ const trainOnlyNote: TemplateTokenSpec = {
   kind: "block",
   sample:
     "<p>We have quoted you for the train only. If you would like to request any other services, we offer those as well.</p>",
+  group: "rail",
 }
 
 // Every token below is resolvable in every template type (lib/templates/resolve-shared-tokens.ts
@@ -143,21 +181,82 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   supplierName,
   { name: "clientSurname", description: "Customer's surname", kind: "scalar", sample: "Smith" },
   consultantName,
-  { name: "direction", description: "Travel route / journey name", kind: "scalar", sample: "Pretoria → Cape Town" },
-  { name: "routeName", description: "Route or journey name (alias of direction)", kind: "scalar", sample: "Pretoria → Cape Town" },
-  { name: "tripStartDate", description: "First day of the trip overall (earliest of any leg — hotel pre-nights count)", kind: "scalar", sample: "12 September 2026" },
-  { name: "departureDate", description: "Train's own departure date (falls back to trip start date if no train leg)", kind: "scalar", sample: "14 September 2026" },
   {
-    name: "departureDateShort",
-    description: "Train's own departure date as used in the subject line (falls back to trip start date if no train leg)",
+    name: "direction",
+    description:
+      "Travel route / journey name. Rail-shaped: a stay has no route, so it falls back to the stay's length (\"3 Nights\") — on a property template prefer nights and checkInDate",
+    kind: "scalar",
+    sample: "Pretoria → Cape Town",
+    group: "rail",
+  },
+  { name: "routeName", description: "Route or journey name (alias of direction)", kind: "scalar", sample: "Pretoria → Cape Town", group: "rail" },
+  { name: "tripStartDate", description: "First day of the trip overall (earliest of any leg — hotel pre-nights count)", kind: "scalar", sample: "12 September 2026" },
+  {
+    name: "departureDate",
+    description:
+      "Train's own departure date (falls back to trip start date if no train leg). On a property booking this is really the check-in date — prefer checkInDate there",
     kind: "scalar",
     sample: "14 September 2026",
+    group: "rail",
+  },
+  {
+    name: "departureDateShort",
+    description:
+      "Departure date with an abbreviated month, for the subject line (falls back to trip start date if no train leg)",
+    kind: "scalar",
+    sample: "14 Sep 2026",
+    group: "rail",
   },
   { name: "tripEndDate", description: "Date the trip ended", kind: "scalar", sample: "18 September 2026" },
-  { name: "tripTitle", description: "Itinerary trip title", kind: "scalar", sample: "Cape Town Rail Adventure" },
+  {
+    name: "tripTitle",
+    description:
+      "The itinerary's title as the salesperson named it, falling back to the route and surname (\"Pretoria → Cape Town — Smith Family\")",
+    kind: "scalar",
+    sample: "Pretoria → Cape Town — Smith Family",
+  },
   suiteType,
   suiteConfiguration,
   suiteDescription,
+  roomType,
+  roomDescription,
+  {
+    name: "propertyName",
+    description:
+      "The property being stayed at, named as it is spelled in Suppliers. Equals supplierName on a standalone stay; on a rail booking with a hotel night it names the hotel, not the train",
+    kind: "scalar",
+    sample: "Kruger Shalati - Train on the Bridge",
+    group: "stay",
+  },
+  { name: "checkInDate", description: "Date the guest checks in to the property", kind: "scalar", sample: "05 May 2026", group: "stay" },
+  {
+    name: "checkOutDate",
+    description: "Date the guest checks out — derived from the check-in date plus the night count, never stored separately",
+    kind: "scalar",
+    sample: "08 May 2026",
+    group: "stay",
+  },
+  { name: "nights", description: "Number of nights stayed, as a plain number", kind: "scalar", sample: "3", group: "stay" },
+  {
+    name: "mealPlan",
+    description: "Meal plan / board basis booked at the property (a hotel supplier's \"route\" is its meal plan)",
+    kind: "scalar",
+    sample: "All-inclusive",
+    group: "stay",
+  },
+  { name: "checkInTime", description: "Property's check-in time (falls back to the app-wide default in Settings)", kind: "scalar", sample: "14h00", group: "stay" },
+  { name: "checkOutTime", description: "Property's check-out time (falls back to the app-wide default in Settings)", kind: "scalar", sample: "11h00", group: "stay" },
+  { name: "propertyLocation", description: "Where the property is, as captured on the supplier record", kind: "scalar", sample: "Kruger National Park", group: "stay" },
+  {
+    name: "propertyAddress",
+    description: "The property's street address, for a directions or arrival paragraph",
+    kind: "scalar",
+    sample: "Selati Station & Bridge, Skukuza Rest Camp, Kruger National Park",
+    group: "stay",
+  },
+  { name: "guestCount", description: "Guests as one phrase, pluralised", kind: "scalar", sample: "2 Adults + 1 Child" },
+  { name: "adultCount", description: "Number of adults, as a plain number", kind: "scalar", sample: "2" },
+  { name: "childCount", description: "Number of children, as a plain number", kind: "scalar", sample: "1" },
   // Hidden while the quote reference is disabled — still substituted at send
   // time so a customised template containing either token keeps working.
   ...(QUOTE_REFERENCE_ENABLED

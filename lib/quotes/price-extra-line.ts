@@ -20,7 +20,8 @@ import {
 } from "@/lib/pricing/commission"
 import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
-import { rateCardFares } from "@/lib/pricing/passenger-fares"
+import { hotelRateCardFares, rateCardFares } from "@/lib/pricing/passenger-fares"
+import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 
 export interface ExtraLineSelection {
@@ -122,7 +123,7 @@ export async function priceExtraLineItems(
       supabase
         .from("suppliers")
         .select(
-          "id, name, kind, infant_max_age, child_max_age, base_rate_type_id, quote_rate_type_id, transfer_pricing_basis",
+          "id, name, kind, infant_max_age, child_max_age, base_rate_type_id, quote_rate_type_id, transfer_pricing_basis, accommodation_pricing_basis",
         )
         .eq("id", supplierId)
         .single(),
@@ -329,9 +330,31 @@ export async function priceExtraLineItems(
     rowBasis: null,
     supplierBasis: supplierRow.transfer_pricing_basis,
   })
-  if (kind === "hotel_property") {
+  // An ad-hoc extra has no booking_services row of its own to carry a per-stay override, so its
+  // basis comes purely from the property's current default (see
+  // lib/pricing/accommodation-basis.ts resolveAccommodationPricingBasis).
+  const accommodationBasis = resolveAccommodationPricingBasis({
+    supplierKind: kind,
+    rowBasis: null,
+    supplierBasis: supplierRow.accommodation_pricing_basis,
+  })
+  if (kind === "hotel_property" && accommodationBasis === "per_room") {
+    // Rooms x nights at a flat room rate. `quantity` is the night count for a hotel extra.
     const nights = Math.max(1, quantity ?? 1)
     addLine(description, Math.max(1, job.no_of_suites) * nights, unit, "included")
+  } else if (kind === "hotel_property") {
+    // Per person per night, the way the package pricer has always charged a hotel stay. This
+    // branch used to charge rooms x nights at the per-person rate whatever the basis, which
+    // billed a double room as a single and dropped children and infants from the quote entirely.
+    const nights = Math.max(1, quantity ?? 1)
+    for (const fare of hotelRateCardFares(fareCard)) {
+      addLine(
+        `${description} - ${fare.label}`,
+        { adultCount, childCount, infantCount }[fare.key] * nights,
+        fare.unitPrice,
+        fare.kind,
+      )
+    }
   } else if (kind === "transfers" && transferBasis === "per_person") {
     for (const fare of rateCardFares(fareCard)) {
       addLine(`${description} - ${fare.label}`, { adultCount, childCount, infantCount }[fare.key], fare.unitPrice, fare.kind)

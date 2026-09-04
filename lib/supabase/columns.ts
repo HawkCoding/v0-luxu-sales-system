@@ -9,9 +9,10 @@ export const BOOKING_COLUMNS =
 
 export const BOOKING_WITH_ROUTE_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, name)`
 
-// Adds the booking's resolvable supplier (via its route, or its hotel supplier)
-// so list views can show the real supplier instead of guessing from the route name.
-export const BOOKING_WITH_SUPPLIER_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name)`
+// Adds the booking's resolvable supplier (its primary supplier, or via its route, or its hotel
+// supplier) so list views can show the real supplier instead of guessing from the route name.
+// primary_supplier is the only one a standalone hotel stay has -- it carries no route at all.
+export const BOOKING_WITH_SUPPLIER_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), primary_supplier:suppliers!bookings_primary_supplier_id_fkey(id, name)`
 
 /** BOOKING_COLUMNS without raw_text / email_import_raw_preview, for list reads across
  * every /api/data page. Neither field renders in any list view — the raw enquiry text

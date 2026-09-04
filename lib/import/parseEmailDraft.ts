@@ -71,6 +71,9 @@ export interface ParsedDraft {
    *  no such block exists at all (e.g. the public web form, which gates acceptance itself). */
   termsAccepted: boolean
   notes: string
+  /** The customer's own free text from the form's "Additional Comments" box. Distinct from
+   *  `notes`, which is the consultant's typing on the review screen and starts empty. */
+  customerComments: string
   formFields: {
     title: string
     country: string
@@ -237,6 +240,14 @@ const FORM_FIELD_LABEL_PATTERNS = [
   /^contact\s+information$/i,
   /^.+\s+information$/i,
   /^additional\s+pre\s+and\s+post\s+train\s+travel\s+services$/i,
+  // The Shalati form closes with a free-text "Additional Comments" box, directly under the
+  // travel-services answer with no blank line between them. Without this the block reader ran past
+  // it and swallowed the label plus the customer's comment into the services answer -- turning a
+  // bare "No" into multi-line free text, which then read as "services requested = Yes".
+  /^additional\s+comments?$/i,
+  // Boundary only -- the same section asks about an airport transfer just above the travel-services
+  // question. Reading its value is not wired up; it is listed so a block reader stops at it.
+  /^do\s+you\s+require\s+airport\s+transfer/i,
 ]
 
 // Some Gravity Forms notification templates wrap labels in markdown-style emphasis
@@ -316,8 +327,17 @@ function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
  *
  * A same-line value (`Label: value`) is returned as-is -- that shape is always a single-line
  * answer, and continuing past it would sweep in whatever unrelated line followed.
+ *
+ * `keepBlankLines` is for a genuine message box rather than a short answer: a customer writing
+ * "Hi there," / blank / a paragraph / blank / "Thank you!" loses everything after the greeting
+ * otherwise. It reads to the next recognised label instead, so it must only be used for fields the
+ * template follows with one (Additional Comments is followed by Consent).
  */
-function getLabeledFieldBlock(text: string, labelPatterns: RegExp[]): string {
+function getLabeledFieldBlock(
+  text: string,
+  labelPatterns: RegExp[],
+  { keepBlankLines = false }: { keepBlankLines?: boolean } = {},
+): string {
   const lines = text.split(/\r?\n/)
 
   for (const rawLine of lines) {
@@ -354,13 +374,16 @@ function getLabeledFieldBlock(text: string, labelPatterns: RegExp[]): string {
     for (; cursor < lines.length; cursor += 1) {
       const line = lines[cursor].trim()
       if (!line) {
-        if (collected.length > 0) break
+        if (collected.length === 0) continue
+        if (!keepBlankLines) break
+        collected.push(line)
         continue
       }
       if (isFormFieldLabel(line)) break
       collected.push(line)
     }
 
+    while (collected.length > 0 && !collected[collected.length - 1]) collected.pop()
     if (collected.length > 0) return collected.join("\n")
   }
 
@@ -722,11 +745,19 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   ])
   // A bare Yes/No is the flag only -- anything else is the customer describing what they want,
   // which is how the Quote form has always carried its detail.
-  const answerIsBareFlag = /^(?:yes|no)$/i.test(additionalServicesAnswer.trim())
+  //
+  // The flag is read from the FIRST line rather than the whole block: when a template puts an
+  // unrecognised label right under the answer, the block reader carries that label and its value
+  // along (see the "Additional Comments" boundary above). Trusting the joined block there flipped
+  // a "No" answer to "Yes" and stored the next field's text as the service detail. Lines after a
+  // bare flag are never detail -- the Availability form keeps its detail in "Briefly explain".
+  const answerLines = additionalServicesAnswer.split('\n').map((line) => line.trim())
+  const firstAnswerLine = answerLines.find((line) => line.length > 0) ?? ''
+  const answerIsBareFlag = /^(?:yes|no)$/i.test(firstAnswerLine)
   const additionalServicesDetails =
     additionalServicesExplanation || (answerIsBareFlag ? '' : additionalServicesAnswer)
   const additionalServicesRequested = answerIsBareFlag
-    ? /^yes$/i.test(additionalServicesAnswer.trim())
+    ? /^yes$/i.test(firstAnswerLine)
     : Boolean(additionalServicesDetails)
   if (additionalServicesAnswer || additionalServicesDetails) {
     confidence['additionalServices.requested'] = 'high'
@@ -1009,6 +1040,12 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   // card). What the consultant types here is theirs, and is saved as a booking note.
   const notes = ''
 
+  // The customer's own comment box, kept separate from `notes` above so the review modal's
+  // "Additional Notes" field stays the consultant's. Stored as a booking note by both import paths.
+  const customerComments = getLabeledFieldBlock(text, [/^additional\s+comments?$/i], {
+    keepBlankLines: true,
+  })
+
   return {
     customer: {
       title,
@@ -1048,6 +1085,7 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
     },
     termsAccepted,
     notes,
+    customerComments,
     formFields: {
       title,
       country,

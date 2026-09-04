@@ -1459,6 +1459,196 @@ describe("PATCH /api/suppliers/[slug]", () => {
     })
   })
 
+  // The accommodation counterpart: a per-room hotel's card price is the whole room's nightly rate,
+  // so its child/infant fare columns have nothing left to mean and are nulled the same way a flat
+  // per-vehicle transfer's are.
+  describe("hotel rate card pricing by basis", () => {
+    const MEAL_PLAN_ID = "00000000-0000-4000-8000-0000000000f1"
+    const RATE_TYPE_ID = "00000000-0000-4000-8000-0000000000f2"
+    const ROOM_TYPE_ID = "00000000-0000-4000-8000-0000000000f3"
+
+    function setup(accommodationPricingBasis: "per_person" | "per_room") {
+      const rateCardUpsertPayloads: Array<unknown> = []
+      const supplierUpdatePayloads: Array<Record<string, unknown>> = []
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      mockAuth()
+      helperMocks.loadSupplierDetail.mockResolvedValue({
+        supplier: {
+          ...supplierRow,
+          kind: "hotel_property",
+          accommodation_pricing_basis: accommodationPricingBasis,
+        },
+        suiteTypes: [
+          {
+            id: ROOM_TYPE_ID,
+            supplier_id: SUPPLIER_ID,
+            name: "Luxury Room",
+            active: true,
+            sort_order: 0,
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        emails: [],
+        routes: [],
+        stationAddresses: [],
+        rateCards: [],
+        locations: [],
+        bedroomTypes: [],
+        bedroomLayouts: [],
+        bathroomTypes: [],
+        suiteTypeBedroomTypes: [],
+        suiteTypeBedroomLayouts: [],
+        suiteTypeBathroomTypes: [],
+        rateTypes: [{ id: RATE_TYPE_ID, code: "standard", name: "Standard", archived_at: null }],
+        inclusionLines: [],
+      })
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") {
+          return {
+            update: (payload: Record<string, unknown>) => {
+              supplierUpdatePayloads.push(payload)
+              return supplierUpdateQuery
+            },
+          }
+        }
+        if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+        if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+        if (table === "routes") return { upsert: async () => ({ error: null }) }
+        if (table === "rate_cards") {
+          return {
+            upsert: async (payload: unknown) => {
+              rateCardUpsertPayloads.push(payload)
+              return { error: null }
+            },
+          }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        if (
+          table === "suite_type_bedroom_types" ||
+          table === "suite_type_bedroom_layouts" ||
+          table === "suite_type_bathroom_types"
+        ) {
+          return { delete: () => ({ in: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+
+      return { rateCardUpsertPayloads, supplierUpdatePayloads }
+    }
+
+    function patchWithRateCard(accommodationPricingBasis: "per_person" | "per_room") {
+      return PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Hotel",
+            kind: "hotel_property",
+            accommodationPricingBasis,
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [{ id: ROOM_TYPE_ID, name: "Luxury Room", active: true }],
+            routes: [
+              {
+                id: MEAL_PLAN_ID,
+                name: "Bed & Breakfast",
+                directionMode: "one_way",
+                active: true,
+                rateCards: [
+                  {
+                    routeId: MEAL_PLAN_ID,
+                    suiteTypeId: ROOM_TYPE_ID,
+                    rateTypeId: RATE_TYPE_ID,
+                    pricePerPerson: 4000,
+                    childPrice: 2000,
+                    infantPrice: 500,
+                    currency: "ZAR",
+                    validFrom: "2026-01-01",
+                    validTo: null,
+                  },
+                ],
+              },
+            ],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+    }
+
+    it("keeps the typed child/infant fares for a per-person hotel", async () => {
+      const { rateCardUpsertPayloads } = setup("per_person")
+      const response = await patchWithRateCard("per_person")
+
+      expect(response.status).toBe(200)
+      const rows = rateCardUpsertPayloads[0] as Array<{ child_price: number | null; infant_price: number | null }>
+      expect(rows[0].child_price).toBe(2000)
+      expect(rows[0].infant_price).toBe(500)
+    })
+
+    it("nulls child/infant fares for a per-room hotel", async () => {
+      const { rateCardUpsertPayloads } = setup("per_room")
+      const response = await patchWithRateCard("per_room")
+
+      expect(response.status).toBe(200)
+      const rows = rateCardUpsertPayloads[0] as Array<{ child_price: number | null; infant_price: number | null }>
+      expect(rows[0].child_price).toBeNull()
+      expect(rows[0].infant_price).toBeNull()
+    })
+
+    it("normalises the basis back to per_person when the kind is not a hotel", async () => {
+      const { supplierUpdatePayloads } = setup("per_person")
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Hotel",
+            kind: "train_operator",
+            accommodationPricingBasis: "per_room",
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [],
+            routes: [],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      // The DB's suppliers_accommodation_pricing_basis_kind_check would reject this; normalising
+      // here means a stale client form can never make that constraint fire.
+      expect(supplierUpdatePayloads[0]).toMatchObject({ accommodation_pricing_basis: "per_person" })
+    })
+  })
+
   describe("transfer rate card pricing by basis", () => {
     const ROUTE_ID = "00000000-0000-4000-8000-0000000000e1"
     const RATE_TYPE_ID = "00000000-0000-4000-8000-0000000000e2"

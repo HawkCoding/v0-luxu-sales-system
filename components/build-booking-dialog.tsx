@@ -1190,15 +1190,6 @@ export function BuildBookingDialog({
               onRateChange={setFxRate}
             />
 
-            {hasAutoFilledServices && (
-              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
-                <p className="text-sm">
-                  Some services below were filled in automatically from the enquiry. Check the dates,
-                  suites and rates — they are recorded as reviewed when you apply this to the quote.
-                </p>
-              </div>
-            )}
-
             {!hasAutoFilledServices && confirmedStamp && (
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Check className="h-3.5 w-3.5" />

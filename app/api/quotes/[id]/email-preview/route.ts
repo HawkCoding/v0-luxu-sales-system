@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
-import { formatDisplayDateLong } from "@/lib/date-format"
+import { formatDisplayDateLong, formatDisplayDateShort } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
@@ -224,7 +224,8 @@ export async function POST(req: Request, { params }: RouteParams) {
       validityDate: formatDisplayDateLong(quote.validity_until) || "To be confirmed",
       tripStartDate: formatDisplayDateLong(journey.start) || "To be confirmed",
       departureDate: formatDisplayDateLong(trainDeparture ?? journey.start) || "To be confirmed",
-      departureDateShort: formatDisplayDateLong(trainDeparture ?? journey.start) || "TBC",
+      // Abbreviated month, unlike departureDate above -- this one goes in the subject line.
+      departureDateShort: formatDisplayDateShort(trainDeparture ?? journey.start) || "TBC",
       // The quoted route wins, then the booking's own. Falling straight to "your journey"
       // from there threw away resolveSharedEmailTokens' answer -- which on a standalone stay
       // (no route at all) is the stay's length, and produced "On the your journey departure"
