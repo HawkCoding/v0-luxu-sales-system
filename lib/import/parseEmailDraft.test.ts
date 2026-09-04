@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   countRequiredComplete,
+  isStayDraft,
   parseEmailDraft,
   validateDraft,
   type ParsedDraft,
@@ -1007,5 +1008,87 @@ describe("standalone hotel (stay) enquiries", () => {
 
     expect(draft.trip.supplier).toBe("Rovos Rail")
     expect(draft.trip.supplierKind).toBe("train_operator")
+  })
+})
+
+/**
+ * Characterization tests for the generalisation of the primary-product feature to every
+ * SupplierKind. `isStayDraft` (hotel vs everything else) becomes a per-kind lookup, and the
+ * required-field count stops being a single constant. Both shapes are pinned here first.
+ */
+describe("intake shape — behaviour frozen before the kind generalisation", () => {
+  const SUPPLIERS = [
+    { name: "Rovos Rail", kind: "train_operator" as const },
+    { name: "Kruger Shalati - Train on the Bridge", kind: "hotel_property" as const },
+  ]
+
+  const emptyStay = () =>
+    parseEmailDraft("", {
+      subject: "New submission from Kruger Shalati Enquiry",
+      standaloneSuppliers: SUPPLIERS,
+    })
+
+  it("a stay reports its own nine required fields, in order", () => {
+    const result = validateDraft(emptyStay())
+
+    expect(result.isValid).toBe(false)
+    expect(result.missingRequired).toEqual([
+      "First name (Customer)",
+      "Surname (Customer)",
+      "Country",
+      "Email or Phone (Customer)",
+      "Check-in date",
+      "Check-out date",
+      "Adults",
+      "Rooms",
+    ])
+  })
+
+  // The supplier resolved off the subject line, so "Supplier" is absent from the list above while
+  // the journey shape (empty draft, no subject) still reports it. Both totals are nine.
+  it("both shapes count nine required fields", () => {
+    expect(countRequiredComplete(emptyStay()).total).toBe(9)
+    expect(countRequiredComplete(parseEmailDraft("")).total).toBe(9)
+  })
+
+  it("a stay counts check-in and check-out where a journey counts route and departure", () => {
+    const stay = parseEmailDraft("Check-in Date\n \t 05/05/2026\nCheck-out Date\n \t 07/05/2026", {
+      subject: "New submission from Kruger Shalati Enquiry",
+      standaloneSuppliers: SUPPLIERS,
+    })
+    // supplier + check-in + check-out
+    expect(countRequiredComplete(stay).completed).toBe(3)
+
+    const journey = parseEmailDraft("Direction\n \t Pretoria to Cape Town\nDeparture Date\n \t 15/05/2026", {
+      subject: "New submission from Rovos Rail",
+      standaloneSuppliers: SUPPLIERS,
+    })
+    // supplier + route + departure
+    expect(countRequiredComplete(journey).completed).toBe(3)
+  })
+
+  /**
+   * An unresolved supplier is the default state of every draft before the consultant picks one, and
+   * it validates as a journey. Any per-kind lookup replacing isStayDraft has to keep that fallback,
+   * or a half-parsed draft would start demanding a check-out date.
+   */
+  it("an unresolved supplier kind validates as a journey", () => {
+    const draft = parseEmailDraft("")
+
+    expect(draft.trip.supplierKind).toBe("")
+    expect(isStayDraft(draft)).toBe(false)
+    expect(validateDraft(draft).missingRequired).toContain("Route / Direction")
+    expect(validateDraft(draft).missingRequired).toContain("Departure date")
+  })
+
+  // Nights are the whole price of a stay, so the parser derives them rather than asking. Frozen
+  // because the same arithmetic has to serve a "days" kind unchanged.
+  it("derives the night count from the date range", () => {
+    const draft = parseEmailDraft("Check-in Date\n \t 05/05/2026\nCheck-out Date\n \t 12/05/2026", {
+      subject: "New submission from Kruger Shalati Enquiry",
+      standaloneSuppliers: SUPPLIERS,
+    })
+
+    expect(draft.trip.nights).toBe(7)
   })
 })
