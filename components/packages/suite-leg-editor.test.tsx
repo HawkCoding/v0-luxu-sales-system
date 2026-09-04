@@ -14,6 +14,7 @@ const leg: PackageLeg = {
   supplierKind: "train_operator",
   pricingMode: "rate_card",
   transferPricingBasis: "per_vehicle",
+  accommodationPricingBasis: "per_person",
   baseRateTypeId: null,
   quoteRateTypeId: null,
   inheritedRateTypeName: null,
@@ -43,6 +44,7 @@ function makeLegState(units: SuiteLegState["units"]): SuiteLegState {
     kind: "suite",
     legId: "leg-1",
     supplierKind: "train_operator",
+    accommodationPricingBasis: "per_person",
     selected: true,
     routeId: null,
     reversed: false,
@@ -183,6 +185,7 @@ function makeHotelState(overrides: Partial<SuiteLegState["units"][number]> = {})
     kind: "suite",
     legId: "leg-hotel",
     supplierKind: "hotel_property",
+    accommodationPricingBasis: "per_person",
     selected: true,
     routeId: "route-1",
     reversed: false,
@@ -335,6 +338,79 @@ describe("SuiteLegEditor room price override", () => {
       }),
     )
   })
+
+  // The card is R4 250 per person and the room holds two adults, so the room costs R8 500 a night.
+  // Quoting the bare card price here told the consultant it cost half that, and the override
+  // placeholder invited them to type that halved figure in.
+  it("quotes the rate card as what this room costs a night, not as one guest's fare", () => {
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
+
+    expect(screen.getByText(/8[\s,]?500/)).toBeInTheDocument()
+    expect(screen.getByText(/per night for this room/i)).toBeInTheDocument()
+  })
+
+  it("quotes the card as the room's flat nightly rate when the stay prices per room", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), accommodationPricingBasis: "per_room" }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/4[\s,]?250/)).toBeInTheDocument()
+    expect(screen.getByText(/per room per night/i)).toBeInTheDocument()
+  })
+
+  it("costs a gifted first night off the room's real nightly rate", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={makeHotelState({ complimentaryFirstNight: true })}
+        onChange={vi.fn()}
+      />,
+    )
+
+    // Three nights, one gifted, two charged at R8 500 = R17 000 -- not 2 x R4 250.
+    expect(screen.getByText(/2 of 3 nights at .*=.*17[\s,]?000/)).toBeInTheDocument()
+  })
+})
+
+describe("SuiteLegEditor accommodation pricing basis", () => {
+  it("renders the per-room switch on a hotel leg, off by default", () => {
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
+
+    expect(screen.getByLabelText(/price this stay per room/i)).not.toBeChecked()
+  })
+
+  it("switches the stay to per_room without touching anything else", () => {
+    const onChange = vi.fn()
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={onChange} />)
+
+    fireEvent.click(screen.getByLabelText(/price this stay per room/i))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ accommodationPricingBasis: "per_room", nights: 3 }),
+    )
+  })
+
+  it("says so when the stay's basis no longer matches the property's", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), accommodationPricingBasis: "per_room" }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByLabelText(/price this stay per room/i)).toBeChecked()
+    expect(screen.getByText(/this stay overrides that/i)).toBeInTheDocument()
+  })
+
+  it("is not rendered for a non-hotel leg", () => {
+    render(<SuiteLegEditor leg={leg} value={makeLegState(mismatchedUnits)} onChange={vi.fn()} />)
+
+    expect(screen.queryByLabelText(/price this stay per room/i)).not.toBeInTheDocument()
+  })
 })
 
 const airlineRoutes: PackageLeg["routes"] = [
@@ -389,6 +465,7 @@ function makeAirlineState(overrides: Partial<SuiteLegState> = {}): SuiteLegState
     kind: "suite",
     legId: "leg-airline",
     supplierKind: "airline",
+    accommodationPricingBasis: "per_person",
     selected: true,
     routeId: null,
     reversed: false,

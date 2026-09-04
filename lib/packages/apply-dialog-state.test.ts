@@ -30,6 +30,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierDescription: null,
     pricingMode: "rate_card",
     transferPricingBasis: "per_vehicle",
+    accommodationPricingBasis: "per_person",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,
@@ -487,6 +488,53 @@ describe("hydrateFromSaved", () => {
     expect(hotel.selected).toBe(false)
     expect(hotel.units).toHaveLength(1)
     expect(hotel.units[0].id.startsWith("draft-")).toBe(true)
+  })
+
+  it("keeps a saved stay's own pricing basis when the property has since switched", () => {
+    const perRoomPkg = detail(
+      pkg.legs.map((packageLeg) =>
+        packageLeg.id === "leg-hotel"
+          ? { ...packageLeg, accommodationPricingBasis: "per_room" as const }
+          : packageLeg,
+      ),
+    )
+    const savedStay: SavedPackageState = {
+      ...saved,
+      selections: [
+        ...saved.selections,
+        {
+          id: "sel-hotel",
+          package_leg_id: "leg-hotel",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-hotel",
+          route_id: "route-bb",
+          route_reversed: false,
+          suite_type_id: null,
+          service_date: "2026-09-04",
+          nights: 2,
+          rate_type_id: null,
+          notes: null,
+          accommodation_pricing_basis: "per_person",
+          units: [],
+        },
+      ],
+    }
+
+    const states = hydrateFromSaved(perRoomPkg, savedStay, [savedRequest], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-hotel").accommodationPricingBasis).toBe("per_person")
+  })
+
+  it("inherits the property's basis for a stay that has none of its own", () => {
+    const perRoomPkg = detail(
+      pkg.legs.map((packageLeg) =>
+        packageLeg.id === "leg-hotel"
+          ? { ...packageLeg, accommodationPricingBasis: "per_room" as const }
+          : packageLeg,
+      ),
+    )
+    const states = hydrateFromSaved(perRoomPkg, saved, [savedRequest], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-hotel").accommodationPricingBasis).toBe("per_room")
   })
 })
 

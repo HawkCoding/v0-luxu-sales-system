@@ -24,6 +24,8 @@ import {
   hasAnyRateCardForRateType,
 } from "@/lib/rate-cards/resolve"
 import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
+import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
+import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 
 /**
  * Pure state model for Build Booking's configure step (components/build-booking-dialog.tsx --
@@ -129,6 +131,10 @@ export interface SuiteLegState {
   /** Hotel legs only: the property lets guests store luggage at reception, printed as a suffix on
    *  the quote itinerary's check-out line. */
   luggageStorageAvailable: boolean
+  /** Hotel legs only: how this stay prices — per person per night, or one flat nightly room rate.
+   *  Seeded from the property's default and then owned by the stay, so switching the property
+   *  never re-prices a stay already quoted. See lib/pricing/accommodation-basis.ts. */
+  accommodationPricingBasis: AccommodationPricingBasis
   /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
   rateTypeId: string | null
   /** The currency this leg's hand-typed fares are in (manual-pricing legs only). Rate-card legs
@@ -222,6 +228,9 @@ export interface SavedSelectionRow {
   price_currency?: string | null
   /** Hotel legs only; absent on a catalogue selection row. */
   luggage_storage_available?: boolean | null
+  /** Hotel legs only; absent on a catalogue selection row. NULL means the stay predates the
+   *  column, in which case the property's current default applies. */
+  accommodation_pricing_basis?: AccommodationPricingBasis | null
   /** Absent on a catalogue selection row; present on a booking_services row. */
   booking_date?: string | null
   confirmation_date?: string | null
@@ -461,6 +470,12 @@ function buildRawDefaultLegStates(
       dateAnchor: isHotel || isAirline ? leg.dateAnchor ?? "custom" : null,
       notes: null,
       luggageStorageAvailable: false,
+      // A brand-new stay inherits the property's current default, exactly as the DB trigger would.
+      accommodationPricingBasis: resolveAccommodationPricingBasis({
+        supplierKind: leg.supplierKind,
+        rowBasis: null,
+        supplierBasis: leg.accommodationPricingBasis,
+      }),
       rateTypeId: null,
       priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
       units: [createDraftUnit(totals)],
@@ -828,6 +843,14 @@ export function hydrateFromSaved(
         isHotel || isAirline ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
       notes: row.notes,
       luggageStorageAvailable: isHotel ? row.luggage_storage_available ?? false : false,
+      // The saved stay's own basis wins; a row with none falls back to the property's default
+      // (the same order the pricer resolves in).
+      accommodationPricingBasis: resolveAccommodationPricingBasis({
+        supplierKind: fallback.supplierKind,
+        rowBasis: row.accommodation_pricing_basis,
+        // fallback already carries the property's current default (createDraftLeg resolved it).
+        supplierBasis: leg?.accommodationPricingBasis ?? fallback.accommodationPricingBasis,
+      }),
       rateTypeId: row.rate_type_id ?? fallback.rateTypeId,
       priceCurrency: row.price_currency ?? fallback.priceCurrency,
       units: units.length > 0 ? units : fallback.units,
@@ -869,6 +892,8 @@ export interface PackageSelectionsPatchBody {
     notes?: string | null
     /** Hotel legs only — the server rejects it on any other supplier kind. */
     luggageStorageAvailable?: boolean
+    /** Hotel legs only — the server rejects it on any other supplier kind. */
+    accommodationPricingBasis?: AccommodationPricingBasis
     bookingDate?: string | null
     confirmationDate?: string | null
     paymentMadeDate?: string | null
@@ -947,7 +972,10 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
         // Sent only for hotels: the server refuses this field on any other kind (see the guard
         // in PATCH /api/jobs/[id]/services).
         ...(state.supplierKind === "hotel_property"
-          ? { luggageStorageAvailable: state.luggageStorageAvailable }
+          ? {
+              luggageStorageAvailable: state.luggageStorageAvailable,
+              accommodationPricingBasis: state.accommodationPricingBasis,
+            }
           : {}),
         bookingDate: state.bookingDate,
         confirmationDate: state.confirmationDate,

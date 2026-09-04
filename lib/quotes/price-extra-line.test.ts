@@ -48,6 +48,8 @@ function buildSupabase(
     base_rate_type_id: null,
     quote_rate_type_id: null,
   },
+  /** Lets a test swap the supplier's kind and pricing basis without restating the whole row. */
+  supplierOverrides: Record<string, unknown> = {},
 ) {
   const results: Record<string, { data: unknown; error: null }> = {
     bookings: {
@@ -62,6 +64,7 @@ function buildSupabase(
         infant_max_age: null,
         child_max_age: null,
         ...supplierRateTiers,
+        ...supplierOverrides,
       },
       error: null,
     },
@@ -148,6 +151,50 @@ describe("priceExtraLineItems", () => {
 
   it("reports the date, not the rate type, when nothing covers the travel date", async () => {
     await expect(price("2020-01-01", SADC)).rejects.toThrow(/No rate card covers 2020-01-01/)
+  })
+
+  // An ad-hoc hotel extra used to price at no_of_suites x nights off the per-person rate whatever
+  // the property's basis -- billing a double room as a single, and dropping children entirely.
+  describe("a hotel extra", () => {
+    function priceStay(basis: "per_person" | "per_room", nights: number) {
+      return priceExtraLineItems({
+        supabase: buildSupabase(
+          [SADC_2026, BTLD_OPEN],
+          { base_rate_type_id: null, quote_rate_type_id: null },
+          { kind: "hotel_property", accommodation_pricing_basis: basis },
+        ),
+        jobId: JOB_ID,
+        travelDate: "2026-08-25",
+        supplierId: SUPPLIER_ID,
+        routeId: ROUTE_ID,
+        suiteTypeId: SUITE_ID,
+        rateTypeId: SADC,
+        fallbackRateTypeId: BTLD,
+        quantity: nights,
+      })
+    }
+
+    it("prices per person per night, matching the package pricer, when the property is per_person", async () => {
+      const { lineItems } = await priceStay("per_person", 3)
+
+      // The booking is 2 adults and 1 child aged 8.
+      const adult = lineItems.find((li) => li.description.endsWith("Adult"))
+      const child = lineItems.find((li) => li.description.endsWith("Child"))
+      expect(adult?.qty).toBe(6)
+      expect(adult?.unitPrice).toBe(22500)
+      expect(child?.qty).toBe(3)
+      expect(child?.unitPrice).toBe(11250)
+    })
+
+    it("prices rooms x nights at the flat room rate when the property is per_room", async () => {
+      const { lineItems } = await priceStay("per_room", 3)
+
+      // One room on the booking, three nights, one line -- no per-guest breakdown.
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0].qty).toBe(3)
+      expect(lineItems[0].unitPrice).toBe(22500)
+      expect(lineItems[0].pricingSnapshot?.passengerKind).toBe("included")
+    })
   })
 
   describe("the supplier's quoted rate", () => {

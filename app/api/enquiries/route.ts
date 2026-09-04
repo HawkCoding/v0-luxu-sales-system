@@ -242,6 +242,9 @@ const enquiryBodySchema = z.object({
   rawText: z.string().max(100_000).nullish(),
   // Free text typed on the review screen; saved as the booking's first internal note.
   notes: z.string().trim().max(5000).nullish(),
+  // The customer's own "Additional Comments" text from the form; saved as its own note, labelled
+  // so it reads as the customer's words rather than the consultant's.
+  customerComments: z.string().trim().max(5000).nullish(),
   // Only honoured for authenticated sessions — see POST below.
   linkedCustomerId: z.string().uuid().nullish().catch(null),
   direction: z.string().trim().max(255).nullish(),
@@ -294,6 +297,17 @@ const enquiryBodySchema = z.object({
   childTravellers: z.array(travellerInputSchema).max(100).nullish(),
   transportRequests: z.array(transportRequestInputSchema).max(50).nullish(),
 })
+
+/**
+ * Reads a Yes/No answer that may arrive as a boolean (the review screen) or as the form's own
+ * wording (the public website). A bare `!!` is wrong here: the schema allows a string, and
+ * `!!("No")` is true, so every declined answer stored as an affirmative one.
+ */
+export function readYesNoFlag(value: boolean | string | null | undefined): boolean {
+  if (typeof value === "boolean") return value
+  if (typeof value !== "string") return false
+  return /^(?:yes|true|1)$/i.test(value.trim())
+}
 
 interface EnquiryFormFieldEdits {
   province?: string | null
@@ -551,7 +565,7 @@ export async function POST(req: Request) {
       hotel_phase: body.hotelPhase || "none",
       extend_stay: body.extendStay === "yes" || body.extendStay === true || false,
       extra_nights: body.extraNights ? Number(body.extraNights) : null,
-      additional_services: !!(body.additionalServices),
+      additional_services: readYesNoFlag(body.additionalServices),
       additional_services_details: body.additionalServicesDetails || null,
       promotion_code: body.promotionCode || null,
     })
@@ -572,6 +586,18 @@ export async function POST(req: Request) {
       body: enquiryNote,
     })
     if (noteError) console.error("enquiries:bookingNote", noteError)
+  }
+
+  // The customer's own "Additional Comments" text. Kept as a separate note, and labelled, so it is
+  // never mistaken for the consultant's note above.
+  const customerComments = body.customerComments?.trim()
+  if (customerComments) {
+    const { error: commentsError } = await supabase.from("booking_notes").insert({
+      booking_id: booking.id,
+      author_id: null,
+      body: `From enquiry form — Additional Comments:\n${customerComments}`,
+    })
+    if (commentsError) console.error("enquiries:customerComments", commentsError)
   }
 
   // --- 3. Insert booking_suites ---

@@ -1,4 +1,4 @@
-import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
+import { SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY, type SupplierKind } from "@/lib/types"
 
 export type ReadinessState = "not_built" | "auto_built" | "confirmed"
 
@@ -108,6 +108,15 @@ const NON_TRANSPORT_UNIT_KINDS = new Set<SupplierKind>([
   "tour_operator",
   "airline",
 ])
+/**
+ * Kinds whose leg cannot be priced without a route row chosen. A hotel's "route" is its meal plan
+ * (SUPPLIER_VOCABULARY relabels the same table per kind), and rate_cards key off it — so a hotel
+ * leg with none set prices off nothing and renders an empty {{mealPlan}} on the quote email. This
+ * was invisible while Kruger Shalati filed exactly one meal plan and auto-build filled it in;
+ * a second one, or any other lodge, makes it reachable. Transfers and rentals are deliberately
+ * absent: their route is optional, and flagging it would fire on legs that are already complete.
+ */
+const ROUTE_REQUIRED_KINDS = new Set<SupplierKind>(["train_operator", "hotel_property"])
 
 function hasText(value: string | null | undefined): boolean {
   return Boolean(value?.trim())
@@ -119,23 +128,36 @@ function hasText(value: string | null | undefined): boolean {
 export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): EnquiryReadiness {
   const orderedServices = [...input.services].sort((a, b) => a.sortOrder - b.sortOrder)
 
-  const services: ReadinessServiceRow[] = orderedServices.map((service) => {
-    const issues: string[] = []
-    if (service.selected && !service.serviceDate) issues.push("No date set")
-    if (service.supplierKind === "train_operator" && !service.routeId) issues.push("No route chosen")
-    if (
+  // The blockers below are derived from these same facts rather than by matching the issue
+  // strings back out of the row. Wording is per-supplier vocabulary now ("no meal plan chosen" on
+  // a lodge), so a string match would have silently stopped blocking the moment the words changed.
+  const assessed = orderedServices.map((service) => {
+    const vocabulary = service.supplierKind ? SUPPLIER_VOCABULARY[service.supplierKind] : null
+
+    // A hotel's "route" is its meal plan, and rate cards key off it -- an unset one prices off
+    // nothing, so it blocks exactly as a train with no route does.
+    const missingRoute = Boolean(
+      service.supplierKind && ROUTE_REQUIRED_KINDS.has(service.supplierKind) && !service.routeId,
+    )
+    const missingUnits =
       service.supplierKind &&
       NON_TRANSPORT_UNIT_KINDS.has(service.supplierKind) &&
       service.unitsMissingSuiteType > 0
-    ) {
-      issues.push(
-        service.unitsMissingSuiteType === 1
-          ? "1 suite has no suite type"
-          : `${service.unitsMissingSuiteType} suites have no suite type`,
-      )
-    }
+        ? service.unitsMissingSuiteType
+        : 0
 
-    return {
+    const unitsIssue =
+      missingUnits > 0 && vocabulary
+        ? `${missingUnits} ${missingUnits === 1 ? vocabulary.unitNoun : vocabulary.unitNounPlural} ` +
+          `${missingUnits === 1 ? "has" : "have"} no ${vocabulary.suiteType.toLowerCase()}`
+        : null
+
+    const issues: string[] = []
+    if (service.selected && !service.serviceDate) issues.push("No date set")
+    if (missingRoute && vocabulary) issues.push(`No ${vocabulary.route.toLowerCase()} chosen`)
+    if (unitsIssue) issues.push(unitsIssue)
+
+    const row: ReadinessServiceRow = {
       serviceId: service.id,
       supplierName: service.supplierName,
       supplierKind: service.supplierKind,
@@ -148,7 +170,10 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
       unitCount: service.unitCount,
       issues,
     }
+    return { row, vocabulary, missingRoute, unitsIssue }
   })
+
+  const services: ReadinessServiceRow[] = assessed.map((entry) => entry.row)
 
   const state: ReadinessState =
     services.length === 0
@@ -263,8 +288,8 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
     gaps.push({
       id: "supplier_unresolved",
       severity: "warn",
-      title: `The train operator is still the customer's wording: "${input.supplierRaw}".`,
-      detail: "Confirm the operator on the service row above.",
+      title: `The supplier is still the customer's wording: "${input.supplierRaw}".`,
+      detail: "Confirm the supplier on the service row above.",
     })
   }
 
@@ -276,7 +301,9 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
       id: "no_services",
       severity: "block",
       title: "Nothing is built.",
-      detail: "The quote cannot be priced until the booking has at least a train journey.",
+      // Kind-neutral: Luxus also sells standalone stays (Kruger Shalati), which have no journey
+      // to add and were being told to add a train.
+      detail: "The quote cannot be priced until the booking has at least one service.",
     })
   }
 
@@ -311,7 +338,7 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
     })
   }
 
-  for (const service of services) {
+  for (const { row: service, vocabulary, missingRoute, unitsIssue } of assessed) {
     if (service.selected && !service.serviceDate) {
       blockers.push({
         id: `service_missing_date_${service.serviceId}`,
@@ -320,20 +347,23 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
         detail: null,
       })
     }
-    if (service.supplierKind === "train_operator" && service.issues.includes("No route chosen")) {
+    if (missingRoute && vocabulary) {
       blockers.push({
+        // Id kept as-is so anything keyed on it keeps working; only trains and lodges reach here.
         id: `train_missing_route_${service.serviceId}`,
         severity: "block",
-        title: "The train journey has no route.",
+        title:
+          service.supplierKind === "train_operator"
+            ? "The train journey has no route."
+            : `${service.kindLabel} has no ${vocabulary.route.toLowerCase()}.`,
         detail: null,
       })
     }
-    const suiteIssue = service.issues.find((issue) => issue.includes("suite type"))
-    if (suiteIssue) {
+    if (unitsIssue) {
       blockers.push({
         id: `unit_missing_suite_type_${service.serviceId}`,
         severity: "block",
-        title: `${service.kindLabel}: ${suiteIssue.charAt(0).toLowerCase()}${suiteIssue.slice(1)}`,
+        title: `${service.kindLabel}: ${unitsIssue.charAt(0).toLowerCase()}${unitsIssue.slice(1)}`,
         detail: null,
       })
     }

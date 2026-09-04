@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
 import { WallClockTimeInput } from "@/components/ui/wall-clock-time-input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NumericInput } from "@/components/ui/numeric-input"
@@ -22,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { PackageLeg, RateType, ServiceDateAnchor, SupplierRateCard } from "@/lib/types"
+import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import {
   getSupplierVocabulary,
   isCoreBookingLeg,
@@ -114,6 +116,10 @@ interface RoomPriceOverrideProps {
   unit: SuiteUnitState
   index: number
   nights: number
+  /** How the stay prices. Under per_person the card's price is a fare per guest, so the room's
+   *  nightly cost is the card read against this room's own occupancy; under per_room the card's
+   *  price already is the room's nightly cost. */
+  basis: AccommodationPricingBasis
   /** The card this room would otherwise price off, or null when none covers it. */
   baseRateCard: SupplierRateCard | null
   /** Used for the override's currency when no rate card covers the room. */
@@ -138,6 +144,7 @@ function RoomPriceOverride({
   unit,
   index,
   nights,
+  basis,
   baseRateCard,
   fallbackCurrency,
   quoteCurrency,
@@ -165,8 +172,27 @@ function RoomPriceOverride({
   const stayTotal = Math.round(price * chargedNights * 100) / 100
   const convertedStayTotal = formatInQuoteCurrency(stayTotal, currency)
   const nightLabel = `${chargedNights} ${chargedNights === 1 ? "night" : "nights"}`
-  // What the quote will actually charge, whichever price the room is running on.
-  const effectivePrice = overridden ? price : baseRateCard?.pricePerPerson ?? null
+
+  // What the rate card costs this room for one night. Under per_person that is the card read
+  // against who is actually in the room -- the same sum the pricer does (hotelRateCardFares: an
+  // unset child or infant fare means free, never "same as an adult"). Showing the bare
+  // pricePerPerson here used to tell the consultant a double room cost half what it does.
+  const cardNightlyRoomRate =
+    baseRateCard === null
+      ? null
+      : basis === "per_room"
+        ? baseRateCard.pricePerPerson
+        : Math.round(
+            (unit.adultCount * baseRateCard.pricePerPerson +
+              unit.childCount * (baseRateCard.childPrice ?? 0) +
+              unit.infantCount * (baseRateCard.infantPrice ?? 0)) *
+              100,
+          ) / 100
+  const cardRateLabel = basis === "per_room" ? "per room per night" : "per night for this room"
+
+  // What the quote will actually charge, whichever price the room is running on. A typed override
+  // is always a room price, so it needs no occupancy sum.
+  const effectivePrice = overridden ? price : cardNightlyRoomRate
   const complimentarySummary =
     effectivePrice === null
       ? `First night complimentary · ${chargedNights} of ${nights} nights charged`
@@ -198,13 +224,13 @@ function RoomPriceOverride({
       <div className="space-y-1.5 border-t pt-3 md:col-span-2 xl:col-span-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
-            {baseRateCard ? (
+            {baseRateCard && cardNightlyRoomRate !== null ? (
               <>
                 Rate card{" "}
                 <span className="font-medium tabular-nums text-foreground">
-                  {formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)}
+                  {formatMoney(cardNightlyRoomRate, baseRateCard.currency)}
                 </span>{" "}
-                per room per night
+                {cardRateLabel}
               </>
             ) : (
               "No rate card price for this room yet"
@@ -284,8 +310,10 @@ function RoomPriceOverride({
             data-slot="input-group-control"
             className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             placeholder={
-              baseRateCard
-                ? baseRateCard.pricePerPerson.toLocaleString("en-ZA", {
+              cardNightlyRoomRate !== null
+                ? // The room rate the override would replace, so typing the same number is a no-op
+                  // rather than a silent halving of a shared room.
+                  cardNightlyRoomRate.toLocaleString("en-ZA", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })
@@ -328,8 +356,11 @@ function RoomPriceOverride({
           <p className="text-xs text-muted-foreground">
             {isComplimentary
               ? "The client's quote and voucher will show this room as complimentary."
-              : baseRateCard
-                ? `Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} per night.`
+              : baseRateCard && cardNightlyRoomRate !== null
+                ? // A typed price is always a room price. Under per_person that means it replaces
+                  // the card's whole per-guest sum for this room, not the single adult fare -- so
+                  // the figure quoted here is the one the override actually has to beat.
+                  `Replaces the rate card's ${formatMoney(cardNightlyRoomRate, baseRateCard.currency)} ${cardRateLabel}.`
                 : "No rate card covers this room, so nothing is being replaced."}
           </p>
         </div>
@@ -579,6 +610,16 @@ export function SuiteLegEditor({
   // running "X/Y adults" tally and its "Spread evenly" fixup only make sense for sleeping/seating
   // suppliers where every traveller must land in exactly one unit.
   const showPassengerSumCheck = PASSENGER_SUM_SUPPLIER_KINDS.has(leg.supplierKind)
+
+  // How this stay prices. Occupancy stays required in both bases (the voucher and worksheet read
+  // who is in which room off it); under per_room it simply stops deciding the price.
+  const perRoom = isHotel && value.accommodationPricingBasis === "per_room"
+  const basisDiffersFromSupplier =
+    isHotel && value.accommodationPricingBasis !== leg.accommodationPricingBasis
+  const roomCount = value.units.length
+  const roomCountLabel = `${roomCount} ${roomCount === 1 ? vocab.unitNoun : vocab.unitNounPlural}`
+  const stayNights = Math.max(1, value.nights ?? 1)
+  const chargedNightsLabel = `${stayNights} ${stayNights === 1 ? "night" : "nights"}`
 
   // Same two rules the server enforces, surfaced under the fields instead of arriving as a 400 the
   // consultant has to trace back. A later arrival date is legitimate (overnight flight) and gets a
@@ -933,6 +974,37 @@ export function SuiteLegEditor({
               onChange({ ...value, nights: Math.max(1, Math.floor(Number(event.target.value) || 1)) })
             }
           />
+        </div>
+      ) : null}
+
+      {isHotel ? (
+        <div className="space-y-1.5 md:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
+            <div>
+              <Label htmlFor={`room-basis-${leg.id}`} className="text-sm font-medium">
+                Price this stay per room
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {perRoom
+                  ? `One nightly rate for each room, whoever sleeps in it — ${roomCountLabel} × ${chargedNightsLabel}.`
+                  : "Each guest is charged their own nightly rate, so a room's price depends on who is in it."}
+              </p>
+              {basisDiffersFromSupplier ? (
+                <p className="text-xs text-muted-foreground">
+                  {leg.supplierName} is set to{" "}
+                  {leg.accommodationPricingBasis === "per_room" ? "per room" : "per person"} — this stay
+                  overrides that.
+                </p>
+              ) : null}
+            </div>
+            <Switch
+              id={`room-basis-${leg.id}`}
+              checked={perRoom}
+              onCheckedChange={(checked) =>
+                onChange({ ...value, accommodationPricingBasis: checked ? "per_room" : "per_person" })
+              }
+            />
+          </div>
         </div>
       ) : null}
 
@@ -1502,6 +1574,7 @@ export function SuiteLegEditor({
                     unit={unit}
                     index={index}
                     nights={nights}
+                    basis={value.accommodationPricingBasis}
                     baseRateCard={resolveRoomRateCard(unit.suiteTypeId)}
                     fallbackCurrency={value.priceCurrency}
                     quoteCurrency={quoteCurrency}

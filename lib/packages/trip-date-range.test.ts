@@ -158,6 +158,7 @@ function suiteState(overrides: Partial<SuiteLegState> & { legId: string }): Suit
   return {
     kind: "suite",
     supplierKind: "train_operator",
+    accommodationPricingBasis: "per_person",
     selected: true,
     routeId: null,
     reversed: false,

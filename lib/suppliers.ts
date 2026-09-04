@@ -125,6 +125,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     status: normalizeSupplierStatus(row.status),
     pricingMode: row.pricing_mode ?? "rate_card",
     transferPricingBasis: row.transfer_pricing_basis ?? "per_vehicle",
+    accommodationPricingBasis: row.accommodation_pricing_basis ?? "per_person",
     name: row.name,
     email: row.email,
     phone: row.phone,

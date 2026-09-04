@@ -370,6 +370,13 @@ export async function PATCH(
   // flipping the toggle would null the child/infant prices the consultant just typed in the same
   // round trip.
   const isFlatRateTransport = isTransport && !(parsed.kind === "transfers" && parsed.transferPricingBasis === "per_person")
+  // A per-room hotel is the accommodation equivalent: price_per_person becomes the whole room's
+  // nightly rate, so the child/infant fare columns have nothing left to mean and are nulled the
+  // same way a flat per-vehicle transfer's are. Read from the INCOMING payload for the same reason
+  // as above.
+  const isFlatRateRoom = parsed.kind === "hotel_property" && parsed.accommodationPricingBasis === "per_room"
+  /** True when this supplier prices a whole unit rather than the seats/beds in it. */
+  const isFlatRateUnit = isFlatRateTransport || isFlatRateRoom
   // Tour operators: rate cards price the tour type (no route), routes describe it.
   const isItineraryKind = isTypePricedSupplier(parsed.kind)
   const normalizedSuiteTypes = parsed.suiteTypes
@@ -660,8 +667,8 @@ export async function PATCH(
         suite_type_id: rateCard.suiteTypeId,
         rate_type_id: resolvedRateTypeId,
         price_per_person: rateCard.pricePerPerson,
-        child_price: isFlatRateTransport ? null : rateCard.childPrice,
-        infant_price: isFlatRateTransport ? null : rateCard.infantPrice,
+        child_price: isFlatRateUnit ? null : rateCard.childPrice,
+        infant_price: isFlatRateUnit ? null : rateCard.infantPrice,
         currency: rateCard.currency.trim().toUpperCase() || "ZAR",
         valid_from: rateCard.validFrom,
         valid_to: normalizeNullableDate(rateCard.validTo),
@@ -959,6 +966,9 @@ export async function PATCH(
     // via suppliers_transfer_pricing_basis_kind_check, and this keeps that constraint from ever
     // actually firing regardless of what a stale client form happens to submit for another kind.
     transfer_pricing_basis: parsed.kind === "transfers" ? parsed.transferPricingBasis : "per_vehicle",
+    // Same normalisation, against suppliers_accommodation_pricing_basis_kind_check.
+    accommodation_pricing_basis:
+      parsed.kind === "hotel_property" ? parsed.accommodationPricingBasis : "per_person",
     parent_supplier_id: nextParentSupplierId,
     // Written for unlinked records only -- for a linked one the trigger replaces these with the
     // parent's values, so submitting them here would be theatre.

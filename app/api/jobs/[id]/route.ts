@@ -304,8 +304,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // preserved, so a resolver miss shows what the customer wrote instead of an empty field.
   const route = booking.route as { name?: string; supplier?: { name?: string } | null } | null
   const hotelSupplier = booking.hotel_supplier as { name?: string } | null
+  const primarySupplier = booking.primary_supplier as { name?: string } | null
   const resolvedDirection = route?.name ?? null
-  const resolvedSupplier = route?.supplier?.name ?? null
+  // Same precedence as resolveBookingSupplierName() in lib/quotes/resolve-supplier-name.ts: the
+  // booking's own primary supplier first, then the route's operator, then the hotel. A standalone
+  // stay (Kruger Shalati) has no route, so route-only resolution reported every one of them as an
+  // unresolved supplier on the Enquiry tab.
+  const resolvedSupplier = primarySupplier?.name ?? route?.supplier?.name ?? hotelSupplier?.name ?? null
   const resolvedHotelOption = hotelSupplier?.name ?? null
 
   // Who confirmed the service list and when, resolved the same way GET /api/jobs/[id]/services

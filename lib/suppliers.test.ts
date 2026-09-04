@@ -24,6 +24,7 @@ const supplierRow: SupplierRow = {
   kind: "train_operator",
   pricing_mode: "rate_card",
   transfer_pricing_basis: "per_vehicle",
+  accommodation_pricing_basis: "per_person",
   base_rate_type_id: null,
   quote_rate_type_id: null,
   status: "draft",

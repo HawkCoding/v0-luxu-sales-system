@@ -110,7 +110,14 @@ function suiteTypeWithNoun(selection: SuiteSelection): string {
 /** "Twin bedded Deluxe Suite …" -> "a Twin bedded Deluxe Suite …". */
 function withArticle(phrase: string): string {
   if (!phrase) return phrase
-  return `${/^[aeiou]/i.test(phrase) ? "an" : "a"} ${phrase}`
+  return `${indefiniteArticle(phrase)} ${phrase}`
+}
+
+/** "a" / "an", by the initial letter. Vocabulary rows are free text per supplier, so a
+ *  vowel-initial one is ordinary -- Kruger Shalati files its bathroom as "En-suite bathroom",
+ *  which read "with a en-suite bathroom" while the article was hardcoded here. */
+function indefiniteArticle(phrase: string): string {
+  return /^[aeiou]/i.test(phrase) ? "an" : "a"
 }
 
 /** "Twin" -> "Twin bedded" */
@@ -125,7 +132,10 @@ function configurationSuffix(selection: SuiteSelection): string {
   const layout = clean(selection.bedroomLayout)
   const parts: string[] = []
 
-  if (bathroom) parts.push(`with a ${bathroom.toLowerCase()}`)
+  if (bathroom) {
+    const lowered = bathroom.toLowerCase()
+    parts.push(`with ${indefiniteArticle(lowered)} ${lowered}`)
+  }
   if (layout) parts.push(layout)
 
   return parts.join(", ")
@@ -195,6 +205,18 @@ export function buildSuiteTokens(selections: SuiteSelection[]): SuiteTokens {
     // Deduped first so identical suites share one article, not one each.
     suiteDescription: joinNaturally(dedupe(usable.map(formatSuitePhrase)).map(withArticle)),
   }
+}
+
+/**
+ * The accommodation tokens for the *hotel* leg specifically, for the stay-shaped
+ * {{roomType}}/{{roomDescription}} tokens. buildSuiteTokens can't serve these: KIND_PRIORITY ranks
+ * trains first, so on a booking carrying both, {{suiteType}} names the train's suite and a stay
+ * template asking for the room would get the wrong thing. Narrowing first and then delegating
+ * keeps one grammar — the "Room" noun and the bedding/bathroom wording come from SUITE_NOUN and
+ * formatSuitePhrase exactly as they do everywhere else.
+ */
+export function buildRoomTokens(selections: SuiteSelection[]): SuiteTokens {
+  return buildSuiteTokens(selections.filter((selection) => selection.supplierKind === "hotel_property"))
 }
 
 /**

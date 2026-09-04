@@ -16,8 +16,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRole } from "@/lib/role-context"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Edit3, Eye, BookOpen, Mail, Plus, Trash2 } from "lucide-react"
-import { getTokenSpecs, TEMPLATE_TOKENS, type TemplateTokenSpec } from "@/lib/templates/registry"
+import { Edit3, Eye, BookOpen, ChevronDown, ChevronRight, Mail, Plus, Trash2 } from "lucide-react"
+import {
+  getTokenSpecs,
+  TEMPLATE_TOKENS,
+  tokenGroup,
+  type TemplateTokenGroup,
+  type TemplateTokenSpec,
+} from "@/lib/templates/registry"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +34,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import type { Template } from "@/lib/types"
+import type { SupplierKind, Template } from "@/lib/types"
 
 interface BookingSearchResult {
   id: string
@@ -78,30 +84,102 @@ const ALL_BLOCK_TOKENS: string[] = (() => {
 
 // Union of all system-template tokens for the reference dialog — the token
 // registry (lib/templates/registry.ts) is the source of truth.
-const EMAIL_PLACEHOLDERS: { token: string; description: string }[] = (() => {
-  const seen = new Map<string, string>()
+const EMAIL_PLACEHOLDERS: { token: string; description: string; group: TemplateTokenGroup }[] = (() => {
+  const seen = new Map<string, TemplateTokenSpec>()
   for (const specs of Object.values(TEMPLATE_TOKENS)) {
     for (const spec of specs) {
-      if (!seen.has(spec.name)) seen.set(spec.name, spec.description)
+      if (!seen.has(spec.name)) seen.set(spec.name, spec)
     }
   }
-  return [...seen.entries()].map(([name, description]) => ({ token: `{{${name}}}`, description }))
+  return [...seen.values()].map((spec) => ({
+    token: `{{${spec.name}}}`,
+    description: spec.description,
+    group: tokenGroup(spec),
+  }))
 })()
 
-const VOUCHER_PLACEHOLDERS = [
-  { token: "{voucher_number}",   description: "Voucher reference — the customer invoice number" },
-  { token: "{guest_names}",      description: "Names of all guests on the booking" },
-  { token: "{consultant_name}",  description: "Name of the assigned consultant" },
-  { token: "{supplier_name}",    description: "Name of the service supplier" },
-  { token: "{route}",            description: "Route or itinerary name" },
-  { token: "{departure}",        description: "Departure location and/or time" },
-  { token: "{arrival}",          description: "Arrival location and/or time" },
-  { token: "{suite_type}",       description: "Accommodation or transport suite type" },
-  { token: "{number_of_guests}", description: "Total number of guests" },
-  { token: "{special_requests}", description: "Any special requests from the customer" },
-  { token: "{customer_email}",   description: "Customer's email address" },
-  { token: "{customer_phone}",   description: "Customer's phone number" },
-]
+const GROUP_HEADINGS: Record<TemplateTokenGroup, string> = {
+  always: "Always available",
+  rail: "Journeys — trains",
+  stay: "Stays — properties",
+}
+
+interface TokenChipsProps {
+  specs: TemplateTokenSpec[]
+  /** Kind of the supplier this variant is for, or null for the untagged parent template. */
+  supplierKind: SupplierKind | null
+  onInsert: (name: string) => void
+}
+
+/**
+ * Token chips, grouped by the product they describe. Nothing is ever hidden: the group that does
+ * not match the template's supplier is collapsed behind a count, one click from view. A hotel
+ * variant (Kruger Shalati) opens on the stay tokens, everything else on the rail ones -- so an
+ * author writes {{checkInDate}} rather than reaching for {{departureDate}} because it was the only
+ * date token in front of them.
+ */
+function TokenChips({ specs, supplierKind, onInsert }: TokenChipsProps) {
+  const relevant: TemplateTokenGroup = supplierKind === "hotel_property" ? "stay" : "rail"
+  const [expanded, setExpanded] = useState<TemplateTokenGroup | null>(relevant)
+
+  const byGroup = new Map<TemplateTokenGroup, TemplateTokenSpec[]>()
+  for (const spec of specs) {
+    const group = tokenGroup(spec)
+    byGroup.set(group, [...(byGroup.get(group) ?? []), spec])
+  }
+  // Always first, then whichever of rail/stay this template is actually for.
+  const order: TemplateTokenGroup[] = ["always", relevant, relevant === "stay" ? "rail" : "stay"]
+
+  const chips = (group: TemplateTokenGroup) => (
+    <div className="flex flex-wrap gap-1.5">
+      {(byGroup.get(group) ?? []).map((spec) => (
+        <button
+          key={spec.name}
+          type="button"
+          title={spec.description}
+          onClick={() => onInsert(spec.name)}
+          className="text-xs font-mono bg-muted hover:bg-accent px-1.5 py-0.5 rounded border border-border focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          {`{{${spec.name}}}`}
+        </button>
+      ))}
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-medium text-muted-foreground">Available tokens — click to insert</p>
+      {order.map((group) => {
+        const groupSpecs = byGroup.get(group) ?? []
+        if (groupSpecs.length === 0) return null
+        // "always" is the shared vocabulary — collapsing it would hide the customer's own name.
+        const collapsible = group !== "always"
+        const isOpen = !collapsible || expanded === group
+        return (
+          <div key={group}>
+            {collapsible ? (
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                onClick={() => setExpanded(isOpen ? null : group)}
+                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring rounded"
+              >
+                {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                {GROUP_HEADINGS[group]}
+                <span className="font-normal normal-case">({groupSpecs.length})</span>
+              </button>
+            ) : (
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                {GROUP_HEADINGS[group]}
+              </p>
+            )}
+            {isOpen && chips(group)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function TemplatesPage() {
   const { data: templates, isLoading, mutate } = useTemplates()
@@ -354,6 +432,9 @@ export default function TemplatesPage() {
     list.sort((a, b) => a.name.localeCompare(b.name))
   }
   const supplierNameById = new Map((suppliers ?? []).map((s) => [s.id, s.name]))
+  // Drives which token group the editor opens on -- a stay variant leads with check-in/meal plan,
+  // a train variant with route/departure.
+  const supplierKindById = new Map((suppliers ?? []).map((s) => [s.id, s.kind]))
   // Any supplier that may head a booking of its own (trains, and standalone stays like Kruger
   // Shalati) may carry a variant -- not just trains.
   const primarySuppliers = (suppliers ?? [])
@@ -678,24 +759,16 @@ export default function TemplatesPage() {
               </div>
             </div>
             {editing && getTokenSpecs(editing.key).length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                  Available tokens — click to insert
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {getTokenSpecs(editing.key).map((spec: TemplateTokenSpec) => (
-                    <button
-                      key={spec.name}
-                      type="button"
-                      title={spec.description}
-                      onClick={() => setEditBody((b) => `${b}{{${spec.name}}}`)}
-                      className="text-xs font-mono bg-muted hover:bg-accent px-1.5 py-0.5 rounded border border-border focus-visible:outline-2 focus-visible:outline-ring"
-                    >
-                      {`{{${spec.name}}}`}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              // Keyed on the template so switching templates re-derives which group opens first
+              // rather than carrying the previous one's expansion across.
+              <TokenChips
+                key={editing.id}
+                specs={getTokenSpecs(editing.key)}
+                supplierKind={
+                  (editing.supplierId ? supplierKindById.get(editing.supplierId) : null) ?? null
+                }
+                onInsert={(name) => setEditBody((b) => `${b}{{${name}}}`)}
+              />
             )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => editCloseGuard.handleOpenChange(false)}>Cancel</Button>
@@ -902,32 +975,28 @@ export default function TemplatesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                Email Templates <span className="font-normal normal-case">— double curly braces</span>
-              </h3>
-              <div className="space-y-2">
-                {EMAIL_PLACEHOLDERS.map(p => (
-                  <div key={p.token} className="flex items-start gap-3">
-                    <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded shrink-0">{p.token}</code>
-                    <span className="text-xs text-muted-foreground">{p.description}</span>
+            {(["always", "rail", "stay"] as TemplateTokenGroup[]).map((group) => {
+              const entries = EMAIL_PLACEHOLDERS.filter((p) => p.group === group)
+              if (entries.length === 0) return null
+              return (
+                <div key={group}>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                    {GROUP_HEADINGS[group]}{" "}
+                    {group === "always" && (
+                      <span className="font-normal normal-case">— double curly braces</span>
+                    )}
+                  </h3>
+                  <div className="space-y-2">
+                    {entries.map((p) => (
+                      <div key={p.token} className="flex items-start gap-3">
+                        <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded shrink-0">{p.token}</code>
+                        <span className="text-xs text-muted-foreground">{p.description}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                Voucher Template <span className="font-normal normal-case">— single curly braces</span>
-              </h3>
-              <div className="space-y-2">
-                {VOUCHER_PLACEHOLDERS.map(p => (
-                  <div key={p.token} className="flex items-start gap-3">
-                    <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded shrink-0">{p.token}</code>
-                    <span className="text-xs text-muted-foreground">{p.description}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              )
+            })}
           </div>
         </DialogContent>
       </Dialog>

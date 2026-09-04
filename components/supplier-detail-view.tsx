@@ -222,6 +222,9 @@ export interface SupplierFormState {
   /** Transfers only: default pricing basis for this supplier's newly created transfer rows.
    *  Ignored for every other kind -- see lib/pricing/transfer-basis.ts. */
   transferPricingBasis: "per_vehicle" | "per_person"
+  /** Hotels only: default pricing basis for this property's newly created stays. Ignored for
+   *  every other kind -- see lib/pricing/accommodation-basis.ts. */
+  accommodationPricingBasis: "per_person" | "per_room"
   emails: EditableSupplierEmail[]
   phone: string
   website: string
@@ -268,6 +271,23 @@ export interface SupplierFormState {
   bedroomTypes: EditableVocabularyValue[]
   bedroomLayouts: EditableVocabularyValue[]
   bathroomTypes: EditableVocabularyValue[]
+}
+
+/**
+ * True when this supplier prices a whole unit rather than the seats or beds in it -- a transfer
+ * sold per vehicle, or a hotel room sold at one nightly rate whoever sleeps in it. Such a supplier's
+ * rate cards carry a single price and no child/infant fares, so the matrix hides those columns and
+ * the save payload nulls them.
+ *
+ * Mirrors the server's isFlatRateUnit in app/api/suppliers/[slug]/route.ts, and reads the FORM
+ * rather than the saved supplier for the same reason the server reads the incoming payload: the
+ * first save after flipping a toggle must not null fares typed in the same round trip.
+ */
+function pricesWholeUnit(form: Pick<SupplierFormState, "kind" | "transferPricingBasis" | "accommodationPricingBasis">): boolean {
+  if (isTransportSupplier(form.kind)) {
+    return !(form.kind === "transfers" && form.transferPricingBasis === "per_person")
+  }
+  return form.kind === "hotel_property" && form.accommodationPricingBasis === "per_room"
 }
 
 const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
@@ -445,6 +465,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     kind: supplier.kind,
     pricingMode: supplier.pricingMode,
     transferPricingBasis: supplier.transferPricingBasis,
+    accommodationPricingBasis: supplier.accommodationPricingBasis,
     emails: detailEmails,
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
@@ -4176,19 +4197,10 @@ export function SupplierDetailView({
                 suiteTypeId: rateCard.suiteTypeId,
                 rateTypeId: rateCard.rateTypeId,
                 pricePerPerson: rateCard.pricePerPerson,
-                // Mirrors the server's isFlatRateTransport in app/api/suppliers/[slug]/route.ts --
-                // a per-person transfer supplier keeps its typed child/infant fares; every other
-                // transport supplier (and a still-per-vehicle transfer supplier) has them nulled.
-                childPrice:
-                  isTransportSupplier(form.kind) &&
-                  !(form.kind === "transfers" && form.transferPricingBasis === "per_person")
-                    ? null
-                    : rateCard.childPrice,
-                infantPrice:
-                  isTransportSupplier(form.kind) &&
-                  !(form.kind === "transfers" && form.transferPricingBasis === "per_person")
-                    ? null
-                    : rateCard.infantPrice,
+                // Mirrors the server's isFlatRateUnit in app/api/suppliers/[slug]/route.ts -- a
+                // supplier that prices the whole unit has no child/infant fares to keep.
+                childPrice: pricesWholeUnit(form) ? null : rateCard.childPrice,
+                infantPrice: pricesWholeUnit(form) ? null : rateCard.infantPrice,
                 currency: rateCard.currency.trim().toUpperCase() || "ZAR",
                 validFrom: rateCard.validFrom,
                 validTo: rateCard.validTo ?? "",
@@ -4255,6 +4267,7 @@ export function SupplierDetailView({
           kind: form.kind,
           pricingMode: form.pricingMode,
           transferPricingBasis: form.transferPricingBasis,
+          accommodationPricingBasis: form.accommodationPricingBasis,
           email: "",
           emails: cleanedEmails,
           phone: form.phone.trim(),
@@ -5243,6 +5256,53 @@ export function SupplierDetailView({
                     </div>
                   )
                 ) : null}
+                {(isEditing ? form.kind : supplier.kind) === "hotel_property" ? (
+                  isEditing ? (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                      <div>
+                        <Label
+                          htmlFor="supplier-accommodation-pricing-basis"
+                          className="text-sm font-semibold text-foreground"
+                        >
+                          Per-room pricing
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                          {form.accommodationPricingBasis === "per_room"
+                            ? "Rates below are per room per night — one flat price whoever sleeps in it."
+                            : "Rates below are per person per night. Each room type carries its own adult / child / infant rate card."}
+                        </p>
+                        {supplier.rateCards.length > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            Stays already on a booking keep the basis they were quoted under. The rate card
+                            amounts are shared, though — a rate typed per person is not the same number as a
+                            rate for the whole room, so re-check them after switching.
+                          </p>
+                        ) : null}
+                      </div>
+                      <Switch
+                        id="supplier-accommodation-pricing-basis"
+                        checked={form.accommodationPricingBasis === "per_room"}
+                        onCheckedChange={(checked) =>
+                          updateField("accommodationPricingBasis", checked ? "per_room" : "per_person")
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Room pricing</p>
+                        <p className="text-sm text-muted-foreground">
+                          {supplier.accommodationPricingBasis === "per_room"
+                            ? "Per room per night — one flat price whoever sleeps in it."
+                            : "Per person per night — adult / child / infant rate cards."}
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {supplier.accommodationPricingBasis === "per_room" ? "Per room" : "Per person"}
+                      </Badge>
+                    </div>
+                  )
+                ) : null}
               </div>
 
               {activeVocabulary.showSingleSupplement &&
@@ -5844,10 +5904,7 @@ export function SupplierDetailView({
                   packageIndex={0}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
-                  flatRate={
-                    isTransportSupplier(form.kind) &&
-                    !(form.kind === "transfers" && form.transferPricingBasis === "per_person")
-                  }
+                  flatRate={pricesWholeUnit(form)}
                   supplierKind={form.kind}
                   trainChildPriceRatio={trainChildPriceRatio}
                   ageBuckets={resolveAgeBuckets(globalAgeDefaults, {
@@ -5873,6 +5930,7 @@ export function SupplierDetailView({
                   supplierKind={supplier.kind}
                   priceLabel={resolveSupplierPriceLabel(supplier.kind, {
                     transferPricingBasis: supplier.transferPricingBasis,
+                    accommodationPricingBasis: supplier.accommodationPricingBasis,
                   })}
                 />
               )}

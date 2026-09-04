@@ -206,7 +206,11 @@ describe("buildEnquiryReadiness", () => {
       baseInput({ supplierResolved: false, supplierRaw: "the blue one" }),
     )
     expect(result.gaps).toContainEqual(
-      expect.objectContaining({ id: "supplier_unresolved" }),
+      expect.objectContaining({
+        id: "supplier_unresolved",
+        // Kind-neutral: an enquiry can be for a hotel (standalone stay), not only a train.
+        title: `The supplier is still the customer's wording: "the blue one".`,
+      }),
     )
   })
 
@@ -282,5 +286,83 @@ describe("buildEnquiryReadiness", () => {
       unitCount: 1,
       origin: "auto",
     })
+  })
+})
+
+/**
+ * A lodge reuses the same tables as a train under different vocabulary: its "route" is its meal
+ * plan, its "suite" is a room. Both gates were train-only, so a Kruger Shalati leg with no meal
+ * plan reached pricing unflagged -- masked only because Shalati files exactly one meal plan and
+ * auto-build fills it in.
+ */
+describe("buildEnquiryReadiness — stay suppliers", () => {
+  const HOTEL_SERVICE = {
+    ...TRAIN_SERVICE,
+    id: "svc-hotel",
+    supplierId: "supplier-hotel",
+    supplierName: "Kruger Shalati - Train on the Bridge",
+    supplierKind: "hotel_property" as const,
+    nights: 3,
+  }
+
+  it("blocks a hotel leg with no meal plan chosen", () => {
+    const result = buildEnquiryReadiness(baseInput({ services: [{ ...HOTEL_SERVICE, routeId: null }] }))
+
+    expect(result.services[0].issues).toContain("No meal plan chosen")
+    expect(result.blockers.some((b) => b.title === "Hotel has no meal plan.")).toBe(true)
+  })
+
+  it("does not block a hotel leg that has one", () => {
+    const result = buildEnquiryReadiness(baseInput({ services: [HOTEL_SERVICE] }))
+
+    expect(result.services[0].issues).toEqual([])
+    expect(result.blockers.some((b) => b.title.includes("meal plan"))).toBe(false)
+  })
+
+  it("still calls a train's missing route a route, not a meal plan", () => {
+    const result = buildEnquiryReadiness(baseInput({ services: [{ ...TRAIN_SERVICE, routeId: null }] }))
+
+    expect(result.services[0].issues).toContain("No route chosen")
+    expect(result.blockers.some((b) => b.title === "The train journey has no route.")).toBe(true)
+  })
+
+  it("names missing unit types by the supplier's own vocabulary", () => {
+    const hotel = buildEnquiryReadiness(
+      baseInput({ services: [{ ...HOTEL_SERVICE, unitsMissingSuiteType: 2 }] }),
+    )
+    expect(hotel.services[0].issues).toContain("2 rooms have no room type")
+    expect(hotel.blockers.some((b) => b.title === "Hotel: 2 rooms have no room type")).toBe(true)
+
+    const train = buildEnquiryReadiness(
+      baseInput({ services: [{ ...TRAIN_SERVICE, unitsMissingSuiteType: 2 }] }),
+    )
+    expect(train.services[0].issues).toContain("2 suites have no suite type")
+  })
+
+  it("uses the singular noun and verb for one unit", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({ services: [{ ...HOTEL_SERVICE, unitsMissingSuiteType: 1 }] }),
+    )
+    expect(result.services[0].issues).toContain("1 room has no room type")
+  })
+
+  // A stay has no journey to add, so the empty-booking blocker must not ask for one.
+  it("does not tell a booking with nothing built to add a train", () => {
+    const result = buildEnquiryReadiness(baseInput({ services: [] }))
+    const blocker = result.blockers.find((b) => b.id === "no_services")
+
+    expect(blocker?.detail).toBe("The quote cannot be priced until the booking has at least one service.")
+    expect(blocker?.detail).not.toContain("train")
+  })
+
+  it("leaves transfer legs alone — their route is optional", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({
+        services: [
+          { ...TRAIN_SERVICE, id: "svc-transfer", supplierKind: "transfers" as const, routeId: null },
+        ],
+      }),
+    )
+    expect(result.services[0].issues).toEqual([])
   })
 })

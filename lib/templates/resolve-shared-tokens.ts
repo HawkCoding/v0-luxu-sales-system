@@ -9,7 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import type { PricingSnapshot } from "@/lib/types"
-import { formatDisplayDateLong } from "@/lib/date-format"
+import { formatDisplayDateLong, formatDisplayDateShort } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { firstRecord } from "@/lib/utils"
 import { resolveBookingSupplierName } from "@/lib/quotes/resolve-supplier-name"
@@ -19,14 +19,17 @@ import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { buildBankingDetailsBlock, buildPaymentReference } from "@/lib/invoices/banking-details-block"
 import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
-import { buildSuiteTokens } from "@/lib/templates/suite-description"
+import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
+import { buildRoomTokens, buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
+import { emptyStayTokens, loadStayTokens } from "@/lib/templates/stay-tokens"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { formatMoney, normaliseCurrency } from "@/lib/money"
 import {
   deriveFlightCapPerPerson,
   deriveJourneyFromBlocks,
   deriveTrainDepartureFromBlocks,
+  formatPaxLabel,
 } from "@/lib/quotes/quote-presentation"
 import {
   complimentaryLegIdsFromLineItems,
@@ -166,6 +169,11 @@ interface VoucherRow {
   created_at: string | null
 }
 
+interface ItineraryRow {
+  name: string
+  created_at: string | null
+}
+
 interface CorrespondenceRow {
   kind: string | null
   sent_at: string | null
@@ -184,8 +192,17 @@ export async function resolveSharedEmailTokens(
   supabase: SupabaseClient<Database>,
   bookingId: string,
 ): Promise<SharedEmailTokens> {
-  const [booking, quotes, invoices, vouchers, correspondences, travellers, suiteSelections, paymentMethod] =
-    await Promise.all([
+  const [
+    booking,
+    quotes,
+    invoices,
+    vouchers,
+    itineraries,
+    correspondences,
+    travellers,
+    suiteSelections,
+    paymentMethod,
+  ] = await Promise.all([
       safeQuery<BookingRow>(() =>
         supabase
           .from("bookings")
@@ -210,6 +227,9 @@ export async function resolveSharedEmailTokens(
           .eq("booking_id", bookingId),
       ),
       safeQuery<VoucherRow[]>(() => supabase.from("vouchers").select("voucher_number, created_at").eq("booking_id", bookingId)),
+      safeQuery<ItineraryRow[]>(() =>
+        supabase.from("itineraries").select("name, created_at").eq("booking_id", bookingId),
+      ),
       safeQuery<CorrespondenceRow[]>(() => supabase.from("correspondences").select("kind, sent_at").eq("booking_id", bookingId)),
       safeQuery<TravellerRow[]>(() =>
         supabase
@@ -232,12 +252,15 @@ export async function resolveSharedEmailTokens(
   // email subject reading "Kruger Shalati/Kluever--05May26". Its length is the closest thing a
   // stay has to a direction, and it is what a consultant scanning a mailbox actually wants.
   const stayNights = booking?.duration_nights ?? null
-  const direction =
+  // Kept separate from `direction` below because the nights fallback is a stand-in for a route,
+  // not a route -- and the trip title must not read "3 Nights — Kluever Family".
+  const routeDirection =
     route && origin?.name && destination?.name
       ? resolveDirectedRouteName(origin.name, destination.name, booking?.route_reversed ?? false)
-      : stayNights && stayNights > 0
-        ? `${stayNights} ${stayNights === 1 ? "Night" : "Nights"}`
-        : null
+      : null
+  const direction =
+    routeDirection ??
+    (stayNights && stayNights > 0 ? `${stayNights} ${stayNights === 1 ? "Night" : "Nights"}` : null)
   const departureDate = formatDisplayDateLong(booking?.departure_date ?? null)
 
   const guestTravellers = (travellers ?? []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
@@ -355,6 +378,16 @@ export async function resolveSharedEmailTokens(
     "Supplier",
   )
 
+  // Resolved here rather than in the parallel fetch above because it keys off the *final*
+  // primarySupplierId — the quote's answer when there is one, the booking's before that — so a
+  // standalone stay is described by its own property and not by a pre-night hotel sitting
+  // alongside it.
+  const stay = await safely(
+    () => loadStayTokens(supabase, bookingId, primarySupplierId, booking?.duration_nights ?? null),
+    emptyStayTokens(),
+  )
+  const roomTokens = buildRoomTokens(suiteSelections)
+
   let receivedAmount = PLACEHOLDER
   let outstandingAmount = PLACEHOLDER
   let finalAmount = PLACEHOLDER
@@ -395,14 +428,39 @@ export async function resolveSharedEmailTokens(
     departureDate: orPlaceholder(
       trainDepartureDate ? formatDisplayDateLong(trainDepartureDate) : departureDate,
     ),
+    // Abbreviated month ("14 Sep 2026"), which is the whole point of the token: it sits in the
+    // subject line next to the supplier, surname and route, where a spelled-out "September" pushed
+    // the useful part out of a mailbox's visible width.
     departureDateShort: orPlaceholder(
-      trainDepartureDate ? formatDisplayDateLong(trainDepartureDate) : departureDate,
+      formatDisplayDateShort(trainDepartureDate ?? booking?.departure_date ?? null),
     ),
     tripEndDate: orPlaceholder(formatDisplayDateLong(booking?.trip_end_date ?? null)),
-    tripTitle: PLACEHOLDER,
+    // The salesperson-editable itinerary name when one exists, else the same default the
+    // itinerary PDF composes (lib/itinerary/ensure-itinerary-pdf.ts), so the email and the
+    // document stapled to it can never announce two different trips.
+    tripTitle: orPlaceholder(
+      latestByCreatedAt(itineraries)?.name ??
+        buildDefaultTripTitle(routeDirection, customer?.last_name ?? null),
+    ),
     suiteType: orPlaceholder(suiteTokens.suiteType),
     suiteConfiguration: orPlaceholder(suiteTokens.suiteConfiguration),
     suiteDescription: orPlaceholder(suiteTokens.suiteDescription),
+    roomType: orPlaceholder(roomTokens.suiteType),
+    roomDescription: orPlaceholder(roomTokens.suiteDescription),
+    propertyName: orPlaceholder(stay.propertyName),
+    checkInDate: orPlaceholder(stay.checkInDate),
+    checkOutDate: orPlaceholder(stay.checkOutDate),
+    nights: orPlaceholder(stay.nights),
+    mealPlan: orPlaceholder(stay.mealPlan),
+    checkInTime: orPlaceholder(stay.checkInTime),
+    checkOutTime: orPlaceholder(stay.checkOutTime),
+    propertyLocation: orPlaceholder(stay.propertyLocation),
+    propertyAddress: orPlaceholder(stay.propertyAddress),
+    guestCount: orPlaceholder(
+      formatPaxLabel({ adults: booking?.no_of_adults ?? 0, children: booking?.no_of_children ?? 0 }),
+    ),
+    adultCount: orPlaceholder(booking?.no_of_adults != null ? String(booking.no_of_adults) : null),
+    childCount: orPlaceholder(booking?.no_of_children != null ? String(booking.no_of_children) : null),
     quoteNumber: orPlaceholder(latestQuote?.quote_number),
     quoteDate: orPlaceholder(latestQuote ? formatDisplayDateLong(latestQuote.created_at?.slice(0, 10) ?? null) : null),
     validityDate: orPlaceholder(latestQuote ? formatDisplayDateLong(latestQuote.validity_until) : null),

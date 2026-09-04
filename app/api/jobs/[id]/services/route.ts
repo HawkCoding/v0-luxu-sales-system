@@ -114,6 +114,10 @@ const updateServiceSchema = z.object({
    * the quote itinerary's check-out line. Rejected on any other supplier kind — see the guard in
    * PATCH. */
   luggageStorageAvailable: z.boolean().optional(),
+  /** Hotel legs only: how this stay prices — per person per night, or one flat nightly room rate.
+   * Rejected on any other supplier kind, and re-checked against the RESOLVED basis in PATCH
+   * because an omitted value is decided by the property's default, which zod cannot see. */
+  accommodationPricingBasis: z.enum(["per_person", "per_room"]).optional(),
   /** Internal supplier-booking record — when this leg was placed, confirmed and paid with the
    * supplier. Never shown to the customer, feeds the booking worksheet. Available on every
    * supplier kind: an admin fact about the booking, not about how the leg prices. */
@@ -152,7 +156,7 @@ type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_un
 const SERVICES_WITH_UNITS_SELECT =
   "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, sort_order, price_currency, updated_at, " +
   "departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, " +
-  "luggage_storage_available, booking_date, confirmation_date, payment_made_date, paid_with, " +
+  "luggage_storage_available, accommodation_pricing_basis, booking_date, confirmation_date, payment_made_date, paid_with, " +
   "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at, complimentary_first_night, rate_type_id)"
 
 /**
@@ -206,6 +210,7 @@ interface ServiceWithUnitsRow {
   hand_luggage_kg: number | null
   checked_luggage_kg: number | null
   luggage_storage_available: boolean
+  accommodation_pricing_basis: "per_person" | "per_room" | null
   booking_date: string | null
   confirmation_date: string | null
   payment_made_date: string | null
@@ -452,6 +457,22 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
+  // Per-room pricing is a hotel concept: every other kind prices per person off its own rate card
+  // or typed fare, so a per-room basis there would be a stored value the pricer never reads. Same
+  // reasoning, and the same shape, as the luggage-storage guard above.
+  for (const selection of parsed.data.selections) {
+    if (selection.accommodationPricingBasis === undefined) continue
+    const service = serviceById.get(selection.packageLegId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    const supplierKind = supplier?.kind
+    if (supplierKind !== "hotel_property") {
+      return jsonError("A per-room pricing basis is only available on hotel services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
+    }
+  }
+
   // A supplier booking cannot be confirmed before it was placed. payment_made_date is left
   // unconstrained — prepayments happen. An omitted bookingDate means the stored value still
   // applies, same convention as the flight-date guard above.
@@ -611,6 +632,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (selection.checkedLuggageKg !== undefined) updatePayload.checked_luggage_kg = selection.checkedLuggageKg
     if (selection.luggageStorageAvailable !== undefined) {
       updatePayload.luggage_storage_available = selection.luggageStorageAvailable
+    }
+    if (selection.accommodationPricingBasis !== undefined) {
+      updatePayload.accommodation_pricing_basis = selection.accommodationPricingBasis
     }
     if (selection.bookingDate !== undefined) updatePayload.booking_date = selection.bookingDate
     if (selection.confirmationDate !== undefined) updatePayload.confirmation_date = selection.confirmationDate

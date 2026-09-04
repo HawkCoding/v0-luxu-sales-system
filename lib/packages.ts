@@ -64,6 +64,10 @@ export interface PackageLegWithSupplier extends PackageLegRow {
    * the pricing engine and the transport leg editor can fall back to it for a row that hasn't
    * set its own basis yet. Ignored for every other supplier kind. */
   supplierTransferPricingBasis: "per_vehicle" | "per_person"
+  /** Hotels only: the supplier's default pricing basis, carried onto every leg of theirs so the
+   * pricing engine and the suite leg editor can fall back to it for a stay that hasn't set its
+   * own basis yet. Ignored for every other supplier kind. */
+  supplierAccommodationPricingBasis: "per_person" | "per_room"
   /** Already resolved via loadSupplierRateTiersResolver -- not the raw supplier columns. */
   supplierBaseRateTypeId: string | null
   supplierQuoteRateTypeId: string | null
@@ -198,6 +202,7 @@ export function mapPackageLeg(
     supplierKind: row.supplierKind,
     pricingMode: row.supplierPricingMode,
     transferPricingBasis: row.supplierTransferPricingBasis,
+    accommodationPricingBasis: row.supplierAccommodationPricingBasis,
     label: row.label,
     sortOrder: row.sort_order,
     dateAnchor: normalizeLegDateAnchor(row.date_anchor),

@@ -327,3 +327,32 @@ describe("inbound email import: blue-train-html-only.json", () => {
     expect(draft.trip.departureDate).toBe("2027-03-14")
   })
 })
+
+describe("inbound email import: kruger-shalati-quote.json (regression)", () => {
+  // Production LTT-2026-0064 showed "Additional Services: Yes" with the details reading
+  // "No Additional Comments <the comment>". The Shalati template puts a free-text "Additional
+  // Comments" box directly under the travel-services answer with no blank line, and that label was
+  // not a recognised field boundary -- so the block reader swallowed it and the answer stopped
+  // looking like a bare flag.
+  const fixture = loadFixture("kruger-shalati-quote.json")
+  const rawText = getMessageBody(fixture.text, fixture.html).body
+  const draft = parseEmailDraft(rawText)
+  const payload = buildEnquiryImportPayload(draft)
+
+  it("reads a declined travel-services answer as No, with no detail", () => {
+    expect(draft.additionalServices.requested).toBe(false)
+    expect(draft.additionalServices.details).toBe("")
+    expect(payload.additionalServices).toBe(false)
+    expect(payload.additionalServicesDetails).toBeUndefined()
+  })
+
+  it("keeps the customer's comment as its own field, bound for a booking note", () => {
+    expect(payload.customerComments).toContain("least expensive to the most expensive")
+    // Not folded into the consultant's own notes box.
+    expect(payload.notes).toBeUndefined()
+  })
+
+  it("stops the comment block before the Consent section", () => {
+    expect(payload.customerComments).not.toContain("Terms and Conditions")
+  })
+})

@@ -329,6 +329,19 @@ export async function createEmailBookingFromParsedDraft(
     throw new Error(bookingError?.message || "Failed to create booking")
   }
 
+  // Whatever the customer typed into the form's "Additional Comments" box. It used to survive only
+  // inside raw_text, because the parser folded it into the travel-services answer instead of
+  // reading it. Best-effort and unattributed -- no human is present on this path, and a note must
+  // never fail an import.
+  if (payload.customerComments) {
+    const { error: noteError } = await supabase.from("booking_notes").insert({
+      booking_id: booking.id,
+      author_id: null,
+      body: `From enquiry form — Additional Comments:\n${payload.customerComments}`,
+    })
+    if (noteError) console.error("importBooking:customerComments", noteError)
+  }
+
   // Resolve the customer's raw suite wording against this supplier's real vocabulary. Anything
   // uncertain is stored as null with its provenance rather than guessed -- and no alias is ever
   // recorded or promoted here, because there is no human in this path to learn from.

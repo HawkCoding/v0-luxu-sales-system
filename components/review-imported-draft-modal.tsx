@@ -982,6 +982,16 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       className="text-sm"
                     />
                   </div>
+                  {draft.customerComments && (
+                    <div className="space-y-1.5">
+                      {/* The customer's words, not the consultant's -- read-only, and saved as its
+                          own booking note. */}
+                      <Label className="text-sm text-muted-foreground">Customer comments (from form)</Label>
+                      <div className="text-sm bg-muted p-3 rounded-md whitespace-pre-wrap">
+                        {draft.customerComments}
+                      </div>
+                    </div>
+                  )}
                   <Separator />
                   <div className="space-y-1.5">
                     <Label className="text-sm text-muted-foreground">Original Pasted Text (Preview)</Label>

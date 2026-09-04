@@ -113,6 +113,12 @@ const supplierPricingModeSchema = z.enum(["rate_card", "manual"])
  *  per vehicle, or split adult/child/infant per person. Ignored for every other supplier kind. */
 const transferPricingBasisSchema = z.enum(["per_vehicle", "per_person"])
 
+/** Hotels only: default pricing basis for this property's newly created stays -- adult/child/infant
+ *  fares per night, or one flat nightly rate for the whole room. Ignored for every other supplier
+ *  kind. Note the default runs the opposite way to transfers: per_person is the legacy behaviour
+ *  every existing hotel was quoted under, so it is what an omitted value has to mean. */
+const accommodationPricingBasisSchema = z.enum(["per_person", "per_room"])
+
 const vehicleRentalRouteDetailsSchema = z.object({
   includedKmPerDay: z.number().finite().nonnegative().nullable().optional(),
   extraKmPrice: z.number().finite().nonnegative().nullable().optional(),
@@ -409,6 +415,7 @@ export const supplierSaveSchema = z.object({
   kind: supplierKindSchema,
   pricingMode: supplierPricingModeSchema.default("rate_card"),
   transferPricingBasis: transferPricingBasisSchema.default("per_vehicle"),
+  accommodationPricingBasis: accommodationPricingBasisSchema.default("per_person"),
   email: z
     .string()
     .trim()
@@ -594,6 +601,7 @@ export const supplierDraftSaveSchema = z.object({
   kind: supplierKindSchema,
   pricingMode: supplierPricingModeSchema.default("rate_card"),
   transferPricingBasis: transferPricingBasisSchema.default("per_vehicle"),
+  accommodationPricingBasis: accommodationPricingBasisSchema.default("per_person"),
   email: z
     .string()
     .trim()
