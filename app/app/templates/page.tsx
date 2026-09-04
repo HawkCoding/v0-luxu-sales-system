@@ -825,8 +825,8 @@ export default function TemplatesPage() {
                 <SelectContent>
                   {primarySuppliers.length === 0 ? (
                     <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      No standalone suppliers found. Tick &ldquo;Sold as a standalone booking&rdquo; on a
-                      supplier first.
+                      No main products found. Tick &ldquo;Can be the main product&rdquo; on a supplier
+                      first.
                     </div>
                   ) : (
                     primarySuppliers.map((s) => (

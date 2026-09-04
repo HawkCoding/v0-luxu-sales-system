@@ -27,7 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
-import { SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
+import { isCoreBookingLeg, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
@@ -621,6 +621,16 @@ export function BuildBookingDialog({
     setTravellerDraft(null)
     clearQuoteConflict()
   }
+
+  // The Add-service picker opens on whatever this booking is actually for. Defaulting to Train was
+  // the visible tell that a cruise- or hotel-headed booking was second-class here. Runs once the
+  // services list has loaded, since the booking's own primary leg is what names the kind.
+  const primaryServiceKind = services.find((service) =>
+    isCoreBookingLeg(service, savedState?.primarySupplierId ?? null),
+  )?.supplierKind
+  useEffect(() => {
+    if (primaryServiceKind) setPickerKind(primaryServiceKind)
+  }, [primaryServiceKind])
 
   const resolvedCommission = resolveCommissionValue(commission)
   // Manual/extra lines added previously survive a rebuild.

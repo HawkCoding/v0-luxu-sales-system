@@ -183,9 +183,9 @@ export async function POST(req: Request) {
       // unchanged here).
       pricing_mode: parsed.kind === "airline" ? "manual" : "rate_card",
       name: parsed.name.trim(),
-      // A train operator always heads its own bookings, so it is standalone from the start.
-      // Anything else is an add-on until someone ticks it on the supplier page -- which is how
-      // a hotel sold on its own (Kruger Shalati) becomes selectable on New Enquiry.
+      // A train operator always heads its own bookings, so it is a main product from the start.
+      // Quick-add is for a supplier being slotted into a booking that already exists, so it never
+      // offers the choice -- the full supplier editor's "Can be the main product" tick does.
       sells_standalone: parsed.kind === "train_operator",
       slug,
       email: parsed.email || null,
