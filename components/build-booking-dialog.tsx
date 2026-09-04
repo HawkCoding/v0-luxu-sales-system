@@ -727,7 +727,8 @@ export function BuildBookingDialog({
 
   function hotelAnchorContext(legId: string): HotelAnchorContext | null {
     if (!packageDetail) return null
-    return toHotelAnchorContext(packageDetail, legStates, legId)
+    // Anchor to whatever this booking is actually for -- a cruise or a flight, not only a train.
+    return toHotelAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
   }
 
   function transferAnchorContext(legId: string): TransferAnchorContext | null {

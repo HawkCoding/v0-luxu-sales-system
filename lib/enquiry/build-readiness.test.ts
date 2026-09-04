@@ -391,20 +391,53 @@ describe("buildEnquiryReadiness — behaviour frozen before the kind generalisat
   }
 
   /**
-   * Deliberate delta to come. The shortfall gap looks for a train leg specifically, so a standalone
-   * stay asking for three rooms and built with one is silently short. Once the check keys off the
-   * booking's primary leg this starts warning, and this expectation flips.
+   * The fix. The shortfall gap used to look for a train leg specifically, so a standalone stay
+   * asking for three rooms and built with one was silently short.
    */
-  it("today: a hotel-primary booking short on rooms raises no shortfall gap", () => {
+  it("flags a room shortfall on a hotel-primary booking, in that kind's words", () => {
     const result = buildEnquiryReadiness(
       baseInput({
         services: [{ ...HOTEL_SERVICE, unitCount: 1 }],
         noOfSuites: 3,
+        primarySupplierId: "supplier-shalati",
         supplierRaw: "Kruger Shalati - Train on the Bridge",
       }),
     )
 
+    expect(result.gaps).toContainEqual(
+      expect.objectContaining({
+        id: "suites_short",
+        severity: "warn",
+        title: "Enquiry asks for 3 rooms; the booking is built with 1.",
+      }),
+    )
+  })
+
+  // A booking predating bookings.primary_supplier_id has no primary leg to measure against, so it
+  // behaves exactly as it did before: the gap keys off a train leg, and a stay raises none.
+  it("leaves a booking with no primary supplier on the old train rule", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({ services: [{ ...HOTEL_SERVICE, unitCount: 1 }], noOfSuites: 3 }),
+    )
+
     expect(result.gaps.find((g) => g.id === "suites_short")).toBeUndefined()
+  })
+
+  it("still says suites when the primary product is a train", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({
+        services: [{ ...TRAIN_SERVICE, unitCount: 1 }],
+        noOfSuites: 2,
+        primarySupplierId: "supplier-train",
+      }),
+    )
+
+    expect(result.gaps).toContainEqual(
+      expect.objectContaining({
+        id: "suites_short",
+        title: "Enquiry asks for 2 suites; the booking is built with 1.",
+      }),
+    )
   })
 
   it("a hotel leg with no meal plan blocks exactly as a train with no route does", () => {
