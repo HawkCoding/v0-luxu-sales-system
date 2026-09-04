@@ -7,7 +7,7 @@ import type { BookingInputRow, PaymentInputRow, ReportFilter } from "./types"
 type Client = SupabaseClient<Database>
 
 export const REPORT_BOOKING_COLUMNS =
-  "id, booking_number, consultant, assigned_salesperson_id, route_id, departure_date, stage, outcome, source, invoice_balance, created_at"
+  "id, booking_number, consultant, assigned_salesperson_id, route_id, primary_supplier_id, departure_date, stage, outcome, source, invoice_balance, created_at"
 
 export interface ReportInputRows {
   bookings: BookingInputRow[]
@@ -20,8 +20,8 @@ export interface ReportInputRows {
  * export route so the two cannot drift apart.
  *
  * The product filter is applied in memory by applyBookingFilter rather than in
- * the query, because product comes from the booking's route supplier and not
- * from any column on bookings.
+ * the query, because product is resolved from two sources (the booking's primary
+ * supplier, else its route's supplier) and neither is a single filterable column.
  */
 export async function loadReportInputRows(
   supabase: Client,

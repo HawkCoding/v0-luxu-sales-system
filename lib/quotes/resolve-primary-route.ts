@@ -1,3 +1,4 @@
+import { isJourneyRouteKind } from "@/lib/enquiry/primary-product"
 import type { createSessionClient } from "@/lib/supabase/server"
 import type { PricingSnapshot } from "@/lib/types"
 
@@ -41,38 +42,57 @@ export interface PrimaryRouteOptions {
 }
 
 /**
- * Derives the journey's primary route from quote line-item pricing snapshots. Hotel legs are
- * excluded — their "route" is a meal plan, not a journey direction. Manual lines without snapshots
- * yield nulls.
+ * Derives the journey's primary route from quote line-item pricing snapshots. Only kinds whose
+ * route names a real origin → destination count: a hotel's route is a meal plan and a tour
+ * operator's is an itinerary, neither of which is a direction. Manual lines without snapshots yield
+ * nulls.
  *
- * When a primary supplier is already known (see resolvePrimarySupplier), a route carried by that
- * supplier's own leg wins first, so the direction shown in an email always agrees with whose
- * template rendered it. Otherwise: the train leg wins (it names the journey, e.g. "Pretoria ↔ Cape
- * Town"), then the first snapshot that carries a route.
+ * When a primary supplier is already known (see resolvePrimarySupplier) the answer comes from that
+ * supplier alone, so the direction shown in an email always agrees with whose template rendered it:
  *
- * A standalone hotel booking (Kruger Shalati) prices nothing but hotel legs, and its meal plan
- * still is not a journey — so it deliberately resolves to no route at all rather than passing a
- * meal plan off as a direction. resolvePrimarySupplier is the one that falls back.
+ *  - a journey-shaped route on the primary supplier's own leg wins; otherwise
+ *  - if the primary supplier is priced here at all, the booking has NO journey line. It does not
+ *    borrow one from an add-on. This is the second half of the Kruger Shalati regression: the old
+ *    code stripped hotel legs before looking for the primary supplier, never found it among the
+ *    candidates, and fell through to the transfer leg — so syncBookingRoute wrote
+ *    "Airport ↔ Shalati" onto the booking as though the stay were a journey there and back.
+ *
+ * With no primary supplier known (a caller that genuinely has no booking) the old ladder still
+ * applies: the train leg wins, then the first snapshot carrying a journey-shaped route.
  */
 export function resolvePrimaryRoute(lineItems: SnapshotCarrier[], options: PrimaryRouteOptions): PrimaryRoute {
   const { primarySupplierId } = options
-  const snapshots = lineItems
-    .map((li) => li.pricingSnapshot)
-    .filter(
-      (snapshot): snapshot is PricingSnapshot =>
-        Boolean(snapshot?.routeId) && snapshot?.supplierKind !== "hotel_property",
-    )
+  const snapshots = lineItems.map((li) => li.pricingSnapshot)
 
-  const primarySnapshot = primarySupplierId
-    ? snapshots.find((snapshot) => snapshot.supplierId === primarySupplierId)
-    : undefined
-  const trainSnapshot = snapshots.find((snapshot) => snapshot.supplierKind === "train_operator")
-  const winner = primarySnapshot ?? trainSnapshot ?? snapshots[0] ?? null
+  // `supplierKind == null` is deliberately kept in play: it is nullable on PricingSnapshot, and a
+  // legacy or manually adapted line with a route but no recorded kind has always contributed one.
+  // isJourneyRouteKind answers false for null, so without this arm those lines would silently stop
+  // counting.
+  const journeySnapshots = snapshots.filter(
+    (snapshot): snapshot is PricingSnapshot =>
+      Boolean(snapshot?.routeId) &&
+      (snapshot?.supplierKind == null || isJourneyRouteKind(snapshot.supplierKind)),
+  )
 
+  if (primarySupplierId) {
+    const primaryJourney = journeySnapshots.find((snapshot) => snapshot.supplierId === primarySupplierId)
+    if (primaryJourney) return toPrimaryRoute(primaryJourney)
+
+    const primaryIsPriced = snapshots.some((snapshot) => snapshot?.supplierId === primarySupplierId)
+    if (primaryIsPriced) return NO_ROUTE
+  }
+
+  const trainSnapshot = journeySnapshots.find((snapshot) => snapshot.supplierKind === "train_operator")
+  return toPrimaryRoute(trainSnapshot ?? journeySnapshots[0] ?? null)
+}
+
+const NO_ROUTE: PrimaryRoute = { routeId: null, routeName: null, routeReversed: false }
+
+function toPrimaryRoute(snapshot: PricingSnapshot | null | undefined): PrimaryRoute {
   return {
-    routeId: winner?.routeId ?? null,
-    routeName: winner?.routeName ?? null,
-    routeReversed: winner?.routeReversed ?? false,
+    routeId: snapshot?.routeId ?? null,
+    routeName: snapshot?.routeName ?? null,
+    routeReversed: snapshot?.routeReversed ?? false,
   }
 }
 
@@ -83,10 +103,10 @@ export function resolvePrimaryRoute(lineItems: SnapshotCarrier[], options: Prima
  *  1. `bookingPrimarySupplierId`, when that supplier is actually priced on this quote.
  *  2. The first leg (in line-item order) whose supplier is in `standaloneSupplierIds`.
  *  3. The first `train_operator` leg (back-compat for callers with no standalone set).
- *  4. The first non-hotel leg.
- *  5. The first leg with any supplier at all — a hotel wins when nothing else is priced, since
- *     returning null there left a standalone stay with no rate audience, no journey class and no
- *     supplier name on the worksheet.
+ *  4. The first leg of a kind whose route is a real journey (train, transfers, rental, airline).
+ *  5. The first leg with any supplier at all — a stay or a tour wins when nothing else is priced,
+ *     since returning null there left a standalone booking with no rate audience, no journey class
+ *     and no supplier name on the worksheet.
  *
  * Callers must look the name up in `suppliers` — the snapshot's own `supplierName` is frozen at
  * pricing time and drifts once a supplier is renamed.
@@ -124,13 +144,17 @@ export function resolvePrimarySupplier(
     return { supplierId: standaloneSnapshot.supplierId, source: "standalone", candidateIds }
   }
 
-  const nonHotel = withSupplier.filter((snapshot) => snapshot.supplierKind !== "hotel_property")
-  const trainSnapshot = nonHotel.find((snapshot) => snapshot.supplierKind === "train_operator")
+  // Steps 3-5 only fire for a caller that supplied no standaloneSupplierIds. Every production
+  // caller reaches this through loadQuoteConfig, which always supplies them.
+  const journeyKindLegs = withSupplier.filter(
+    (snapshot) => snapshot.supplierKind == null || isJourneyRouteKind(snapshot.supplierKind),
+  )
+  const trainSnapshot = journeyKindLegs.find((snapshot) => snapshot.supplierKind === "train_operator")
   if (trainSnapshot) {
     return { supplierId: trainSnapshot.supplierId, source: "train", candidateIds }
   }
-  if (nonHotel[0]) {
-    return { supplierId: nonHotel[0].supplierId, source: "first_leg", candidateIds }
+  if (journeyKindLegs[0]) {
+    return { supplierId: journeyKindLegs[0].supplierId, source: "first_leg", candidateIds }
   }
   if (withSupplier[0]) {
     return { supplierId: withSupplier[0].supplierId, source: "hotel_fallback", candidateIds }
@@ -156,10 +180,11 @@ export function resolvePrimarySupplierId(
  * standalone stay wrote the transfer's route onto the booking. Callers already hold the booking row,
  * so it is passed in rather than queried here.
  *
- * A priced quote that resolves to no route at all — a hotel-only stay, whose meal plan is not a
- * journey — clears route_id rather than leaving the enquiry-time guess standing. A quote with no
- * pricing snapshots at all is a different case: a purely manual quote knows nothing about the
- * journey, so it has nothing to correct and leaves the booking's route untouched.
+ * A priced quote that resolves to no route at all — a stay, whose meal plan is not a journey, or a
+ * tour, whose itinerary is not a direction — clears route_id rather than leaving the enquiry-time
+ * guess standing. A quote with no pricing snapshots at all is a different case: a purely manual
+ * quote knows nothing about the journey, so it has nothing to correct and leaves the booking's
+ * route untouched.
  */
 export async function syncBookingRoute(
   supabase: Awaited<ReturnType<typeof createSessionClient>>,

@@ -413,12 +413,12 @@ describe("resolve-primary-route — behaviour frozen before the kind generalisat
   })
 
   /**
-   * Deliberate delta to come: a tour operator's "route" is an itinerary, not a journey, so once the
-   * exclusion keys off routeHasLocations the hotel wins this instead (source "hotel_fallback").
-   * Only reachable from a caller that supplies no standaloneSupplierIds -- every production caller
-   * goes through loadQuoteConfig, which always supplies them.
+   * Deliberate delta, applied. A tour operator's "route" is an itinerary, not a journey, so the
+   * fallback ladder no longer prefers it over a stay -- both are products rather than directions,
+   * and line-item order decides. Only reachable from a caller that supplies no
+   * standaloneSupplierIds; every production caller goes through loadQuoteConfig, which always does.
    */
-  it("today: a tour leg beats a hotel leg when no standalone set is supplied", () => {
+  it("a tour leg no longer outranks a hotel leg in the fallback ladder", () => {
     const result = resolvePrimarySupplier(
       [
         { pricingSnapshot: snapshot({ supplierKind: "hotel_property", supplierId: "sup-hotel" }) },
@@ -427,28 +427,35 @@ describe("resolve-primary-route — behaviour frozen before the kind generalisat
       { bookingPrimarySupplierId: null },
     )
 
-    expect(result.supplierId).toBe("sup-tour")
+    expect(result.supplierId).toBe("sup-hotel")
+    expect(result.source).toBe("hotel_fallback")
+  })
+
+  it("still prefers a genuinely journey-shaped leg over a stay", () => {
+    const result = resolvePrimarySupplier(
+      [
+        { pricingSnapshot: snapshot({ supplierKind: "hotel_property", supplierId: "sup-hotel" }) },
+        { pricingSnapshot: snapshot({ supplierKind: "airline", supplierId: "sup-air" }) },
+      ],
+      { bookingPrimarySupplierId: null },
+    )
+
+    expect(result.supplierId).toBe("sup-air")
     expect(result.source).toBe("first_leg")
   })
 
   /**
-   * The Kruger Shalati regression, in two halves.
+   * The Kruger Shalati regression, both halves, fixed.
    *
-   * The naming half is fixed: the booking's own primary supplier wins, so the quote email opens
-   * with the property rather than "your most valued Ulysses Tours & Transfers enquiry".
+   * Naming: the booking's own primary supplier wins, so the quote email opens with the property
+   * rather than "your most valued Ulysses Tours & Transfers enquiry".
    *
-   * The route half is NOT. resolvePrimaryRoute strips hotel legs before it looks for the primary
-   * supplier's own snapshot, so on a standalone stay the primary is never found among the
-   * candidates and the ladder falls through to the transfer's leg -- syncBookingRoute then writes
-   * "Airport <-> Shalati" onto bookings.route_id as though it were the journey. The module's own
-   * docstring claims this resolves to no route at all, which only holds while nothing but hotel
-   * legs are priced.
-   *
-   * Recorded here as it actually behaves today. Phase 2 makes a known primary supplier with no
-   * journey-shaped route of its own resolve to no route instead of borrowing another supplier's,
-   * and updates the second half of this test in the same commit.
+   * Route: a stay has no journey line at all. The old code stripped hotel legs before looking for
+   * the primary supplier, never found it, and fell through to the transfer leg -- so
+   * syncBookingRoute wrote "Airport <-> Shalati" onto the booking as though the stay were a
+   * journey there and back.
    */
-  it("a hotel-primary booking with a transfer extra keeps the hotel, but today still borrows the transfer's route", () => {
+  it("a hotel-primary booking with a transfer extra keeps the hotel and takes no route from it", () => {
     const lineItems = [
       { pricingSnapshot: snapshot({ supplierKind: "hotel_property", supplierId: "sup-shalati", routeId: "meal-plan-1", routeName: "Full Board" }) },
       { pricingSnapshot: snapshot({ supplierKind: "transfers", supplierId: "sup-ulysses", routeId: "route-transfer", routeName: "Airport ↔ Shalati" }) },
@@ -462,10 +469,45 @@ describe("resolve-primary-route — behaviour frozen before the kind generalisat
     expect(supplier.source).toBe("booking")
 
     expect(resolvePrimaryRoute(lineItems, { primarySupplierId: supplier.supplierId })).toEqual({
-      routeId: "route-transfer",
-      routeName: "Airport ↔ Shalati",
+      routeId: null,
+      routeName: null,
       routeReversed: false,
     })
+  })
+
+  // The same rule for the other kind whose "route" is not a direction: a cruise sold under Tours
+  // must not have its itinerary name published as a journey, nor borrow a transfer's.
+  it("a tour-primary booking with a transfer extra takes no route either", () => {
+    const lineItems = [
+      { pricingSnapshot: snapshot({ supplierKind: "tour_operator", supplierId: "sup-cruise", routeId: "itin-1", routeName: "7-night Round Trip" }) },
+      { pricingSnapshot: snapshot({ supplierKind: "transfers", supplierId: "sup-ulysses", routeId: "route-transfer", routeName: "Airport ↔ Harbour" }) },
+    ]
+
+    expect(resolvePrimaryRoute(lineItems, { primarySupplierId: "sup-cruise" })).toEqual({
+      routeId: null,
+      routeName: null,
+      routeReversed: false,
+    })
+  })
+
+  // A primary supplier that is not priced on this quote at all is a different case: there is
+  // nothing of its own to prefer, so the old ladder still applies rather than blanking the route.
+  it("falls back to the ladder when the primary supplier is not priced here", () => {
+    const result = resolvePrimaryRoute(
+      [
+        {
+          pricingSnapshot: snapshot({
+            supplierKind: "train_operator",
+            supplierId: "sup-rovos",
+            routeId: "route-rovos",
+            routeName: "Pretoria ↔ Cape Town",
+          }),
+        },
+      ],
+      { primarySupplierId: "sup-not-on-this-quote" },
+    )
+
+    expect(result.routeId).toBe("route-rovos")
   })
 
   // An airline primary is one of the kinds this work unlocks. Its route is a genuine origin ->
