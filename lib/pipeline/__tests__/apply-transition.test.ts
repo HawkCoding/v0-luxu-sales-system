@@ -188,11 +188,14 @@ describe("applyTransition", () => {
           final_paid_at: now.toISOString(),
           deposit_paid: true,
           deposit_confirmed_manually: true,
-          invoice_balance: 0,
           stage: "final_paid",
         }),
       }),
     )
+    // F-P1-8: invoice_balance is no longer forced to 0 by the transition itself -- it is derived
+    // from actual payments by syncBookingPaymentState below. A fixture with no payments at all
+    // must not see the booking's balance written to zero here.
+    expect(operations[0]?.payload).not.toHaveProperty("invoice_balance")
     expect(operations).toContainEqual(
       expect.objectContaining({
         table: "quotes",
@@ -209,9 +212,61 @@ describe("applyTransition", () => {
     expect(operations).not.toContainEqual(
       expect.objectContaining({ table: "correspondences", action: "insert" }),
     )
+    // Called once for the `accepted` crossing (promoting the sent quote) and once more for the
+    // `final_paid` crossing (deriving the real balance) -- see apply-transition.ts.
+    expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledTimes(2)
     expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(
       client,
       "booking-1",
+      expect.objectContaining({ actorName: "Douwlien", actorUserId: "user-1" }),
+    )
+  })
+
+  it("derives the real balance instead of trusting the tick when crossing only final_paid", async () => {
+    // F-P1-8 exact repro: a booking already at deposit_paid with a part payment on record moves to
+    // final_paid. The gate (validate-transition.test.ts) is what refuses this while money is
+    // outstanding; this test covers apply-transition's side of it -- once the gate is satisfied
+    // (or overridden), the transition itself must never fabricate a zero balance.
+    const now = new Date("2026-05-01T10:00:00.000Z")
+    const updatedRow = { id: "booking-9", stage: "final_paid", invoice_balance: 52438.5 }
+    const { client, operations } = createFakeSupabase(updatedRow)
+    syncMocks.syncBookingPaymentState.mockClear()
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-9",
+        booking_number: "BT-2026-0034",
+        stage: "deposit_paid",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-9",
+        consultant: "DR",
+      },
+      targetStage: "final_paid",
+      actorName: "Douwlien",
+      actorUserId: "user-1",
+      manualConfirmations: { finalPaymentReceived: true },
+      quotes: [{ id: "quote-9", status: "accepted", total: 174795, created_at: "2026-05-01T08:00:00.000Z" }],
+      documents: [],
+      correspondences: [],
+      now,
+    })
+
+    expect(operations[0]).toEqual(
+      expect.objectContaining({
+        table: "bookings",
+        action: "update",
+        payload: expect.objectContaining({ final_paid_at: now.toISOString(), stage: "final_paid" }),
+      }),
+    )
+    expect(operations[0]?.payload).not.toHaveProperty("invoice_balance")
+    // No quote to promote (it is already accepted), so this is the only sync call, and it is what
+    // actually derives invoice_balance from quotes/payments -- never a written zero.
+    expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledTimes(1)
+    expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(
+      client,
+      "booking-9",
       expect.objectContaining({ actorName: "Douwlien", actorUserId: "user-1" }),
     )
   })

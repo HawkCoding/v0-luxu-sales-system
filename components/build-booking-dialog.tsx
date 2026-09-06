@@ -732,7 +732,7 @@ export function BuildBookingDialog({
 
   function transferAnchorContext(legId: string): TransferAnchorContext | null {
     if (!packageDetail) return null
-    return toTransferAnchorContext(packageDetail, legStates, legId)
+    return toTransferAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
   }
 
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")

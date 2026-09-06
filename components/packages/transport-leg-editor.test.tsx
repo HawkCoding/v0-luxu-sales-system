@@ -328,6 +328,18 @@ describe("TransportLegEditor date anchor", () => {
     startDate: "2026-09-24",
     endDate: "2026-09-26",
     endDateAssumed: false,
+    isPrimaryProduct: true,
+  }
+
+  // F-P1-4 exact repro shape: a transfer sitting below a hotel add-on resolves "Pre"/"Post" to
+  // that hotel, not to the train that heads the booking.
+  const hotelAnchor: TransferAnchorContext = {
+    legLabel: "The President Hotel",
+    legKind: "hotel_property",
+    startDate: "2026-11-14",
+    endDate: "2026-11-16",
+    endDateAssumed: false,
+    isPrimaryProduct: false,
   }
 
   it("disables Pre/Post with no anchor context, leaving Custom's date picker live", () => {
@@ -356,10 +368,41 @@ describe("TransportLegEditor date anchor", () => {
       />,
     )
 
-    expect(screen.getByRole("button", { name: "Post" })).toHaveAttribute("aria-pressed", "true")
+    // F-P1-4: bare "Pre"/"Post" now name the leg they resolved to, once it's known.
+    expect(screen.getByRole("button", { name: "After Blue Train" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: /pickup date/i })).toBeDisabled()
     expect(screen.getByText(/26-09-2026/)).toBeInTheDocument()
-    expect(screen.getByText(/blue train/i)).toBeInTheDocument()
+    expect(screen.getByText(/end of blue train/i)).toBeInTheDocument()
+  })
+
+  it("warns when the resolved anchor leg is not the booking's primary product (F-P1-8 sibling, F-P1-4)", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ dateAnchor: "pre" })])}
+        onChange={vi.fn()}
+        anchorContext={hotelAnchor}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Before The President Hotel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "After The President Hotel" })).toBeInTheDocument()
+    expect(
+      screen.getByText(/anchored to the president hotel, not the booking's main product/i),
+    ).toBeInTheDocument()
+  })
+
+  it("does not warn when the resolved anchor leg is the primary product", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ dateAnchor: "post" })])}
+        onChange={vi.fn()}
+        anchorContext={trainAnchor}
+      />,
+    )
+
+    expect(screen.queryByText(/not the booking's main product/i)).not.toBeInTheDocument()
   })
 
   it("switches to Custom and re-enables the date picker", () => {

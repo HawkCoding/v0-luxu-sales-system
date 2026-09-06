@@ -1,3 +1,4 @@
+import { formatMoney } from "@/lib/money"
 import type { PipelineStage } from "@/lib/types"
 
 export type GateSeverity = "block" | "confirm"
@@ -16,6 +17,14 @@ export interface GateFailure {
    * demands where there is one.
    */
   confirmLabel?: string
+  /**
+   * Set on `final_payment_confirmation` when there is a priced accepted quote to compare
+   * payments against, so the modal can show real figures and pre-fill a payment instead of
+   * asking the user to assert a money fact with nothing on screen.
+   */
+  amountTotal?: number
+  amountPaid?: number
+  amountOutstanding?: number
 }
 
 export interface TransitionBooking {
@@ -232,6 +241,19 @@ function hasSubjectCorrespondence(
   subjectTerms: string[],
 ): boolean {
   return correspondences.some((correspondence) => subjectIncludes(correspondence, subjectTerms))
+}
+
+/** Same arbiter as lib/invoices/sync-booking-payment-state.ts and calculate-balance.ts: the newest
+ * accepted quote's total, or null when there is nothing priced to compare payments against. */
+function newestAcceptedQuoteTotal(quotes: TransitionQuote[]): number | null {
+  const accepted = quotes
+    .filter((quote) => quote.status === "accepted" && quote.total !== null && quote.total !== undefined)
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))
+  return accepted.length > 0 ? Number(accepted[0].total) : null
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
 }
 
 function customerCompletenessFailure(customer: TransitionCustomer | null): GateFailure | null {
@@ -469,14 +491,44 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     }
   }
 
-  if (crossedStages.includes("final_paid") && !manualConfirmations.finalPaymentReceived) {
-    failures.push({
-      gateId: "final_payment_confirmation",
-      message: "Payment in full needs confirming.",
-      fixHint: "No amount entry needed — the balance is already on record.",
-      severity: "confirm",
-      confirmLabel: "I confirm the full balance has been received.",
-    })
+  if (crossedStages.includes("final_paid")) {
+    // F-P1-8: this used to be a bare confirm tick that read nothing but the boolean, and
+    // apply-transition.ts wrote invoice_balance = 0 unconditionally once it was checked -- so a
+    // booking could be ticked "paid in full" with a fraction of the money actually received. The
+    // real arbiter (the same one lib/invoices/sync-booking-payment-state.ts derives from) is the
+    // newest accepted quote's total minus the sum of recorded payments. When that is positive the
+    // gate blocks and names the real numbers; ticking a box cannot make money appear.
+    const quoteTotal = newestAcceptedQuoteTotal(quotes)
+    const totalPaid = round2(payments.reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0))
+    const outstanding = quoteTotal !== null ? round2(Math.max(0, quoteTotal - totalPaid)) : null
+
+    if (outstanding !== null && outstanding > 0) {
+      failures.push({
+        gateId: "final_payment_confirmation",
+        message: `${formatMoney(outstanding)} of ${formatMoney(quoteTotal!)} has not been received.`,
+        fixHint:
+          "Record the outstanding payment on the Payments tab — the booking moves to Paid in Full on its own once the balance clears.",
+        severity: "block",
+        amountTotal: quoteTotal!,
+        amountPaid: totalPaid,
+        amountOutstanding: outstanding,
+      })
+    } else if (!manualConfirmations.finalPaymentReceived) {
+      // Balance is verified at zero (or there is no priced accepted quote to check against, which
+      // fails safe to the same tick rather than inventing a number) -- still ask for the tick so a
+      // human eye is on the move, but it can no longer manufacture a balance.
+      failures.push({
+        gateId: "final_payment_confirmation",
+        message: "Payment in full needs confirming.",
+        fixHint:
+          quoteTotal !== null
+            ? "The full balance is on record. Confirm to move this booking to Paid in Full."
+            : "No accepted quote total is on record to check the balance against — confirm to proceed.",
+        severity: "confirm",
+        confirmLabel: "I confirm the full balance has been received.",
+        ...(quoteTotal !== null ? { amountTotal: quoteTotal, amountPaid: totalPaid, amountOutstanding: 0 } : {}),
+      })
+    }
   }
 
   if (crossedStages.includes("voucher_sent")) {

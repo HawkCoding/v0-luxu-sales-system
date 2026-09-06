@@ -44,11 +44,31 @@ import { resolveTransferPax, resolveTransferPricingBasis, type TransferPricingBa
 
 const NONE_VALUE = "__none"
 
-const ANCHOR_OPTIONS: { value: ServiceDateAnchor; label: string; hint: string }[] = [
-  { value: "pre", label: "Pre", hint: "The day the leg above starts" },
-  { value: "post", label: "Post", hint: "The day the leg above ends" },
-  { value: "custom", label: "Custom", hint: "Pick the pickup date manually" },
-]
+/**
+ * F-P1-4: bare "Pre"/"Post" read as anchored to the booking's primary leg (the train), but a
+ * transfer always anchors to the nearest *dated* leg directly above it in the itinerary, whatever
+ * that is (see findTransferAnchorLeg's doc comment) -- a hotel add-on placed between the train and
+ * the transfer silently becomes "Pre". Naming the leg in the option itself, once it is known,
+ * means the consultant sees what it resolved to before saving, not after reading a small caption.
+ */
+function buildAnchorOptions(
+  anchorContext: TransferAnchorContext | null,
+): { value: ServiceDateAnchor; label: string; hint: string }[] {
+  const legLabel = anchorContext?.legLabel ?? null
+  return [
+    {
+      value: "pre",
+      label: legLabel ? `Before ${legLabel}` : "Pre",
+      hint: legLabel ? `The day ${legLabel} starts` : "The day the leg above starts",
+    },
+    {
+      value: "post",
+      label: legLabel ? `After ${legLabel}` : "Post",
+      hint: legLabel ? `The day ${legLabel} ends` : "The day the leg above ends",
+    },
+    { value: "custom", label: "Custom", hint: "Pick the pickup date manually" },
+  ]
+}
 
 interface RequestPriceOverrideProps {
   request: BookingTransportRequest
@@ -628,7 +648,7 @@ export function TransportLegEditor({
                 <div className="md:col-span-2 xl:col-span-3">
                   <AnchorDateSection
                     label="Pickup date/time"
-                    options={ANCHOR_OPTIONS}
+                    options={buildAnchorOptions(anchorContext)}
                     value={request.dateAnchor}
                     onChange={(next) => updateRequest(request.id, { dateAnchor: next })}
                     disabledValues={anchorContext ? [] : ["pre", "post"]}
@@ -676,6 +696,18 @@ export function TransportLegEditor({
                       <p className="text-xs text-amber-600 dark:text-amber-500">
                         {anchorContext.legLabel} has no journey length set, so the pickup falls on its start day. Set
                         the route&apos;s duration in Suppliers, or pick a custom date.
+                      </p>
+                    ) : null}
+                    {(request.dateAnchor === "pre" || request.dateAnchor === "post") &&
+                    anchorContext &&
+                    !anchorContext.isPrimaryProduct ? (
+                      // F-P1-4: this transfer's Pre/Post resolved to the nearest dated leg above it,
+                      // and that leg is not the booking's primary product -- the exact shape that
+                      // sent a guest "collected in Pretoria" two days after the train they were
+                      // supposed to be caught before actually left.
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        Anchored to {anchorContext.legLabel}, not the booking&apos;s main product. If this transfer
+                        belongs to a different leg, pick Custom.
                       </p>
                     ) : null}
                   </AnchorDateSection>
