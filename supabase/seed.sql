@@ -1398,11 +1398,14 @@ insert into public.templates (id,key,subject,body_html,version,active,is_system,
   ('00000000-0000-0000-0000-000000007008','thank_you','Thank you for travelling with us — {{jobNumber}}','<p>Dear {{customerName}},</p><p>We hope you had a wonderful journey on <strong>{{routeName}}</strong>. Thank you for travelling with Luxus Travel &amp; Tours — it was a privilege to arrange your trip.</p><p>We would love to welcome you aboard again.</p><p>Warm regards,<br/>{{consultantName}}<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2026-07-13T20:23:38.992853+00:00','2026-07-13T20:23:38.992853+00:00'),
   ('00000000-0000-0000-0000-000000007009','reservation_received','{{supplierName}} | {{clientSurname}} - {{direction}} - {{departureDateShort}}','<p>Dear {{customerName}}</p><p>Thank you for your reservation form well received.</p><p>The confirmation invoice with payment instructions will follow shortly.</p><p>In the meantime, I have secured your suite for you.</p>',3,true,true,'2026-07-21T11:11:33.288351+00:00','2026-07-22T10:31:31.037437+00:00'),
   ('00000000-0000-0000-0000-000000007010','payment_received','Payment received — {{invoiceNumber}}','<p>Dear {{customerName}}</p><p>Thank you very much for your payment well received.</p><p>Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong><br>Amount received: <strong>{{receivedAmount}}</strong> – Received, thank you.</p><p>Final amount due {{finalDueDate}}: <strong>{{outstandingAmount}}</strong></p><p>Hope you have a wonderful day.</p>',5,true,true,'2026-07-21T11:11:33.288351+00:00','2026-08-04T00:00:00.000000+00:00')
--- Conflict target is `key` (unique index): the unify-email-templates migration
--- pre-inserts the newer system keys with generated ids on a fresh reset. The
--- 'full_payment_request' key is seeded separately by migration
--- 20260723120000_full_payment_invoice.sql and intentionally left untouched here.
-on conflict (key) do update set subject=excluded.subject,
+-- Conflict target is `(key, supplier_id)` (ux_templates_key_supplier, NULLS NOT
+-- DISTINCT) since 20260824100000_template_supplier_variants.sql replaced the
+-- single-column `key` unique index that used to arbitrate here. The
+-- unify-email-templates migration pre-inserts the newer system keys with
+-- generated ids on a fresh reset. The 'full_payment_request' key is seeded
+-- separately by migration 20260723120000_full_payment_invoice.sql and
+-- intentionally left untouched here.
+on conflict (key, supplier_id) do update set subject=excluded.subject,
   body_html=excluded.body_html,version=excluded.version,active=excluded.active,is_system=excluded.is_system,updated_at=excluded.updated_at;
 
 -- ============================================================

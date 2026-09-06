@@ -310,6 +310,31 @@ describe("GET /api/jobs/[id]/services", () => {
     expect(body.selections[0].supplier_name).toBeNull()
     expect(body.selections[0].supplier_kind).toBeNull()
   })
+
+  // F-P1-3 (the select-string half): this handler's response-shaping code just forwards whatever
+  // the query returns (see the .map(({ suppliers, ...row }) => ...) below), so it was never what
+  // dropped manual_tour_price -- the select string itself was. That half is covered directly in
+  // lib/packages/service-columns.test.ts, which can assert against the actual column list; this
+  // mock harness returns getServiceRows verbatim and cannot simulate postgrest's projection.
+  it("passes a unit's manual price override straight through, whatever columns the query returns", async () => {
+    mockAuth({
+      getServiceRows: [
+        {
+          id: SERVICE_A,
+          supplier_id: "sup-a",
+          sort_order: 0,
+          suppliers: { name: "City Sightseeing Bus Tours", kind: "tour_operator" },
+          units: [{ id: UNIT_A, manual_tour_price: 1650, manual_tour_price_set_at: "2026-09-04T10:00:00.000Z" }],
+        },
+      ],
+    })
+    const res = await GET(new Request("http://localhost"), makeParams())
+    const body = await res.json()
+    expect(body.selections[0].units[0]).toMatchObject({
+      manual_tour_price: 1650,
+      manual_tour_price_set_at: "2026-09-04T10:00:00.000Z",
+    })
+  })
 })
 
 describe("PATCH /api/jobs/[id]/services", () => {

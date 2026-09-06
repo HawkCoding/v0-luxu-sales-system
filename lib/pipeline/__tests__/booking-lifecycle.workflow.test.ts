@@ -241,6 +241,26 @@ describe("booking lifecycle workflow regression", () => {
       }),
     ).toEqual([])
 
+    // F-P1-2: app/api/enquiries/route.ts sets email_import_needs_review for ANY source with an
+    // unresolved suite or missing field ("This never blocks: quote build is the hard gate."). A
+    // manual (phone_call) enquiry must never be gated by it here -- the UI used to disable Next
+    // and hide the only resolve control behind `source === "email"`, stranding the booking with
+    // no way forward.
+    expect(
+      validateTransition({
+        booking: {
+          id: BOOKING_ID,
+          stage: "enquiry",
+          source: "phone_call",
+          email_import_needs_review: true,
+          email_import_review_resolved_at: null,
+        },
+        customer,
+        targetStage: "quote_sent",
+        quotes: [{ status: "sent", total: 1000 }],
+      }),
+    ).toEqual([])
+
     expect(
       validateTransition({
         booking: {
@@ -283,6 +303,7 @@ describe("booking lifecycle workflow regression", () => {
         quotes: [{ status: "accepted", total: 1000 }],
         invoices: [{ kind: "final", status: "sent" }],
         correspondences: [{ kind: "invoice", subject: "Final invoice BT-2026-0001-FIN1", status: "sent" }],
+        payments: [{ amount: 1000 }],
         manualConfirmations: { finalPaymentReceived: true },
       }),
     ).toEqual([])

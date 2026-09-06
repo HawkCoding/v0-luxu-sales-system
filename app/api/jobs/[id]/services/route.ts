@@ -26,6 +26,7 @@ export const runtime = "nodejs"
 import { isCoreBookingLeg, type SupplierKind } from "@/lib/types"
 import { normaliseCurrency } from "@/lib/money"
 import { PASSENGER_SUM_SUPPLIER_KINDS } from "@/lib/packages/apply-dialog-state"
+import { SERVICES_WITH_SUPPLIER_SELECT, SERVICES_WITH_UNITS_SELECT } from "@/lib/packages/service-columns"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -153,23 +154,6 @@ interface RouteParams {
 type BookingServiceUpdate = Database["public"]["Tables"]["booking_services"]["Update"]
 type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_units"]["Insert"]
 
-const SERVICES_WITH_UNITS_SELECT =
-  "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, sort_order, price_currency, updated_at, " +
-  "departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, " +
-  "luggage_storage_available, accommodation_pricing_basis, booking_date, confirmation_date, payment_made_date, paid_with, " +
-  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at, complimentary_first_night, rate_type_id)"
-
-/**
- * GET only. Build Booking's step 1 lists a booking's services by supplier name and kind, which is
- * all it renders -- so carrying the name/kind here lets the dialog paint that list off this read
- * instead of waiting on the far heavier GET /build-booking payload (every route, rate card and
- * suite type for every supplier on the booking) that step 2 actually needs.
- *
- * Deliberately separate from SERVICES_WITH_UNITS_SELECT so PATCH's reload response below keeps its
- * existing shape -- a read-path speedup has no business changing what a write returns.
- */
-const SERVICES_WITH_SUPPLIER_SELECT = `${SERVICES_WITH_UNITS_SELECT}, suppliers(name, kind)`
-
 interface ServiceUnitRow {
   id: string
   suite_type_id: string | null
@@ -185,6 +169,8 @@ interface ServiceUnitRow {
   manual_infant_price: number | null
   manual_room_price: number | null
   manual_room_price_set_at: string | null
+  manual_tour_price: number | null
+  manual_tour_price_set_at: string | null
   complimentary_first_night: boolean
   rate_type_id: string | null
 }

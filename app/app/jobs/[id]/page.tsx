@@ -49,6 +49,7 @@ import { JobAuditTab } from "@/components/job-audit-tab"
 import { BookingStageStepper } from "@/components/booking-stage-stepper"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
+import { RecordPaymentDialog } from "@/components/record-payment-dialog"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
 import { QuoteRevisionBanner } from "@/components/quote-revision-banner"
 import { SendPaymentConfirmationButton } from "@/components/send-payment-confirmation-button"
@@ -187,6 +188,11 @@ export default function JobDetailPage() {
   // when there is an unsent draft to resume.
   const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
   const [paymentConfirmationOpen, setPaymentConfirmationOpen] = useState(false)
+  // F-P1-8: the final_payment_confirmation gate's "Record the balance payment" action opens this
+  // pre-filled with the outstanding amount the gate computed, instead of a tick that asserts money
+  // no one recorded.
+  const [balancePaymentOpen, setBalancePaymentOpen] = useState(false)
+  const [balancePaymentDefaultAmount, setBalancePaymentDefaultAmount] = useState<number | null>(null)
   const [depositPaymentConfirmationOpen, setDepositPaymentConfirmationOpen] = useState(false)
   const [voucherOpen, setVoucherOpen] = useState(false)
   const [voucherAutoPreview, setVoucherAutoPreview] = useState(false)
@@ -351,6 +357,12 @@ export default function JobDetailPage() {
   const hasAnyPayment = payments.length > 0
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
+  // The server-side gate (lib/pipeline/validate-transition.ts) only ever blocks a forward move for
+  // source === "email" — an unresolved review flag on a manual/phone/walk-in enquiry never blocks
+  // there. This used to block anyway on every source: `needsEmailReview` disabled Next with no
+  // resolve control in sight for anything but an email-sourced booking, stranding a hand-typed
+  // enquiry with no way out but a raw API call. Mirror the server's condition here.
+  const reviewBlocksAdvance = needsEmailReview && enquiry?.source === "email"
   const nextBlockedByMissingPayment = forwardTargetIsDepositPaid && !hasAnyPayment && !needsEmailReview
   // Moving to Deposit Paid sends the payment confirmation, and that email is
   // built around the booking's invoice — POST /payment-received 422s without
@@ -609,7 +621,7 @@ export default function JobDetailPage() {
   }
 
   const moveStage = async (direction: "forward" | "back") => {
-    if (needsEmailReview && direction === "forward") return
+    if (reviewBlocksAdvance && direction === "forward") return
     const newIdx = direction === "forward" ? currentStageIdx + 1 : currentStageIdx - 1
     if (newIdx < 0 || newIdx >= PIPELINE_STAGES.length) return
     const target = PIPELINE_STAGES[newIdx].key
@@ -625,7 +637,7 @@ export default function JobDetailPage() {
         throw new Error(payload.error ?? "Could not resolve import review")
       }
       await mutate()
-      toast.success("Import review cleared")
+      toast.success("Review cleared")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not resolve import review")
     } finally {
@@ -715,7 +727,7 @@ export default function JobDetailPage() {
       size="sm"
       disabled={
         currentStageIdx >= PIPELINE_STAGES.length - 1 ||
-        needsEmailReview ||
+        reviewBlocksAdvance ||
         isSavingJob ||
         transitionSubmitting ||
         (forwardTargetIsDepositPaid && !hasAnyPayment) ||
@@ -905,8 +917,8 @@ export default function JobDetailPage() {
                 </Button>
               )}
             </div>
-            {needsEmailReview && (
-              <p className="text-[11px] text-muted-foreground">Resolve email review to advance</p>
+            {reviewBlocksAdvance && (
+              <p className="text-[11px] text-muted-foreground">Resolve the review to advance</p>
             )}
           </div>
         )}
@@ -961,13 +973,19 @@ export default function JobDetailPage() {
             <InfoItem label="Phone" value={customer?.phone} />
             <InfoItem label="Country" value={customer?.country} />
           </div>
-          {enquiry?.source === "email" && (
+          {(enquiry?.source === "email" || needsEmailReview) && (
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => setChangeCustomerOpen(true)}>
-                <UserRound className="w-4 h-4 mr-1.5" />
-                Change customer
-              </Button>
+              {enquiry?.source === "email" && (
+                <Button size="sm" variant="outline" onClick={() => setChangeCustomerOpen(true)}>
+                  <UserRound className="w-4 h-4 mr-1.5" />
+                  Change customer
+                </Button>
+              )}
               {needsEmailReview && (
+                // Not source-gated: the flag is set for any enquiry source with an
+                // unresolved suite/field (app/api/enquiries/route.ts), but this used to
+                // render only for source === "email" -- a manual/phone/walk-in enquiry
+                // had no way to clear it and could get stuck at Enquiry forever.
                 <Button size="sm" onClick={resolveEmailReview} disabled={resolvingImportReview}>
                   <CheckCircle2 className="w-4 h-4 mr-1.5" />
                   {resolvingImportReview ? "Resolving" : "Resolve review"}
@@ -984,7 +1002,9 @@ export default function JobDetailPage() {
             <div className="flex gap-3">
               <AlertCircle className="mt-0.5 h-4 w-4 text-destructive" />
               <div className="space-y-1">
-                <p className="text-sm font-medium">Email import needs review</p>
+                <p className="text-sm font-medium">
+                  {enquiry?.source === "email" ? "Email import needs review" : "Needs review"}
+                </p>
                 <p className="text-sm text-muted-foreground">
                   {[...(enquiry?.emailImportMissingFields ?? []), ...(enquiry?.emailImportWarnings ?? [])].join(", ") || "Review parsed fields before moving this enquiry forward."}
                 </p>
@@ -1235,6 +1255,19 @@ export default function JobDetailPage() {
         onSendDepositInvoice={() => {
           setDepositInvoiceOpen(true)
         }}
+        onRecordBalancePayment={(amountOutstanding) => {
+          setBalancePaymentDefaultAmount(amountOutstanding)
+          setBalancePaymentOpen(true)
+        }}
+      />
+
+      <RecordPaymentDialog
+        open={balancePaymentOpen}
+        onOpenChange={setBalancePaymentOpen}
+        jobId={id}
+        mutate={mutate}
+        currency={billingCurrency}
+        defaultAmount={balancePaymentDefaultAmount}
       />
 
       <GenerateDepositInvoiceDialog

@@ -898,9 +898,50 @@ describe("transfer date anchors", () => {
   it("toTransferAnchorContext flags a missing route duration as assumed", () => {
     const noDurationPkg = detail([{ ...chainTrain, routes: [{ ...chainTrain.routes[0], durationDays: null }] }, chainTransfer1])
     const states = buildDefaultLegStates(noDurationPkg, { tripStartDate: "2026-09-10" })
-    const context = toTransferAnchorContext(noDurationPkg, states, "leg-transfer-1")
+    const context = toTransferAnchorContext(noDurationPkg, states, "leg-transfer-1", null)
     expect(context?.endDateAssumed).toBe(true)
     expect(context?.startDate).toBe(context?.endDate)
+  })
+
+  // F-P1-4: "Pre"/"Post" always resolves to the nearest dated leg above (by design -- see
+  // findTransferAnchorLeg), never to the booking's primary product specifically. On chainPkg,
+  // train(1) -> transfer1(2) -> hotel(3) -> transfer2(4): transfer1's neighbour is the train (the
+  // primary product on a train-headed booking), but transfer2's neighbour is the hotel -- exactly
+  // the shape that sent a guest's pickup to "Pre-train" resolving against a hotel two days later.
+  it("toTransferAnchorContext flags when the resolved neighbour is not the primary product", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-10"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "custom"
+    hotel.serviceDate = "2026-09-12"
+    hotel.nights = 2
+
+    const transfer1Context = toTransferAnchorContext(chainPkg, states, "leg-transfer-1", null)
+    expect(transfer1Context?.legLabel).toBe(chainTrain.supplierName)
+    expect(transfer1Context?.isPrimaryProduct).toBe(true)
+
+    const transfer2Context = toTransferAnchorContext(chainPkg, states, "leg-transfer-2", null)
+    expect(transfer2Context?.legLabel).toBe(chainHotel.supplierName)
+    expect(transfer2Context?.isPrimaryProduct).toBe(false)
+  })
+
+  it("toTransferAnchorContext resolves isPrimaryProduct off an explicit primarySupplierId, not just the train fallback", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-10"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "custom"
+    hotel.serviceDate = "2026-09-12"
+    hotel.nights = 2
+
+    // The hotel is the primary product here (e.g. a standalone-stay booking) -- transfer1's train
+    // neighbour is then the one that is NOT the primary product, the inverse of the default rule.
+    const transfer1Context = toTransferAnchorContext(chainPkg, states, "leg-transfer-1", "supplier-leg-hotel")
+    expect(transfer1Context?.isPrimaryProduct).toBe(false)
+
+    const transfer2Context = toTransferAnchorContext(chainPkg, states, "leg-transfer-2", "supplier-leg-hotel")
+    expect(transfer2Context?.isPrimaryProduct).toBe(true)
   })
 })
 

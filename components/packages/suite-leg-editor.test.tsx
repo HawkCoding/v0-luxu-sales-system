@@ -493,6 +493,10 @@ const flightAnchorContext: TransferAnchorContext = {
   startDate: "2026-09-24",
   endDate: "2026-09-27",
   endDateAssumed: false,
+  // F-P1-4: a hotel is never the primary product on a train-headed booking (the fixtures in this
+  // file are all trains) -- exercises the "anchored to something that isn't the main product"
+  // warning alongside the existing resolved-date assertions below.
+  isPrimaryProduct: false,
 }
 
 describe("SuiteLegEditor flight date anchor", () => {
@@ -526,6 +530,25 @@ describe("SuiteLegEditor flight date anchor", () => {
     expect(screen.getByText(/end of table bay hotel/i)).toBeInTheDocument()
   })
 
+  it("names the anchor leg in the option itself and warns when it isn't the primary product", () => {
+    render(
+      <SuiteLegEditor
+        leg={airlineLeg}
+        value={makeAirlineState({ dateAnchor: "post" })}
+        onChange={vi.fn()}
+        flightAnchorContext={flightAnchorContext}
+      />,
+    )
+
+    // F-P1-4: bare "Pre"/"Post" read as anchored to the primary leg -- once the anchor resolves,
+    // the option itself names what it actually resolved to.
+    expect(screen.getByRole("button", { name: "Before Table Bay Hotel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "After Table Bay Hotel" })).toBeInTheDocument()
+    expect(
+      screen.getByText(/anchored to table bay hotel, not the booking's main product/i),
+    ).toBeInTheDocument()
+  })
+
   it("setting the anchor updates dateAnchor without touching other flight fields", () => {
     const onChange = vi.fn()
     render(
@@ -537,7 +560,7 @@ describe("SuiteLegEditor flight date anchor", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Pre" }))
+    fireEvent.click(screen.getByRole("button", { name: "Before Table Bay Hotel" }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dateAnchor: "pre" }))
   })
 })

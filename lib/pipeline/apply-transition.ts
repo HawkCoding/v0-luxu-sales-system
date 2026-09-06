@@ -97,7 +97,10 @@ function buildBookingUpdates(input: ApplyTransitionInput, nowIso: string): Booki
   }
   if (crossedStages.includes("final_paid")) {
     updates.final_paid_at = nowIso
-    updates.invoice_balance = 0
+    // invoice_balance is no longer written here. It used to be forced to 0 unconditionally on
+    // every final_paid crossing -- including an overridden gate -- which meant a booking could be
+    // marked "paid in full" while carrying a false zero balance no payment ever backed. See the
+    // syncBookingPaymentState call below, which derives it from actual payments instead.
   }
   if (crossedStages.includes("voucher_sent")) {
     updates.voucher_sent_at = nowIso
@@ -184,6 +187,19 @@ export async function applyTransition(
 
     // Recompute invoice_balance/deposit_paid off the newly-accepted quote total so a
     // revised (e.g. higher) total is reflected immediately, not just on the next payment.
+    await syncBookingPaymentState(supabase, input.booking.id, {
+      actorName: input.actorName,
+      actorUserId: input.actorUserId,
+    })
+  }
+
+  if (crossedStages.includes("final_paid")) {
+    // The gate above (final_payment_confirmation) already refuses this crossing while a real
+    // balance remains, unless a manager overrides it -- so this call is what actually derives
+    // invoice_balance from the newest accepted quote total minus sum(payments) rather than
+    // trusting the removed `invoice_balance = 0` write above. Safe to call even when the
+    // `accepted` branch above already synced in the same multi-stage skip: it re-reads the
+    // booking's current (already-updated) stage and payments, so it is idempotent.
     await syncBookingPaymentState(supabase, input.booking.id, {
       actorName: input.actorName,
       actorUserId: input.actorUserId,
