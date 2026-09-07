@@ -58,11 +58,20 @@ describe("invoiceRowsForBlock", () => {
       left: { label: "Room Type", value: "Deluxe Room" },
       right: { label: "Qty", value: "2" },
     })
+    // No check-in/check-out time configured, so the right column stays empty on both date rows.
+    expect(rows.find((r) => r.left?.label === "Check-In")).toEqual({
+      left: { label: "Check-In", value: "18 November 2026" },
+      right: null,
+    })
+    expect(rows.find((r) => r.left?.label === "Check-Out")).toEqual({
+      left: { label: "Check-Out", value: "21 November 2026" },
+      right: null,
+    })
     // The 3-cell Guests row is blocked, same as Your Reference.
     expect(rows.every((row) => row.left?.label !== "Guests")).toBe(true)
   })
 
-  it("train block: route, duration, dates, suite -- no boarding/arrival point or supplier reference", () => {
+  it("train block: route, split date/time columns, suite -- no duration, boarding point or reference", () => {
     const rows = invoiceRowsForBlock(
       block({
         serviceType: "train",
@@ -80,9 +89,54 @@ describe("invoiceRowsForBlock", () => {
         },
       }),
     )
-    expect(labels(rows)).toEqual(["Route", "Duration", "Departure Date", "Arrival Date", "Suite Type"])
+    expect(labels(rows)).toEqual(["Route", "Departure", "Arrival", "Suite Type"])
+    expect(rows.find((r) => r.left?.label === "Departure")).toEqual({
+      left: { label: "Departure", value: "20 July 2026" },
+      right: { label: "Time", value: "13h00" },
+    })
+    expect(rows.find((r) => r.left?.label === "Arrival")).toEqual({
+      left: { label: "Arrival", value: "22 July 2026" },
+      right: { label: "Time", value: "18h00" },
+    })
     expect(rows.some((r) => r.left?.label === "Boarding Point")).toBe(false)
     expect(rows.some((r) => r.left?.label === "Your Reference")).toBe(false)
+  })
+
+  it("train block: undated arrival keeps the voucher's TBC and prints no time cell", () => {
+    const rows = invoiceRowsForBlock(
+      block({
+        serviceType: "train",
+        serviceData: { departureDate: "2026-07-20", endTime: "18:00" },
+      }),
+    )
+    expect(rows.find((r) => r.left?.label === "Departure")).toEqual({
+      left: { label: "Departure", value: "20 July 2026" },
+      right: null,
+    })
+    expect(rows.find((r) => r.left?.label === "Arrival")).toEqual({
+      left: { label: "Arrival", value: "TBC" },
+      right: null,
+    })
+  })
+
+  it("airline block: departure/arrival keep the voucher's folded airport-code line", () => {
+    const rows = invoiceRowsForBlock(
+      block({
+        serviceType: "airline",
+        serviceData: {
+          departureDate: "2026-07-20",
+          departureAirportCode: "CPT",
+          startTime: "16:20",
+          arrivalDate: "2026-07-20",
+          arrivalAirportCode: "JNB",
+          endTime: "18:25",
+        },
+      }),
+    )
+    expect(rows.find((r) => r.left?.label === "Departure")).toEqual({
+      left: { label: "Departure", value: "20 July 2026: CPT at 16h20" },
+      right: null,
+    })
   })
 
   // Drift guard: every label this module blocks must still be something voucherRowsForBlock
@@ -96,6 +150,7 @@ describe("invoiceRowsForBlock", () => {
           route: "Pretoria → Cape Town",
           boardingPoint: "Pretoria Station",
           arrivalPoint: "Cape Town Station",
+          durationDays: 3,
           departureDate: "2026-07-20",
           requestsLine: "1st seating",
         },

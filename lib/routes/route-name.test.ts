@@ -7,7 +7,23 @@ import {
   resolveDirectedArrivalName,
   resolveDirectedEndpointCodes,
   resolveDirectedRouteName,
+  sameRouteEndpoints,
 } from "@/lib/routes/route-name"
+
+describe("sameRouteEndpoints", () => {
+  it("matches a canonical two-way name against either booked direction", () => {
+    expect(sameRouteEndpoints("Pretoria ↔ Cape Town", "Pretoria → Cape Town")).toBe(true)
+    expect(sameRouteEndpoints("Pretoria ↔ Cape Town", "Cape Town → Pretoria")).toBe(true)
+    expect(sameRouteEndpoints("pretoria ↔ cape town", "Pretoria → Cape Town")).toBe(true)
+  })
+
+  it("does not match different endpoints or a route named something other than its endpoints", () => {
+    expect(sameRouteEndpoints("Pretoria ↔ Cape Town", "Pretoria → Victoria Falls")).toBe(false)
+    expect(sameRouteEndpoints("Pride of Africa", "Pretoria → Victoria Falls")).toBe(false)
+    expect(sameRouteEndpoints(null, "Pretoria → Cape Town")).toBe(false)
+    expect(sameRouteEndpoints("Pretoria ↔ Cape Town", null)).toBe(false)
+  })
+})
 
 describe("displayRouteName", () => {
   it("drops a tour operator's itinerary name, which is stored as the route's own id", () => {
