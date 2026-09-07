@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { computeLegPassengerTotals, distributePassengerTotals } from "@/lib/packages/passenger-totals"
+import { zonedDateTimeToIso } from "@/lib/date-format"
 
 const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
@@ -207,7 +208,9 @@ export async function seedUnitsForServices(
       service_type: service.kind === "vehicle_rental" ? "rental" : "transfer",
       pickup_point: "",
       dropoff_point: "",
-      pickup_at: tripStartDate ? `${tripStartDate}T00:00:00+00:00` : null,
+      // A seeded pickup means "00:00 in Johannesburg", not UTC midnight -- the latter used to
+      // print as "02h00" on the voucher (F-P3-5).
+      pickup_at: tripStartDate ? zonedDateTimeToIso(tripStartDate, "00:00") : null,
       sort_order: 0,
       pricing_basis:
         service.kind === "transfers"
@@ -226,7 +229,7 @@ export async function seedUnitsForServices(
       .filter((row) => row.service_type === "rental")
       .map((row) => ({
         transport_request_id: row.id,
-        return_at: tripEndDate ? `${tripEndDate}T00:00:00+00:00` : null,
+        return_at: tripEndDate ? zonedDateTimeToIso(tripEndDate, "00:00") : null,
       }))
 
     if (rentalDetailRows.length > 0) {

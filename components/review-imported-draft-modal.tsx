@@ -37,7 +37,7 @@ import {
 import { suiteVocabularyFromSupplierDetail, type SuiteAxis } from "@/lib/suites/suite-vocabulary"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { resolveDraftSupplierId } from "@/lib/import/resolve-draft-supplier"
-import { primaryProductOf } from "@/lib/enquiry/primary-product"
+import { formatPrimaryProductDuration, primaryProductOf } from "@/lib/enquiry/primary-product"
 import {
   SUPPLIER_KIND_LABELS,
   getSupplierVocabulary,
@@ -64,16 +64,6 @@ const ENQUIRY_DRAFT_DEBOUNCE_MS = 1500
 interface EnquiryDraftPayload {
   draft: ParsedDraft
   dirtyFields: string[]
-}
-
-/**
- * "3 nights" / "1 day". The draft field is called `nights` for every kind because that is the
- * column behind it (bookings.duration_nights); the customer's word for the same span depends on
- * what they are booking.
- */
-function durationWord(count: number, unit: "nights" | "days" | null): string {
-  const plural = unit ?? "nights"
-  return count === 1 ? plural.slice(0, -1) : plural
 }
 
 function isEnquiryDraftPayload(data: unknown): data is EnquiryDraftPayload {
@@ -684,7 +674,10 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       <p className="text-xs text-muted-foreground">
                         {draft.trip.nights
                           ? [
-                              `${draft.trip.nights} ${durationWord(draft.trip.nights, product.durationUnit)}`,
+                              // The stored interval is always nights; a kind that counts in days
+                              // (a tour) counts both end days, so 20 -> 23 Nov is "4 days", not
+                              // "3 days" (F-P3-4).
+                              formatPrimaryProductDuration(draft.trip.nights, product.durationUnit),
                               product.endDateHintSuffix,
                             ]
                               .filter(Boolean)

@@ -4,7 +4,7 @@ import {
   resolveSupplierPriceLabel,
   SUPPLIER_VOCABULARY,
 } from "@/lib/types"
-import { resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { displayRouteName, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import type { CommissionKind, PackageDetail, PricingSnapshot, QuoteLineItem, SupplierRateCard } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
@@ -534,6 +534,10 @@ export async function buildPackageQuoteLineItems({
      * switched stays explicable next to one quoted after. See
      * lib/pricing/accommodation-basis.ts. */
     accommodationPricingBasis?: "per_person" | "per_room" | null
+    /** Hotel per-person lines only: the two factors `qty` is the product of, carried so the
+     * internal quote view can render "1 guest × 2 nights" rather than a bare 2 that reads as a
+     * headcount beside a "per person per night" basis. */
+    qtyBasis?: { occupants: number; nights: number } | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -566,6 +570,7 @@ export async function buildPackageQuoteLineItems({
     transportRequestId,
     transferPricingBasis,
     accommodationPricingBasis,
+    qtyBasis,
   }: AddLineItemOptions) {
     // A stay whose every night was gifted still has to reach the quote: the client documents read
     // their itinerary off the priced legs, so dropping the line would drop the hotel entirely.
@@ -687,6 +692,7 @@ export async function buildPackageQuoteLineItems({
           : {}),
         ...(transferPricingBasis ? { transferPricingBasis } : {}),
         ...(accommodationPricingBasis ? { accommodationPricingBasis } : {}),
+        ...(qtyBasis ? { occupantCount: qtyBasis.occupants, chargedNights: qtyBasis.nights } : {}),
       }
     }
 
@@ -792,8 +798,9 @@ export async function buildPackageQuoteLineItems({
     if (!route) return null
     // Only two-way point-to-point routes have a meaningful travel direction to render; everything
     // else (one-way routes, hotel meal plans) keeps its stored name regardless of `reversed`.
+    // displayRouteName drops a tour operator's itinerary, whose stored "name" is its own id.
     if (route.directionMode !== "round_trip" || !route.originLocationName || !route.destinationLocationName) {
-      return route.name
+      return displayRouteName(route.name)
     }
     return resolveDirectedRouteName(route.originLocationName, route.destinationLocationName, reversed)
   }
@@ -1171,6 +1178,7 @@ export async function buildPackageQuoteLineItems({
               description,
               // Per person per night: three guests for four nights is twelve person-nights.
               qty: headcount * chargedNights,
+              qtyBasis: { occupants: headcount, nights: chargedNights },
               unitPrice: fare.unitPrice,
               supplierDescription,
               suiteTypeId: unitSelection.suiteTypeId,

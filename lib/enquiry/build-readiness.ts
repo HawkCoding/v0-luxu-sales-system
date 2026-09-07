@@ -110,6 +110,7 @@ const NON_TRANSPORT_UNIT_KINDS = new Set<SupplierKind>([
   "hotel_property",
   "tour_operator",
   "airline",
+  "cruise_line",
 ])
 /**
  * Whether this kind's leg can be priced without a route row chosen.
@@ -270,7 +271,11 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
   }
 
   const hasAdditionalServiceBuilt = orderedServices.some(
-    (s) => s.supplierKind && (TRANSPORT_KINDS.has(s.supplierKind) || s.supplierKind === "tour_operator"),
+    (s) =>
+      s.supplierKind &&
+      (TRANSPORT_KINDS.has(s.supplierKind) ||
+        s.supplierKind === "tour_operator" ||
+        s.supplierKind === "cruise_line"),
   )
   if (input.additionalServicesRequested && !hasAdditionalServiceBuilt) {
     gaps.push({

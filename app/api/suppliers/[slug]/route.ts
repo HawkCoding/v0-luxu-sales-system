@@ -956,7 +956,11 @@ export async function PATCH(
     }
   }
 
-  const nextActive = isDraftSave ? false : parsed.active
+  // "Save & Publish" on a draft must actually publish it -- the form's `active` field is seeded
+  // from the record's current (inactive) value, not from which button was pressed, so trusting it
+  // alone let the save report success while the record stayed invisible to New Enquiry (F-P3-7).
+  const publishRequested = !isDraftSave && "publish" in parsed && parsed.publish === true
+  const nextActive = isDraftSave ? false : publishRequested ? true : parsed.active
   const nextStatus = isDraftSave ? "draft" : nextActive ? "active" : "inactive"
   const supplierUpdatePayload = {
     name: parsed.name.trim(),

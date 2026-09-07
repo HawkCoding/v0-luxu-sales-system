@@ -57,6 +57,15 @@ describe("dateOnly", () => {
     expect(dateOnly("2026-08-20T14:00:00+00:00")).toBe("2026-08-20")
   })
 
+  it("reads the calendar date in APP_TIME_ZONE, not a raw UTC slice (F-P3-5)", () => {
+    // A 00:00 SAST pickup is stored as 22:00 the previous day in UTC.
+    expect(dateOnly("2026-11-17T22:00:00.000Z")).toBe("2026-11-18")
+  })
+
+  it("passes a bare date-only value through unchanged", () => {
+    expect(dateOnly("2026-08-20")).toBe("2026-08-20")
+  })
+
   it("returns null for empty or malformed values", () => {
     expect(dateOnly(null)).toBeNull()
     expect(dateOnly("soon")).toBeNull()
@@ -80,6 +89,25 @@ describe("serviceDateSpan", () => {
     expect(
       serviceDateSpan({ supplierKind: "tour_operator", serviceDate: "2026-07-18", nights: null, routeDurationDays: null }),
     ).toEqual({ start: "2026-07-18", end: "2026-07-18" })
+  })
+
+  it("spans a multi-day tour off its own nights, not a route duration (F-P3-4)", () => {
+    // 20 -> 23 November is the 3-night interval behind a "4-Day Kruger Safari".
+    expect(
+      serviceDateSpan({ supplierKind: "tour_operator", serviceDate: "2026-11-20", nights: 3, routeDurationDays: null }),
+    ).toEqual({ start: "2026-11-20", end: "2026-11-23" })
+  })
+
+  it("ignores a route duration on a tour -- tours state their own span", () => {
+    expect(
+      serviceDateSpan({ supplierKind: "tour_operator", serviceDate: "2026-11-20", nights: 3, routeDurationDays: 7 }),
+    ).toEqual({ start: "2026-11-20", end: "2026-11-23" })
+  })
+
+  it("still floors a hotel with unset nights at one night", () => {
+    expect(
+      serviceDateSpan({ supplierKind: "hotel_property", serviceDate: "2026-07-16", nights: null, routeDurationDays: null }),
+    ).toEqual({ start: "2026-07-16", end: "2026-07-17" })
   })
 
   it("returns null without a service date", () => {

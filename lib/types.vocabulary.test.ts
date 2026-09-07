@@ -27,6 +27,7 @@ const ALL_KINDS: SupplierKind[] = [
   "vehicle_rental",
   "tour_operator",
   "airline",
+  "cruise_line",
 ]
 
 describe("SUPPLIER_VOCABULARY — frozen kinds", () => {
@@ -120,6 +121,25 @@ describe("SUPPLIER_VOCABULARY — frozen kinds", () => {
   })
 })
 
+describe("SUPPLIER_VOCABULARY — cruise_line", () => {
+  it("speaks its own vocabulary, distinct from the other type-priced kind (tour_operator)", () => {
+    const cruise = SUPPLIER_VOCABULARY.cruise_line
+    expect(cruise.suiteType).toBe("Cabin Type")
+    expect(cruise.route).toBe("Itinerary")
+    expect(cruise.routeHasLocations).toBe(false)
+    expect(cruise.primaryProduct.bookingNoun).toBe("Voyage")
+    expect(cruise.primaryProduct.startDateLabel).toBe("Sailing Date")
+    expect(cruise.primaryProduct.endDateLabel).toBe("Return Date")
+    expect(cruise.primaryProduct.routeFieldLabel).toBeNull()
+    expect(cruise.primaryProduct.durationUnit).toBe("nights")
+    expect(cruise.primaryProduct.routeRequiredForPricing).toBe(false)
+    expect(cruise.primaryProduct.capturesUnitCount).toBe(true)
+    expect(cruise.primaryProduct.capturesHotelOption).toBe(true)
+    // Both are type-priced, but must not have collapsed into one copy-pasted entry.
+    expect(cruise.primaryProduct.bookingNoun).not.toBe(SUPPLIER_VOCABULARY.tour_operator.primaryProduct.bookingNoun)
+  })
+})
+
 describe("SUPPLIER_VOCABULARY — shape", () => {
   it("covers every SupplierKind", () => {
     expect(Object.keys(SUPPLIER_VOCABULARY).sort()).toEqual([...ALL_KINDS].sort())
@@ -163,9 +183,9 @@ describe("SUPPLIER_VOCABULARY — shape", () => {
     )
   })
 
-  it("prices only tour operators off the type alone", () => {
+  it("prices tour operators and cruise lines off the type alone", () => {
     const typePriced = ALL_KINDS.filter((kind) => isTypePricedSupplier(kind))
-    expect(typePriced).toEqual(["tour_operator"])
+    expect(typePriced).toEqual(["tour_operator", "cruise_line"])
   })
 })
 
@@ -219,6 +239,7 @@ describe("SUPPLIER_VOCABULARY — primary product", () => {
       vehicle_rental: "days",
       tour_operator: "days",
       airline: null,
+      cruise_line: "nights",
     })
   })
 

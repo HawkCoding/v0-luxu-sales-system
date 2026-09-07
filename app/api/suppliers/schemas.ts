@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { SUPPLIER_VOCABULARY, SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
+import { SUPPLIER_VOCABULARY, SUPPORTED_CURRENCY_VALUES, isTypePricedSupplier, type SupplierKind } from "@/lib/types"
 import { findUnknownSuitePatternTokens } from "@/lib/templates/suite-phrase-pattern"
 
 /** Rejects a save outright when the pattern references a token other than {type}/{bedroom}/
@@ -103,6 +103,7 @@ const supplierKindSchema = z.enum([
   "vehicle_rental",
   "tour_operator",
   "airline",
+  "cruise_line",
 ])
 
 /** 'manual' suppliers (airlines, by default) skip rate cards entirely -- their price is typed
@@ -276,8 +277,8 @@ function checkRouteNames(
       continue
     }
     // Derivation source differs per kind: trains derive from origin/destination locations,
-    // tour operators derive from the tour type they're linked to.
-    if (value.kind === "tour_operator") {
+    // type-priced kinds (tour operators, cruise lines) derive from the type they're linked to.
+    if (isTypePricedSupplier(value.kind as SupplierKind)) {
       if (route.suiteTypeId) continue
     } else if (route.originLocationId && route.destinationLocationId) {
       continue
@@ -291,11 +292,12 @@ function checkRouteNames(
 }
 
 /**
- * Tour operators split the two concepts this endpoint used to conflate: the tour type carries the
- * price (top-level `rateCards`, no route id) and the itinerary carries the description (a route
- * that must name its tour type). Enforced here so neither half can be posted the old way.
+ * Type-priced kinds (tour operators, cruise lines) split the two concepts this endpoint used to
+ * conflate: the type carries the price (top-level `rateCards`, no route id) and the itinerary
+ * carries the description (a route that must name its type). Enforced here so neither half can be
+ * posted the old way.
  */
-function checkTourOperatorItineraries(
+function checkTypePricedItineraries(
   value: {
     kind: string
     suiteTypes: { id?: string }[]
@@ -304,12 +306,12 @@ function checkTourOperatorItineraries(
   },
   ctx: z.RefinementCtx,
 ) {
-  if (value.kind !== "tour_operator") {
+  if (!isTypePricedSupplier(value.kind as SupplierKind)) {
     if (value.rateCards.length > 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["rateCards"],
-        message: "Only tour operators price without an itinerary",
+        message: "Only tour operators and cruise lines price without an itinerary",
       })
     }
     return
@@ -318,9 +320,9 @@ function checkTourOperatorItineraries(
   const suiteTypeIds = new Set(
     value.suiteTypes.flatMap((suiteType) => (suiteType.id ? [suiteType.id] : [])),
   )
-  // One itinerary per tour type: the itinerary's name is now derived straight from the tour
-  // type's name, so a second itinerary on the same type would collide on the DB unique-name
-  // constraint. Caught here with a readable message instead of a raw 500 at insert.
+  // One itinerary per type: the itinerary's name is now derived straight from the type's name, so
+  // a second itinerary on the same type would collide on the DB unique-name constraint. Caught
+  // here with a readable message instead of a raw 500 at insert.
   const seenSuiteTypeIds = new Set<string>()
 
   for (const [index, route] of value.routes.entries()) {
@@ -328,19 +330,19 @@ function checkTourOperatorItineraries(
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["routes", index, "suiteTypeId"],
-        message: "Each itinerary must belong to a tour type",
+        message: "Each itinerary must belong to a type",
       })
     } else if (suiteTypeIds.size > 0 && !suiteTypeIds.has(route.suiteTypeId)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["routes", index, "suiteTypeId"],
-        message: "The tour type must be one of this supplier's tour types",
+        message: "The type must be one of this supplier's types",
       })
     } else if (seenSuiteTypeIds.has(route.suiteTypeId)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["routes", index, "suiteTypeId"],
-        message: "Each tour type can only have one itinerary",
+        message: "Each type can only have one itinerary",
       })
     } else {
       seenSuiteTypeIds.add(route.suiteTypeId)
@@ -350,7 +352,7 @@ function checkTourOperatorItineraries(
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["routes", index, "rateCards"],
-        message: "Tour operator rates belong to the tour type, not the itinerary",
+        message: "Rates belong to the type, not the itinerary",
       })
     }
   }
@@ -362,8 +364,8 @@ export const routeSchema = z.object({
    *  origin/destination may send "" and let the handler fill it in, the way the quick-create
    *  endpoint already does. Every other kind still has to name its route. */
   name: z.string().trim(),
-  /** Tour operators only: the tour type this itinerary describes. Required for that kind, see
-   * `checkTourOperatorItineraries`. */
+  /** Type-priced kinds only (tour operators, cruise lines): the type this itinerary describes.
+   * Required for those kinds, see `checkTypePricedItineraries`. */
   suiteTypeId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().optional(),
   originLocationId: z.string().uuid().nullable().optional(),
@@ -476,6 +478,11 @@ export const supplierSaveSchema = z.object({
   /** Comma-separated wording to match in an enquiry email. Null/blank derives it from the name. */
   emailMatchPhrases: z.string().trim().max(500).nullable().optional(),
   active: z.boolean(),
+  /** Set when the client pressed "Save & Publish" on a draft — the server forces active/status to
+   *  published for this save regardless of the `active` field above, which a draft record's form
+   *  seeds from the current (inactive) row rather than from the button the consultant pressed
+   *  (F-P3-7: "Save & Publish" toasted success while the record stayed draft/inactive). */
+  publish: z.boolean().optional(),
   /** The sibling record (same company, different category) this supplier inherits its contact
    * details from. `null` unlinks and keeps the last mirrored values as this record's own. Omit the
    * key entirely to leave the current link untouched. */
@@ -496,7 +503,7 @@ export const supplierSaveSchema = z.object({
 }).superRefine((value, ctx) => {
   checkRateAdjustments(value, ctx)
   checkStationAddresses(value, ctx)
-  checkTourOperatorItineraries(value, ctx)
+  checkTypePricedItineraries(value, ctx)
   checkRouteNames(value, ctx)
 
   for (const [index, route] of value.routes.entries()) {

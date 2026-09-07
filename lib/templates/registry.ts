@@ -49,14 +49,16 @@ const ALL_SUPPLIER_KINDS: readonly SupplierKind[] = [
   "vehicle_rental",
   "tour_operator",
   "airline",
+  "cruise_line",
 ]
 
-/** Kinds whose product runs from an origin to a destination, so a direction describes it. */
+/** Kinds whose product runs from an origin to a destination, so a direction describes it. A cruise
+ *  is not here -- a round-trip voyage has no direction, the same reason a tour is not here. */
 const JOURNEY_KINDS: SupplierKind[] = ["train_operator", "transfers", "vehicle_rental", "airline"]
 /** Kinds that state a start date of their own. */
-const DATED_KINDS: SupplierKind[] = [...JOURNEY_KINDS, "tour_operator"]
+const DATED_KINDS: SupplierKind[] = [...JOURNEY_KINDS, "tour_operator", "cruise_line"]
 /** Kinds sold by the unit -- a suite, a tour, a cabin -- and priced per person on it. */
-const UNIT_SOLD_KINDS: SupplierKind[] = ["train_operator", "tour_operator", "airline"]
+const UNIT_SOLD_KINDS: SupplierKind[] = ["train_operator", "tour_operator", "airline", "cruise_line"]
 /** The stay vocabulary belongs to a property and nothing else: these tokens are read off a hotel
  *  leg (see lib/templates/stay-tokens.ts) and have nothing to say about any other product. */
 const STAY_KINDS: SupplierKind[] = ["hotel_property"]
@@ -142,6 +144,23 @@ const suiteDescription: TemplateTokenSpec = {
   kind: "scalar",
   sample: "a Twin bedded Deluxe Suite with a shower and a Double bedded Luxury Suite with a full bath",
   kinds: UNIT_SOLD_KINDS,
+}
+// Universal (no `kinds`): every product is sold by some named unit -- a suite, a room, a tour, a
+// cabin, a vehicle -- so unlike suiteType/roomType above (each scoped to the half of the kinds it
+// actually names), these two read correctly in a shared sentence regardless of which kind the
+// booking turns out to be (F-P3-12: a rail template's "your selected suite" reached a tour client
+// unchanged, since nothing resolved the noun to what they'd actually booked).
+const unitNoun: TemplateTokenSpec = {
+  name: "unitNoun",
+  description: "What one bookable unit is called, lowercase singular (\"suite\", \"room\", \"tour\", \"cabin\", \"vehicle\")",
+  kind: "scalar",
+  sample: "suite",
+}
+const unitNounPlural: TemplateTokenSpec = {
+  name: "unitNounPlural",
+  description: "unitNoun, plural (\"suites\", \"rooms\", \"tours\", \"cabins\", \"vehicles\")",
+  kind: "scalar",
+  sample: "suites",
 }
 // Stay tokens. On a booking carrying both a train and a hotel these name the hotel, where
 // suiteType/suiteDescription above name the train — that is the whole point of the pair.
@@ -244,6 +263,8 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   suiteType,
   suiteConfiguration,
   suiteDescription,
+  unitNoun,
+  unitNounPlural,
   roomType,
   roomDescription,
   {

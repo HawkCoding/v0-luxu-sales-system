@@ -1,20 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import type {
-  InvoiceBillingParty,
-  InvoiceDeparture,
-  InvoiceDepartureLeg,
-  InvoiceItem,
-} from "@/lib/invoices/pdf/invoice-document"
+import type { InvoiceBillingParty, InvoiceDeparture, InvoiceItem } from "@/lib/invoices/pdf/invoice-document"
+import { INVOICE_PRODUCT_LABEL, invoiceRowsForBlock } from "@/lib/invoices/departure-rows"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
 import { foldCommissionLines } from "@/lib/invoices/fold-commission-line"
 import { logError } from "@/lib/error-log"
+import { primaryProductDurationCount, primaryProductOf } from "@/lib/enquiry/primary-product"
 import { nightsBetween } from "@/lib/packages/trip-date-range"
 import type { Database } from "@/lib/supabase/types"
-import type { PricingSnapshot } from "@/lib/types"
+import type { PricingSnapshot, SupplierKind } from "@/lib/types"
 import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
-import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
+import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
 
 /**
  * Assembles the descriptive half of an invoice — who is billed, what they are
@@ -72,45 +69,57 @@ export function buildBillingParty(
   }
 }
 
-function toLeg(block: VoucherServiceBlock): InvoiceDepartureLeg {
-  const data = block.serviceData
-  return {
-    route: data.route ?? null,
-    departureDate: data.departureDate ?? null,
-    departureTime: data.startTime ?? null,
-    arrivalDate: data.arrivalDate ?? null,
-    arrivalTime: data.endTime ?? null,
-    suite: data.suiteType ?? null,
-  }
-}
-
 export interface DepartureContext {
-  /** Train / product name, e.g. "The Blue Train" (route supplier). */
-  trainName: string | null
-  /** Package name, e.g. "Pretoria Journey". */
+  /** Package/tour name from the booking's route, e.g. "Pretoria Journey" — bookings.route_id is
+   *  only ever set for a journey kind, so this is null on a tour or stay. */
   tourName: string | null
   durationNights: number | null
+  /** What the primary product's own vocabulary counts durationNights in — feeds buildDaysLabel. */
+  durationUnit: "nights" | "days" | null
   suites: number
   adults: number
   children: number
 }
 
-/** "2 Nights / 3 Days" from the booking's duration. */
-export function buildDaysLabel(durationNights: number | null): string | null {
+/**
+ * "2 Nights / 3 Days" for a kind that counts nights (unset/"nights"); "4 Days" for one that
+ * counts days ("days" -- the stored interval is nights, but the kind's own word for it counts both
+ * end days, see primaryProductDurationCount). The `durationUnit` default keeps every call site
+ * written before a booking could be headed by something other than a train unchanged.
+ */
+export function buildDaysLabel(
+  durationNights: number | null,
+  durationUnit: "nights" | "days" | null = null,
+): string | null {
   if (!durationNights || durationNights <= 0) return null
+  if (durationUnit === "days") {
+    const days = primaryProductDurationCount(durationNights, "days")
+    return `${days} Day${days === 1 ? "" : "s"}`
+  }
   return `${durationNights} Night${durationNights === 1 ? "" : "s"} / ${durationNights + 1} Days`
 }
 
 /**
  * The invoice's "Days" figure. `bookings.duration_nights` is never written by the app (only
- * `packages.duration_nights` is), so it can't be trusted as the primary source — prefer the
- * trip's actual date span, which `recompute-trip-dates.ts` keeps current across every dated
- * service (train, hotel, transfers), then the train route's own duration, then the legacy column.
+ * `packages.duration_nights` is), so it can't be trusted as the primary source. Prefers, in order:
+ * the primary leg's own span (its captured departure/arrival dates -- the product's own length,
+ * not the whole trip's), then the trip's actual date span (which spans every dated leg and so
+ * over-counts once an ancillary transfer or hotel is added -- see recompute-trip-dates.ts), then
+ * the train route's own duration, then the legacy column.
  */
 export function resolveDurationNights(
   booking: { trip_start_date?: string | null; trip_end_date?: string | null; duration_nights?: number | null } | null | undefined,
   blocks: VoucherServiceBlock[],
+  primaryBlock?: VoucherServiceBlock | null,
 ): number | null {
+  if (primaryBlock) {
+    const fromPrimaryLeg = nightsBetween(
+      primaryBlock.serviceData.departureDate ?? null,
+      primaryBlock.serviceData.arrivalDate ?? null,
+    )
+    if (fromPrimaryLeg !== null && fromPrimaryLeg > 0) return fromPrimaryLeg
+  }
+
   const fromTripRange = nightsBetween(booking?.trip_start_date ?? null, booking?.trip_end_date ?? null)
   if (fromTripRange !== null && fromTripRange > 0) return fromTripRange
 
@@ -124,19 +133,48 @@ export function resolveDurationNights(
 }
 
 /**
- * The journey shown on the invoice is the train travel. A second train block
- * means a return leg, rendered as its own journey block.
+ * The blocks that describe the booking's PRIMARY PRODUCT — the leg supplied by
+ * bookings.primary_supplier_id — not "whichever train block exists" (F-P3-2: a tour booking with
+ * a Blue Train add-on used to print the add-on as the thing being sold; a stay- or tour-headed
+ * booking with no train printed nothing at all).
+ *
+ * Falls back in order: the primary supplier's own block(s) -> any block of the primary kind's
+ * service type -> the earliest priced service block -> empty. A ladder, not a single rule, so an
+ * older booking with no primary_supplier_id recorded (or one whose primary leg somehow isn't
+ * dated/priced) still renders something rather than nothing.
+ */
+export function selectPrimaryBlocks(
+  blocks: VoucherServiceBlock[],
+  primarySupplierId: string | null,
+  primarySupplierKind: SupplierKind | null,
+): VoucherServiceBlock[] {
+  const sorted = [...blocks].sort((a, b) => a.displayOrder - b.displayOrder)
+
+  if (primarySupplierId) {
+    const own = sorted.filter((block) => block.supplierId === primarySupplierId)
+    if (own.length > 0) return own
+  }
+
+  if (primarySupplierKind) {
+    const kindServiceType = mapSupplierKindToServiceType(primarySupplierKind)
+    const kindMatch = sorted.filter((block) => block.serviceType === kindServiceType)
+    if (kindMatch.length > 0) return kindMatch
+  }
+
+  const earliest = sorted.find((block) => block.serviceType !== "additional_service")
+  return earliest ? [earliest] : []
+}
+
+/**
+ * The journey block for the booking's primary product. A second block of the same kind (a round
+ * trip) renders as its own "Return Journey" section; every other kind has exactly one block.
  */
 export function buildDeparture(
-  blocks: VoucherServiceBlock[],
+  primaryBlocks: VoucherServiceBlock[],
   heading: string,
   context: DepartureContext,
 ): InvoiceDeparture | null {
-  const trainBlocks = blocks
-    .filter((block) => block.serviceType === "train")
-    .sort((a, b) => a.displayOrder - b.displayOrder)
-
-  const [outbound, returnLeg] = trainBlocks
+  const [outbound, returnLeg] = primaryBlocks
   if (!outbound) return null
 
   // The units actually configured on the outbound leg are the authoritative suite count;
@@ -144,15 +182,17 @@ export function buildDeparture(
   const resolvedSuites = outbound.serviceData.numberOfSuites ?? context.suites
 
   return {
-    heading,
-    trainName: context.trainName,
+    productLabel: INVOICE_PRODUCT_LABEL[outbound.serviceType],
+    trainName: outbound.contactDetails.name ?? null,
     tourName: context.tourName,
-    daysLabel: buildDaysLabel(context.durationNights),
+    daysLabel: buildDaysLabel(context.durationNights, context.durationUnit),
     qty: resolvedSuites > 0 ? String(resolvedSuites) : null,
     adults: String(context.adults),
     children: String(context.children),
-    outbound: toLeg(outbound),
-    returnLeg: returnLeg ? toLeg(returnLeg) : null,
+    legs: [
+      { heading, rows: invoiceRowsForBlock(outbound) },
+      ...(returnLeg ? [{ heading: "Return Journey", rows: invoiceRowsForBlock(returnLeg) }] : []),
+    ],
   }
 }
 
@@ -189,6 +229,9 @@ export interface BuildInvoiceViewOptions {
   bookingId: string
   quoteId: string | null
   journeyHeading: string
+  /** The booking's primary product — already resolved by the caller (ensure-invoice-pdf.ts also
+   *  uses it for per-kind document copy/brand), so no second lookup happens here. */
+  primarySupplierKind: SupplierKind | null
 }
 
 /**
@@ -198,13 +241,13 @@ export interface BuildInvoiceViewOptions {
  */
 export async function buildInvoiceView(
   supabase: SupabaseClient<Database>,
-  { bookingId, quoteId, journeyHeading }: BuildInvoiceViewOptions,
+  { bookingId, quoteId, journeyHeading, primarySupplierKind }: BuildInvoiceViewOptions,
 ): Promise<InvoiceView> {
   const [{ data: booking }, { data: travellers }, { data: billingDetails }] = await Promise.all([
     supabase
       .from("bookings")
       .select(
-        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, customer:customers(phone, email), route:routes(name, supplier:suppliers(name))",
+        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, primary_supplier_id, customer:customers(phone, email), route:routes(name)",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -224,7 +267,6 @@ export async function buildInvoiceView(
 
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
   const route = Array.isArray(booking?.route) ? booking.route[0] : booking?.route
-  const routeSupplier = Array.isArray(route?.supplier) ? route.supplier[0] : route?.supplier
 
   let items: InvoiceItem[] = []
   // The invoice's quote is the accepted one, so its priced legs also scope the departure block
@@ -259,10 +301,11 @@ export async function buildInvoiceView(
       legIds: quoteLegIds,
       includeUnlinkedTransportRequests: false,
     })
-    departure = buildDeparture(blocks, journeyHeading, {
-      trainName: routeSupplier?.name ?? null,
+    const primaryBlocks = selectPrimaryBlocks(blocks, booking?.primary_supplier_id ?? null, primarySupplierKind)
+    departure = buildDeparture(primaryBlocks, journeyHeading, {
       tourName: route?.name ?? null,
-      durationNights: resolveDurationNights(booking, blocks),
+      durationNights: resolveDurationNights(booking, blocks, primaryBlocks[0] ?? null),
+      durationUnit: primaryProductOf(primarySupplierKind).durationUnit,
       suites: booking?.no_of_suites ?? 0,
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,

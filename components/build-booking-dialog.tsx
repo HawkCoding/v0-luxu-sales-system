@@ -56,8 +56,10 @@ import {
   applyAnchoredDates,
   buildDefaultLegStates,
   hydrateFromSaved,
+  mergeLegStatesAfterRebuild,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   PASSENGER_SUM_SUPPLIER_KINDS,
+  toAirlineAnchorContext,
   toApplySelections,
   toHotelAnchorContext,
   toPackageSelectionsPatch,
@@ -709,7 +711,15 @@ export function BuildBookingDialog({
       // Every service the salesperson explicitly added should start selected — unlike the
       // predefined-package flow (which defaults optional legs to unselected), a leg the user
       // just picked here has no "optional" concept; only respect an existing saved deselection.
-      setLegStates(states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true })))
+      const seeded = states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true }))
+      // F-P2-8: `seeded` above is derived entirely from the server (savedState / defaults), which
+      // knows nothing about configure-step edits made since the dialog opened -- nothing reaches
+      // the server until validateAndPreview's PATCH. Re-entering step 1 (Back, or adding another
+      // service) must not throw that work away, so carry it across the rebuild and re-anchor
+      // dates against the new packageDetail (removing/adding a leg can change what a surviving
+      // leg anchors to).
+      const merged = mergeLegStatesAfterRebuild(legStates, seeded)
+      setLegStates(applyAnchoredDates(built.packageDetail, merged, stateOptions.primarySupplierId))
       setStep("configure")
       // The reorder pass in build-booking bumps updated_at on every kept leg, not just moved ones;
       // legStates above still carries the pre-build stamps from the dialog's initial load, so the
@@ -731,7 +741,9 @@ export function BuildBookingDialog({
     const edited: ApplyLegState = next.origin === "auto" ? { ...next, origin: "consultant" } : next
     setLegStates((prev) => {
       const merged = prev.map((state) => (state.legId === edited.legId ? edited : state))
-      return packageDetail ? applyAnchoredDates(packageDetail, merged) : merged
+      return packageDetail
+        ? applyAnchoredDates(packageDetail, merged, savedState?.primarySupplierId ?? null)
+        : merged
     })
   }
 
@@ -744,6 +756,11 @@ export function BuildBookingDialog({
   function transferAnchorContext(legId: string): TransferAnchorContext | null {
     if (!packageDetail) return null
     return toTransferAnchorContext(packageDetail, legStates, legId)
+  }
+
+  function airlineAnchorContext(): TransferAnchorContext | null {
+    if (!packageDetail) return null
+    return toAirlineAnchorContext(packageDetail, legStates, savedState?.primarySupplierId ?? null)
   }
 
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
@@ -1235,7 +1252,7 @@ export function BuildBookingDialog({
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
-                        flightAnchorContext={transferAnchorContext(leg.id)}
+                        flightAnchorContext={airlineAnchorContext()}
                         primarySupplierId={savedState?.primarySupplierId ?? null}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}

@@ -262,8 +262,18 @@ export async function GET(req: Request) {
       direction:
         (b.route as { name?: string } | null)?.name ??
         ((b.extracted_json as { historical_import?: { route?: string } } | null)?.historical_import?.route ?? null),
+      // Same ladder lib/reports/product-suppliers.ts uses for reporting attribution, so the two
+      // screens a consultant browses and the manager's report can no longer disagree about whose
+      // sale a booking is (F-P3-3). primary_supplier works for any kind, including a tour or stay
+      // whose route_id is deliberately null; the route rung stays train-only for the same reason
+      // product-suppliers.ts does -- on an older booking a route is as likely to belong to a
+      // transfer add-on as to the product.
       supplierName:
-        (b.route as { supplier?: { name?: string | null } | null } | null)?.supplier?.name ??
+        (b.primary_supplier as { name?: string | null } | null)?.name ??
+        (() => {
+          const route = b.route as { supplier?: { name?: string | null; kind?: string | null } | null } | null
+          return route?.supplier?.kind === "train_operator" ? route.supplier.name ?? null : null
+        })() ??
         (b.hotel_supplier as { name?: string | null } | null)?.name ??
         ((b.extracted_json as { historical_import?: { supplier_id?: string } } | null)?.historical_import
           ?.supplier_id

@@ -258,11 +258,12 @@ describe("seedUnitsForServices", () => {
     expect(transportRows).toHaveLength(2)
     const transfer = transportRows.find((row) => row.service_id === "svc-transfer")
     const rental = transportRows.find((row) => row.service_id === "svc-rental")
-    expect(transfer).toMatchObject({ service_type: "transfer", pickup_at: "2026-09-01T00:00:00+00:00" })
+    // 00:00 in Johannesburg (SAST, UTC+2) is 22:00 UTC the day before (F-P3-5).
+    expect(transfer).toMatchObject({ service_type: "transfer", pickup_at: "2026-08-31T22:00:00.000Z" })
     expect(rental).toMatchObject({ service_type: "rental" })
 
     const rentalDetails = store.rows("booking_vehicle_rental_details")
     expect(rentalDetails).toHaveLength(1)
-    expect(rentalDetails[0]).toMatchObject({ return_at: "2026-09-05T00:00:00+00:00" })
+    expect(rentalDetails[0]).toMatchObject({ return_at: "2026-09-04T22:00:00.000Z" })
   })
 })

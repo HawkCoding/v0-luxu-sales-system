@@ -1,6 +1,7 @@
-import type { PackageDetail, PackageLeg } from "@/lib/types"
+import { legStatesOwnSpan, type PackageDetail, type PackageLeg } from "@/lib/types"
 import type { ApplyLegState } from "@/lib/packages/apply-dialog-state"
 import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
+import { formatDateISO } from "@/lib/date-format"
 
 /**
  * Trip start/end dates derived from the dated services on a booking.
@@ -9,9 +10,11 @@ import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
  * range is pure math over the services they configure:
  *
  *   train        → departure … arrival (departure + route durationDays, counting departure day)
- *   hotel        → check-in … check-out (check-in + nights)
+ *   hotel        → check-in … check-out (check-in + nights, floored at 1 night)
  *   airline      → departure date … captured arrival date (same day when uncaptured)
- *   tour         → service date … service date + route durationDays (single day when unset)
+ *   tour         → service date … service date + nights (single day when nights is unset/0 --
+ *                  see legStatesOwnSpan: a tour states its own length the same way a hotel does,
+ *                  not off a route duration, since a tour's route carries none)
  *   transfer     → pickup date
  *   rental       → pickup date … return date
  *
@@ -38,11 +41,11 @@ function isIsoDate(value: string | null | undefined): value is string {
   return typeof value === "string" && ISO_DATE_PATTERN.test(value)
 }
 
-/** Date part of a stored timestamp ("2026-08-20T14:00:00+00:00" → "2026-08-20"). */
+/** Calendar date of a stored timestamp, read in APP_TIME_ZONE ("2026-11-17T22:00:00Z" is a 00:00
+ *  SAST pickup, so it is 2026-11-18, not the UTC-slice 2026-11-17 — see F-P3-5). A bare date-only
+ *  string ("2026-08-20") passes through unchanged; it has no instant to convert. */
 export function dateOnly(value: string | null | undefined): string | null {
-  if (!value) return null
-  const candidate = value.slice(0, 10)
-  return isIsoDate(candidate) ? candidate : null
+  return formatDateISO(value)
 }
 
 /** Min start / max end over the spans; null/null when nothing is dated. */
@@ -82,9 +85,12 @@ export function serviceDateSpan(input: SpanInput): ServiceDateSpan | null {
   if (!isIsoDate(input.serviceDate)) return null
   const start = input.serviceDate
 
-  if (input.supplierKind === "hotel_property") {
-    const nights = Math.max(1, Math.floor(input.nights ?? 1))
-    return { start, end: addDays(start, nights) }
+  if (legStatesOwnSpan(input.supplierKind)) {
+    // A stay always covers at least one night; a tour that starts and ends the same day
+    // legitimately spans zero, so only the hotel floors at 1.
+    const floor = input.supplierKind === "hotel_property" ? 1 : 0
+    const nights = Math.max(floor, Math.floor(input.nights ?? floor))
+    return { start, end: nights > 0 ? addDays(start, nights) : start }
   }
 
   // A captured flight arrival is a fact, not a derivation — it beats the route duration below,

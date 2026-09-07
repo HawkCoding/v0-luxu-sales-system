@@ -51,6 +51,11 @@ export interface QuoteSummaryInput {
    *  "Stay", "Tour"). Omit when the caller has no booking: the label is then inferred from the
    *  blocks, as it was before bookings.primary_supplier_id existed. */
   primarySupplierKind?: SupplierKind | null
+  /** Settings-resolved override for that noun (see resolveProductCopy in settings-access.ts) --
+   *  wins over primarySupplierKind's own code-vocabulary noun when supplied, so a Kruger Shalati
+   *  quote can read "Getaway:" instead of "Stay:" without a code change. Omit to keep the
+   *  vocabulary noun, which is what every caller got before per-kind document copy existed. */
+  productBookingNoun?: string | null
   /** Heading for the itinerary section (document-text setting). */
   packageIncludesHeading?: string
   /** Heading for the exclusions section (document-text setting). */
@@ -109,12 +114,14 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   //
   // The fallback -- every block is a hotel -- is what callers that hold no booking still use, and
   // is exactly how this read before a primary product was recorded.
-  const journeyLabel = input.primarySupplierKind
-    ? primaryProductOf(input.primarySupplierKind).bookingNoun
-    : input.itineraryBlocks.length > 0 &&
-        input.itineraryBlocks.every((block) => block.serviceType === "hotel")
-      ? "Stay"
-      : "Journey"
+  const journeyLabel =
+    input.productBookingNoun ??
+    (input.primarySupplierKind
+      ? primaryProductOf(input.primarySupplierKind).bookingNoun
+      : input.itineraryBlocks.length > 0 &&
+          input.itineraryBlocks.every((block) => block.serviceType === "hotel")
+        ? "Stay"
+        : "Journey")
   const agentCommission = input.agentCommission ?? 0
   const hasAgentCommission = agentCommission > 0
   // Per-person rate is always the gross rate — the discount is the agency's cut, not the

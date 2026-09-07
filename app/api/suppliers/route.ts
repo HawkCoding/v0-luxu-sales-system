@@ -17,7 +17,15 @@ const EMAIL_LABEL_MAX_LENGTH = 100
 
 
 const createSupplierSchema = z.object({
-  kind: z.enum(["train_operator", "hotel_property", "transfers", "vehicle_rental", "tour_operator", "airline"]),
+  kind: z.enum([
+    "train_operator",
+    "hotel_property",
+    "transfers",
+    "vehicle_rental",
+    "tour_operator",
+    "airline",
+    "cruise_line",
+  ]),
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   email: z
     .string()

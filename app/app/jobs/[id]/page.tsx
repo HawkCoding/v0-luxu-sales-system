@@ -350,14 +350,20 @@ export default function JobDetailPage() {
   const forwardTargetIsDepositPaid = forwardTargetStage === "deposit_paid"
   const hasAnyPayment = payments.length > 0
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
+  // Any source: drives the banner, the badge and whether "Resolve review" renders — a consultant
+  // should see and be able to clear this regardless of how the enquiry was captured.
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
-  const nextBlockedByMissingPayment = forwardTargetIsDepositPaid && !hasAnyPayment && !needsEmailReview
+  // Only an email import is a hard stop server-side (validate-transition.ts, start-quote/route.ts) —
+  // the client gates must match, or a manually captured enquiry (source stays phone_call/walk_in/...
+  // even after auto-build) is frozen at Enquiry with no server gate it could ever satisfy. F-P3-1.
+  const emailReviewBlocking = needsEmailReview && enquiry?.source === "email"
+  const nextBlockedByMissingPayment = forwardTargetIsDepositPaid && !hasAnyPayment && !emailReviewBlocking
   // Moving to Deposit Paid sends the payment confirmation, and that email is
   // built around the booking's invoice — POST /payment-received 422s without
   // one. Next used to be enabled here anyway: it fired, took the 422, and the
   // page showed nothing at all. Say why instead of leading to a dead end.
   const nextBlockedByMissingInvoice =
-    forwardTargetIsDepositPaid && hasAnyPayment && invoices.length === 0 && !needsEmailReview
+    forwardTargetIsDepositPaid && hasAnyPayment && invoices.length === 0 && !emailReviewBlocking
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
   const canReassign = can("edit:jobs")
@@ -609,7 +615,7 @@ export default function JobDetailPage() {
   }
 
   const moveStage = async (direction: "forward" | "back") => {
-    if (needsEmailReview && direction === "forward") return
+    if (emailReviewBlocking && direction === "forward") return
     const newIdx = direction === "forward" ? currentStageIdx + 1 : currentStageIdx - 1
     if (newIdx < 0 || newIdx >= PIPELINE_STAGES.length) return
     const target = PIPELINE_STAGES[newIdx].key
@@ -715,7 +721,7 @@ export default function JobDetailPage() {
       size="sm"
       disabled={
         currentStageIdx >= PIPELINE_STAGES.length - 1 ||
-        needsEmailReview ||
+        emailReviewBlocking ||
         isSavingJob ||
         transitionSubmitting ||
         (forwardTargetIsDepositPaid && !hasAnyPayment) ||
@@ -905,7 +911,7 @@ export default function JobDetailPage() {
                 </Button>
               )}
             </div>
-            {needsEmailReview && (
+            {emailReviewBlocking && (
               <p className="text-[11px] text-muted-foreground">Resolve email review to advance</p>
             )}
           </div>
@@ -961,20 +967,21 @@ export default function JobDetailPage() {
             <InfoItem label="Phone" value={customer?.phone} />
             <InfoItem label="Country" value={customer?.country} />
           </div>
-          {enquiry?.source === "email" && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => setChangeCustomerOpen(true)}>
-                <UserRound className="w-4 h-4 mr-1.5" />
-                Change customer
+          {/* Not gated on enquiry.source: "Resolve review" used to render only for an email import,
+              so a manually captured enquiry with the flag set (e.g. no tour type chosen at intake)
+              had no control that could ever clear it. F-P3-1. */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setChangeCustomerOpen(true)}>
+              <UserRound className="w-4 h-4 mr-1.5" />
+              Change customer
+            </Button>
+            {needsEmailReview && (
+              <Button size="sm" onClick={resolveEmailReview} disabled={resolvingImportReview}>
+                <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                {resolvingImportReview ? "Resolving" : "Resolve review"}
               </Button>
-              {needsEmailReview && (
-                <Button size="sm" onClick={resolveEmailReview} disabled={resolvingImportReview}>
-                  <CheckCircle2 className="w-4 h-4 mr-1.5" />
-                  {resolvingImportReview ? "Resolving" : "Resolve review"}
-                </Button>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -984,7 +991,9 @@ export default function JobDetailPage() {
             <div className="flex gap-3">
               <AlertCircle className="mt-0.5 h-4 w-4 text-destructive" />
               <div className="space-y-1">
-                <p className="text-sm font-medium">Email import needs review</p>
+                <p className="text-sm font-medium">
+                  {enquiry?.source === "email" ? "Email import needs review" : "This enquiry needs review"}
+                </p>
                 <p className="text-sm text-muted-foreground">
                   {[...(enquiry?.emailImportMissingFields ?? []), ...(enquiry?.emailImportWarnings ?? [])].join(", ") || "Review parsed fields before moving this enquiry forward."}
                 </p>
@@ -1038,7 +1047,7 @@ export default function JobDetailPage() {
             bookingNumber={job.jobNumber}
             travelDate={enquiry?.departureDate ?? null}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
-            emailImportNeedsReview={needsEmailReview}
+            emailImportNeedsReview={emailReviewBlocking}
             mutate={mutate}
             autoOpenBuildBookingQuoteId={autoOpenBuildBookingQuoteId}
             onAutoOpenBuildBookingHandled={() => setAutoOpenBuildBookingQuoteId(null)}

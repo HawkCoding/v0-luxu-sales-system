@@ -78,6 +78,23 @@ function makeSupabase({
 
   const correspondenceInsert = vi.fn(async () => ({ error: correspondenceInsertError }))
 
+  // The worker embeds the booking (and its customer) in the quotes query rather than reading one
+  // booking row per quote, so the fixture hangs `bookingData` off every quote row. The builder is
+  // a thenable because the chain now ends in two `.not()` calls, not one.
+  const quotesNot = vi.fn()
+  const quotesBuilder: Record<string, unknown> = {
+    then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve(
+        resolve({
+          data: sentQuotes.map((quote) => ({ ...(quote as object), bookings: bookingData })),
+          error: null,
+        }),
+      ),
+  }
+  quotesBuilder.select = vi.fn(() => quotesBuilder)
+  quotesBuilder.eq = vi.fn(() => quotesBuilder)
+  quotesBuilder.not = quotesNot.mockImplementation(() => quotesBuilder)
+
   const supabase = {
     from: vi.fn((table: string) => {
       if (table === "app_settings") {
@@ -88,11 +105,7 @@ function makeSupabase({
         }
       }
       if (table === "quotes") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          not: vi.fn(async () => ({ data: sentQuotes, error: null })),
-        }
+        return quotesBuilder
       }
       if (table === "quote_follow_ups") {
         return {
@@ -118,13 +131,6 @@ function makeSupabase({
           in: vi.fn(async () => ({ data: supplierRows, error: null })),
         }
       }
-      if (table === "bookings") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          single: vi.fn(async () => ({ data: bookingData, error: bookingData ? null : { message: "not found" } })),
-        }
-      }
       if (table === "salesperson_credentials") {
         return {
           select: vi.fn().mockReturnThis(),
@@ -146,7 +152,7 @@ function makeSupabase({
     }),
   }
 
-  return { supabase, followUpUpdateFn, followUpInsert, correspondenceInsert }
+  return { supabase, followUpUpdateFn, followUpInsert, correspondenceInsert, quotesNot }
 }
 
 function makeBooking(overrides: Record<string, unknown> = {}) {
@@ -154,7 +160,8 @@ function makeBooking(overrides: Record<string, unknown> = {}) {
     id: BOOKING_ID,
     booking_number: "RR-2026-0001",
     stage: "quote_sent",
-    outcome: "open",
+    // Capitalised, as the column is actually written ("Open", "Won", "Lost", "Cancelled").
+    outcome: "Open",
     assigned_salesperson_id: SALESPERSON_ID,
     customers: { first_name: "Jane", last_name: "Smith", email: CUSTOMER_EMAIL },
     ...overrides,
@@ -269,15 +276,76 @@ describe("runQuoteFollowUpWorker", () => {
     expect(html).toContain("SA RAIL")
   })
 
-  it("skips booking with cancelled outcome", async () => {
+  it("excludes terminal-stage bookings in the query itself, not just in the loop", async () => {
+    const { supabase, quotesNot } = makeSupabase({
+      sentQuotes: [],
+    })
+
+    await runQuoteFollowUpWorker(supabase as never)
+
+    expect(quotesNot).toHaveBeenCalledWith(
+      "bookings.stage",
+      "in",
+      expect.stringContaining("voucher_sent"),
+    )
+    expect(quotesNot).toHaveBeenCalledWith("bookings.stage", "in", expect.stringContaining("lost"))
+  })
+
+  it("skips a lost booking (regression: 'lost' was missing from the terminal stages)", async () => {
     const { supabase } = makeSupabase({
       sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
-      bookingData: makeBooking({ outcome: "cancelled" }),
+      bookingData: makeBooking({ stage: "lost", outcome: "Cancelled" }),
     })
 
     const result = await runQuoteFollowUpWorker(supabase as never)
     expect(result.sent).toBe(0)
     expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+  })
+
+  it("skips a booking whose outcome is capitalised (regression: case-sensitive outcome match)", async () => {
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      // Stage still looks live, so only the outcome check can stop this send.
+      bookingData: makeBooking({ stage: "quote_sent", outcome: "Cancelled" }),
+    })
+
+    const result = await runQuoteFollowUpWorker(supabase as never)
+    expect(result.sent).toBe(0)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+  })
+
+  it("skips a won booking sitting at a non-terminal stage", async () => {
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking({ stage: "quote_sent", outcome: "Won" }),
+    })
+
+    const result = await runQuoteFollowUpWorker(supabase as never)
+    expect(result.sent).toBe(0)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+  })
+
+  it("writes no log row for a run that sends nothing", async () => {
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking({ stage: "deposit_paid" }),
+    })
+
+    const result = await runQuoteFollowUpWorker(supabase as never)
+    expect(result.skipped).toBe(1)
+    expect(logErrorMocks.logError).not.toHaveBeenCalled()
+  })
+
+  it("logs a summary once a run actually sends something", async () => {
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking(),
+    })
+
+    await runQuoteFollowUpWorker(supabase as never)
+    expect(logErrorMocks.logError).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: "Info", details: { sent: 1, failed: 0, skipped: 0 } }),
+    )
   })
 
   it("sets status=failed and logs error when email send fails", async () => {
@@ -336,7 +404,9 @@ describe("runQuoteFollowUpWorker", () => {
 
     await runQuoteFollowUpWorker(supabase as never)
 
-    expect(templateMocks.getTemplate).toHaveBeenCalledWith(expect.anything(), "follow_up", SUPPLIER_ID)
+    // Fourth arg is the supplier's kind, resolved via loadSupplierKind -- null here because this
+    // fixture's supplierRows carry no `kind` column, not because the lookup was skipped.
+    expect(templateMocks.getTemplate).toHaveBeenCalledWith(expect.anything(), "follow_up", SUPPLIER_ID, null)
     expect(emailMocks.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({ subject: "Shalati follow-up — RR-2026-0001" }),
     )

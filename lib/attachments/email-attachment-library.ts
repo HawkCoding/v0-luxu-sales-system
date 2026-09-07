@@ -36,6 +36,7 @@ export const EMAIL_ATTACHMENT_SUPPLIER_KINDS = [
   "vehicle_rental",
   "tour_operator",
   "airline",
+  "cruise_line",
 ] as const
 
 export type EmailAttachmentSupplierKind =

@@ -4,8 +4,10 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useDocumentTextSettings, type DocumentTextSettings } from "@/lib/use-data"
+import { SUPPLIER_VOCABULARY, type SupplierKind } from "@/lib/types"
 
 interface DocumentTextSettingsEditorProps {
   canEdit: boolean
@@ -18,7 +20,8 @@ interface FieldConfig {
   label: string
   group: string
   multiline: boolean
-  /** Saving an empty value is allowed (clears the text). */
+  /** Saving an empty value is allowed (clears the text). Always true on a per-kind tab, where
+   *  empty means "remove the override", not "blank the document". */
   allowEmpty?: boolean
 }
 
@@ -36,29 +39,52 @@ const FIELDS: FieldConfig[] = [
   { key: "itinerary_doc_intro_text", label: "Itinerary intro paragraph (leave empty to omit)", group: "Itinerary document", multiline: true, allowEmpty: true },
 ]
 
+const SUPPLIER_KINDS = Object.keys(SUPPLIER_VOCABULARY) as SupplierKind[]
+
 export function DocumentTextSettingsEditor({ canEdit, groups: groupsFilter }: DocumentTextSettingsEditorProps) {
-  const { data, isLoading, error, mutate } = useDocumentTextSettings()
+  const [selectedKind, setSelectedKind] = useState<SupplierKind | null>(null)
+  const global = useDocumentTextSettings()
+  // Reuses the "All products" SWR cache entry when no kind is selected (same key), so this never
+  // doubles the request -- it's a distinct fetch only once a kind tab is actually opened.
+  const overlay = useDocumentTextSettings(selectedKind)
+  const { data, isLoading, error } = selectedKind ? overlay : global
   const [values, setValues] = useState<Partial<DocumentTextSettings>>({})
   const [savingField, setSavingField] = useState<string | null>(null)
 
   useEffect(() => {
-    if (data) setValues(data)
-  }, [data])
+    if (!data) return
+    if (!selectedKind) {
+      setValues(data)
+      return
+    }
+    // A per-kind tab shows blank (with the global value as placeholder) for anything this kind
+    // hasn't overridden, so blank visibly reads as "same as All products". A value that differs
+    // from the global one is this kind's own override and shows filled in.
+    const globalValues = global.data
+    setValues(
+      Object.fromEntries(
+        FIELDS.map((f) => [f.key, globalValues && data[f.key] === globalValues[f.key] ? "" : data[f.key]]),
+      ),
+    )
+  }, [data, selectedKind, global.data])
 
   const handleSave = async (field: FieldConfig) => {
     const { key, label } = field
     const value = values[key]?.trim() ?? ""
-    if (!value && !field.allowEmpty) return
+    // Off the per-kind tab, an empty save is only meaningful for fields that allow clearing the
+    // document text outright. On a per-kind tab it always means "remove this kind's override".
+    if (!value && !field.allowEmpty && !selectedKind) return
     setSavingField(key)
     try {
       const res = await fetch("/api/settings/document-text", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [key]: value }),
+        body: JSON.stringify(selectedKind ? { kind: selectedKind, [key]: value } : { [key]: value }),
       })
       if (!res.ok) throw new Error()
       toast.success(`${label} saved`)
-      mutate()
+      global.mutate()
+      if (selectedKind) overlay.mutate()
     } catch {
       toast.error(`Failed to save ${label.toLowerCase()}`)
     } finally {
@@ -90,6 +116,25 @@ export function DocumentTextSettingsEditor({ canEdit, groups: groupsFilter }: Do
 
   return (
     <div className="space-y-6">
+      <Tabs
+        value={selectedKind ?? "all"}
+        onValueChange={(v) => setSelectedKind(v === "all" ? null : (v as SupplierKind))}
+      >
+        <TabsList>
+          <TabsTrigger value="all">All products</TabsTrigger>
+          {SUPPLIER_KINDS.map((kind) => (
+            <TabsTrigger key={kind} value={kind}>
+              {SUPPLIER_VOCABULARY[kind].primaryProduct.bookingNoun}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      {selectedKind && (
+        <p className="text-xs text-muted-foreground">
+          Overrides for {SUPPLIER_VOCABULARY[selectedKind].primaryProduct.bookingNoun.toLowerCase()} bookings.
+          A blank field falls back to the All products value shown as its placeholder.
+        </p>
+      )}
       {groups.map((group) => (
         <div key={group} className="space-y-4">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group}</h3>
@@ -102,6 +147,7 @@ export function DocumentTextSettingsEditor({ canEdit, groups: groupsFilter }: Do
                     value={values[field.key] ?? ""}
                     onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
                     readOnly={!canEdit}
+                    placeholder={selectedKind ? global.data?.[field.key] : undefined}
                     rows={2}
                     className="text-sm"
                   />
@@ -110,6 +156,7 @@ export function DocumentTextSettingsEditor({ canEdit, groups: groupsFilter }: Do
                     value={values[field.key] ?? ""}
                     onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
                     readOnly={!canEdit}
+                    placeholder={selectedKind ? global.data?.[field.key] : undefined}
                     className="text-sm"
                   />
                 )}
@@ -117,7 +164,10 @@ export function DocumentTextSettingsEditor({ canEdit, groups: groupsFilter }: Do
                   <Button
                     size="sm"
                     onClick={() => handleSave(field)}
-                    disabled={savingField === field.key || (!field.allowEmpty && !values[field.key]?.trim())}
+                    disabled={
+                      savingField === field.key ||
+                      (!selectedKind && !field.allowEmpty && !values[field.key]?.trim())
+                    }
                   >
                     {savingField === field.key ? "Saving…" : "Save"}
                   </Button>

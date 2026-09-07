@@ -536,6 +536,7 @@ export async function POST(req: Request) {
     formFields: mergeEnquiryFormFields(existingExtractedJson.formFields, body),
     resolvedReferences: {
       routeId,
+      routeReversed,
       hotelSupplierId,
       // Kept for readers written before bookings.primary_supplier_id existed. It now carries the
       // primary supplier whatever its kind, with the kind alongside it.
@@ -560,6 +561,11 @@ export async function POST(req: Request) {
       departure_date: body.departureDate || null,
       duration_nights: stayNights,
       route_id: routeId,
+      // Same reversal findRouteMatch computed above -- auto-build spends it on the rail leg's own
+      // route_reversed; without it here the booking-level column silently falls to its schema
+      // default (false), and any surface that reads the booking (itinerary PDF, email {{direction}}
+      // tokens) can disagree with the leg it was built from.
+      route_reversed: routeId ? routeReversed : false,
       hotel_supplier_id: hotelSupplierId,
       primary_supplier_id: primarySupplier?.id ?? null,
       no_of_adults: body.noOfAdults ?? 1,

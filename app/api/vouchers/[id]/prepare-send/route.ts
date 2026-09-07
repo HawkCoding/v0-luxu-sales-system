@@ -225,6 +225,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
     templateSupplierId: shared.primarySupplierId,
+    templateSupplierKind: shared.primarySupplierKind,
   })
 
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)

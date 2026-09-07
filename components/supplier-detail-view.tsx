@@ -114,7 +114,7 @@ import {
   rateCardMatchesPill,
   resolveRateTypePills,
 } from "@/lib/rate-types/view-rate-type-pills"
-import { buildRouteName } from "@/lib/routes/route-name"
+import { buildRouteName, displayRouteName } from "@/lib/routes/route-name"
 import { routeHasReturnLeg } from "@/lib/routes/route-schedule"
 import {
   getSupplierVocabulary,
@@ -734,7 +734,9 @@ function findPackageRateCardConflicts(
   suiteTypes: EditableSuiteType[],
 ): RateCardConflict[] {
   const suiteTypeNames = new Map(suiteTypes.map((suiteType) => [suiteType.id, suiteType.name.trim()]))
-  const routeNames = new Map(pkg.routes.map((route) => [route.id, route.name.trim()]))
+  // An itinerary's stored name is its own id (see lib/routes/route-name.ts), which must never
+  // reach a message — displayRouteName collapses it so the "Unknown route" fallback fires instead.
+  const routeNames = new Map(pkg.routes.map((route) => [route.id, displayRouteName(route.name) ?? ""]))
   const seen = new Set<string>()
   const conflicts: RateCardConflict[] = []
 
@@ -847,7 +849,9 @@ function findPackageRateCardOverlapConflicts(
   suiteTypes: EditableSuiteType[],
 ): RateCardOverlapConflict[] {
   const suiteTypeNames = new Map(suiteTypes.map((suiteType) => [suiteType.id, suiteType.name.trim()]))
-  const routeNames = new Map(pkg.routes.map((route) => [route.id, route.name.trim()]))
+  // An itinerary's stored name is its own id (see lib/routes/route-name.ts), which must never
+  // reach a message — displayRouteName collapses it so the "Unknown route" fallback fires instead.
+  const routeNames = new Map(pkg.routes.map((route) => [route.id, displayRouteName(route.name) ?? ""]))
   const groupedCards = new Map<
     string,
     Array<{
@@ -1070,12 +1074,15 @@ function getRouteLabel(
   locationsById: Record<string, Location>,
   vocabulary: SupplierVocabulary,
 ) {
-  if (route.name.trim()) {
-    return route.name
+  // A tour operator's itinerary stores its own id as its name — never a label (see
+  // lib/routes/route-name.ts), so it reads as unnamed here like any other route without a name.
+  const displayName = displayRouteName(route.name)
+  if (displayName) {
+    return displayName
   }
 
   if (!vocabulary.routeHasLocations) {
-    return route.name || `Unnamed ${vocabulary.route.toLowerCase()}`
+    return `Unnamed ${vocabulary.route.toLowerCase()}`
   }
 
   if (route.pickupPoint || route.dropoffPoint) {
@@ -3467,7 +3474,7 @@ export function SupplierDetailView({
       const linkedRateCardCount = pkg.rateCards.filter((rateCard) => rateCard.routeId === routeId).length
       if (linkedRateCardCount > 0) {
         const vocabulary = getSupplierVocabulary(currentForm.kind)
-        const routeName = route.name.trim() || "Unnamed route"
+        const routeName = displayRouteName(route.name) ?? "Unnamed route"
         const shouldDeleteRoute = window.confirm(
           buildRouteDeletionConfirmationMessage({
             routeName,
@@ -4314,6 +4321,10 @@ export function SupplierDetailView({
           // Only sent when the user broke the link -- otherwise the key is omitted and the server
           // leaves the existing link untouched.
           ...(pendingUnlink ? { parentSupplierId: null } : {}),
+          // "Save & Publish" only renders on a draft supplier -- tell the server to actually
+          // publish it, rather than trusting `active` above, which this form seeds from the
+          // record's current (still-inactive) value (F-P3-7).
+          ...(isDraftSupplier ? { publish: true } : {}),
           expectedUpdatedAt:
             expectedUpdatedAtRef.current ?? supplier?.updatedAt,
         }),
@@ -4375,7 +4386,7 @@ export function SupplierDetailView({
         toast.error(typedPayload.error ?? "Failed to update supplier")
         return
       }
-      const successPayload = payload as { updatedAt?: string }
+      const successPayload = payload as { updatedAt?: string; status?: string }
       if (typeof successPayload?.updatedAt === "string") {
         expectedUpdatedAtRef.current = successPayload.updatedAt
       }
@@ -4390,8 +4401,14 @@ export function SupplierDetailView({
       setPendingUnlink(false)
       setIsEditing(false)
       setStaleVersionDialog(null)
+      // From the response's own status, not from isDraftSupplier (computed before the save) --
+      // "published" only when the save actually made it active (F-P3-7).
       toast.success(
-        isDraftSupplier ? "Supplier published successfully" : "Supplier updated successfully",
+        isDraftSupplier && successPayload.status !== "active"
+          ? "Supplier saved as a draft"
+          : isDraftSupplier
+            ? "Supplier published successfully"
+            : "Supplier updated successfully",
       )
     } catch {
       toast.error("Failed to update supplier")
@@ -5144,29 +5161,17 @@ export function SupplierDetailView({
           </CardContent>
         </Card>
 
-        {form.kind === "train_operator" || form.kind === "hotel_property" ? (
-          <SuiteVocabularyCard
-            kind={form.kind}
-            bedroomTypes={form.bedroomTypes}
-            bedroomLayouts={form.bedroomLayouts}
-            bathroomTypes={form.bathroomTypes}
-            onChangeBedroomTypes={setBedroomTypes}
-            onChangeBedroomLayouts={setBedroomLayouts}
-            onChangeBathroomTypes={setBathroomTypes}
-            isEditing={isEditing}
-          />
-        ) : null}
-
+        {/* Pricing: everything that decides what a number costs — the basis it is quoted on,
+            the single supplement, the age bands the bands are read against, and which rate
+            types are in play. The rate cards themselves live with the inventory below, since
+            they are a grid over suite types and routes. */}
         <Card>
             <CardHeader className="pb-4">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <CardTitle>{activeVocabulary.sectionTitle}</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {activeVocabulary.sectionDescription}
-                  </p>
-                </div>
-              </div>
+              <CardTitle>Pricing</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                How this supplier is priced, and the age bands and rate types those prices are
+                quoted under.
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-lg border p-4">
@@ -5325,7 +5330,8 @@ export function SupplierDetailView({
                         />
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        Added to the per-person sharing rate when a traveller occupies a suite alone.
+                        Added to the per-person sharing rate when a traveller occupies a{" "}
+                        {activeVocabulary.unitNoun} alone.
                       </p>
                     </div>
                   ) : (
@@ -5335,7 +5341,7 @@ export function SupplierDetailView({
                           Single supplement
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          Added when a traveller occupies a suite alone.
+                          Added when a traveller occupies a {activeVocabulary.unitNoun} alone.
                         </p>
                       </div>
                       <Badge variant="outline">
@@ -5346,8 +5352,44 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
+              <PassengerAgeBandsSection
+                isEditing={isEditing}
+                infantMaxAge={isEditing ? form.infantMaxAge : supplier.infantMaxAge}
+                childMaxAge={isEditing ? form.childMaxAge : supplier.childMaxAge}
+                onChangeInfantMaxAge={(value) => updateField("infantMaxAge", value)}
+                onChangeChildMaxAge={(value) => updateField("childMaxAge", value)}
+              />
+
+              {(isEditing ? form.pricingMode : supplier.pricingMode) !== "manual" ? (
+                <ApplicableRatesCard
+                  isEditing={isEditing}
+                  rateTypes={supplier.rateTypes ?? []}
+                  baseRateTypeId={effectiveBaseRateTypeId}
+                  quoteRateTypeId={effectiveQuoteRateTypeId}
+                  adjustments={isEditing ? form.rateAdjustments : supplier.rateAdjustments ?? []}
+                  onChange={(next) => updateField("rateAdjustments", next)}
+                  onChangeBaseRateType={handleChangeBaseRateType}
+                  onChangeQuoteRateType={handleChangeQuoteRateType}
+                />
+              ) : null}
+            </CardContent>
+          </Card>
+
+        {/* Schedule and operations: the timing facts the itinerary and booking schedules read.
+            Trains carry their times per route (see RouteEditorRow), so all a train contributes
+            here is the long-journey threshold; hotels contribute the check-in/out pair. No
+            other kind has anything, so the card only exists for those two. */}
+        {form.kind === "train_operator" || form.kind === "hotel_property" ? (
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>Schedule and operations</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Timing defaults used by the quote itinerary and by new booking schedules.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
               {(isEditing ? form.kind : supplier.kind) === "train_operator" ? (
-                <div className="rounded-lg border p-4 space-y-4">
+                <div className="space-y-4">
                   {isEditing ? (
                     <>
                       <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
@@ -5408,9 +5450,73 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
-              {/* Quote suite detail sits with the phrase wording: both decide how a suite is
-                  named to the client, one for the quote line and one for the other documents. */}
-              <div className="rounded-lg border p-4 space-y-4">
+              {form.kind === "hotel_property" ? (
+                <div>
+                  {isEditing ? (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,10rem)_1fr] sm:items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-default-time-start">
+                          {activeVocabulary.scheduleFields?.timeStartLabel ?? "Check-in time"}
+                        </Label>
+                        <BufferedInput
+                          id="supplier-default-time-start"
+                          type="time"
+                          value={form.defaultTimeStart}
+                          onValueChange={(value) => updateField("defaultTimeStart", value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-default-time-end">
+                          {activeVocabulary.scheduleFields?.timeEndLabel ?? "Check-out time"}
+                        </Label>
+                        <BufferedInput
+                          id="supplier-default-time-end"
+                          type="time"
+                          value={form.defaultTimeEnd}
+                          onValueChange={(value) => updateField("defaultTimeEnd", value)}
+                        />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Shown on the quote itinerary and prefilled on new booking schedules.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          {activeVocabulary.scheduleFields?.timeStartLabel ?? "Start"}
+                          {" / "}
+                          {activeVocabulary.scheduleFields?.timeEndLabel ?? "End"}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Shown on the quote itinerary and prefilled on new booking schedules.
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {(supplier.defaultTimeStart ?? "").slice(0, 5) || "—"}
+                        {" / "}
+                        {(supplier.defaultTimeEnd ?? "").slice(0, 5) || "—"}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {/* What the client is told a unit is called. Quote suite detail and the phrase wording
+            both decide how a suite is named to the client — one for the quote line, one for the
+            other documents — so they belong together. */}
+        <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>Client-facing wording</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {`How a ${activeVocabulary.unitNoun} is described on the quote, voucher and invoice.`}
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-4">
                 {(isEditing ? form.kind : supplier.kind) === "train_operator" ? (
                   isEditing ? (
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
@@ -5456,11 +5562,13 @@ export function SupplierDetailView({
                 {isEditing ? (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="supplier-suite-phrase-pattern">Suite phrase wording</Label>
+                      <Label htmlFor="supplier-suite-phrase-pattern">
+                        {activeVocabulary.suiteType} phrase wording
+                      </Label>
                       <p className="text-xs text-muted-foreground">
-                        Controls the word order of the full suite/room description printed on the
-                        voucher, invoice and accommodation emails — the quote itinerary line is
-                        unaffected. Tokens: <code>{"{type}"}</code>, <code>{"{bedroom}"}</code>,{" "}
+                        Controls the word order of the full {activeVocabulary.unitNoun} description
+                        printed on the voucher, invoice and accommodation emails — the quote
+                        itinerary line is unaffected. Tokens: <code>{"{type}"}</code>, <code>{"{bedroom}"}</code>,{" "}
                         <code>{"{layout}"}</code>, <code>{"{bathroom}"}</code>. Wrap a token in{" "}
                         <code>{"[...]"}</code> to drop that whole chunk when it has nothing to
                         show, e.g. <code>{"[{bedroom}] [{layout}] {type}"}</code>. Leave blank to
@@ -5497,22 +5605,36 @@ export function SupplierDetailView({
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-foreground">Suite phrase wording</p>
+                      <p className="text-sm font-semibold text-foreground">
+                        {activeVocabulary.suiteType} phrase wording
+                      </p>
                       <p className="text-sm text-muted-foreground">
-                        Word order for the full suite/room description on client documents.
+                        Word order for the full {activeVocabulary.unitNoun} description on client
+                        documents.
                       </p>
                     </div>
                     <Badge variant="outline">{supplier.suitePhrasePattern || "Default"}</Badge>
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
 
-              {/* What this supplier can be sold as. A train operator always heads its own
-                  bookings; a hotel is normally an add-on stay hanging off one, except Kruger
-                  Shalati -- a stationary train carriage let per room per night, which is the whole
-                  booking. Ticking this is what puts a supplier in the New Enquiry dropdown and in
-                  the inbound-email supplier scan. */}
-              <div className="rounded-lg border p-4 space-y-4">
+        {/* What this supplier can be sold as. A train operator always heads its own
+            bookings; a hotel is normally an add-on stay hanging off one, except Kruger
+            Shalati -- a stationary train carriage let per room per night, which is the whole
+            booking. Ticking this is what puts a supplier in the New Enquiry dropdown and in
+            the inbound-email supplier scan. */}
+        <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>Main Product</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Whether this supplier can head a booking of its own, and the wording that pulls an
+                enquiry email onto it.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-4">
                 {isEditing ? (
                   <>
                     <div className="flex items-start gap-3">
@@ -5522,7 +5644,7 @@ export function SupplierDetailView({
                         onCheckedChange={(checked) => updateField("sellsStandalone", checked === true)}
                       />
                       <div className="space-y-1">
-                        <Label htmlFor="supplier-sells-standalone">Sold as a standalone booking</Label>
+                        <Label htmlFor="supplier-sells-standalone">Can be the main product</Label>
                         <p className="text-xs text-muted-foreground">
                           Lets this supplier head a booking of its own: it appears in the New
                           Enquiry supplier list, and enquiry emails naming it are imported against
@@ -5586,82 +5708,38 @@ export function SupplierDetailView({
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
 
-              {/* Trains carry their times per route (see RouteEditorRow) — a supplier-wide pair
-                  would claim every route departs at the same hour. */}
-              {form.kind === "hotel_property" ? (
-                <div className="rounded-lg border p-4">
-                  {isEditing ? (
-                    <div className="grid gap-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,10rem)_1fr] sm:items-end">
-                      <div className="space-y-2">
-                        <Label htmlFor="supplier-default-time-start">
-                          {activeVocabulary.scheduleFields?.timeStartLabel ?? "Check-in time"}
-                        </Label>
-                        <BufferedInput
-                          id="supplier-default-time-start"
-                          type="time"
-                          value={form.defaultTimeStart}
-                          onValueChange={(value) => updateField("defaultTimeStart", value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="supplier-default-time-end">
-                          {activeVocabulary.scheduleFields?.timeEndLabel ?? "Check-out time"}
-                        </Label>
-                        <BufferedInput
-                          id="supplier-default-time-end"
-                          type="time"
-                          value={form.defaultTimeEnd}
-                          onValueChange={(value) => updateField("defaultTimeEnd", value)}
-                        />
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Shown on the quote itinerary and prefilled on new booking schedules.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">
-                          {activeVocabulary.scheduleFields?.timeStartLabel ?? "Start"}
-                          {" / "}
-                          {activeVocabulary.scheduleFields?.timeEndLabel ?? "End"}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Shown on the quote itinerary and prefilled on new booking schedules.
-                        </p>
-                      </div>
-                      <Badge variant="outline">
-                        {(supplier.defaultTimeStart ?? "").slice(0, 5) || "—"}
-                        {" / "}
-                        {(supplier.defaultTimeEnd ?? "").slice(0, 5) || "—"}
-                      </Badge>
-                    </div>
-                  )}
+        {/* The vocabulary feeds the suite-type rows in the card below it, so the two sit
+            together. */}
+        {form.kind === "train_operator" || form.kind === "hotel_property" ? (
+          <SuiteVocabularyCard
+            kind={form.kind}
+            bedroomTypes={form.bedroomTypes}
+            bedroomLayouts={form.bedroomLayouts}
+            bathroomTypes={form.bathroomTypes}
+            onChangeBedroomTypes={setBedroomTypes}
+            onChangeBedroomLayouts={setBedroomLayouts}
+            onChangeBathroomTypes={setBathroomTypes}
+            isEditing={isEditing}
+          />
+        ) : null}
+
+        {/* Inventory: what this supplier sells and the rate grid over it. Kept last because it
+            is the longest section on the page. */}
+        <Card>
+            <CardHeader className="pb-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <CardTitle>{activeVocabulary.sectionTitle}</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {activeVocabulary.sectionDescription}
+                  </p>
                 </div>
-              ) : null}
-
-              <PassengerAgeBandsSection
-                isEditing={isEditing}
-                infantMaxAge={isEditing ? form.infantMaxAge : supplier.infantMaxAge}
-                childMaxAge={isEditing ? form.childMaxAge : supplier.childMaxAge}
-                onChangeInfantMaxAge={(value) => updateField("infantMaxAge", value)}
-                onChangeChildMaxAge={(value) => updateField("childMaxAge", value)}
-              />
-
-              {(isEditing ? form.pricingMode : supplier.pricingMode) !== "manual" ? (
-                <ApplicableRatesCard
-                  isEditing={isEditing}
-                  rateTypes={supplier.rateTypes ?? []}
-                  baseRateTypeId={effectiveBaseRateTypeId}
-                  quoteRateTypeId={effectiveQuoteRateTypeId}
-                  adjustments={isEditing ? form.rateAdjustments : supplier.rateAdjustments ?? []}
-                  onChange={(next) => updateField("rateAdjustments", next)}
-                  onChangeBaseRateType={handleChangeBaseRateType}
-                  onChangeQuoteRateType={handleChangeQuoteRateType}
-                />
-              ) : null}
-
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>

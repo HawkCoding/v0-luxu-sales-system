@@ -103,6 +103,8 @@ describe("template token scoping", () => {
       "tripEndDate",
       "tripStartDate",
       "tripTitle",
+      "unitNoun",
+      "unitNounPlural",
       "voucherNumber",
     ])
   })
@@ -148,7 +150,7 @@ describe("template token scoping", () => {
   })
 
   it("defaults an unscoped token to every product", () => {
-    expect(tokenKinds({ name: "x", description: "", kind: "scalar", sample: "" })).toHaveLength(6)
+    expect(tokenKinds({ name: "x", description: "", kind: "scalar", sample: "" })).toHaveLength(7)
   })
 
   /**

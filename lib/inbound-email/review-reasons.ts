@@ -39,6 +39,7 @@ export const REVIEW_REASON = {
   returnDate: "Return date",
   tourDate: "Tour date",
   tourEndDate: "Tour end date",
+  sailingDate: "Sailing date",
   vehicles: "Vehicles",
   tours: "Tours",
   cabins: "Cabins",
@@ -147,6 +148,10 @@ export const REVIEW_REASON_DETAIL: Record<ReviewReason, ReviewReasonDetail> = {
     label: "No end date was found in the email",
     fixHint: "Set the date the tour ends -- its length decides the dates on every other service.",
   },
+  [REVIEW_REASON.sailingDate]: {
+    label: "No sailing date was found in the email",
+    fixHint: "Add the date the voyage departs from the original email before quoting.",
+  },
   [REVIEW_REASON.vehicles]: {
     label: "No vehicle count was found in the email",
     fixHint: "Set how many vehicles the party needs.",
@@ -226,6 +231,11 @@ export const INTAKE_REVIEW_REASONS: Record<
   },
   airline: {
     startDate: REVIEW_REASON.departureDate,
+    endDate: REVIEW_REASON.returnDate,
+    unitCount: REVIEW_REASON.cabins,
+  },
+  cruise_line: {
+    startDate: REVIEW_REASON.sailingDate,
     endDate: REVIEW_REASON.returnDate,
     unitCount: REVIEW_REASON.cabins,
   },

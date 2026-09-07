@@ -157,6 +157,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     },
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
     templateSupplierId: shared.primarySupplierId,
+    templateSupplierKind: shared.primarySupplierKind,
   })
 
   if (!composed) return jsonError("Payment reminder template could not be resolved", 500)

@@ -3,6 +3,7 @@ import type { QuoteLineItem } from "@/lib/types"
 import {
   calculateQuoteTotals,
   complimentaryNights,
+  describeQtyBasis,
   hasComplimentaryNight,
   isComplimentaryTransport,
   isFreeHotelOccupant,
@@ -226,5 +227,33 @@ describe("isFreeHotelOccupant", () => {
 
   it("still flags a zero-priced adult, which is a room nobody has priced", () => {
     expect(isMissingPricing(hotelLine("adult"))).toBe(true)
+  })
+})
+
+describe("describeQtyBasis", () => {
+  function line(snapshot: Record<string, unknown> | null): QuoteLineItem {
+    return {
+      description: "Kruger Shalati — Carriage Room - Adult",
+      qty: 2,
+      unitPrice: 25280,
+      total: 50560,
+      pricingSnapshot: snapshot as QuoteLineItem["pricingSnapshot"],
+    }
+  }
+
+  // The reported confusion: one guest for two nights and two guests for one night both show a
+  // qty of 2 beside "per person per night".
+  it("spells out the two factors behind a person-night qty", () => {
+    expect(describeQtyBasis(line({ occupantCount: 1, chargedNights: 2 }))).toBe("1 guest × 2 nights")
+    expect(describeQtyBasis(line({ occupantCount: 2, chargedNights: 1 }))).toBe("2 guests × 1 night")
+  })
+
+  it("says nothing when there is no multiplication to explain", () => {
+    expect(describeQtyBasis(line({ occupantCount: 1, chargedNights: 1 }))).toBeNull()
+  })
+
+  it("says nothing for lines that carry no occupancy basis", () => {
+    expect(describeQtyBasis(line({ unit: "per room per night" }))).toBeNull()
+    expect(describeQtyBasis(line(null))).toBeNull()
   })
 })

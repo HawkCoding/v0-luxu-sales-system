@@ -136,6 +136,7 @@ export async function GET(request: Request) {
         blocks: shared.blocks,
         senderProfileId: booking.assigned_salesperson_id,
         templateSupplierId: shared.primarySupplierId,
+        templateSupplierKind: shared.primarySupplierKind,
       })
       if (!composed) {
         return NextResponse.json({ error: "Thank-you template could not be resolved" }, { status: 500 })

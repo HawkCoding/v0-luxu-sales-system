@@ -26,6 +26,7 @@ const KIND_PRIORITY: SupplierKind[] = [
   "hotel_property",
   "airline",
   "tour_operator",
+  "cruise_line",
   "vehicle_rental",
   "transfers",
 ]
@@ -41,6 +42,7 @@ const SUITE_NOUN: Record<SupplierKind, string> = {
   hotel_property: "Room",
   airline: "Cabin",
   tour_operator: "Tour",
+  cruise_line: "Cabin",
   vehicle_rental: "Vehicle",
   transfers: "Vehicle",
 }

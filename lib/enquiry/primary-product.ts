@@ -35,3 +35,22 @@ export function isJourneyRouteKind(kind: SupplierKind | null | undefined): boole
   if (!kind) return false
   return SUPPLIER_VOCABULARY[kind].routeHasLocations
 }
+
+/**
+ * The span in the unit the primary product's own vocabulary counts it in. What is stored (and what
+ * a hotel's "Nights" field means) is always the night count between the two dates; a kind that
+ * talks in days instead (a tour, a rental) counts both the first and the last day, so a 3-night
+ * span is a 4-day one (F-P3-4: "20 -> 23 November" is a 4-Day Kruger Safari, not "3 days"). A kind
+ * with no `durationUnit` (a journey, a flight) states no span at intake — nights is returned
+ * unchanged for it, since there is no other word to render it in.
+ */
+export function primaryProductDurationCount(nights: number, unit: "nights" | "days" | null): number {
+  return unit === "days" ? nights + 1 : nights
+}
+
+/** "3 nights" / "4 days" / "1 day" — primaryProductDurationCount with its noun, pluralised. */
+export function formatPrimaryProductDuration(nights: number, unit: "nights" | "days" | null): string {
+  const count = primaryProductDurationCount(nights, unit)
+  const noun = unit === "days" ? "day" : "night"
+  return `${count} ${noun}${count === 1 ? "" : "s"}`
+}

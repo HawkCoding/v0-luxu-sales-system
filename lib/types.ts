@@ -237,6 +237,7 @@ export type SupplierKind =
   | "vehicle_rental"
   | "tour_operator"
   | "airline"
+  | "cruise_line"
 export type SupplierStatus = "draft" | "active" | "inactive" | "temporary"
 export type TransportRequestServiceType = "transfer" | "rental"
 export type TransportServiceType = TransportRequestServiceType
@@ -265,6 +266,7 @@ export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   vehicle_rental: "Vehicle Rental",
   tour_operator: "Tours",
   airline: "Airlines",
+  cruise_line: "Cruises",
 }
 
 /**
@@ -616,6 +618,55 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       routeRequiredForPricing: false,
     },
   },
+
+  cruise_line: {
+    suiteType: "Cabin Type",
+    suiteTypePlural: "Cabin Types",
+    unitNoun: "cabin",
+    unitNounPlural: "cabins",
+    package: "Season",
+    packagePlural: "Seasons",
+    route: "Itinerary",
+    routePlural: "Itineraries",
+    sectionTitle: "Cabin Types, Itineraries and Rates",
+    sectionDescription:
+      "Manage the cabin types this cruise line offers, itineraries, and per-person pricing.",
+    priceLabel: "per person sharing",
+    routeHasLocations: false,
+    routeHasDirection: false,
+    routeHasDuration: false,
+    routeHasSchedule: false,
+    routeNameAutoDerived: true,
+    showSingleSupplement: true,
+    originLabel: "Origin",
+    destinationLabel: "Destination",
+    durationLabel: "nights",
+    scheduleFields: {
+      dateFromLabel: "Sailing date",
+      dateToLabel: "Return date",
+      timeStartLabel: "Sailing time",
+      timeEndLabel: "Arrival time",
+    },
+    primaryProduct: {
+      bookingNoun: "Voyage",
+      startDateLabel: "Sailing Date",
+      // A multi-night cruise states its own return date, the same shape as a tour's end date --
+      // priced per person by cabin type, not by a route. Counted in nights (the travel-industry
+      // word for a cruise), unlike a tour's days.
+      endDateLabel: "Return Date",
+      endDateHintSuffix: "- the voyage is priced per person.",
+      endDateInvalidHint: "The return date must fall after the sailing date.",
+      // A cruise's "route" is an itinerary with no origin or destination, so there is nothing to type.
+      routeFieldLabel: null,
+      routeFieldPlaceholder: null,
+      durationUnit: "nights",
+      capturesUnitCount: true,
+      capturesHotelOption: true,
+      // Cruises price off the cabin type alone (isTypePricedSupplier), so a leg with no itinerary
+      // chosen still prices.
+      routeRequiredForPricing: false,
+    },
+  },
 }
 
 export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
@@ -624,6 +675,18 @@ export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
 
 export function isTransportSupplier(kind: SupplierKind): boolean {
   return kind === "transfers" || kind === "vehicle_rental"
+}
+
+/**
+ * Kinds whose leg states its own length on `booking_services.nights` rather than deriving it from
+ * a route's `duration_days` — a stay's nights and a tour's day count are the same N-night interval
+ * stored the same way, only counted in different words (see `SupplierPrimaryProduct.durationUnit`).
+ * Neither kind's route carries a duration (`routeHasDuration: false` on both), so there is nothing
+ * else to derive it from. Rentals also count in days but are dated by their transport request's
+ * pickup/return, never by a `booking_services` row, so they never reach this check at all.
+ */
+export function legStatesOwnSpan(kind: SupplierKind | string | null | undefined): boolean {
+  return kind === "hotel_property" || kind === "tour_operator" || kind === "cruise_line"
 }
 
 /**
@@ -655,12 +718,13 @@ export function resolveSupplierPriceLabel(
 
 /**
  * True for suppliers whose price hangs off the type alone (a tour operator sells a tour type at one
- * price, whatever itinerary it is described by), so their rate cards carry no route and their
- * routes are descriptive instead: one itinerary belongs to one tour type and holds its own copy.
- * Every other kind prices route x type, where the route genuinely changes the fare.
+ * price, whatever itinerary it is described by; a cruise line prices its cabin type the same way),
+ * so their rate cards carry no route and their routes are descriptive instead: one itinerary
+ * belongs to one type and holds its own copy. Every other kind prices route x type, where the
+ * route genuinely changes the fare.
  */
 export function isTypePricedSupplier(kind: SupplierKind): boolean {
-  return kind === "tour_operator"
+  return kind === "tour_operator" || kind === "cruise_line"
 }
 
 /**
@@ -956,6 +1020,14 @@ export interface PricingSnapshot {
   manualTourPriceSetByName?: string | null
   /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
   unit?: string | null
+  /** Hotel per-person legs only: how the line's qty was arrived at. The qty on such a line is
+   *  person-nights (occupants × charged nights), which reads as a headcount next to a "per person
+   *  per night" basis — two guests for one night and one guest for two both show as 2. Stamped so
+   *  the internal quote view can spell the multiplication out instead of leaving it ambiguous. */
+  occupantCount?: number | null
+  /** The nights `occupantCount` was multiplied by — the charged nights, so a gifted night is
+   *  already excluded (see complimentaryNights). */
+  chargedNights?: number | null
 }
 
 export interface SupplierPackage {
@@ -1533,9 +1605,14 @@ export interface Template {
   active: boolean
   isSystem: boolean
   sortOrder: number
-  /** Set only on a per-train variant of a system key (e.g. a Rovos-specific quote_email body) --
-   * null on every other template, including the shared/default row for that same key. */
+  /** Set only on a per-supplier variant of a system key (e.g. a Rovos-specific quote_email body) --
+   * null on every other template, including the shared/default row for that same key. Mutually
+   * exclusive with supplierKind. */
   supplierId: string | null
+  /** Set only on a per-kind variant of a system key (e.g. the hotel_property quote_email every
+   * stay uses unless its own supplier overrides it) -- null on every other template. Mutually
+   * exclusive with supplierId. */
+  supplierKind: SupplierKind | null
 }
 
 export interface Correspondence {

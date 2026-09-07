@@ -6,9 +6,10 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
-import { resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { displayRouteName, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import { firstRecord } from "@/lib/utils"
 
@@ -38,6 +39,7 @@ type BookingRecord = {
   no_of_adults: number
   no_of_children: number
   route_reversed: boolean | null
+  primary_supplier_id: string | null
   customer: CustomerRecord | CustomerRecord[] | null
   route: RouteRecord | RouteRecord[] | null
 }
@@ -69,7 +71,9 @@ function resolveRouteName(route: RouteRecord | null, routeReversed: boolean | nu
   if (!route) return null
   const origin = firstRecord(route.origin)?.name
   const destination = firstRecord(route.destination)?.name
-  if (route.direction_mode !== "round_trip" || !origin || !destination) return route.name
+  // displayRouteName drops an id-shaped name (a tour operator's itinerary), which would otherwise
+  // become the trip title.
+  if (route.direction_mode !== "round_trip" || !origin || !destination) return displayRouteName(route.name)
   return resolveDirectedRouteName(origin, destination, routeReversed ?? false)
 }
 
@@ -122,39 +126,40 @@ export async function ensureItineraryPdf(
     }
   }
 
-  const [
-    { data: bookingRaw, error: bookingError },
-    { data: templateRaw },
-    { data: existingItinerary },
-    documentText,
-    documentBrandSettings,
-  ] = await Promise.all([
-    supabase
-      .from("bookings")
-      .select(
-        `id, booking_number, consultant, assigned_salesperson_id, departure_date, no_of_adults, no_of_children, route_reversed,
+  const [{ data: bookingRaw, error: bookingError }, { data: templateRaw }, { data: existingItinerary }] =
+    await Promise.all([
+      supabase
+        .from("bookings")
+        .select(
+          `id, booking_number, consultant, assigned_salesperson_id, departure_date, no_of_adults, no_of_children, route_reversed, primary_supplier_id,
          customer:customers(first_name, last_name, email, phone, title),
          route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))`,
-      )
-      .eq("id", bookingId)
-      .single(),
-    supabase
-      .from("voucher_template")
-      .select("id, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
-      .limit(1)
-      .maybeSingle(),
-    supabase.from("itineraries").select("id, name, notes").eq("booking_id", bookingId).maybeSingle(),
-    getDocumentTextSettings(supabase),
-    getDocumentBrandSettings(supabase),
-  ])
-  const { brand } = resolveDocumentBrand(documentBrandSettings)
-  const brandLogo = await loadBrandLogo(brand.logoUrl)
+        )
+        .eq("id", bookingId)
+        .single(),
+      supabase
+        .from("voucher_template")
+        .select("id, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
+        .limit(1)
+        .maybeSingle(),
+      supabase.from("itineraries").select("id, name, notes").eq("booking_id", bookingId).maybeSingle(),
+    ])
 
   if (bookingError || !bookingRaw) throw new Error("Booking not found")
 
   const booking = bookingRaw as unknown as BookingRecord
   const customer = firstRecord(booking.customer)
   const route = firstRecord(booking.route)
+
+  // Same per-kind document copy the quote PDF resolves (settings-access.ts), so a Kruger Shalati
+  // itinerary can carry stay wording while a rail itinerary keeps its own.
+  const primarySupplierKind = await loadSupplierKind(supabase, booking.primary_supplier_id)
+  const [documentText, documentBrandSettings] = await Promise.all([
+    getDocumentTextSettings(supabase, primarySupplierKind),
+    getDocumentBrandSettings(supabase, primarySupplierKind),
+  ])
+  const { brand } = resolveDocumentBrand(documentBrandSettings)
+  const brandLogo = await loadBrandLogo(brand.logoUrl)
 
   const consultant = await resolveConsultant(supabase, {
     consultant: booking.consultant,

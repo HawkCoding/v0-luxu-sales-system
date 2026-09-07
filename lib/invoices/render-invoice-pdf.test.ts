@@ -32,22 +32,27 @@ const depositTotals: InvoiceTotals = {
 }
 
 const departure = {
-  heading: "Luxury Train Departure Information",
+  productLabel: "Train",
   trainName: "The Blue Train",
   tourName: "Cape Town Journey",
   daysLabel: "2 Nights / 3 Days",
   qty: "1",
   adults: "2",
   children: "0",
-  outbound: {
-    route: "Pretoria → Cape Town",
-    departureDate: "2026-07-20",
-    departureTime: "13h00",
-    arrivalDate: "2026-07-22",
-    arrivalTime: "18h00",
-    suite: "Twin Deluxe with Shower",
-  },
-  returnLeg: null,
+  legs: [
+    {
+      heading: "Luxury Train Departure Information",
+      rows: [
+        { left: { label: "Route", value: "Pretoria → Cape Town" }, right: null },
+        { left: { label: "Departure Date", value: "20 July 2026 at 13h00" }, right: null },
+        { left: { label: "Arrival Date", value: "22 July 2026 at 18h00" }, right: null },
+        {
+          left: { label: "Suite Type", value: "Twin Deluxe with Shower" },
+          right: { label: "Qty", value: "1" },
+        },
+      ],
+    },
+  ],
 }
 
 const items = [

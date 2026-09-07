@@ -1,4 +1,5 @@
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+const TIME_ONLY_PATTERN = /^(\d{2}):(\d{2})$/
 
 /**
  * Every displayed date and time is rendered in South African time, not in the timezone of whatever
@@ -124,6 +125,38 @@ export function formatDateISO(value: string | Date | null | undefined): string |
   if (!parts) return null
 
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`
+}
+
+/**
+ * The UTC instant at which the wall clock in `APP_TIME_ZONE` reads `date` (YYYY-MM-DD) at `time`
+ * (HH:MM) — the exact inverse of `formatDateISO` + `formatTimeHHMM`. A consultant types the time a
+ * guest is collected in Johannesburg; which timezone their own machine happens to be set to must
+ * never change the instant that gets stored (F-P3-5: a 00:00 SAST pickup was being written from the
+ * browser's local clock, so on a UTC/other-zone machine it landed on the wrong South African day).
+ * Resolved by probing the zone's offset at the naive instant and refining once, so this stays
+ * correct even for a zone with DST — `Africa/Johannesburg` has none, but the formatter is generic.
+ */
+export function zonedDateTimeToIso(date: string, time: string): string | null {
+  const dateMatch = DATE_ONLY_PATTERN.exec(date)
+  const timeMatch = TIME_ONLY_PATTERN.exec(time)
+  if (!dateMatch || !timeMatch) return null
+
+  const year = Number(dateMatch[1])
+  const month = Number(dateMatch[2])
+  const day = Number(dateMatch[3])
+  const hour = Number(timeMatch[1])
+  const minute = Number(timeMatch[2])
+  if (!isRealDate(year, month, day) || hour > 23 || minute > 59) return null
+
+  const naive = Date.UTC(year, month - 1, day, hour, minute)
+  const offsetAtInstant = (instant: number): number => {
+    const parts = zonedParts(new Date(instant))
+    const zonedAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute)
+    return zonedAsUtc - instant
+  }
+  const firstPass = naive - offsetAtInstant(naive)
+  const refined = naive - offsetAtInstant(firstPass)
+  return new Date(refined).toISOString()
 }
 
 export const LONG_MONTH_NAMES = [

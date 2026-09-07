@@ -946,6 +946,10 @@ Acceptance
       child_ages: [5, 6],
       terms_accepted: true,
       route_id: "route-blue-pta-cpt",
+      // F-P2-3 regression: the booking-level column used to be omitted from this insert entirely,
+      // silently falling to its schema default (false) while the rail leg below got the correct
+      // computed value -- the same booking then disagreed with itself about its own direction.
+      route_reversed: true,
     })
     expect(state.serviceInsertRows).toHaveLength(1)
     expect(state.serviceInsertRows[0]).toMatchObject({

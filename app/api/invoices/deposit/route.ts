@@ -305,6 +305,7 @@ export async function POST(req: Request) {
         },
         senderProfileId: booking.assigned_salesperson_id ?? user.id,
         templateSupplierId: shared.primarySupplierId,
+        templateSupplierKind: shared.primarySupplierKind,
       })
     : await composeEmail(supabase, "deposit_request", {
         tokens: {
@@ -331,6 +332,7 @@ export async function POST(req: Request) {
         },
         senderProfileId: booking.assigned_salesperson_id ?? user.id,
         templateSupplierId: shared.primarySupplierId,
+        templateSupplierKind: shared.primarySupplierKind,
       })
 
   if (!composed) return jsonError("Invoice email template could not be resolved", 500)

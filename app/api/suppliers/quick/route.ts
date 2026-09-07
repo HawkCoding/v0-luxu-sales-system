@@ -22,6 +22,7 @@ const quickSupplierSchema = z
       "vehicle_rental",
       "tour_operator",
       "airline",
+      "cruise_line",
     ]),
     name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
     email: z

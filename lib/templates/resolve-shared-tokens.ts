@@ -8,7 +8,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import type { PricingSnapshot, SupplierKind } from "@/lib/types"
+import { getSupplierVocabulary, type PricingSnapshot, type SupplierKind } from "@/lib/types"
 import { formatDisplayDateLong, formatDisplayDateShort } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { firstRecord } from "@/lib/utils"
@@ -40,6 +40,7 @@ import {
 import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
 import { getPaymentMethod } from "@/lib/payment-methods"
 import { getDocumentTextSettings } from "@/lib/settings-access"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import {
   loadQuoteConfig,
   loadQuoteDisplayTokens,
@@ -55,6 +56,10 @@ export interface SharedEmailTokens {
    * through as composeEmail's templateSupplierId so every system email, not just the quote email,
    * can carry a per-supplier variant. Null when nothing could be resolved. */
   primarySupplierId: string | null
+  /** That supplier's kind -- pass straight through as composeEmail's templateSupplierKind for the
+   * per-kind template layer (a hotel_property quote_email every stay uses unless its own supplier
+   * overrides it). Null exactly when primarySupplierId is null. */
+  primarySupplierKind: SupplierKind | null
 }
 
 function orPlaceholder(value: string | null | undefined): string {
@@ -111,18 +116,6 @@ async function safely<T>(run: () => Promise<T>, fallback: T): Promise<T> {
   } catch {
     return fallback
   }
-}
-
-/** The supplier's kind, for deciding which leg dates the trip and what a document calls it. */
-async function loadSupplierKind(
-  supabase: SupabaseClient<Database>,
-  supplierId: string | null,
-): Promise<SupplierKind | null> {
-  if (!supplierId) return null
-  const row = await safeQuery<{ kind: SupplierKind }>(() =>
-    supabase.from("suppliers").select("kind").eq("id", supplierId).maybeSingle(),
-  )
-  return row?.kind ?? null
 }
 
 interface BookingRow {
@@ -364,7 +357,12 @@ export async function resolveSharedEmailTokens(
       primarySupplierKind = await loadSupplierKind(supabase, primarySupplierId)
       suiteTokens = buildSuiteTokens(suiteSelections, primarySupplierKind)
 
-      const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
+      // Narrowed to the primary product's own legs where it has any (F-P3-4), so a tour's dates
+      // aren't stretched by an add-on hotel or transfer.
+      const journey = deriveJourneyFromBlocks(
+        itineraryBlocks,
+        mapSupplierKindToServiceType(primarySupplierKind),
+      ) ?? { start: null, end: null }
       trainDepartureDate = deriveTrainDepartureFromBlocks(
         itineraryBlocks,
         mapSupplierKindToServiceType(primarySupplierKind),
@@ -470,6 +468,10 @@ export async function resolveSharedEmailTokens(
     suiteType: orPlaceholder(suiteTokens.suiteType),
     suiteConfiguration: orPlaceholder(suiteTokens.suiteConfiguration),
     suiteDescription: orPlaceholder(suiteTokens.suiteDescription),
+    // F-P3-12: a rail template's "your selected suite" reached a tour client unchanged. Falls back
+    // to the rail vocabulary before primarySupplierKind resolves, same as primaryProductOf.
+    unitNoun: getSupplierVocabulary(primarySupplierKind ?? "train_operator").unitNoun,
+    unitNounPlural: getSupplierVocabulary(primarySupplierKind ?? "train_operator").unitNounPlural,
     roomType: orPlaceholder(roomTokens.suiteType),
     roomDescription: orPlaceholder(roomTokens.suiteDescription),
     propertyName: orPlaceholder(stay.propertyName),
@@ -522,5 +524,5 @@ export async function resolveSharedEmailTokens(
     trainOnlyNote: trainOnlyNote ?? "",
   }
 
-  return { tokens, blocks, primarySupplierId }
+  return { tokens, blocks, primarySupplierId, primarySupplierKind }
 }

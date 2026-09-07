@@ -236,6 +236,7 @@ export async function createEmailBookingFromParsedDraft(
     },
     resolvedReferences: {
       routeId,
+      routeReversed,
       hotelSupplierId,
       supplierId: primarySupplier?.id ?? null,
       supplierKind: primarySupplier?.kind ?? null,
@@ -288,6 +289,9 @@ export async function createEmailBookingFromParsedDraft(
     departure_date: payload.departureDate || null,
     duration_nights: stayNights,
     route_id: routeId,
+    // Same reversal computed above -- auto-build spends it on the rail leg's own route_reversed;
+    // without it here the booking-level column silently falls to its schema default (false).
+    route_reversed: routeId ? routeReversed : false,
     hotel_supplier_id: hotelSupplierId,
     primary_supplier_id: primarySupplier?.id ?? null,
     // Never defaulted to 1. parseEmailDraft deliberately leaves an unstated count at 0 ("an

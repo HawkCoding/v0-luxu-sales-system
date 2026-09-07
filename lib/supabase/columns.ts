@@ -23,7 +23,12 @@ export const BOOKING_WITH_SUPPLIER_COLUMNS = `${BOOKING_COLUMNS}, route:routes(i
 export const BOOKING_LIST_COLUMNS =
   "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, is_repeat_client_at_creation, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, no_of_adults, no_of_children, no_of_adults_original, no_of_children_original, no_of_suites, child_ages, route_id, extracted_json, terms_accepted, additional_services, additional_services_details, promotion_code, extend_stay, extra_nights, hotel_phase, hotel_supplier_id, primary_supplier_id, customer_invoice_number, services_confirmed_at, services_confirmed_by, created_at, updated_at, quote_sent_at, accepted_at, reservation_form_received_at, deposit_requested_at, deposit_paid_at, final_paid_at, voucher_sent_at, closed_at, deposit_paid, invoice_balance, overpaid_amount, cancelled_at, refund_status, refund_amount, refund_reference, refunded_at, outcome, outcome_reason_id, outcome_notes, outcome_set_at, outcome_set_by"
 
-export const BOOKING_LIST_WITH_SUPPLIER_COLUMNS = `${BOOKING_LIST_COLUMNS}, route:routes(id, name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name)`
+// Same ladder as BOOKING_WITH_SUPPLIER_COLUMNS: primary_supplier first (works for any kind,
+// including a tour or stay whose route_id is deliberately null), then the route's own supplier
+// (kind included so a train-only guard can apply, same as lib/reports/product-suppliers.ts — an
+// older booking's route is as likely to belong to a transfer add-on as to the product), then the
+// hotel add-on as the last resort.
+export const BOOKING_LIST_WITH_SUPPLIER_COLUMNS = `${BOOKING_LIST_COLUMNS}, route:routes(id, name, supplier:suppliers(id, name, kind)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), primary_supplier:suppliers!bookings_primary_supplier_id_fkey(id, name)`
 
 export const BOOKING_SUITE_COLUMNS =
   "id, booking_id, suite_number, suite_type_id, suite_type_name, bedroom_type_id, bedroom_layout_id, bathroom_type_id, source_phrase, match_json"

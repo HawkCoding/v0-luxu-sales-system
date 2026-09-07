@@ -200,9 +200,14 @@ test("01-supplier creates supplier, route, suite type, and report", async ({ pag
     })
 
     const dbEvidence = await getSupplierDbEvidence(supplierSlug)
-    const supplierRecord = dbEvidence.supplier as { id: string; slug: string }
+    const supplierRecord = dbEvidence.supplier as { id: string; slug: string; status: string; active: boolean }
     supplierId = supplierRecord.id
     report.addDbEvidence(dbEvidence)
+
+    // F-P3-7: "Save & Publish" toasted success while the record stayed draft/inactive. The toast
+    // alone is not proof -- confirm the record actually published.
+    expect(supplierRecord.status).toBe("active")
+    expect(supplierRecord.active).toBe(true)
 
     const routes = dbEvidence.routes as Array<{ name: string }>
     const suiteTypes = dbEvidence.suiteTypes as Array<{ name: string }>
