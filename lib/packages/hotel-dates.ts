@@ -121,28 +121,45 @@ export function resolveChainedHotelStayDates(
 }
 
 /**
- * The train leg a hotel anchors to: for a post-stay the nearest train leg *before* it in the
- * itinerary, for a pre-stay the nearest one *after*. Falls back to the nearest train leg in the
+ * The leg a hotel anchors its dates to: for a post-stay the nearest candidate *before* it in the
+ * itinerary, for a pre-stay the nearest one *after*. Falls back to the nearest candidate in the
  * other direction so a hotel placed at either end of the leg list still resolves (a package with
- * one train — the common case — always resolves to it).
+ * one anchor — the common case — always resolves to it).
+ *
+ * The candidate is the booking's primary leg when one is known, otherwise a train leg. Anchoring to
+ * trains alone was fine while every booking was a rail journey: a cruise or a flight with a pre- or
+ * post-night has no train, so the anchor never resolved, the hotel leg got no date, and readiness
+ * blocked the quote with "Hotel has no date". Passing no primary supplier reproduces the old
+ * train-only behaviour exactly.
  */
-export function findAnchorTrainLeg(
+export function findAnchorLeg(
   legs: PackageLeg[],
   hotelLegId: string,
   anchor: ServiceDateAnchor | null,
+  primarySupplierId?: string | null,
 ): PackageLeg | null {
   const ordered = legs.slice().sort((a, b) => a.sortOrder - b.sortOrder)
   const hotelIndex = ordered.findIndex((leg) => leg.id === hotelLegId)
   if (hotelIndex === -1) return null
 
-  const trains = ordered
-    .map((leg, index) => ({ leg, index }))
-    .filter((entry) => entry.leg.supplierKind === TRAIN_LEG_KIND)
-  if (trains.length === 0) return null
+  const indexed = ordered.map((leg, index) => ({ leg, index }))
+  const isAnchorCandidate = (leg: PackageLeg) =>
+    primarySupplierId
+      ? leg.supplierId === primarySupplierId
+      : leg.supplierKind === TRAIN_LEG_KIND
+  // A booking whose primary supplier files no leg here (or none that is not the stay itself) still
+  // anchors to a train if there is one, rather than losing its dates.
+  const candidates = indexed.filter((entry) => isAnchorCandidate(entry.leg) && entry.leg.id !== hotelLegId)
+  const fallback = indexed.filter((entry) => entry.leg.supplierKind === TRAIN_LEG_KIND)
+  const pool = candidates.length > 0 ? candidates : fallback
+  if (pool.length === 0) return null
 
-  const before = trains.filter((entry) => entry.index < hotelIndex).at(-1)
-  const after = trains.find((entry) => entry.index > hotelIndex)
+  const before = pool.filter((entry) => entry.index < hotelIndex).at(-1)
+  const after = pool.find((entry) => entry.index > hotelIndex)
 
   const preferred = anchor === "post" ? before ?? after : after ?? before
   return preferred?.leg ?? null
 }
+
+/** @deprecated Use {@link findAnchorLeg}, which also anchors to a non-train primary product. */
+export const findAnchorTrainLeg = findAnchorLeg

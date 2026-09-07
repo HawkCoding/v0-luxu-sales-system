@@ -4,6 +4,7 @@ import {
   FOOTER_BRAND_PRODUCT_LINE,
 } from "@/lib/assets/footer-brand"
 import { formatDisplayDate } from "@/lib/date-format"
+import type { InvoiceDepartureRow } from "@/lib/invoices/departure-rows"
 import { formatMoney } from "@/lib/money"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
@@ -26,31 +27,31 @@ export interface InvoiceBillingParty {
   vatNumber?: string | null
 }
 
-/** One direction of travel — a round trip renders one block per leg. */
+/** One direction of travel — a round trip renders one block per leg. Its rows are built by
+ *  `invoiceRowsForBlock` (lib/invoices/departure-rows.ts) from the same per-kind logic the
+ *  voucher uses, so the two documents can never again disagree about what a booking is. */
 export interface InvoiceDepartureLeg {
-  route: string | null
-  departureDate?: string | null
-  departureTime?: string | null
-  arrivalDate?: string | null
-  arrivalTime?: string | null
-  suite?: string | null
+  heading: string
+  rows: InvoiceDepartureRow[]
 }
 
 export interface InvoiceDeparture {
-  heading: string
-  /** Train / product name, e.g. "The Blue Train". */
+  /** Train / product name, e.g. "The Blue Train" — the primary supplier's own name, whatever kind
+   *  it is. */
   trainName?: string | null
+  /** What `trainName` names, per kind ("Train", "Tour Operator", "Hotel", …). */
+  productLabel?: string | null
   /** Tour or package name, e.g. "Pretoria Journey". */
   tourName?: string | null
-  /** e.g. "2 Nights / 3 Days". */
+  /** e.g. "2 Nights / 3 Days", or "4 Days" for a kind that counts in days. */
   daysLabel?: string | null
   /** Number of suites booked. */
   qty?: string | null
   adults?: string | null
   children?: string | null
-  outbound: InvoiceDepartureLeg
-  /** Present for round trips; rendered as a second journey block. */
-  returnLeg?: InvoiceDepartureLeg | null
+  /** One block per direction — a round trip (two train blocks) renders a second, headed "Return
+   *  Journey". Every other kind has exactly one. */
+  legs: InvoiceDepartureLeg[]
 }
 
 export interface InvoiceItem {
@@ -122,10 +123,6 @@ function orDash(value: string | null | undefined): string {
   return value?.trim() || EMPTY
 }
 
-function legDate(value: string | null | undefined): string {
-  if (!value) return EMPTY
-  return formatDisplayDate(value.slice(0, 10)) || EMPTY
-}
 
 /**
  * "25% Deposit due now" reads as a fresh demand once the deposit has actually
@@ -459,65 +456,63 @@ const BANKING_ROWS: Array<{ key: keyof BankingSettings; label: string }> = [
   { key: "bank_swift_code", label: "SWIFT code" },
 ]
 
-interface DepartureCell {
-  label: string
-  value: string
-}
-
-interface DeparturePair {
-  left: DepartureCell | null
-  right: DepartureCell | null
-}
-
-/** Rows for one journey leg: left label/value column + right label/value column. */
-function legPairs(departure: InvoiceDeparture, leg: InvoiceDepartureLeg): DeparturePair[] {
-  const pairs: DeparturePair[] = [
+/** The product-name row + days row above every leg's own rows — the two fields that describe the
+ *  booking as a whole rather than one direction of it, so they only print once, on the first leg. */
+function productRows(departure: InvoiceDeparture): InvoiceDepartureRow[] {
+  const rows: InvoiceDepartureRow[] = [
     {
-      left: { label: "Train", value: orDash(departure.trainName) },
+      left: { label: departure.productLabel ?? "Train", value: orDash(departure.trainName) },
       right: { label: "Days", value: orDash(departure.daysLabel) },
     },
-    departure.tourName
-      ? { left: { label: "Tour", value: departure.tourName }, right: null }
-      : { left: null, right: null },
-    { left: { label: "Route", value: orDash(leg.route) }, right: null },
-    {
-      left: { label: "Departure", value: legDate(leg.departureDate) },
-      right: { label: "Time", value: orDash(leg.departureTime) },
-    },
-    {
-      left: { label: "Arrival", value: legDate(leg.arrivalDate) },
-      right: { label: "Time", value: orDash(leg.arrivalTime) },
-    },
-    {
-      left: { label: "Suite Type", value: orDash(leg.suite) },
-      right: { label: "Qty", value: orDash(departure.qty) },
-    },
-    {
-      left: { label: "Adults", value: orDash(departure.adults) },
-      right: { label: "Children", value: orDash(departure.children) },
-    },
   ]
-  return pairs.filter((pair) => pair.left !== null || pair.right !== null)
+  if (departure.tourName) rows.push({ left: { label: "Tour", value: departure.tourName }, right: null })
+  return rows
+}
+
+/** A train/hotel leg's own rows already carry a "Suite Type | Qty" or "Room Type | Qty" row (see
+ *  suiteRow in service-block-rows.ts) — printing departure.qty again alongside it would duplicate
+ *  the same fact under two "Qty:" labels. Every other kind (a tour has no unit-count row of its
+ *  own) still needs it. */
+function hasOwnUnitCountRow(rows: InvoiceDepartureRow[]): boolean {
+  return rows.some((row) => row.left?.label === "Suite Type" || row.left?.label === "Room Type")
+}
+
+/** The pax/qty row at the foot of the first leg's rows. */
+function paxRows(departure: InvoiceDeparture, legRows: InvoiceDepartureRow[]): InvoiceDepartureRow[] {
+  const rows: InvoiceDepartureRow[] = []
+  if (!hasOwnUnitCountRow(legRows)) {
+    rows.push({ left: { label: "Qty", value: orDash(departure.qty) }, right: null })
+  }
+  rows.push({
+    left: { label: "Adults", value: orDash(departure.adults) },
+    right: { label: "Children", value: orDash(departure.children) },
+  })
+  return rows
 }
 
 function DepartureLegBlock({
   departure,
   leg,
-  heading,
+  isFirst,
 }: {
   departure: InvoiceDeparture
   leg: InvoiceDepartureLeg
-  heading: string
+  isFirst: boolean
 }) {
+  const rows = [
+    ...(isFirst ? productRows(departure) : []),
+    ...leg.rows,
+    ...(isFirst ? paxRows(departure, leg.rows) : []),
+  ]
   return (
     <View style={{ marginBottom: 8 }}>
-      <Text style={styles.sectionHeading}>{heading}</Text>
-      {legPairs(departure, leg).map((pair, index) => (
+      <Text style={styles.sectionHeading}>{leg.heading}</Text>
+      {rows.map((row, index) => (
         <View key={index} style={styles.departureRow}>
-          <Text style={styles.departureLabel}>{pair.left ? `${pair.left.label}:` : ""}</Text>
-          <Text style={styles.departureValue}>{pair.left?.value ?? ""}</Text>
-          <Text style={styles.departureLabel}>{pair.right ? `${pair.right.label}:` : ""}</Text>
-          <Text style={styles.departureValue}>{pair.right?.value ?? ""}</Text>
+          <Text style={styles.departureLabel}>{row.left ? `${row.left.label}:` : ""}</Text>
+          <Text style={styles.departureValue}>{row.left?.value ?? ""}</Text>
+          <Text style={styles.departureLabel}>{row.right ? `${row.right.label}:` : ""}</Text>
+          <Text style={styles.departureValue}>{row.right?.value ?? ""}</Text>
         </View>
       ))}
     </View>
@@ -527,14 +522,9 @@ function DepartureLegBlock({
 function DepartureBlock({ departure }: { departure: InvoiceDeparture }) {
   return (
     <View>
-      <DepartureLegBlock departure={departure} leg={departure.outbound} heading={departure.heading} />
-      {departure.returnLeg ? (
-        <DepartureLegBlock
-          departure={departure}
-          leg={departure.returnLeg}
-          heading="Return Journey"
-        />
-      ) : null}
+      {departure.legs.map((leg, index) => (
+        <DepartureLegBlock key={index} departure={departure} leg={leg} isFirst={index === 0} />
+      ))}
     </View>
   )
 }

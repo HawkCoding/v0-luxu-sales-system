@@ -17,6 +17,7 @@ import {
   ImportConflictResolutionModal,
   type ImportConflictGroup,
 } from "@/components/import-conflict-resolution-modal"
+import { displayRouteName } from "@/lib/routes/route-name"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -388,7 +389,9 @@ export function CustomerBulkImportPanel() {
     if (!supplierDetail || "error" in supplierDetail) return []
     return supplierDetail.routes
       .filter((route) => route.active)
-      .map((route) => ({ id: route.id, label: route.name }))
+      // An itinerary stores its own id as its name (see lib/routes/route-name.ts) — label it as
+      // unnamed rather than offering a uuid to pick from.
+      .map((route) => ({ id: route.id, label: displayRouteName(route.name) ?? "Unnamed route" }))
   }, [supplierDetail])
 
   const selectedValidRows = useMemo(() => rows.filter((row) => row.selected && isRowValid(row)), [rows])

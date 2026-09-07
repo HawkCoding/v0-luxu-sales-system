@@ -6,17 +6,18 @@ import type {
   ServiceDateAnchor,
   SupplierKind,
 } from "@/lib/types"
-import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_VOCABULARY } from "@/lib/types"
+import { isCoreBookingLeg, isTypePricedSupplier, legStatesOwnSpan, SUPPLIER_VOCABULARY } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import type { AnchoredStay, HotelStayDates } from "@/lib/packages/hotel-dates"
-import { findAnchorTrainLeg, resolveChainedHotelStayDates } from "@/lib/packages/hotel-dates"
+import { findAnchorLeg, resolveChainedHotelStayDates } from "@/lib/packages/hotel-dates"
 import type { AnchorLegDates } from "@/lib/packages/transfer-dates"
 import { findTransferAnchorLeg, resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
+import { resolveTripEdgeDates } from "@/lib/packages/flight-dates"
 import type { ServiceDateSpan } from "@/lib/packages/trip-date-range"
 import { dateOnly, selectedRouteDurationDays, serviceDateSpan } from "@/lib/packages/trip-date-range"
-import { splitLocalDateTime, joinLocalDateTime } from "@/lib/date-time-field"
+import { splitAppZoneDateTime, joinAppZoneDateTime } from "@/lib/date-time-field"
 import { toHoursMinutes } from "@/lib/routes/route-schedule"
-import { resolveDirectedEndpointCodes } from "@/lib/routes/route-name"
+import { displayRouteName, resolveDirectedEndpointCodes } from "@/lib/routes/route-name"
 import { BASE_CURRENCY } from "@/lib/money"
 import {
   findRateCardCandidates,
@@ -111,7 +112,8 @@ export interface SuiteLegState {
   /** Two-way (round_trip) routes only: when true the booking travels destination → origin. */
   reversed: boolean
   serviceDate: string | null
-  /** Hotel legs only. */
+  /** Hotel and tour legs only (legStatesOwnSpan) — the night interval behind the leg's own end
+   *  date, whatever unit that kind's vocabulary counts it in (see primaryProductDurationCount). */
   nights: number | null
   /** Airline legs only — the flight this booking is actually on. `serviceDate` is its departure
    *  date; `arrivalDate` is a full date so an overnight flight states a real arrival day. */
@@ -404,7 +406,7 @@ export function buildDefaultLegStates(
   detail: PackageDetail,
   options: BuildDefaultLegStatesOptions,
 ): ApplyLegState[] {
-  return applyAnchoredDates(detail, buildRawDefaultLegStates(detail, options))
+  return applyAnchoredDates(detail, buildRawDefaultLegStates(detail, options), options.primarySupplierId)
 }
 
 function buildRawDefaultLegStates(
@@ -492,17 +494,19 @@ function normalizeSavedAnchor(value: string | null): ServiceDateAnchor | null {
   return value === "pre" || value === "post" || value === "custom" ? value : null
 }
 
-/** The train leg a hotel leg's dates hang off, plus the departure date and route length currently
- * chosen on it. Returns null for legs that aren't anchored hotels or have no train to anchor to. */
+/** The leg a hotel leg's dates hang off — the booking's primary product, else a train — plus the
+ * departure date and route length currently chosen on it. Returns null for legs that aren't
+ * anchored hotels or have nothing to anchor to. */
 export function getHotelAnchorContext(
   detail: PackageDetail,
   states: ApplyLegState[],
   hotelLegId: string,
+  primarySupplierId?: string | null,
 ): { trainLeg: PackageLeg; departureDate: string | null; durationDays: number | null } | null {
   const state = states.find((candidate) => candidate.legId === hotelLegId)
   if (state?.kind !== "suite" || state.supplierKind !== "hotel_property") return null
 
-  const trainLeg = findAnchorTrainLeg(detail.legs, hotelLegId, state.dateAnchor)
+  const trainLeg = findAnchorLeg(detail.legs, hotelLegId, state.dateAnchor, primarySupplierId)
   if (!trainLeg) return null
 
   const trainState = states.find((candidate) => candidate.legId === trainLeg.id)
@@ -521,6 +525,9 @@ export function getHotelAnchorContext(
 /** The train leg this hotel's dates hang off, as the leg editor needs it. */
 export interface HotelAnchorContext {
   trainLabel: string
+  /** The anchor leg's own supplier kind — drives the Pre-/Post- button wording (F-P2-7): a hotel
+   *  anchored to a tour reads "Pre-tour", not the train-only "Pre-train" every kind used to see. */
+  anchorKind: SupplierKind
   departureDate: string | null
   durationDays: number | null
   /** This hotel's own resolved stay — chained with any other stay anchored to the same train on
@@ -539,6 +546,7 @@ export interface HotelAnchorContext {
 function resolveAllAnchoredHotelDates(
   detail: PackageDetail,
   states: ApplyLegState[],
+  primarySupplierId?: string | null,
 ): Map<string, HotelStayDates> {
   interface Group {
     anchor: "pre" | "post"
@@ -551,7 +559,7 @@ function resolveAllAnchoredHotelDates(
     if (state.kind !== "suite" || state.supplierKind !== "hotel_property") continue
     if (state.dateAnchor !== "pre" && state.dateAnchor !== "post") continue
 
-    const context = getHotelAnchorContext(detail, states, state.legId)
+    const context = getHotelAnchorContext(detail, states, state.legId, primarySupplierId)
     if (!context) continue
 
     const leg = detail.legs.find((candidate) => candidate.id === state.legId)
@@ -583,26 +591,29 @@ export function toHotelAnchorContext(
   detail: PackageDetail,
   states: ApplyLegState[],
   hotelLegId: string,
+  primarySupplierId?: string | null,
 ): HotelAnchorContext | null {
-  const context = getHotelAnchorContext(detail, states, hotelLegId)
+  const context = getHotelAnchorContext(detail, states, hotelLegId, primarySupplierId)
   if (!context) return null
 
   return {
     trainLabel: context.trainLeg.label ?? context.trainLeg.supplierName,
+    anchorKind: context.trainLeg.supplierKind,
     departureDate: context.departureDate,
     durationDays: context.durationDays,
-    stayDates: resolveAllAnchoredHotelDates(detail, states).get(hotelLegId) ?? null,
+    stayDates: resolveAllAnchoredHotelDates(detail, states, primarySupplierId).get(hotelLegId) ?? null,
   }
 }
 
-/** Recomputes the service date of every pre/post-anchored hotel leg from its train leg, chaining
- * consecutive same-side stays on one train end to end. Runs after any state change so editing the
- * train's departure date or any stay's nights re-dates the whole group. */
+/** Recomputes the service date of every pre/post-anchored hotel leg from the leg it hangs off,
+ * chaining consecutive same-side stays on one anchor end to end. Runs after any state change so
+ * editing the anchor's departure date or any stay's nights re-dates the whole group. */
 export function applyAnchoredHotelDates(
   detail: PackageDetail,
   states: ApplyLegState[],
+  primarySupplierId?: string | null,
 ): ApplyLegState[] {
-  const resolved = resolveAllAnchoredHotelDates(detail, states)
+  const resolved = resolveAllAnchoredHotelDates(detail, states, primarySupplierId)
 
   return states.map((state) => {
     if (state.kind !== "suite" || state.supplierKind !== "hotel_property") return state
@@ -695,10 +706,10 @@ export function applyAnchoredTransferDates(
       if (!targetDate) return request
 
       // Rewrites only the date half of pickupAt — the consultant's typed time survives every
-      // re-derive, and an unset time lands at local midnight, same as picking the date alone in
-      // <DateTimePicker> does today.
-      const parts = splitLocalDateTime(request.pickupAt)
-      const nextPickupAt = joinLocalDateTime(targetDate, parts.time)
+      // re-derive, and an unset time lands at midnight in APP_TIME_ZONE, same as picking the date
+      // alone in <DateTimePicker> does today.
+      const parts = splitAppZoneDateTime(request.pickupAt)
+      const nextPickupAt = joinAppZoneDateTime(targetDate, parts.time)
       if (!nextPickupAt || nextPickupAt === request.pickupAt) return request
 
       changed = true
@@ -709,23 +720,42 @@ export function applyAnchoredTransferDates(
   })
 }
 
-/** Recomputes the departure date of every pre/post-anchored airline leg from the leg above it —
- * same "nearest dated leg above, skipping transport/transfer" resolver a transfer's pickup date
- * uses, since a flight has no single canonical service (like a hotel's train) to hang off. Only
- * `serviceDate` (departure) is derived; `arrivalDate`/times stay independent manual fields. */
+/** View-model form of {@link resolveTripEdgeDates} — what the airline leg editor takes as a prop.
+ * Reuses TransferAnchorContext's shape: `startDate`/`endDate` are the trip's own edges rather than
+ * a single neighbouring leg's span, but the editor only ever reads them as "what Pre/Post resolve
+ * to", so no new prop type is needed. */
+export function toAirlineAnchorContext(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  primarySupplierId?: string | null,
+): TransferAnchorContext | null {
+  const edge = resolveTripEdgeDates(detail, states, primarySupplierId)
+  if (!edge.primaryLeg) return null
+
+  return {
+    legLabel: edge.primaryLeg.label ?? edge.primaryLeg.supplierName,
+    legKind: edge.primaryLeg.supplierKind,
+    startDate: edge.preDate,
+    endDate: edge.postDate,
+    endDateAssumed: edge.preDate != null && edge.preDate === edge.postDate,
+  }
+}
+
+/** Recomputes the departure date of every pre/post-anchored airline leg from the trip's own edges
+ * — see {@link resolveTripEdgeDates}. Only `serviceDate` (departure) is derived; `arrivalDate`/
+ * times stay independent manual fields. */
 export function applyAnchoredAirlineDates(
   detail: PackageDetail,
   states: ApplyLegState[],
+  primarySupplierId?: string | null,
 ): ApplyLegState[] {
+  const edge = resolveTripEdgeDates(detail, states, primarySupplierId)
+
   return states.map((state) => {
     if (state.kind !== "suite" || state.supplierKind !== "airline") return state
     if (state.dateAnchor !== "pre" && state.dateAnchor !== "post") return state
 
-    const context = getTransferAnchorContext(detail, states, state.legId)
-    const anchorDates: AnchorLegDates | null = context
-      ? { start: context.span?.start ?? null, end: context.span?.end ?? null }
-      : null
-    const targetDate = resolveTransferPickupDate(state.dateAnchor, anchorDates)
+    const targetDate = state.dateAnchor === "pre" ? edge.preDate : edge.postDate
     if (!targetDate || targetDate === state.serviceDate) return state
 
     return { ...state, serviceDate: targetDate }
@@ -733,16 +763,61 @@ export function applyAnchoredAirlineDates(
 }
 
 /** Runs the hotel, airline, and transfer date-anchor recomputes in the order that makes chaining
- * work: a hotel anchors only to a train, so it settles first; an airline can anchor to that
- * now-settled hotel (or a train, or another leg above it), so it settles second; a transfer can
- * anchor to any of those, including a now-settled airline leg, so it settles last. Each recompute
- * reads only already-settled kinds ahead of it in this chain, so one pass each (rather than
- * repeating to a fixed point) is enough. */
-export function applyAnchoredDates(detail: PackageDetail, states: ApplyLegState[]): ApplyLegState[] {
+ * work: a hotel anchors only to the primary product, so it settles first; an airline anchors to
+ * the trip's own edges -- which a settled pre/post-stay hotel can push out past the primary
+ * product's own date -- so it settles second; a transfer can anchor to any of those, including a
+ * now-settled airline leg, so it settles last. Each recompute reads only already-settled kinds
+ * ahead of it in this chain, so one pass each (rather than repeating to a fixed point) is enough. */
+export function applyAnchoredDates(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  primarySupplierId?: string | null,
+): ApplyLegState[] {
   return applyAnchoredTransferDates(
     detail,
-    applyAnchoredAirlineDates(detail, applyAnchoredHotelDates(detail, states)),
+    applyAnchoredAirlineDates(
+      detail,
+      applyAnchoredHotelDates(detail, states, primarySupplierId),
+      primarySupplierId,
+    ),
   )
+}
+
+/**
+ * Carries the configure step's in-memory edits across a step-1 service-list rebuild (F-P2-8).
+ *
+ * Adding, removing or reordering a service re-runs `POST /api/jobs/[id]/build-booking`, which
+ * reconciles `booking_services` by deletion + insert and returns a fresh `packageDetail`. The
+ * dialog then re-derives `legStates` from `savedState` -- a snapshot read once when the dialog
+ * opened -- because nothing typed in the configure step reaches the server until its own Next
+ * (`validateAndPreview`'s PATCH). Without this merge, that re-derive silently discards every
+ * suite split, occupancy, note and price override made since the dialog opened.
+ *
+ * `next` is what `hydrateFromSaved`/`buildDefaultLegStates` just produced from the fresh
+ * `packageDetail` -- the source of truth for which legs exist post-rebuild, their `updatedAt`
+ * stamps, and defaults for any leg genuinely new this session. `previous` is the pre-rebuild
+ * in-memory state. A leg surviving the rebuild keeps its prior edits; a leg whose `kind`/
+ * `supplierKind` changed (a reused id resolving to a different supplier -- shouldn't happen, but
+ * the state shapes genuinely differ) falls back to the fresh state rather than risk a type
+ * mismatch. The caller must still re-run {@link applyAnchoredDates} afterwards: removing a leg can
+ * change what a surviving leg anchors to.
+ */
+export function mergeLegStatesAfterRebuild(
+  previous: ApplyLegState[],
+  next: ApplyLegState[],
+): ApplyLegState[] {
+  const previousByLegId = new Map(previous.map((state) => [state.legId, state]))
+
+  return next.map((freshState) => {
+    const priorState = previousByLegId.get(freshState.legId)
+    if (!priorState) return freshState
+    if (priorState.kind !== freshState.kind || priorState.supplierKind !== freshState.supplierKind) {
+      return freshState
+    }
+    // updatedAt always comes from the fresh read -- refreshLegVersions() re-stamps it right after
+    // the rebuild anyway, and the prior value would 409 against the write the rebuild just made.
+    return { ...priorState, updatedAt: freshState.updatedAt } as ApplyLegState
+  })
 }
 
 /** Hydrates dialog state from the booking's saved selections and transport requests. Legs with
@@ -828,7 +903,7 @@ export function hydrateFromSaved(
         ? row.route_reversed ?? false
         : false,
       serviceDate: row.service_date ?? fallback.serviceDate,
-      nights: isHotel ? row.nights ?? fallback.nights : null,
+      nights: legStatesOwnSpan(fallback.supplierKind) ? row.nights ?? fallback.nights : null,
       // Postgres hands a `time` back as "10:00:00"; the editor and the API both speak HH:MM.
       departureTime: isAirline ? toHoursMinutes(row.departure_time) : null,
       arrivalDate: isAirline ? row.arrival_date ?? null : null,
@@ -863,7 +938,7 @@ export function hydrateFromSaved(
     } satisfies SuiteLegState
   })
 
-  return applyAnchoredDates(detail, hydrated)
+  return applyAnchoredDates(detail, hydrated, options.primarySupplierId)
 }
 
 /** PATCH /api/jobs/[id]/package-selections body. */
@@ -947,7 +1022,11 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
         routeId: state.routeId,
         routeReversed: state.reversed,
         serviceDate: state.serviceDate,
-        nights: state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : null,
+        nights: legStatesOwnSpan(state.supplierKind)
+          ? state.supplierKind === "hotel_property"
+            ? Math.max(1, state.nights ?? 1)
+            : state.nights ?? null
+          : null,
         // Sent only for airlines: the server refuses these fields on any other kind, so a hotel
         // leg posting an explicit null would 400 rather than quietly clear nothing.
         ...(state.supplierKind === "airline"
@@ -1180,8 +1259,11 @@ export function toApplySelections(
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
           rateTypeId: state.supplierKind === "tour_operator" ? unit.rateTypeId ?? undefined : undefined,
         })),
-      nights:
-        state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
+      nights: legStatesOwnSpan(state.supplierKind)
+        ? state.supplierKind === "hotel_property"
+          ? Math.max(1, state.nights ?? 1)
+          : state.nights ?? undefined
+        : undefined,
       rateTypeId: state.rateTypeId ?? undefined,
       priceCurrency: state.priceCurrency,
       commissionOverride,
@@ -1208,9 +1290,10 @@ function describeMissingRateCard(
   rateTypeNameById?: Map<string, string>,
 ): string | null {
   const suiteTypeName = leg.suiteTypes.find((s) => s.id === suiteTypeId)?.name ?? "this type"
-  // A tour operator's itinerary saves with a blank name (see app/api/suppliers/[slug]/route.ts),
-  // so `||` here (not `??`) is deliberate -- an empty string must fall back same as a missing route.
-  const routeName = leg.routes.find((r) => r.id === routeId)?.name || "this route"
+  // A tour operator's itinerary has no name of its own -- it saves as its own id (see
+  // app/api/suppliers/[slug]/route.ts), which displayRouteName drops so the error reads "this
+  // route" rather than naming a uuid at the user.
+  const routeName = displayRouteName(leg.routes.find((r) => r.id === routeId)?.name) ?? "this route"
   const where = `"${suiteTypeName}" on "${routeName}"`
 
   if (findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate).length === 0) {
@@ -1255,10 +1338,12 @@ export function validateConfigureState(
     // with zero itineraries is still priceable and must not be blocked here (matches the pricing
     // engine's own rule in lib/quotes/build-from-package.ts).
     if (state.kind !== "transport" && !isTypePricedSupplier(state.supplierKind)) {
+      // Each kind's own word for the same table: routes, meal plans, itineraries.
+      const routeVocabulary = SUPPLIER_VOCABULARY[leg.supplierKind]
       if (leg.routes.length === 0) {
-        errors.push(`${legLabel}: no ${leg.supplierKind === "hotel_property" ? "meal plans" : "routes"} configured for this supplier — add one in Suppliers first`)
+        errors.push(`${legLabel}: no ${routeVocabulary.routePlural.toLowerCase()} configured for this supplier — add one in Suppliers first`)
       } else if (leg.routes.length > 1 && !state.routeId) {
-        errors.push(`${legLabel}: select a ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"}`)
+        errors.push(`${legLabel}: select a ${routeVocabulary.route.toLowerCase()}`)
       }
     }
 

@@ -61,6 +61,9 @@ export interface WorksheetPdfData {
   /** Departure of the earliest dated train leg on the booking, printed in the sheet's top-right
    * cell. Null - and so blank on the sheet - when the booking has no train. */
   trainDepartureDate: string | null
+  /** What the core leg's own start date is called on this booking's product — "Departure Date" on a
+   *  journey, "Check-in Date" on a stay. Omitted falls back to "Departure Date". */
+  departureDateLabel?: string | null
   /** Full name of the salesperson assigned to the job; null when nobody is assigned. */
   consultant: string | null
   arriveDate: string | null
@@ -428,6 +431,7 @@ export function WorksheetDocument({
   invoiceNumber,
   serviceName,
   trainDepartureDate,
+  departureDateLabel,
   consultant,
   arriveDate,
   departDate,
@@ -483,7 +487,7 @@ export function WorksheetDocument({
               <Text style={[styles.bodyText, styles.bold]}>{orBlank(serviceName)}</Text>
             </View>
             <View style={[styles.cellLast, { width: 110 }]}>
-              <Text style={styles.headText}>Departure Date</Text>
+              <Text style={styles.headText}>{departureDateLabel ?? "Departure Date"}</Text>
               <Text style={[styles.bodyText, styles.bold]}>{trainDateOrBlank(trainDepartureDate)}</Text>
             </View>
           </View>

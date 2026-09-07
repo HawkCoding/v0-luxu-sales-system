@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
+import { displayRouteName } from "@/lib/routes/route-name"
 import {
   getAttachmentAllowedMimeTypes,
   getAttachmentMaxSizeMb,
@@ -41,7 +42,9 @@ function supplierNameOf(row: LibraryRow): string | null {
 
 function routeNameOf(row: LibraryRow): string | null {
   if (!row.route) return null
-  return Array.isArray(row.route) ? row.route[0]?.name ?? null : row.route.name
+  // An itinerary stores its own id as its name (see lib/routes/route-name.ts), and this name is
+  // rendered next to the file in the attachment picker.
+  return displayRouteName(Array.isArray(row.route) ? row.route[0]?.name : row.route.name)
 }
 
 export async function GET(req: Request) {

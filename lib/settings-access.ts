@@ -15,9 +15,11 @@ import {
   parseInvoiceStatusOptions,
   type InvoiceStatusOption,
 } from "@/lib/invoices/invoice-status-options"
+import { primaryProductOf } from "@/lib/enquiry/primary-product"
 import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
+import type { SupplierKind } from "@/lib/types"
 
 export interface SettingsAccessContext {
   supabase: Awaited<ReturnType<typeof createSessionClient>>
@@ -140,6 +142,32 @@ export async function getAttachmentMaxSizeMb(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ATTACHMENT_MAX_SIZE_MB
 }
 
+/**
+ * Per-supplier-kind overrides for a set of document copy keys (supplier_kind_document_text),
+ * trimmed and with blanks dropped. Shared by the document-text and brand-block resolvers below so
+ * a Kruger Shalati quote can read "Luxury Stays" while a Rovos quote keeps "Luxury Rail Journeys",
+ * without every supplier kind having to answer in code. An absent or unknown kind resolves to no
+ * overrides, so callers fall through to the existing global app_settings value unchanged.
+ */
+async function loadSupplierKindDocumentText(
+  supabase: SupabaseClient<Database>,
+  kind: string,
+  keys: readonly string[],
+): Promise<Record<string, string>> {
+  const { data } = await supabase
+    .from("supplier_kind_document_text")
+    .select("key, value")
+    .eq("kind", kind)
+    .in("key", keys)
+
+  const overrides: Record<string, string> = {}
+  for (const row of data ?? []) {
+    const trimmed = row.value?.trim()
+    if (trimmed) overrides[row.key] = trimmed
+  }
+  return overrides
+}
+
 // Email wording lives in the templates table (Templates page); these keys
 // only cover text rendered into the generated PDFs themselves.
 export const DOCUMENT_TEXT_SETTING_KEYS = [
@@ -182,8 +210,14 @@ const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   itinerary_doc_intro_text: "",
 }
 
+/**
+ * `kind` overlays a per-supplier-kind override (supplier_kind_document_text) on top of the global
+ * value, falling back to it wherever no override row exists — omit `kind`, or pass one nothing has
+ * overridden yet, and this returns exactly what it always has.
+ */
 export async function getDocumentTextSettings(
   supabase: SupabaseClient<Database>,
+  kind?: SupplierKind | null,
 ): Promise<DocumentTextSettings> {
   const { data } = await supabase
     .from("app_settings")
@@ -192,8 +226,15 @@ export async function getDocumentTextSettings(
 
   const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
 
-  return Object.fromEntries(
+  const base = Object.fromEntries(
     DOCUMENT_TEXT_SETTING_KEYS.map((key) => [key, map[key]?.trim() || DOCUMENT_TEXT_DEFAULTS[key]]),
+  ) as DocumentTextSettings
+
+  if (!kind) return base
+
+  const overrides = await loadSupplierKindDocumentText(supabase, kind, DOCUMENT_TEXT_SETTING_KEYS)
+  return Object.fromEntries(
+    DOCUMENT_TEXT_SETTING_KEYS.map((key) => [key, overrides[key] ?? base[key]]),
   ) as DocumentTextSettings
 }
 
@@ -286,8 +327,14 @@ export interface DocumentBrand {
   logoUrl: string | null
 }
 
+// Of the six brand-block keys, only the heading/subheading copy is worth a per-product variant --
+// the logo and the top/bottom/hidden placements are document chrome, not product-specific wording.
+const OVERRIDABLE_BRAND_KEYS = ["brand_block_heading", "brand_block_subheading"] as const
+
+/** `kind` overlays a per-supplier-kind heading/subheading (see getDocumentTextSettings). */
 export async function getDocumentBrandSettings(
   supabase: SupabaseClient<Database>,
+  kind?: SupplierKind | null,
 ): Promise<DocumentBrandSettings> {
   const { data } = await supabase
     .from("app_settings")
@@ -296,12 +343,21 @@ export async function getDocumentBrandSettings(
 
   const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
 
-  return Object.fromEntries(
+  const base = Object.fromEntries(
     DOCUMENT_BRAND_SETTING_KEYS.map((key) => [
       key,
       map[key]?.trim() || DOCUMENT_BRAND_DEFAULTS[key],
     ]),
   ) as DocumentBrandSettings
+
+  if (!kind) return base
+
+  const overrides = await loadSupplierKindDocumentText(supabase, kind, OVERRIDABLE_BRAND_KEYS)
+  return {
+    ...base,
+    brand_block_heading: overrides.brand_block_heading ?? base.brand_block_heading,
+    brand_block_subheading: overrides.brand_block_subheading ?? base.brand_block_subheading,
+  }
 }
 
 /**
@@ -359,6 +415,34 @@ export function resolveDocumentBrand(settings: DocumentBrandSettings): {
       quote: toBrandBlockPosition(settings.brand_block_position_quote, "bottom"),
       invoice: toBrandBlockPosition(settings.brand_block_position_invoice, "top"),
     },
+  }
+}
+
+/** What a document calls the trip and its start-date field, for one supplier kind. */
+export interface ProductCopy {
+  bookingNoun: string
+  startDateLabel: string
+}
+
+const PRODUCT_COPY_KEYS = ["product_booking_noun", "product_start_date_label"] as const
+
+/**
+ * `bookingNoun`/`startDateLabel` for client documents, falling back to the code vocabulary
+ * (lib/types.ts SUPPLIER_VOCABULARY) rather than to a global setting -- these two have no
+ * rail-specific default to inherit, only a per-kind one. A null kind (nothing resolved yet)
+ * answers exactly like primaryProductOf's own null fallback: a rail journey.
+ */
+export async function resolveProductCopy(
+  supabase: SupabaseClient<Database>,
+  kind: SupplierKind | null,
+): Promise<ProductCopy> {
+  const vocabulary = primaryProductOf(kind)
+  if (!kind) return { bookingNoun: vocabulary.bookingNoun, startDateLabel: vocabulary.startDateLabel }
+
+  const overrides = await loadSupplierKindDocumentText(supabase, kind, PRODUCT_COPY_KEYS)
+  return {
+    bookingNoun: overrides.product_booking_noun ?? vocabulary.bookingNoun,
+    startDateLabel: overrides.product_start_date_label ?? vocabulary.startDateLabel,
   }
 }
 

@@ -57,6 +57,25 @@ export function resolveDirectedArrivalName(
   return reversed ? originName : destinationName
 }
 
+/** A bare UUID and nothing else — the shape a tour operator's itinerary name is stored in. */
+const ID_SHAPED_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * The route's name as it may be shown to a person, or null when it has none.
+ *
+ * A tour operator's itinerary has no name of its own: it can't be blank (routes carries
+ * UNIQUE(name, supplier_id)), so it saves as the route's own id instead — see
+ * app/api/suppliers/[slug]/route.ts and migration 20260828090000_retire_tour_itinerary_names.sql.
+ * Every caller that composes a route name into text a person reads must route it through here, or
+ * that id renders verbatim ("Robben Island - 1f514c73-… — Robben Island Museum Tour"). Blank and
+ * id-shaped names both mean the same thing: no name to show.
+ */
+export function displayRouteName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim()
+  if (!trimmed || ID_SHAPED_NAME.test(trimmed)) return null
+  return trimmed
+}
+
 /** The pair of airport codes an airline route travels between, in booked-direction order. */
 export interface RouteEndpointCodes {
   departure: string

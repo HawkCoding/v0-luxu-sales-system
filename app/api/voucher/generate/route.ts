@@ -22,6 +22,7 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
@@ -63,6 +64,7 @@ type BookingVoucherRecord = {
   no_of_adults: number
   no_of_children: number
   child_ages: number[] | null
+  primary_supplier_id: string | null
   customer: CustomerRecord | CustomerRecord[] | null
   route: { name: string | null; supplier: SupplierRecord | SupplierRecord[] | null } | null
 }
@@ -150,13 +152,11 @@ export async function POST(req: Request) {
     { data: travellers, error: travellersError },
     { data: reservationDetails },
     { data: templateRaw },
-    documentText,
-    documentBrandSettings,
   ] = await Promise.all([
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, customer_invoice_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, child_ages, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(id, name, description))",
+        "id, booking_number, customer_invoice_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, child_ages, primary_supplier_id, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(id, name, description))",
       )
       .eq("id", parsed.data.jobId)
       .single(),
@@ -180,11 +180,7 @@ export async function POST(req: Request) {
       .select("id, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
       .limit(1)
       .maybeSingle(),
-    getDocumentTextSettings(supabase),
-    getDocumentBrandSettings(supabase),
   ])
-  const { brand } = resolveDocumentBrand(documentBrandSettings)
-  const brandLogo = await loadBrandLogo(brand.logoUrl)
 
   if (bookingError || !bookingRaw) return jsonError("Booking not found", 404)
   if (suitesError) return safeSupabaseError("voucher:suites", suitesError)
@@ -206,6 +202,16 @@ export async function POST(req: Request) {
   }
   const scopedLegIds = scopeLegIdsFilter(quoteScope)
   const quoteConfig = await loadQuoteConfigForBooking(supabase, booking.id)
+
+  // Same per-kind document copy the quote PDF resolves (settings-access.ts), so a Kruger Shalati
+  // voucher can carry stay wording while a rail voucher keeps its own.
+  const primarySupplierKind = await loadSupplierKind(supabase, quoteConfig.primarySupplierId)
+  const [documentText, documentBrandSettings] = await Promise.all([
+    getDocumentTextSettings(supabase, primarySupplierKind),
+    getDocumentBrandSettings(supabase, primarySupplierKind),
+  ])
+  const { brand } = resolveDocumentBrand(documentBrandSettings)
+  const brandLogo = await loadBrandLogo(brand.logoUrl)
 
   let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
   try {
@@ -528,6 +534,7 @@ export async function POST(req: Request) {
     blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
     templateSupplierId: shared.primarySupplierId,
+    templateSupplierKind: shared.primarySupplierKind,
   })
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)
 

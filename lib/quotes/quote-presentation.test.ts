@@ -82,6 +82,29 @@ describe("deriveJourneyFromBlocks", () => {
     ).toBeNull()
     expect(deriveJourneyFromBlocks([])).toBeNull()
   })
+
+  // F-P3-4: a "TOUR 18 – 22 November" line built from every leg (a pre-arrival transfer, an add-on
+  // hotel) quoted a window that was never the tour's own.
+  it("narrows to the primary product's own legs when a service type is given", () => {
+    expect(deriveJourneyFromBlocks([trainBlock, hotelBlock], "train")).toEqual({
+      start: "2026-07-20",
+      end: "2026-07-22",
+    })
+  })
+
+  it("falls back to every block when none match the primary product's service type", () => {
+    expect(deriveJourneyFromBlocks([hotelBlock], "tour")).toEqual({
+      start: "2026-07-18",
+      end: "2026-07-20",
+    })
+  })
+
+  it("keeps the un-narrowed range when no service type is passed at all", () => {
+    expect(deriveJourneyFromBlocks([trainBlock, hotelBlock])).toEqual({
+      start: "2026-07-18",
+      end: "2026-07-22",
+    })
+  })
 })
 
 describe("deriveTrainDepartureFromBlocks", () => {
@@ -100,6 +123,17 @@ describe("deriveTrainDepartureFromBlocks", () => {
       ]),
     ).toBeNull()
     expect(deriveTrainDepartureFromBlocks([])).toBeNull()
+  })
+
+  // A hotel-primary booking (Kruger Shalati) must date {{departureDate}} off its own check-in, not
+  // fall through to "train" and find nothing -- see resolve-shared-tokens.ts, which passes the
+  // primary product's own service type here.
+  it("dates off the primary product's own service type, not always a train", () => {
+    expect(deriveTrainDepartureFromBlocks([trainBlock, hotelBlock], "hotel")).toBe("2026-07-18")
+  })
+
+  it("returns null when the primary product's service type matches no block", () => {
+    expect(deriveTrainDepartureFromBlocks([hotelBlock], "tour")).toBeNull()
   })
 })
 
@@ -277,6 +311,14 @@ describe("buildQuoteItineraryLines", () => {
       text: "Arrival at Cape Town station at 18h00",
       bullets: [{ kind: "item", text: "Train arrival times cannot be guaranteed" }],
     })
+  })
+
+  it("does not double the article when the supplier name already carries one (F-P3-8)", () => {
+    const [boarding] = buildQuoteItineraryLines([
+      { ...trainBlock, contactDetails: { ...trainBlock.contactDetails, name: "The Blue Train" } },
+    ])
+    expect(boarding.text).toContain("on The Blue Train")
+    expect(boarding.text).not.toContain("the The Blue Train")
   })
 
   it("prefers itinerarySuiteType over the full suiteType when the supplier states it separately", () => {

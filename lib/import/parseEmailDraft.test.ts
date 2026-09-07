@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   countRequiredComplete,
+  isStayDraft,
   parseEmailDraft,
   validateDraft,
   type ParsedDraft,
@@ -1007,5 +1008,193 @@ describe("standalone hotel (stay) enquiries", () => {
 
     expect(draft.trip.supplier).toBe("Rovos Rail")
     expect(draft.trip.supplierKind).toBe("train_operator")
+  })
+})
+
+/**
+ * Characterization tests for the generalisation of the primary-product feature to every
+ * SupplierKind. `isStayDraft` (hotel vs everything else) becomes a per-kind lookup, and the
+ * required-field count stops being a single constant. Both shapes are pinned here first.
+ */
+describe("intake shape — behaviour frozen before the kind generalisation", () => {
+  const SUPPLIERS = [
+    { name: "Rovos Rail", kind: "train_operator" as const },
+    { name: "Kruger Shalati - Train on the Bridge", kind: "hotel_property" as const },
+  ]
+
+  const emptyStay = () =>
+    parseEmailDraft("", {
+      subject: "New submission from Kruger Shalati Enquiry",
+      standaloneSuppliers: SUPPLIERS,
+    })
+
+  it("a stay reports its own nine required fields, in order", () => {
+    const result = validateDraft(emptyStay())
+
+    expect(result.isValid).toBe(false)
+    expect(result.missingRequired).toEqual([
+      "First name (Customer)",
+      "Surname (Customer)",
+      "Country",
+      "Email or Phone (Customer)",
+      "Check-in date",
+      "Check-out date",
+      "Adults",
+      "Rooms",
+    ])
+  })
+
+  // The supplier resolved off the subject line, so "Supplier" is absent from the list above while
+  // the journey shape (empty draft, no subject) still reports it. Both totals are nine.
+  it("both shapes count nine required fields", () => {
+    expect(countRequiredComplete(emptyStay()).total).toBe(9)
+    expect(countRequiredComplete(parseEmailDraft("")).total).toBe(9)
+  })
+
+  it("a stay counts check-in and check-out where a journey counts route and departure", () => {
+    const stay = parseEmailDraft("Check-in Date\n \t 05/05/2026\nCheck-out Date\n \t 07/05/2026", {
+      subject: "New submission from Kruger Shalati Enquiry",
+      standaloneSuppliers: SUPPLIERS,
+    })
+    // supplier + check-in + check-out
+    expect(countRequiredComplete(stay).completed).toBe(3)
+
+    const journey = parseEmailDraft("Direction\n \t Pretoria to Cape Town\nDeparture Date\n \t 15/05/2026", {
+      subject: "New submission from Rovos Rail",
+      standaloneSuppliers: SUPPLIERS,
+    })
+    // supplier + route + departure
+    expect(countRequiredComplete(journey).completed).toBe(3)
+  })
+
+  /**
+   * An unresolved supplier is the default state of every draft before the consultant picks one, and
+   * it validates as a journey. Any per-kind lookup replacing isStayDraft has to keep that fallback,
+   * or a half-parsed draft would start demanding a check-out date.
+   */
+  it("an unresolved supplier kind validates as a journey", () => {
+    const draft = parseEmailDraft("")
+
+    expect(draft.trip.supplierKind).toBe("")
+    expect(isStayDraft(draft)).toBe(false)
+    expect(validateDraft(draft).missingRequired).toContain("Route / Direction")
+    expect(validateDraft(draft).missingRequired).toContain("Departure date")
+  })
+
+  // Nights are the whole price of a stay, so the parser derives them rather than asking. Frozen
+  // because the same arithmetic has to serve a "days" kind unchanged.
+  it("derives the night count from the date range", () => {
+    const draft = parseEmailDraft("Check-in Date\n \t 05/05/2026\nCheck-out Date\n \t 12/05/2026", {
+      subject: "New submission from Kruger Shalati Enquiry",
+      standaloneSuppliers: SUPPLIERS,
+    })
+
+    expect(draft.trip.nights).toBe(7)
+  })
+})
+
+/**
+ * The kinds the generalisation unlocks. A supplier ticked "can be the main product" under any kind
+ * now heads an enquiry on its own terms -- these are the shapes that were previously impossible.
+ */
+describe("intake shape — kinds beyond train and hotel", () => {
+  const SUPPLIERS = [
+    { name: "Rovos Rail", kind: "train_operator" as const },
+    { name: "Cape Winelands Cruises", kind: "tour_operator" as const },
+    { name: "Ulysses Tours & Transfers", kind: "transfers" as const },
+    { name: "Karoo Car Hire", kind: "vehicle_rental" as const },
+    { name: "Airlink", kind: "airline" as const },
+  ]
+
+  const parseFor = (supplier: string, body = "") =>
+    parseEmailDraft(body, { subject: `New submission from ${supplier} Enquiry`, standaloneSuppliers: SUPPLIERS })
+
+  it("asks a cruise for a start and an end date, and never for a direction", () => {
+    const result = validateDraft(parseFor("Cape Winelands Cruises"))
+
+    expect(result.missingRequired).toEqual([
+      "First name (Customer)",
+      "Surname (Customer)",
+      "Country",
+      "Email or Phone (Customer)",
+      "Tour date",
+      "Tour end date",
+      "Adults",
+      "Tours",
+    ])
+    expect(result.missingRequired).not.toContain("Route / Direction")
+  })
+
+  it("reads a cruise's own date labels and counts the span in days", () => {
+    const draft = parseFor(
+      "Cape Winelands Cruises",
+      "Tour Date\n \t 05/05/2026\nTour End Date\n \t 12/05/2026\nNo of Adults\n \t 2",
+    )
+
+    expect(draft.trip.supplierKind).toBe("tour_operator")
+    expect(draft.trip.departureDate).toBe("2026-05-05")
+    expect(draft.trip.checkOutDate).toBe("2026-05-12")
+    // The draft field is called nights because bookings.duration_nights is; the customer's word for
+    // the same span is days.
+    expect(draft.trip.nights).toBe(7)
+  })
+
+  // A cruise itinerary has no origin and destination, so prose about travelling from A to B must
+  // not be turned into a direction -- the same rule that already protected a stay.
+  it("never invents a direction for a cruise from prose", () => {
+    const draft = parseFor(
+      "Cape Winelands Cruises",
+      "Additional Comments\n \t We would like to travel from Cape Town to Stellenbosch.",
+    )
+
+    expect(draft.trip.route).toBe("")
+  })
+
+  it("asks a transfer for neither an end date nor a unit count", () => {
+    const result = validateDraft(parseFor("Ulysses Tours & Transfers"))
+
+    expect(result.missingRequired).toContain("Transfer date")
+    expect(result.missingRequired).not.toContain("Transfer end date")
+    expect(result.missingRequired).not.toContain("Suites")
+    expect(result.missingRequired).not.toContain("Vehicles")
+    // A transfer carries a booking_transport_request, not units, so it states one fewer field than
+    // a journey does.
+    expect(countRequiredComplete(parseFor("Ulysses Tours & Transfers")).total).toBe(8)
+  })
+
+  it("asks a vehicle rental for a pickup and a return", () => {
+    const draft = parseFor("Karoo Car Hire", "Pickup Date\n \t 05/05/2026\nReturn Date\n \t 08/05/2026")
+
+    expect(draft.trip.departureDate).toBe("2026-05-05")
+    expect(draft.trip.checkOutDate).toBe("2026-05-08")
+    expect(draft.trip.nights).toBe(3)
+    // The route reason string stays generic across kinds -- it is persisted verbatim in
+    // bookings.email_import_missing_fields, so only the on-screen field label varies by kind.
+    expect(validateDraft(draft).missingRequired).toContain("Route / Direction")
+    expect(validateDraft(draft).missingRequired).not.toContain("Vehicles")
+  })
+
+  it("asks an airline for a route, a departure and cabins", () => {
+    const result = validateDraft(parseFor("Airlink"))
+
+    expect(result.missingRequired).toContain("Route / Direction")
+    expect(result.missingRequired).toContain("Departure date")
+    expect(result.missingRequired).toContain("Cabins")
+  })
+
+  it("keeps every kind's required count consistent with what it asks for", () => {
+    const totals = Object.fromEntries(
+      SUPPLIERS.map((supplier) => [supplier.kind, countRequiredComplete(parseFor(supplier.name)).total]),
+    )
+
+    // Five fields every enquiry states, plus whichever of route / start / end / adults / unit count
+    // that kind actually asks for. A train and a cruise both land on nine by different routes.
+    expect(totals).toEqual({
+      train_operator: 9,
+      tour_operator: 9,
+      transfers: 8,
+      vehicle_rental: 9,
+      airline: 10,
+    })
   })
 })

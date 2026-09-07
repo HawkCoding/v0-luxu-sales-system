@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { PackageLeg, SupplierKind } from "@/lib/types"
 import {
   addDays,
+  findAnchorLeg,
   findAnchorTrainLeg,
   resolveChainedHotelStayDates,
   resolveHotelStayDates,
@@ -205,5 +206,49 @@ describe("findAnchorTrainLeg", () => {
 
   it("returns null when the package has no train leg", () => {
     expect(findAnchorTrainLeg([hotelBefore], hotelBefore.id, "pre")).toBeNull()
+  })
+})
+
+/**
+ * Anchoring beyond trains. A booking headed by a cruise or a flight has no train leg at all, so a
+ * pre- or post-night hung off it never resolved a date -- the hotel leg stayed blank and readiness
+ * blocked the quote with "Hotel has no date".
+ */
+describe("findAnchorLeg — non-train primary products", () => {
+  const cruise = leg("cruise", "tour_operator", 0)
+  const postStay = leg("hotel-post", "hotel_property", 1)
+  const legs = [cruise, postStay]
+
+  it("anchors a post-stay to the booking's own primary leg", () => {
+    expect(findAnchorLeg(legs, postStay.id, "post", cruise.supplierId)?.id).toBe("cruise")
+  })
+
+  it("resolves nothing for the same package without a primary supplier", () => {
+    expect(findAnchorLeg(legs, postStay.id, "post")).toBeNull()
+  })
+
+  it("still anchors to a train when the primary supplier files no other leg", () => {
+    const outbound = leg("train-out", "train_operator", 0)
+    const stay = leg("hotel-post", "hotel_property", 1)
+
+    expect(findAnchorLeg([outbound, stay], stay.id, "post", "supplier-not-in-this-package")?.id).toBe(
+      "train-out",
+    )
+  })
+
+  // The stay cannot anchor to itself: on a standalone stay the primary leg IS the hotel, and its
+  // dates are stated outright rather than derived.
+  it("never anchors a stay to itself", () => {
+    const stay = leg("hotel-only", "hotel_property", 0)
+
+    expect(findAnchorLeg([stay], stay.id, "post", stay.supplierId)).toBeNull()
+  })
+
+  it("keeps the train-only behaviour byte-for-byte when no primary supplier is passed", () => {
+    for (const anchor of ["pre", "post"] as const) {
+      expect(findAnchorLeg(legs, postStay.id, anchor)).toEqual(
+        findAnchorTrainLeg(legs, postStay.id, anchor),
+      )
+    }
   })
 })

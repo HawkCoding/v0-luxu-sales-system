@@ -13,7 +13,7 @@ import { NumericInput } from "@/components/ui/numeric-input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WallClockTimeInput } from "@/components/ui/wall-clock-time-input"
 import { formatDisplayDate } from "@/lib/date-format"
-import { joinLocalDateTime } from "@/lib/date-time-field"
+import { joinAppZoneDateTime } from "@/lib/date-time-field"
 import { useJobMovementTimes, type JobMovementTimeRow } from "@/lib/use-data"
 
 interface JobTransferTimesTabProps {
@@ -118,12 +118,12 @@ export function JobTransferTimesTab({ bookingId }: JobTransferTimesTabProps) {
             kind: "transport_request" as const,
             id: row.id,
             pickupAt: draft.departureDate
-              ? joinLocalDateTime(draft.departureDate, draft.departureTime)
+              ? joinAppZoneDateTime(draft.departureDate, draft.departureTime)
               : null,
             ...(row.hasArrival
               ? {
                   returnAt: draft.arrivalDate
-                    ? joinLocalDateTime(draft.arrivalDate, draft.arrivalTime)
+                    ? joinAppZoneDateTime(draft.arrivalDate, draft.arrivalTime)
                     : null,
                 }
               : {}),

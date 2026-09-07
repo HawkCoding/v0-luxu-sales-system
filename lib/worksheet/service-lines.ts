@@ -1,4 +1,5 @@
 import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
+import { formatDateISO } from "@/lib/date-format"
 import { firstRecord } from "@/lib/utils"
 import {
   mapSupplierKindToServiceType,
@@ -106,7 +107,12 @@ function resolveToDate(
 ): string | null {
   if (serviceType === "airline") return arrivalDate
   if (!serviceDate) return null
-  if (serviceType === "hotel") return nights && nights > 0 ? addDays(serviceDate, nights) : null
+  // A stay and a multi-day tour both state their own length on the leg rather than deriving it
+  // from a route duration — see legStatesOwnSpan/lib/voucher/build-service-blocks.ts. Without this
+  // a tour's own end date never printed here, only its (never-configured) route duration (F-P3-4).
+  if (serviceType === "hotel" || serviceType === "tour") {
+    return nights && nights > 0 ? addDays(serviceDate, nights) : null
+  }
   // An unconfigured route duration leaves this blank rather than silently claiming a same-day
   // arrival on a multi-day train.
   if (durationDays && durationDays > 0) return trainArrivalDate(serviceDate, durationDays)
@@ -195,7 +201,10 @@ export function buildWorksheetServiceLines({
   })
 
   const transportLine = (request: WorksheetTransportRow): WorksheetServiceLine => ({
-    fromDate: request.pickup_at ? request.pickup_at.slice(0, 10) : null,
+    // formatDateISO reads the instant in APP_TIME_ZONE — a raw slice(0,10) on the stored UTC
+    // string prints the previous day for anything before 02h00 SAST (F-P3-5), disagreeing with
+    // the voucher, which already reads this the zone-aware way.
+    fromDate: formatDateISO(request.pickup_at),
     toDate: null,
     description: firstRecord(request.suppliers)?.name ?? "",
     reservationReference: request.supplier_reference,

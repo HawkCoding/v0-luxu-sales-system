@@ -20,10 +20,11 @@ import {
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
-import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
+import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { PricingSnapshot } from "@/lib/types"
 import { getDocumentTextSettings } from "@/lib/settings-access"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { loadQuoteConfig, loadQuoteDisplayTokens, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
 
 // Composes the quote email from the editable quote_email template (Templates
@@ -102,6 +103,10 @@ export async function POST(req: Request, { params }: RouteParams) {
   })
   const quoteDisplayTokens = await loadQuoteDisplayTokens(supabase, quoteConfig)
 
+  // Which leg dates the trip and what the summary line calls it -- same lookup
+  // resolveSharedEmailTokens makes, so the preview can never disagree with the sent email.
+  const primarySupplierKind = await loadSupplierKind(supabase, quoteConfig.primarySupplierId)
+
   // The quoted journey's route (from line-item snapshots) beats the booking's
   // route_id, which may still point at the enquiry-time route.
   const { routeName: quotedRouteName } = resolvePrimaryRoute(snapshotCarriers, {
@@ -164,10 +169,17 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   const documentText = await getDocumentTextSettings(supabase)
 
-  // Journey + header departure date come from the priced legs, not the booking's
-  // enquiry-time scalar dates which drift out of sync once the package changes.
-  const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
-  const trainDeparture = deriveTrainDepartureFromBlocks(itineraryBlocks)
+  // Journey + header departure date come from the priced legs, not the booking's enquiry-time
+  // scalar dates which drift out of sync once the package changes -- narrowed to the primary
+  // product's own legs where it has any (F-P3-4), so a tour's dates aren't stretched by an add-on.
+  const journey = deriveJourneyFromBlocks(
+    itineraryBlocks,
+    mapSupplierKindToServiceType(primarySupplierKind),
+  ) ?? { start: null, end: null }
+  const trainDeparture = deriveTrainDepartureFromBlocks(
+    itineraryBlocks,
+    mapSupplierKindToServiceType(primarySupplierKind),
+  )
 
   const quoteSummaryTable = buildQuoteSummaryBlock({
     quoteNumber,
@@ -182,6 +194,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     agentCommission: Number(quote.agent_commission ?? 0),
     currency: quote.currency,
     itineraryBlocks,
+    primarySupplierKind,
     packageIncludesHeading: documentText.quote_doc_includes_heading,
     packageExcludesHeading: documentText.quote_doc_excludes_heading,
     packageExcludesDefault: documentText.quote_doc_excludes_default,
@@ -248,6 +261,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     blocks: { ...shared.blocks, quoteSummaryTable, trainOnlyNote: quoteDisplayTokens.trainOnlyNote ?? "" },
     senderProfileId: booking?.assigned_salesperson_id ?? user.id,
     templateSupplierId: quoteConfig.primarySupplierId,
+    templateSupplierKind: primarySupplierKind,
   })
 
   if (!composed) {

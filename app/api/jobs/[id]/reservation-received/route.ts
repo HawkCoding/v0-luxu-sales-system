@@ -44,6 +44,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
     templateSupplierId: shared.primarySupplierId,
+    templateSupplierKind: shared.primarySupplierKind,
   })
 
   if (!composed) return jsonError("Reservation-received template could not be resolved", 500)

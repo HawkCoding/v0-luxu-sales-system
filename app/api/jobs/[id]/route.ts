@@ -353,6 +353,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       sourcePhrase: suite.source_phrase,
     })),
     noOfSuites: booking.no_of_suites,
+    primarySupplierId: booking.primary_supplier_id ?? null,
     hotelOptionResolved: resolvedHotelOption ?? (readFormField(booking.extracted_json, "hotelOption") || null),
     hotelPhase: booking.hotel_phase !== "none" ? booking.hotel_phase : null,
     extendStay: booking.extend_stay ?? false,

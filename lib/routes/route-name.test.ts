@@ -2,11 +2,38 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildRouteName,
+  displayRouteName,
   parseRouteEndpointCodes,
   resolveDirectedArrivalName,
   resolveDirectedEndpointCodes,
   resolveDirectedRouteName,
 } from "@/lib/routes/route-name"
+
+describe("displayRouteName", () => {
+  it("drops a tour operator's itinerary name, which is stored as the route's own id", () => {
+    expect(displayRouteName("1f514c73-b66b-4fc0-808c-118b9c790e77")).toBeNull()
+  })
+
+  it("drops an id whichever case it was written in, and ignores surrounding whitespace", () => {
+    expect(displayRouteName("  1F514C73-B66B-4FC0-808C-118B9C790E77  ")).toBeNull()
+  })
+
+  it("treats blank and missing names the same as an id-shaped one", () => {
+    expect(displayRouteName("   ")).toBeNull()
+    expect(displayRouteName(null)).toBeNull()
+    expect(displayRouteName(undefined)).toBeNull()
+  })
+
+  it("keeps a real route name, trimmed", () => {
+    expect(displayRouteName("  Pretoria → Cape Town  ")).toBe("Pretoria → Cape Town")
+  })
+
+  it("keeps a name that merely contains an id", () => {
+    expect(displayRouteName("Tour 1f514c73-b66b-4fc0-808c-118b9c790e77")).toBe(
+      "Tour 1f514c73-b66b-4fc0-808c-118b9c790e77",
+    )
+  })
+})
 
 describe("buildRouteName", () => {
   it("uses a single arrow for one-way routes", () => {

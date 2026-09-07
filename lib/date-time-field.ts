@@ -1,53 +1,39 @@
-// Pure helpers backing <DateTimePicker>. Values are stored as full UTC ISO
-// timestamps but edited as a local date (yyyy-mm-dd) plus a 24-hour time (HH:MM),
-// so the split/join always round-trips through the browser's local timezone.
+// Pure helpers backing <DateTimePicker>. Values are stored as UTC instants but edited as a South
+// African calendar date (yyyy-mm-dd) plus a 24-hour time (HH:MM) -- the split/join always
+// round-trips through APP_TIME_ZONE, not whichever timezone the machine formatting it happens to
+// be set to (F-P3-5: reading/writing the browser's local clock here shifted a pickup onto the
+// wrong South African day for anyone not on a South African machine).
+
+import { formatDateISO, formatTimeHHMM, zonedDateTimeToIso } from "@/lib/date-format"
 
 function pad(value: number): string {
   return value.toString().padStart(2, "0")
 }
 
-export interface LocalDateTimeParts {
-  /** Local calendar date as yyyy-mm-dd, or "" when unset/unparseable. */
+export interface AppZoneDateTimeParts {
+  /** Calendar date in APP_TIME_ZONE as yyyy-mm-dd, or "" when unset/unparseable. */
   date: string
-  /** Local 24-hour time as HH:MM, or "" when unset/unparseable. */
+  /** 24-hour time in APP_TIME_ZONE as HH:MM, or "" when unset/unparseable. */
   time: string
 }
 
-export function splitLocalDateTime(value: string | null | undefined): LocalDateTimeParts {
-  if (!value) return { date: "", time: "" }
-
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return { date: "", time: "" }
-
+export function splitAppZoneDateTime(value: string | null | undefined): AppZoneDateTimeParts {
   return {
-    date: `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`,
-    time: `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`,
+    date: formatDateISO(value) ?? "",
+    time: formatTimeHHMM(value) ?? "",
   }
 }
 
 /**
- * Recombines the parts into a UTC ISO timestamp. A missing date yields null —
- * a time on its own has no instant to anchor to. A missing time means midnight.
+ * Recombines the parts into the UTC instant at which the wall clock in APP_TIME_ZONE reads that
+ * date and time. A missing date yields null — a time on its own has no instant to anchor to. A
+ * missing time means midnight.
  */
-export function joinLocalDateTime(date: string, time: string): string | null {
+export function joinAppZoneDateTime(date: string, time: string): string | null {
   if (!date) return null
 
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
-  if (!dateMatch) return null
-
   const normalizedTime = normalizeTimeInput(time) || "00:00"
-  const [hours, minutes] = normalizedTime.split(":")
-
-  const [, year, month, day] = dateMatch
-  const combined = new Date(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hours),
-    Number(minutes),
-  )
-
-  return Number.isNaN(combined.getTime()) ? null : combined.toISOString()
+  return zonedDateTimeToIso(date, normalizedTime)
 }
 
 /**

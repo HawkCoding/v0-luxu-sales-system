@@ -19,9 +19,9 @@ import { toast } from "sonner"
 import { Edit3, Eye, BookOpen, ChevronDown, ChevronRight, Mail, Plus, Trash2 } from "lucide-react"
 import {
   getTokenSpecs,
+  isUniversalToken,
   TEMPLATE_TOKENS,
-  tokenGroup,
-  type TemplateTokenGroup,
+  tokenKinds,
   type TemplateTokenSpec,
 } from "@/lib/templates/registry"
 import {
@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/select"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
-import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
+import { SUPPLIER_KIND_LABELS, VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 import { BrandBlockSettingsEditor } from "@/components/brand-block-settings-editor"
 import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
@@ -84,7 +84,12 @@ const ALL_BLOCK_TOKENS: string[] = (() => {
 
 // Union of all system-template tokens for the reference dialog — the token
 // registry (lib/templates/registry.ts) is the source of truth.
-const EMAIL_PLACEHOLDERS: { token: string; description: string; group: TemplateTokenGroup }[] = (() => {
+const EMAIL_PLACEHOLDERS: {
+  token: string
+  description: string
+  universal: boolean
+  kinds: SupplierKind[]
+}[] = (() => {
   const seen = new Map<string, TemplateTokenSpec>()
   for (const specs of Object.values(TEMPLATE_TOKENS)) {
     for (const spec of specs) {
@@ -94,15 +99,24 @@ const EMAIL_PLACEHOLDERS: { token: string; description: string; group: TemplateT
   return [...seen.values()].map((spec) => ({
     token: `{{${spec.name}}}`,
     description: spec.description,
-    group: tokenGroup(spec),
+    universal: isUniversalToken(spec),
+    kinds: tokenKinds(spec),
   }))
 })()
 
-const GROUP_HEADINGS: Record<TemplateTokenGroup, string> = {
-  always: "Always available",
-  rail: "Journeys — trains",
-  stay: "Stays — properties",
-}
+/** Reference-dialog sections: the shared vocabulary, then one per product type. A token that suits
+ *  several products is listed under each of them. */
+const PLACEHOLDER_SECTIONS: { key: string; heading: string; universal: boolean }[] = [
+  { key: "always", heading: "Always available", universal: true },
+  ...(Object.keys(SUPPLIER_KIND_LABELS) as SupplierKind[]).map((kind) => ({
+    key: kind,
+    heading: SUPPLIER_KIND_LABELS[kind],
+    universal: false,
+  })),
+]
+
+/** The three sections a variant's chip list is split into. */
+type ChipSection = "always" | "product" | "other"
 
 interface TokenChipsProps {
   specs: TemplateTokenSpec[]
@@ -119,18 +133,30 @@ interface TokenChipsProps {
  * date token in front of them.
  */
 function TokenChips({ specs, supplierKind, onInsert }: TokenChipsProps) {
-  const relevant: TemplateTokenGroup = supplierKind === "hotel_property" ? "stay" : "rail"
-  const [expanded, setExpanded] = useState<TemplateTokenGroup | null>(relevant)
+  const [expanded, setExpanded] = useState<ChipSection | null>("product")
 
-  const byGroup = new Map<TemplateTokenGroup, TemplateTokenSpec[]>()
-  for (const spec of specs) {
-    const group = tokenGroup(spec)
-    byGroup.set(group, [...(byGroup.get(group) ?? []), spec])
+  // The untagged parent template serves every product, so it has no one kind to open on. It falls
+  // back to the rail vocabulary, which is what it did before per-kind variants existed.
+  const relevantKind: SupplierKind = supplierKind ?? "train_operator"
+  const headings: Record<ChipSection, string> = {
+    always: "Always available",
+    product: SUPPLIER_KIND_LABELS[relevantKind],
+    other: "Other products",
   }
-  // Always first, then whichever of rail/stay this template is actually for.
-  const order: TemplateTokenGroup[] = ["always", relevant, relevant === "stay" ? "rail" : "stay"]
 
-  const chips = (group: TemplateTokenGroup) => (
+  const byGroup = new Map<ChipSection, TemplateTokenSpec[]>()
+  for (const spec of specs) {
+    const section: ChipSection = isUniversalToken(spec)
+      ? "always"
+      : tokenKinds(spec).includes(relevantKind)
+        ? "product"
+        : "other"
+    byGroup.set(section, [...(byGroup.get(section) ?? []), spec])
+  }
+  // Always first, then the words for what this template is actually selling.
+  const order: ChipSection[] = ["always", "product", "other"]
+
+  const chips = (group: ChipSection) => (
     <div className="flex flex-wrap gap-1.5">
       {(byGroup.get(group) ?? []).map((spec) => (
         <button
@@ -165,12 +191,12 @@ function TokenChips({ specs, supplierKind, onInsert }: TokenChipsProps) {
                 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring rounded"
               >
                 {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                {GROUP_HEADINGS[group]}
+                {headings[group]}
                 <span className="font-normal normal-case">({groupSpecs.length})</span>
               </button>
             ) : (
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-                {GROUP_HEADINGS[group]}
+                {headings[group]}
               </p>
             )}
             {isOpen && chips(group)}
@@ -206,7 +232,9 @@ export default function TemplatesPage() {
   const [selectedBooking, setSelectedBooking] = useState<{ id: string; label: string } | null>(null)
   const [orderedTemplates, setOrderedTemplates] = useState<Template[]>([])
   const [addingVariantFor, setAddingVariantFor] = useState<Template | null>(null)
+  const [variantScope, setVariantScope] = useState<"supplier" | "kind">("supplier")
   const [variantSupplierId, setVariantSupplierId] = useState("")
+  const [variantSupplierKind, setVariantSupplierKind] = useState<SupplierKind | "">("")
   const [creatingVariant, setCreatingVariant] = useState(false)
 
   useEffect(() => {
@@ -416,14 +444,15 @@ export default function TemplatesPage() {
     }
   }
 
-  // Per-supplier variants (e.g. a Rovos-specific quote_email body, or a Kruger Shalati one) reuse
-  // their parent's system key, distinguished only by supplierId. SortableList drags parents only --
-  // a variant's position is fixed under its parent card, so it is filtered out of the draggable
-  // list and grouped by key.
-  const parentTemplates = orderedTemplates.filter((t) => !t.supplierId)
+  // Per-supplier variants (e.g. a Rovos-specific quote_email body, or a Kruger Shalati one) and
+  // per-kind variants (e.g. the hotel_property quote_email every stay uses unless its own supplier
+  // overrides it) reuse their parent's system key, distinguished by supplierId or supplierKind.
+  // SortableList drags parents only -- a variant's position is fixed under its parent card, so it
+  // is filtered out of the draggable list and grouped by key.
+  const parentTemplates = orderedTemplates.filter((t) => !t.supplierId && !t.supplierKind)
   const variantsByKey = new Map<string, Template[]>()
   for (const t of orderedTemplates) {
-    if (!t.supplierId) continue
+    if (!t.supplierId && !t.supplierKind) continue
     const list = variantsByKey.get(t.key) ?? []
     list.push(t)
     variantsByKey.set(t.key, list)
@@ -443,12 +472,18 @@ export default function TemplatesPage() {
 
   const openAddVariant = (parent: Template) => {
     setAddingVariantFor(parent)
+    setVariantScope("supplier")
     setVariantSupplierId("")
+    setVariantSupplierKind("")
   }
 
   const handleCreateVariant = async () => {
-    if (!addingVariantFor || !variantSupplierId) return
-    const supplierName = supplierNameById.get(variantSupplierId) ?? "Supplier"
+    if (!addingVariantFor) return
+    const scopeName =
+      variantScope === "supplier"
+        ? supplierNameById.get(variantSupplierId) ?? "Supplier"
+        : SUPPLIER_KIND_LABELS[variantSupplierKind as SupplierKind]
+    if (variantScope === "supplier" ? !variantSupplierId : !variantSupplierKind) return
     setCreatingVariant(true)
     try {
       const res = await fetch("/api/templates", {
@@ -456,8 +491,10 @@ export default function TemplatesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           key: addingVariantFor.key,
-          supplierId: variantSupplierId,
-          name: `${addingVariantFor.name} — ${supplierName}`,
+          ...(variantScope === "supplier"
+            ? { supplierId: variantSupplierId }
+            : { supplierKind: variantSupplierKind }),
+          name: `${addingVariantFor.name} — ${scopeName}`,
           subject: addingVariantFor.subject,
           bodyHtml: addingVariantFor.bodyHtml,
         }),
@@ -467,10 +504,11 @@ export default function TemplatesPage() {
         toast.error(body.error ?? "Failed to create variant")
         return
       }
-      toast.success(`${supplierName} variant created — starts as a copy, edit it to diverge`)
+      toast.success(`${scopeName} variant created — starts as a copy, edit it to diverge`)
       mutate()
       setAddingVariantFor(null)
       setVariantSupplierId("")
+      setVariantSupplierKind("")
     } catch {
       toast.error("Failed to create variant")
     } finally {
@@ -575,7 +613,11 @@ export default function TemplatesPage() {
                         <div key={variant.id} className="flex items-center justify-between gap-2 rounded-md bg-secondary/40 px-2.5 py-1.5">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="text-xs font-medium truncate">
-                              {supplierNameById.get(variant.supplierId ?? "") ?? "Unknown supplier"}
+                              {variant.supplierId
+                                ? supplierNameById.get(variant.supplierId) ?? "Unknown supplier"
+                                : variant.supplierKind
+                                  ? `${SUPPLIER_KIND_LABELS[variant.supplierKind]} (every supplier)`
+                                  : "Unknown"}
                             </span>
                             <Badge variant="secondary" className="text-[10px]">v{variant.version}</Badge>
                           </div>
@@ -593,7 +635,13 @@ export default function TemplatesPage() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => setPendingDelete(variant)}
-                                aria-label={`Delete ${supplierNameById.get(variant.supplierId ?? "") ?? "supplier"} variant`}
+                                aria-label={`Delete ${
+                                  variant.supplierId
+                                    ? supplierNameById.get(variant.supplierId) ?? "supplier"
+                                    : variant.supplierKind
+                                      ? SUPPLIER_KIND_LABELS[variant.supplierKind]
+                                      : "supplier"
+                                } variant`}
                               >
                                 <Trash2 className="w-3.5 h-3.5 text-destructive" />
                               </Button>
@@ -765,7 +813,9 @@ export default function TemplatesPage() {
                 key={editing.id}
                 specs={getTokenSpecs(editing.key)}
                 supplierKind={
-                  (editing.supplierId ? supplierKindById.get(editing.supplierId) : null) ?? null
+                  editing.supplierKind ??
+                  (editing.supplierId ? supplierKindById.get(editing.supplierId) : null) ??
+                  null
                 }
                 onInsert={(name) => setEditBody((b) => `${b}{{${name}}}`)}
               />
@@ -785,38 +835,88 @@ export default function TemplatesPage() {
             <DialogTitle>Add variant</DialogTitle>
             <DialogDescription>
               {addingVariantFor
-                ? `Starts as a copy of "${addingVariantFor.name}" — edit it afterwards to diverge in wording. A supplier with no variant of its own keeps using the shared template.`
+                ? `Starts as a copy of "${addingVariantFor.name}" — edit it afterwards to diverge in wording. A supplier (or product type) with no variant of its own keeps using the shared template.`
                 : null}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Supplier</label>
-              <Select value={variantSupplierId} onValueChange={setVariantSupplierId}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select a supplier" />
-                </SelectTrigger>
-                <SelectContent>
-                  {primarySuppliers.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      No standalone suppliers found. Tick &ldquo;Sold as a standalone booking&rdquo; on a
-                      supplier first.
-                    </div>
-                  ) : (
-                    primarySuppliers.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+            <div className="flex gap-1.5">
+              <Button
+                type="button"
+                variant={variantScope === "supplier" ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs flex-1"
+                onClick={() => setVariantScope("supplier")}
+              >
+                For a supplier
+              </Button>
+              <Button
+                type="button"
+                variant={variantScope === "kind" ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs flex-1"
+                onClick={() => setVariantScope("kind")}
+              >
+                For a product type
+              </Button>
             </div>
+            {variantScope === "supplier" ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Supplier</label>
+                <Select value={variantSupplierId} onValueChange={setVariantSupplierId}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select a supplier" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {primarySuppliers.length === 0 ? (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                        No main products found. Tick &ldquo;Can be the main product&rdquo; on a supplier
+                        first.
+                      </div>
+                    ) : (
+                      primarySuppliers.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Product type</label>
+                <Select
+                  value={variantSupplierKind}
+                  onValueChange={(value) => setVariantSupplierKind(value as SupplierKind)}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select a product type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.entries(SUPPLIER_KIND_LABELS) as [SupplierKind, string][]).map(([kind, label]) => (
+                      <SelectItem key={kind} value={kind}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Every supplier of this type uses this wording, unless it has its own supplier variant.
+                </p>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setAddingVariantFor(null)}>
                 Cancel
               </Button>
-              <Button size="sm" onClick={handleCreateVariant} disabled={creatingVariant || !variantSupplierId}>
+              <Button
+                size="sm"
+                onClick={handleCreateVariant}
+                disabled={
+                  creatingVariant || (variantScope === "supplier" ? !variantSupplierId : !variantSupplierKind)
+                }
+              >
                 {creatingVariant ? "Adding..." : "Add variant"}
               </Button>
             </div>
@@ -975,14 +1075,16 @@ export default function TemplatesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
-            {(["always", "rail", "stay"] as TemplateTokenGroup[]).map((group) => {
-              const entries = EMAIL_PLACEHOLDERS.filter((p) => p.group === group)
+            {PLACEHOLDER_SECTIONS.map((section) => {
+              const entries = EMAIL_PLACEHOLDERS.filter((p) =>
+                section.universal ? p.universal : !p.universal && p.kinds.includes(section.key as SupplierKind),
+              )
               if (entries.length === 0) return null
               return (
-                <div key={group}>
+                <div key={section.key}>
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                    {GROUP_HEADINGS[group]}{" "}
-                    {group === "always" && (
+                    {section.heading}{" "}
+                    {section.universal && (
                       <span className="font-normal normal-case">— double curly braces</span>
                     )}
                   </h3>

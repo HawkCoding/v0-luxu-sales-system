@@ -56,6 +56,7 @@ const KIND_OPTIONS: SupplierKind[] = [
   "tour_operator",
   "train_operator",
   "airline",
+  "cruise_line",
 ]
 
 function todayIso(): string {

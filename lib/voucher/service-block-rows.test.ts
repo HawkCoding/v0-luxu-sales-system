@@ -454,6 +454,21 @@ describe("voucherRowsForBlock", () => {
     expect(labels(rows)).toEqual(["Your Reference", "Itinerary", "Start Date"])
   })
 
+  it("tour block: prints an End Date once the leg's own span gives it an arrival date (F-P3-4)", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "tour",
+        serviceData: {
+          itinerary: "4-Day Kruger Safari",
+          departureDate: "2026-11-20",
+          arrivalDate: "2026-11-23",
+        },
+      }),
+    )
+    expect(labels(rows)).toEqual(["Your Reference", "Itinerary", "Start Date", "End Date"])
+    expect(rows.find((r) => r.label === "End Date")?.value).toBe("23 November 2026")
+  })
+
   it("tour block: names the priced tour type and the itinerary's own copy", () => {
     const rows = voucherRowsForBlock(
       block({

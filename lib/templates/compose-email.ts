@@ -8,6 +8,7 @@ import { resolveEmailSignature } from "@/lib/email/signature"
 import { getDocumentBrandForEmail, getEmailBrandingSettings } from "@/lib/settings-access"
 import { getTemplate, type EmailTemplate } from "@/lib/templates/get-template"
 import { renderTemplate } from "@/lib/templates/render"
+import type { SupplierKind } from "@/lib/types"
 
 export interface ComposedEmail {
   subject: string
@@ -39,8 +40,11 @@ export interface ComposeOptions extends ComposeTokens {
   /** Division brand to render in the signature; omitted resolves to the first enabled brand. */
   signatureBrandId?: string | null
   /** Train (or other primary) supplier to pick a template variant for — see getTemplate. Omitted
-   * or unmatched falls back to the shared (key, null) template. */
+   * or unmatched falls back to templateSupplierKind, then the shared (key, null, null) template. */
   templateSupplierId?: string | null
+  /** The primary supplier's kind (e.g. "hotel_property"), for the per-kind template layer between
+   * a specific supplier's own variant and the shared default — see getTemplate. */
+  templateSupplierKind?: SupplierKind | null
 }
 
 /** Compose from an already-fetched template (e.g. once per worker run). */
@@ -92,7 +96,7 @@ export async function composeEmail(
   key: string,
   options: ComposeOptions,
 ): Promise<ComposedEmail | null> {
-  const template = await getTemplate(supabase, key, options.templateSupplierId)
+  const template = await getTemplate(supabase, key, options.templateSupplierId, options.templateSupplierKind)
   if (!template) return null
   return composeFromTemplate(template, options)
 }

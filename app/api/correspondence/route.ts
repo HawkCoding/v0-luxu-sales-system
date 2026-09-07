@@ -647,6 +647,7 @@ export async function POST(req: Request) {
       blocks: shared.blocks,
       senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
       templateSupplierId: shared.primarySupplierId,
+      templateSupplierKind: shared.primarySupplierKind,
     })
 
     if (followUp) {

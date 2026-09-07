@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
+import { isCoreBookingLeg, type SupplierKind } from "@/lib/types"
 import {
   dateOnly,
   deriveTripDateRange,
@@ -14,10 +15,15 @@ import {
  *
  * `package_travel_date` is kept in sync with the derived start for legacy read paths.
  *
- * `departure_date` — the enquiry-time scalar that vouchers/itineraries and pricing read
- * directly — is also re-synced to the derived start, but only when a start exists: a package
- * whose legs aren't dated yet keeps its enquiry-time departure rather than being nulled (which
- * would trip the departure_date_missing voucher-readiness gate).
+ * `trip_start_date`/`trip_end_date` span every dated leg — that full window is what the
+ * worksheet's ARRIVE/DEPART columns want (see build-worksheet-view.ts). `departure_date` — the
+ * scalar vouchers, quote documents and pricing read directly — is different: it anchors to the
+ * booking's PRIMARY PRODUCT's own leg, not to whichever ancillary service happens to run first.
+ * A pre-arrival transfer three days before a tour used to drag departure_date back to the
+ * transfer's date (F-P3-4); it no longer does. Falls back to the derived trip start when the
+ * booking has no primary leg among the dated ones (e.g. a transport-only booking, or the primary
+ * leg itself carries no date yet) — never nulled just because the legs aren't dated yet, which
+ * would trip the departure_date_missing voucher-readiness gate.
  */
 export async function recomputeBookingTripDates(
   supabase: SupabaseClient<Database>,
@@ -25,7 +31,7 @@ export async function recomputeBookingTripDates(
 ): Promise<{ error: string | null }> {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id")
+    .select("id, primary_supplier_id")
     .eq("id", bookingId)
     .maybeSingle()
 
@@ -33,6 +39,7 @@ export async function recomputeBookingTripDates(
   if (!booking) return { error: "Booking not found" }
 
   const spans: ServiceDateSpan[] = []
+  let primaryStart: string | null = null
 
   interface DatedRow {
     selected: boolean
@@ -40,13 +47,14 @@ export async function recomputeBookingTripDates(
     nights: number | null
     route_id: string | null
     arrival_date: string | null
+    supplier_id: string | null
     kind: string | null
   }
   const datedRows: DatedRow[] = []
 
   const { data: services, error: servicesError } = await supabase
     .from("booking_services")
-    .select("selected, service_date, nights, route_id, arrival_date, suppliers(kind)")
+    .select("selected, service_date, nights, route_id, arrival_date, supplier_id, suppliers(kind)")
     .eq("booking_id", bookingId)
 
   if (servicesError) return { error: servicesError.message }
@@ -59,6 +67,7 @@ export async function recomputeBookingTripDates(
       nights: row.nights,
       route_id: row.route_id,
       arrival_date: row.arrival_date,
+      supplier_id: row.supplier_id,
       kind: supplier?.kind ?? null,
     })
   }
@@ -91,7 +100,15 @@ export async function recomputeBookingTripDates(
         routeDurationDays: row.route_id ? durationByRouteId.get(row.route_id) ?? null : null,
         arrivalDate: row.arrival_date,
       })
-      if (span) spans.push(span)
+      if (!span) continue
+      spans.push(span)
+
+      if (
+        isCoreBookingLeg({ supplierId: row.supplier_id, supplierKind: kind as SupplierKind }, booking.primary_supplier_id) &&
+        (primaryStart === null || span.start < primaryStart)
+      ) {
+        primaryStart = span.start
+      }
     }
   }
 
@@ -123,9 +140,11 @@ export async function recomputeBookingTripDates(
     trip_end_date: range.end,
     package_travel_date: range.start,
   }
-  // Keep the doc/pricing departure in sync with the legs; never null a known
-  // enquiry-time date just because the legs aren't dated yet.
-  if (range.start) updates.departure_date = range.start
+  // The primary product's own start when one is known, else the earliest dated leg (matches the
+  // old train-only behaviour when there is no primary supplier, or none of its legs are dated).
+  // Never nulled just because the legs aren't dated yet.
+  const departureStart = primaryStart ?? range.start
+  if (departureStart) updates.departure_date = departureStart
 
   const { error: updateError } = await supabase
     .from("bookings")

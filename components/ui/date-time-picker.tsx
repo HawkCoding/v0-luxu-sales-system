@@ -4,7 +4,7 @@ import * as React from 'react'
 
 import { DatePicker } from '@/components/ui/date-picker'
 import { Input } from '@/components/ui/input'
-import { joinLocalDateTime, normalizeTimeInput, splitLocalDateTime } from '@/lib/date-time-field'
+import { joinAppZoneDateTime, normalizeTimeInput, splitAppZoneDateTime } from '@/lib/date-time-field'
 import { cn } from '@/lib/utils'
 
 interface DateTimePickerProps {
@@ -37,7 +37,7 @@ export function DateTimePicker({
   datePlaceholder = 'Select date',
   'aria-label': ariaLabel,
 }: DateTimePickerProps) {
-  const parts = splitLocalDateTime(value)
+  const parts = splitAppZoneDateTime(value)
 
   // The time field is free-text while focused, so hold the raw keystrokes here
   // and only normalize on blur. Re-syncs whenever the committed value changes.
@@ -56,7 +56,7 @@ export function DateTimePicker({
     // Without a date there is no instant to attach the time to; keep the text
     // on screen and wait for the user to pick a day.
     if (!parts.date) return
-    onChange(joinLocalDateTime(parts.date, normalized))
+    onChange(joinAppZoneDateTime(parts.date, normalized))
   }
 
   return (
@@ -73,7 +73,7 @@ export function DateTimePicker({
             onChange(null)
             return
           }
-          onChange(joinLocalDateTime(date, timeDraft))
+          onChange(joinAppZoneDateTime(date, timeDraft))
         }}
       />
       <Input

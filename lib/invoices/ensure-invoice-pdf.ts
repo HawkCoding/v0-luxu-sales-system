@@ -10,6 +10,7 @@ import {
   getDocumentTextSettings,
   resolveDocumentBrand,
 } from "@/lib/settings-access"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { logError } from "@/lib/error-log"
 
 export const INVOICE_BUCKET = "invoices"
@@ -69,10 +70,20 @@ export async function ensureInvoicePdf(
   supabase: SupabaseClient<Database>,
   { invoice, bookingNumber, displayInvoiceNumber, customerName, statusLabel, totals }: EnsureInvoicePdfInput,
 ): Promise<EnsuredInvoicePdf> {
+  // Same per-kind document copy the quote PDF resolves (settings-access.ts), so a Kruger Shalati
+  // invoice can carry stay wording while a rail invoice keeps its own. Also feeds buildInvoiceView
+  // below, which uses it to pick the primary supplier's own blocks for the journey section (F-P3-2).
+  const { data: bookingRow } = await supabase
+    .from("bookings")
+    .select("primary_supplier_id")
+    .eq("id", invoice.booking_id)
+    .maybeSingle()
+  const primarySupplierKind = await loadSupplierKind(supabase, bookingRow?.primary_supplier_id ?? null)
+
   const [method, documentText, documentBrand] = await Promise.all([
     getPaymentMethod(supabase, invoice.payment_method_id ?? null),
-    getDocumentTextSettings(supabase),
-    getDocumentBrandSettings(supabase),
+    getDocumentTextSettings(supabase, primarySupplierKind),
+    getDocumentBrandSettings(supabase, primarySupplierKind),
   ])
   const banking = method.banking
   const { brand, position } = resolveDocumentBrand(documentBrand)
@@ -82,6 +93,7 @@ export async function ensureInvoicePdf(
     bookingId: invoice.booking_id,
     quoteId: invoice.quote_id ?? null,
     journeyHeading: documentText.itinerary_doc_journey_heading,
+    primarySupplierKind,
   })
 
   let pdfBuffer: Buffer

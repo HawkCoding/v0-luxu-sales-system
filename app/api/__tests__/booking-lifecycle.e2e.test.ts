@@ -326,6 +326,37 @@ describe("booking lifecycle (route-level E2E)", () => {
     expect(store.rows("bookings")[0].closed_at).toBeTruthy()
   })
 
+  it("supersedes sibling sent quotes when the booking is accepted", async () => {
+    const mock = seedStore()
+    const { store } = mock
+    mockAuthOk(mock.supabase)
+
+    // Two options were sent to the customer. Only the newest one is the deal; the older one used
+    // to stay 'sent' for the life of the booking, which kept the follow-up worker chasing it.
+    await startQuote(jsonRequest(`http://localhost/api/jobs/${BOOKING_ID}/start-quote`, {}), {
+      params: Promise.resolve({ id: BOOKING_ID }),
+    })
+    await createQuote(
+      jsonRequest("http://localhost/api/quotes", { bookingId: BOOKING_ID, status: "sent", total: 800 }),
+    )
+    const olderQuote = store.rows("quotes").find((q) => q.status === "sent")
+    store.rows("quotes").forEach((q) => {
+      if (q.id === olderQuote?.id) q.created_at = "2026-05-02T00:00:00.000Z"
+    })
+
+    await createQuote(
+      jsonRequest("http://localhost/api/quotes", { bookingId: BOOKING_ID, status: "sent", total: 1000 }),
+    )
+    const newerQuote = store.rows("quotes").find((q) => q.status === "sent" && q.id !== olderQuote?.id)
+    expect(newerQuote).toBeTruthy()
+
+    await movePipeline(mock, "quote_sent")
+    await movePipeline(mock, "accepted")
+
+    expect(store.rows("quotes").find((q) => q.id === newerQuote?.id)).toMatchObject({ status: "accepted" })
+    expect(store.rows("quotes").find((q) => q.id === olderQuote?.id)).toMatchObject({ status: "superseded" })
+  })
+
   it("blocks voucher readiness while an invoice balance remains", () => {
     const result = checkVoucherReadiness({
       stage: "final_paid",

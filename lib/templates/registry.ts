@@ -6,16 +6,7 @@
 // is not supplied at send time.
 
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
-
-/**
- * Which product a token describes. Luxus sells two shapes — a journey (Rovos, Blue Train) and a
- * stay (Kruger Shalati, a stationary carriage sold as a hotel) — and each has vocabulary the other
- * cannot use: a stay has no route or departure, a journey has no check-out or meal plan. Every
- * token still resolves in every template; the group only decides how the editor's chip list is
- * ordered and headed, so an author writing the Kruger Shalati variant reaches for the stay words
- * first instead of hunting through rail ones.
- */
-export type TemplateTokenGroup = "always" | "rail" | "stay"
+import type { SupplierKind } from "@/lib/types"
 
 export interface TemplateTokenSpec {
   /** Token name as written in the template, without braces (e.g. "customerName"). */
@@ -28,14 +19,49 @@ export interface TemplateTokenSpec {
   kind: "scalar" | "block"
   /** Sample value used for template previews. */
   sample: string
-  /** Presentation only — see {@link TemplateTokenGroup}. Defaults to "always" when unset. */
-  group?: TemplateTokenGroup
+  /**
+   * Which products this token is worth reaching for, or omitted for the ones every template uses.
+   *
+   * Presentation only: every token still resolves in every template. The kinds decide how the
+   * editor's chip list is grouped and which group opens first, so an author writing the Kruger
+   * Shalati variant reaches for {{checkInDate}} rather than {{departureDate}} because it was the
+   * only date token in front of them. A token can belong to several kinds -- {{direction}} to
+   * everything that runs from an origin to a destination, {{suiteType}} to everything sold by the
+   * unit.
+   */
+  kinds?: SupplierKind[]
 }
 
-/** A token's group, with the "always" default applied. */
-export function tokenGroup(spec: TemplateTokenSpec): TemplateTokenGroup {
-  return spec.group ?? "always"
+/** Every kind a token is worth reaching for; an unscoped token belongs to all of them. */
+export function tokenKinds(spec: TemplateTokenSpec): SupplierKind[] {
+  return spec.kinds ?? [...ALL_SUPPLIER_KINDS]
 }
+
+/** Whether this token is one every template uses, rather than one scoped to some products. */
+export function isUniversalToken(spec: TemplateTokenSpec): boolean {
+  return spec.kinds === undefined
+}
+
+const ALL_SUPPLIER_KINDS: readonly SupplierKind[] = [
+  "train_operator",
+  "hotel_property",
+  "transfers",
+  "vehicle_rental",
+  "tour_operator",
+  "airline",
+  "cruise_line",
+]
+
+/** Kinds whose product runs from an origin to a destination, so a direction describes it. A cruise
+ *  is not here -- a round-trip voyage has no direction, the same reason a tour is not here. */
+const JOURNEY_KINDS: SupplierKind[] = ["train_operator", "transfers", "vehicle_rental", "airline"]
+/** Kinds that state a start date of their own. */
+const DATED_KINDS: SupplierKind[] = [...JOURNEY_KINDS, "tour_operator", "cruise_line"]
+/** Kinds sold by the unit -- a suite, a tour, a cabin -- and priced per person on it. */
+const UNIT_SOLD_KINDS: SupplierKind[] = ["train_operator", "tour_operator", "airline", "cruise_line"]
+/** The stay vocabulary belongs to a property and nothing else: these tokens are read off a hotel
+ *  leg (see lib/templates/stay-tokens.ts) and have nothing to say about any other product. */
+const STAY_KINDS: SupplierKind[] = ["hotel_property"]
 
 export const SYSTEM_TEMPLATE_KEYS = [
   "quote_email",
@@ -95,12 +121,14 @@ const dueDate: TemplateTokenSpec = {
   kind: "scalar",
   sample: "01 August 2026",
 }
+// Unit tokens. Whatever the product is sold by -- a suite on a train, a tour, a cabin on a flight
+// -- these name it. The property equivalents are roomType / roomDescription below.
 const suiteType: TemplateTokenSpec = {
   name: "suiteType",
-  description: "Selected suite type, without configuration options",
+  description: "Selected suite, tour or cabin type, without configuration options",
   kind: "scalar",
   sample: "Deluxe Suite and Luxury Suite",
-  group: "rail",
+  kinds: UNIT_SOLD_KINDS,
 }
 const suiteConfiguration: TemplateTokenSpec = {
   name: "suiteConfiguration",
@@ -108,14 +136,31 @@ const suiteConfiguration: TemplateTokenSpec = {
     "Configuration options only (bedding, bathroom, layout). Pairs with the wrong suite once a booking has more than one — prefer suiteDescription",
   kind: "scalar",
   sample: "Twin bedded, with a shower",
-  group: "rail",
+  kinds: UNIT_SOLD_KINDS,
 }
 const suiteDescription: TemplateTokenSpec = {
   name: "suiteDescription",
   description: "Every selected suite with its own configuration, as one sentence. Includes the article",
   kind: "scalar",
   sample: "a Twin bedded Deluxe Suite with a shower and a Double bedded Luxury Suite with a full bath",
-  group: "rail",
+  kinds: UNIT_SOLD_KINDS,
+}
+// Universal (no `kinds`): every product is sold by some named unit -- a suite, a room, a tour, a
+// cabin, a vehicle -- so unlike suiteType/roomType above (each scoped to the half of the kinds it
+// actually names), these two read correctly in a shared sentence regardless of which kind the
+// booking turns out to be (F-P3-12: a rail template's "your selected suite" reached a tour client
+// unchanged, since nothing resolved the noun to what they'd actually booked).
+const unitNoun: TemplateTokenSpec = {
+  name: "unitNoun",
+  description: "What one bookable unit is called, lowercase singular (\"suite\", \"room\", \"tour\", \"cabin\", \"vehicle\")",
+  kind: "scalar",
+  sample: "suite",
+}
+const unitNounPlural: TemplateTokenSpec = {
+  name: "unitNounPlural",
+  description: "unitNoun, plural (\"suites\", \"rooms\", \"tours\", \"cabins\", \"vehicles\")",
+  kind: "scalar",
+  sample: "suites",
 }
 // Stay tokens. On a booking carrying both a train and a hotel these name the hotel, where
 // suiteType/suiteDescription above name the train — that is the whole point of the pair.
@@ -124,19 +169,19 @@ const roomType: TemplateTokenSpec = {
   description: "Selected room type at the property, without configuration options",
   kind: "scalar",
   sample: "Bridge House Room",
-  group: "stay",
+  kinds: STAY_KINDS,
 }
 const roomDescription: TemplateTokenSpec = {
   name: "roomDescription",
   description: "Every selected room with its own configuration, as one sentence. Includes the article",
   kind: "scalar",
   sample: "a Twin bedded Bridge House Room with an en-suite bathroom",
-  group: "stay",
+  kinds: STAY_KINDS,
 }
 const supplierName: TemplateTokenSpec = {
   name: "supplierName",
   description:
-    "Primary supplier for the booking, named exactly as it is spelled in Suppliers (quoted train leg, falling back to the route or hotel supplier)",
+    "The booking's main product, named exactly as it is spelled in Suppliers (the booking's primary supplier, falling back to the route or hotel supplier)",
   kind: "scalar",
   sample: "The Blue Train",
 }
@@ -157,10 +202,10 @@ const guestInfo: TemplateTokenSpec = {
 const rateLabel: TemplateTokenSpec = {
   name: "rateLabel",
   description:
-    "Client-facing name of the rate quoted on the train leg (rate_types.client_label, falling back to its internal name)",
+    "Client-facing name of the rate quoted on the booking's main product (rate_types.client_label, falling back to its internal name)",
   kind: "scalar",
   sample: "SADC Resident special",
-  group: "rail",
+  kinds: UNIT_SOLD_KINDS,
 }
 const trainOnlyNote: TemplateTokenSpec = {
   name: "trainOnlyNote",
@@ -169,7 +214,7 @@ const trainOnlyNote: TemplateTokenSpec = {
   kind: "block",
   sample:
     "<p>We have quoted you for the train only. If you would like to request any other services, we offer those as well.</p>",
-  group: "rail",
+  kinds: ["train_operator"],
 }
 
 // Every token below is resolvable in every template type (lib/templates/resolve-shared-tokens.ts
@@ -184,28 +229,28 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   {
     name: "direction",
     description:
-      "Travel route / journey name. Rail-shaped: a stay has no route, so it falls back to the stay's length (\"3 Nights\") — on a property template prefer nights and checkInDate",
+      "Travel route / journey name. Only products that run from an origin to a destination have one: on a stay or a tour it falls back to the length (\"3 Nights\") — prefer nights and checkInDate there",
     kind: "scalar",
     sample: "Pretoria → Cape Town",
-    group: "rail",
+    kinds: JOURNEY_KINDS,
   },
-  { name: "routeName", description: "Route or journey name (alias of direction)", kind: "scalar", sample: "Pretoria → Cape Town", group: "rail" },
+  { name: "routeName", description: "Route or journey name (alias of direction)", kind: "scalar", sample: "Pretoria → Cape Town", kinds: JOURNEY_KINDS },
   { name: "tripStartDate", description: "First day of the trip overall (earliest of any leg — hotel pre-nights count)", kind: "scalar", sample: "12 September 2026" },
   {
     name: "departureDate",
     description:
-      "Train's own departure date (falls back to trip start date if no train leg). On a property booking this is really the check-in date — prefer checkInDate there",
+      "The main product's own start date (falls back to the trip start date). On a property booking this is really the check-in date — prefer checkInDate there",
     kind: "scalar",
     sample: "14 September 2026",
-    group: "rail",
+    kinds: DATED_KINDS,
   },
   {
     name: "departureDateShort",
     description:
-      "Departure date with an abbreviated month, for the subject line (falls back to trip start date if no train leg)",
+      "Start date with an abbreviated month, for the subject line (falls back to the trip start date)",
     kind: "scalar",
     sample: "14 Sep 2026",
-    group: "rail",
+    kinds: DATED_KINDS,
   },
   { name: "tripEndDate", description: "Date the trip ended", kind: "scalar", sample: "18 September 2026" },
   {
@@ -218,6 +263,8 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   suiteType,
   suiteConfiguration,
   suiteDescription,
+  unitNoun,
+  unitNounPlural,
   roomType,
   roomDescription,
   {
@@ -226,33 +273,33 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
       "The property being stayed at, named as it is spelled in Suppliers. Equals supplierName on a standalone stay; on a rail booking with a hotel night it names the hotel, not the train",
     kind: "scalar",
     sample: "Kruger Shalati - Train on the Bridge",
-    group: "stay",
+    kinds: STAY_KINDS,
   },
-  { name: "checkInDate", description: "Date the guest checks in to the property", kind: "scalar", sample: "05 May 2026", group: "stay" },
+  { name: "checkInDate", description: "Date the guest checks in to the property", kind: "scalar", sample: "05 May 2026", kinds: STAY_KINDS },
   {
     name: "checkOutDate",
     description: "Date the guest checks out — derived from the check-in date plus the night count, never stored separately",
     kind: "scalar",
     sample: "08 May 2026",
-    group: "stay",
+    kinds: STAY_KINDS,
   },
-  { name: "nights", description: "Number of nights stayed, as a plain number", kind: "scalar", sample: "3", group: "stay" },
+  { name: "nights", description: "Number of nights stayed, as a plain number", kind: "scalar", sample: "3", kinds: STAY_KINDS },
   {
     name: "mealPlan",
     description: "Meal plan / board basis booked at the property (a hotel supplier's \"route\" is its meal plan)",
     kind: "scalar",
     sample: "All-inclusive",
-    group: "stay",
+    kinds: STAY_KINDS,
   },
-  { name: "checkInTime", description: "Property's check-in time (falls back to the app-wide default in Settings)", kind: "scalar", sample: "14h00", group: "stay" },
-  { name: "checkOutTime", description: "Property's check-out time (falls back to the app-wide default in Settings)", kind: "scalar", sample: "11h00", group: "stay" },
-  { name: "propertyLocation", description: "Where the property is, as captured on the supplier record", kind: "scalar", sample: "Kruger National Park", group: "stay" },
+  { name: "checkInTime", description: "Property's check-in time (falls back to the app-wide default in Settings)", kind: "scalar", sample: "14h00", kinds: STAY_KINDS },
+  { name: "checkOutTime", description: "Property's check-out time (falls back to the app-wide default in Settings)", kind: "scalar", sample: "11h00", kinds: STAY_KINDS },
+  { name: "propertyLocation", description: "Where the property is, as captured on the supplier record", kind: "scalar", sample: "Kruger National Park", kinds: STAY_KINDS },
   {
     name: "propertyAddress",
     description: "The property's street address, for a directions or arrival paragraph",
     kind: "scalar",
     sample: "Selati Station & Bridge, Skukuza Rest Camp, Kruger National Park",
-    group: "stay",
+    kinds: STAY_KINDS,
   },
   { name: "guestCount", description: "Guests as one phrase, pluralised", kind: "scalar", sample: "2 Adults + 1 Child" },
   { name: "adultCount", description: "Number of adults, as a plain number", kind: "scalar", sample: "2" },

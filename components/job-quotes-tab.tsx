@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import type { Quote } from "@/lib/types"
 import {
+  describeQtyBasis,
   hasComplimentaryNight,
   isComplimentaryRoom,
   isComplimentaryTransport,
@@ -333,6 +334,11 @@ export function JobQuotesTab({
                           <div>{li.qty}</div>
                           {li.pricingSnapshot?.unit ? (
                             <div className="text-[10px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
+                          ) : null}
+                          {/* Person-nights read as a headcount beside "per person per night", so
+                              the multiplication is spelled out — see describeQtyBasis. */}
+                          {describeQtyBasis(li) ? (
+                            <div className="text-[10px] text-muted-foreground">{describeQtyBasis(li)}</div>
                           ) : null}
                           {/* qty is the charged nights once a night was gifted — the stay itself
                               is longer, and the client documents still say so. */}

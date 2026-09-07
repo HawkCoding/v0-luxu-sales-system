@@ -366,3 +366,96 @@ describe("buildEnquiryReadiness — stay suppliers", () => {
     expect(result.services[0].issues).toEqual([])
   })
 })
+
+/**
+ * Characterization tests for the generalisation of the primary-product feature to every
+ * SupplierKind. Readiness is still written around a train leg in two places; both are pinned here
+ * as they behave today so the phase that moves them onto the booking's primary supplier shows up as
+ * a deliberate diff rather than an accident.
+ */
+describe("buildEnquiryReadiness — behaviour frozen before the kind generalisation", () => {
+  const HOTEL_SERVICE = {
+    id: "svc-hotel",
+    supplierId: "supplier-shalati",
+    supplierName: "Kruger Shalati - Train on the Bridge",
+    supplierKind: "hotel_property" as const,
+    selected: true,
+    origin: "auto" as const,
+    serviceDate: "2026-10-14",
+    serviceDateDisplay: "14 Oct 2026",
+    nights: 3,
+    routeId: "meal-plan-1",
+    sortOrder: 0,
+    unitCount: 1,
+    unitsMissingSuiteType: 0,
+  }
+
+  /**
+   * The fix. The shortfall gap used to look for a train leg specifically, so a standalone stay
+   * asking for three rooms and built with one was silently short.
+   */
+  it("flags a room shortfall on a hotel-primary booking, in that kind's words", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({
+        services: [{ ...HOTEL_SERVICE, unitCount: 1 }],
+        noOfSuites: 3,
+        primarySupplierId: "supplier-shalati",
+        supplierRaw: "Kruger Shalati - Train on the Bridge",
+      }),
+    )
+
+    expect(result.gaps).toContainEqual(
+      expect.objectContaining({
+        id: "suites_short",
+        severity: "warn",
+        title: "Enquiry asks for 3 rooms; the booking is built with 1.",
+      }),
+    )
+  })
+
+  // A booking predating bookings.primary_supplier_id has no primary leg to measure against, so it
+  // behaves exactly as it did before: the gap keys off a train leg, and a stay raises none.
+  it("leaves a booking with no primary supplier on the old train rule", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({ services: [{ ...HOTEL_SERVICE, unitCount: 1 }], noOfSuites: 3 }),
+    )
+
+    expect(result.gaps.find((g) => g.id === "suites_short")).toBeUndefined()
+  })
+
+  it("still says suites when the primary product is a train", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({
+        services: [{ ...TRAIN_SERVICE, unitCount: 1 }],
+        noOfSuites: 2,
+        primarySupplierId: "supplier-train",
+      }),
+    )
+
+    expect(result.gaps).toContainEqual(
+      expect.objectContaining({
+        id: "suites_short",
+        title: "Enquiry asks for 2 suites; the booking is built with 1.",
+      }),
+    )
+  })
+
+  it("a hotel leg with no meal plan blocks exactly as a train with no route does", () => {
+    const result = buildEnquiryReadiness(
+      baseInput({ services: [{ ...HOTEL_SERVICE, routeId: null }] }),
+    )
+
+    expect(result.services[0].issues).toContain("No meal plan chosen")
+  })
+
+  // Tours and airlines are two of the kinds this work unlocks as a primary product. Neither is in
+  // ROUTE_REQUIRED_KINDS today, so a missing route is not currently an issue on either.
+  it("today: tour and airline legs are not blocked by a missing route", () => {
+    for (const supplierKind of ["tour_operator", "airline"] as const) {
+      const result = buildEnquiryReadiness(
+        baseInput({ services: [{ ...HOTEL_SERVICE, supplierKind, routeId: null }] }),
+      )
+      expect(result.services[0].issues, supplierKind).toEqual([])
+    }
+  })
+})

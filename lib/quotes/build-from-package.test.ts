@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import type { PackageDetail, PackageLeg, SupplierKind, SupplierRateCard } from "@/lib/types"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
-import { isMissingPricing } from "@/lib/quotes/pricing-engine"
+import { describeQtyBasis, isMissingPricing } from "@/lib/quotes/pricing-engine"
 
 const JOB_ID = "00000000-0000-4000-8000-00000000aaaa"
 
@@ -1115,6 +1115,63 @@ describe("buildPackageQuoteLineItems", () => {
     expect(perPerson.lineItems[0].pricingSnapshot?.accommodationPricingBasis).toBe("per_person")
   })
 
+  /**
+   * A per-person hotel line's qty is person-nights, but the basis printed beside it reads "per
+   * person per night" — so three single-occupancy rooms over two nights each showed a bare "2"
+   * that a consultant read as two adults in the room. The number was always right; nothing said
+   * which two factors made it.
+   */
+  it("stamps how a per-person hotel line's qty was arrived at", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      accommodationPricingBasis: "per_person",
+      routes: [route("route-ai", "supplier-leg-hotel", "All-inclusive")],
+      suiteTypes: [suiteType("room-carriage", "supplier-leg-hotel", "Carriage Room")],
+      rateCards: [
+        rateCard({ id: "rc-carriage", routeId: "route-ai", suiteTypeId: "room-carriage", pricePerPerson: 25280 }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        booking: {
+          id: JOB_ID,
+          no_of_adults: 3,
+          no_of_children: 0,
+          no_of_suites: 3,
+          child_ages: [],
+          departure_date: "2026-09-01",
+        },
+      }),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-ai",
+          nights: 2,
+          units: [
+            { suiteTypeId: "room-carriage", adultCount: 1 },
+            { suiteTypeId: "room-carriage", adultCount: 1 },
+            { suiteTypeId: "room-carriage", adultCount: 1 },
+          ],
+        },
+      ],
+    })
+
+    // One line per room, never merged by suite type — each room is independently occupied.
+    expect(lineItems).toHaveLength(3)
+    for (const line of lineItems) {
+      expect(line.qty).toBe(2)
+      expect(line.pricingSnapshot?.occupantCount).toBe(1)
+      expect(line.pricingSnapshot?.chargedNights).toBe(2)
+      expect(describeQtyBasis(line)).toBe("1 guest × 2 nights")
+    }
+  })
+
   it("charges nights - 1 for a per_room stay whose first night the hotel gifted", async () => {
     const hotelLeg = leg({
       id: "leg-hotel",
@@ -1532,6 +1589,43 @@ describe("buildPackageQuoteLineItems", () => {
 
       expect(lineItems.every((li) => li.unitPrice === 850)).toBe(true)
     }
+  })
+
+  it("never renders an itinerary's id, which is what a tour operator stores as its route name", async () => {
+    // Every tour itinerary saves with its own id as its name (see the 20260828090000 migration),
+    // so a builder that joins the route name into the line description prints a raw uuid at the
+    // client: "Robben Island - 1f514c73-… — Robben Island Museum Tour - Adult".
+    const itineraryId = "1f514c73-b66b-4fc0-808c-118b9c790e77"
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      supplierName: "Robben Island",
+      routes: [route(itineraryId, "supplier-leg-tour", itineraryId)],
+      suiteTypes: [suiteType("tour-museum", "supplier-leg-tour", "Robben Island Museum Tour")],
+      rateCards: [rateCard({ id: "rc-museum", routeId: null, suiteTypeId: "tour-museum", pricePerPerson: 400 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour",
+          selected: true,
+          routeId: itineraryId,
+          units: [{ suiteTypeId: "tour-museum", adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(lineItems.length).toBeGreaterThan(0)
+    for (const lineItem of lineItems) {
+      expect(lineItem.description).not.toContain(itineraryId)
+      expect(lineItem.pricingSnapshot?.routeName).toBeNull()
+    }
+    expect(lineItems[0].description).toBe("Robben Island — Robben Island Museum Tour - Adult")
   })
 
   it("prices a tour unit off its typed override instead of the rate card, and says so internally", async () => {

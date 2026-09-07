@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { joinLocalDateTime, normalizeTimeInput, splitLocalDateTime } from "./date-time-field"
+import { joinAppZoneDateTime, normalizeTimeInput, splitAppZoneDateTime } from "./date-time-field"
 
 describe("normalizeTimeInput", () => {
   it("passes through a well-formed 24-hour time", () => {
@@ -40,26 +40,32 @@ describe("normalizeTimeInput", () => {
   })
 })
 
-describe("splitLocalDateTime / joinLocalDateTime", () => {
-  it("round-trips a timestamp through its local parts", () => {
-    const iso = joinLocalDateTime("2026-07-15", "14:30")
+describe("splitAppZoneDateTime / joinAppZoneDateTime", () => {
+  it("round-trips a timestamp through its APP_TIME_ZONE parts", () => {
+    const iso = joinAppZoneDateTime("2026-07-15", "14:30")
     expect(iso).not.toBeNull()
 
-    const parts = splitLocalDateTime(iso)
+    const parts = splitAppZoneDateTime(iso)
     expect(parts).toEqual({ date: "2026-07-15", time: "14:30" })
   })
 
   it("treats a missing time as midnight", () => {
-    const iso = joinLocalDateTime("2026-07-15", "")
-    expect(splitLocalDateTime(iso)).toEqual({ date: "2026-07-15", time: "00:00" })
+    const iso = joinAppZoneDateTime("2026-07-15", "")
+    expect(splitAppZoneDateTime(iso)).toEqual({ date: "2026-07-15", time: "00:00" })
   })
 
   it("returns null when there is no date to anchor the time to", () => {
-    expect(joinLocalDateTime("", "14:30")).toBeNull()
+    expect(joinAppZoneDateTime("", "14:30")).toBeNull()
   })
 
   it("returns empty parts for null and unparseable input", () => {
-    expect(splitLocalDateTime(null)).toEqual({ date: "", time: "" })
-    expect(splitLocalDateTime("not a timestamp")).toEqual({ date: "", time: "" })
+    expect(splitAppZoneDateTime(null)).toEqual({ date: "", time: "" })
+    expect(splitAppZoneDateTime("not a timestamp")).toEqual({ date: "", time: "" })
+  })
+
+  // A fixed expectation, not a round-trip -- this is the one that fails on a UTC (or any
+  // non-SAST) CI/dev box if the write path regresses back to the browser's local clock (F-P3-5).
+  it("resolves a 00:00 SAST pickup to the previous day in UTC regardless of process timezone", () => {
+    expect(joinAppZoneDateTime("2026-11-18", "00:00")).toBe("2026-11-17T22:00:00.000Z")
   })
 })

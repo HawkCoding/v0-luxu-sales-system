@@ -37,6 +37,7 @@ import {
 import { suiteVocabularyFromSupplierDetail, type SuiteAxis } from "@/lib/suites/suite-vocabulary"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { resolveDraftSupplierId } from "@/lib/import/resolve-draft-supplier"
+import { formatPrimaryProductDuration, primaryProductOf } from "@/lib/enquiry/primary-product"
 import {
   SUPPLIER_KIND_LABELS,
   getSupplierVocabulary,
@@ -270,9 +271,10 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
     return matchedId ? primarySuppliers.find((supplier) => supplier.id === matchedId) ?? null : null
   }, [draft, primarySuppliers])
   // A stay is a different shape of enquiry, not a different screen: check-in/check-out instead of
-  // route + departure, rooms instead of suites. The vocabulary supplies every label so a future
-  // standalone kind needs no further branching here.
-  const isStay = selectedSupplier?.kind === "hotel_property"
+  // route + departure, rooms instead of suites. Every label and every field's presence comes from
+  // the supplier's kind, so a newly ticked kind -- a cruise line filed under Tours -- needs no
+  // branching here at all.
+  const product = primaryProductOf(selectedSupplier?.kind ?? null)
   const vocabulary = getSupplierVocabulary(selectedSupplier?.kind ?? "train_operator")
   const unitNounPluralLabel =
     vocabulary.unitNounPlural.charAt(0).toUpperCase() + vocabulary.unitNounPlural.slice(1)
@@ -554,7 +556,8 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   </CardTitle>
                   {!draft.trip.supplierId ||
                   !draft.trip.departureDate ||
-                  (isStay ? !draft.trip.checkOutDate : !draft.trip.route) ? (
+                  (product.endDateLabel !== null && !draft.trip.checkOutDate) ||
+                  (product.routeFieldLabel !== null && !draft.trip.route) ? (
                     <Badge variant="destructive" className="text-xs">Incomplete</Badge>
                   ) : (
                     <CheckCircle2 className="w-4 h-4 text-green-600" />
@@ -574,6 +577,8 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                         const supplier = primarySuppliers.find((item) => item.slug === slug)
                         if (!supplier) return
 
+                        const next = primaryProductOf(supplier.kind)
+
                         setDraft((prev) => {
                           if (!prev) return prev
 
@@ -584,12 +589,12 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                               supplier: supplier.name,
                               supplierId: supplier.id,
                               supplierKind: supplier.kind,
-                              // Switching between a journey and a stay drops the fields the other
-                              // shape owns, so a half-filled route can't ride along on a hotel
-                              // enquiry (or a check-out on a train one) and reach the API.
-                              route: supplier.kind === "hotel_property" ? "" : prev.trip.route,
-                              checkOutDate: supplier.kind === "hotel_property" ? prev.trip.checkOutDate : "",
-                              nights: supplier.kind === "hotel_property" ? prev.trip.nights : null,
+                              // Switching supplier drops the fields the new shape does not own, so
+                              // a half-filled route can't ride along on a hotel enquiry (or a
+                              // check-out on a train one) and reach the API.
+                              route: next.routeFieldLabel !== null ? prev.trip.route : "",
+                              checkOutDate: next.endDateLabel !== null ? prev.trip.checkOutDate : "",
+                              nights: next.endDateLabel !== null ? prev.trip.nights : null,
                             },
                           }
                         })
@@ -612,23 +617,23 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       </SelectContent>
                     </Select>
                   </div>
-                  {!isStay && (
+                  {product.routeFieldLabel !== null && (
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
-                        Route / Direction <span className="text-destructive">*</span>
+                        {product.routeFieldLabel} <span className="text-destructive">*</span>
                         <FieldFlags confidence={draft.confidence['trip.route']} dirty={dirtyFields.has('trip.route')} />
                       </Label>
                       <Input
                         value={draft.trip.route}
                         onChange={(e) => updateDraft('trip.route', e.target.value)}
-                        placeholder="e.g., Pretoria to Cape Town"
+                        placeholder={product.routeFieldPlaceholder ?? ''}
                         className={!draft.trip.route ? 'border-destructive' : ''}
                       />
                     </div>
                   )}
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
-                      {isStay ? 'Check-in Date' : 'Departure Date'} <span className="text-destructive">*</span>
+                      {product.startDateLabel} <span className="text-destructive">*</span>
                       <FieldFlags confidence={draft.confidence['trip.departureDate']} dirty={dirtyFields.has('trip.departureDate')} />
                     </Label>
                     <DatePicker
@@ -646,10 +651,10 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       buttonClassName={!draft.trip.departureDate ? 'border-destructive' : ''}
                     />
                   </div>
-                  {isStay && (
+                  {product.endDateLabel !== null && (
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
-                        Check-out Date <span className="text-destructive">*</span>
+                        {product.endDateLabel} <span className="text-destructive">*</span>
                         <FieldFlags confidence={draft.confidence['trip.checkOutDate']} dirty={dirtyFields.has('trip.checkOutDate')} />
                       </Label>
                       <DatePicker
@@ -668,8 +673,16 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       />
                       <p className="text-xs text-muted-foreground">
                         {draft.trip.nights
-                          ? `${draft.trip.nights} ${draft.trip.nights === 1 ? 'night' : 'nights'} - the stay is priced per room per night.`
-                          : 'Check-out must fall after check-in.'}
+                          ? [
+                              // The stored interval is always nights; a kind that counts in days
+                              // (a tour) counts both end days, so 20 -> 23 Nov is "4 days", not
+                              // "3 days" (F-P3-4).
+                              formatPrimaryProductDuration(draft.trip.nights, product.durationUnit),
+                              product.endDateHintSuffix,
+                            ]
+                              .filter(Boolean)
+                              .join(' ')
+                          : product.endDateInvalidHint}
                       </p>
                     </div>
                   )}
@@ -681,7 +694,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       placeholder="Package option"
                     />
                   </div>
-                  {!isStay && (
+                  {product.capturesHotelOption && (
                     <div className="space-y-1.5">
                       <Label className="text-sm">Hotel Option</Label>
                       <Input

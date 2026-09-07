@@ -77,6 +77,15 @@ const TRANSFER = service({
   suppliers: { name: "Cape Executive Transfers", kind: "transfers" },
 })
 
+const TOUR = service({
+  id: "tour",
+  sort_order: 4,
+  service_date: "2026-11-20",
+  nights: 3,
+  suppliers: { name: "Sabi Wilderness Journeys", kind: "tour_operator" },
+  routes: { duration_days: null, name: "Kruger Itinerary", direction_mode: "one_way", origin: null, destination: null },
+})
+
 describe("buildWorksheetServiceLines", () => {
   it("emits a line for every booked service, not just the transfers", () => {
     const lines = buildWorksheetServiceLines({
@@ -111,6 +120,15 @@ describe("buildWorksheetServiceLines", () => {
     expect(lines[0]).toMatchObject({ fromDate: "2026-10-14", toDate: "2026-10-15" })
     expect(lines[1]).toMatchObject({ fromDate: "2026-10-15", toDate: "2026-10-18" })
     expect(lines[2]).toMatchObject({ fromDate: "2026-10-18", toDate: "2026-10-19" })
+  })
+
+  it("spans a tour off its own nights, not its (never-configured) route duration (F-P3-4)", () => {
+    const [line] = buildWorksheetServiceLines({
+      services: [TOUR],
+      transportRequests: [],
+    })
+
+    expect(line).toMatchObject({ fromDate: "2026-11-20", toDate: "2026-11-23" })
   })
 
   it("leaves a train's end date blank when its route has no duration", () => {
@@ -253,6 +271,23 @@ describe("buildWorksheetServiceLines", () => {
     expect(lines).toHaveLength(2)
     expect(lines.map((l) => l.reservationReference)).toEqual(["480789", "480788"])
     expect(lines.map((l) => l.fromDate)).toEqual(["2026-10-20", "2026-10-21"])
+  })
+
+  it("reads a transfer's pickup date in APP_TIME_ZONE, matching the voucher (F-P3-5)", () => {
+    // A 00:00 SAST pickup is stored as 22:00 the previous day in UTC -- a raw slice(0,10) used to
+    // print 2026-11-17 here while the voucher (already zone-aware) printed 2026-11-18.
+    const [line] = buildWorksheetServiceLines({
+      services: [TRANSFER],
+      transportRequests: [
+        transport({
+          service_id: "transfer",
+          pickup_at: "2026-11-17T22:00:00.000Z",
+          suppliers: { name: "Cape Executive Transfers" },
+        }),
+      ],
+    })
+
+    expect(line.fromDate).toBe("2026-11-18")
   })
 
   it("prefixes a complimentary trip's notes without touching the charged trip on the same leg", () => {

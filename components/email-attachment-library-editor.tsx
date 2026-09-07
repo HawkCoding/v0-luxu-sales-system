@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { EMAIL_ATTACHMENT_KINDS } from "@/lib/attachments/email-attachment-library"
+import { displayRouteName } from "@/lib/routes/route-name"
 import { SUPPLIER_KIND_LABELS, type Supplier } from "@/lib/types"
 
 interface LibraryEntry {
@@ -151,7 +152,8 @@ function LibraryEntryRow({
               <SelectItem value={ALL_ROUTES}>All routes</SelectItem>
               {routes.map((route) => (
                 <SelectItem key={route.id} value={route.id}>
-                  {route.name}
+                  {/* An itinerary stores its own id as its name — see lib/routes/route-name.ts. */}
+                  {displayRouteName(route.name) ?? "Unnamed route"}
                 </SelectItem>
               ))}
             </SelectContent>
