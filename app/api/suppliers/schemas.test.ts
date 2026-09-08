@@ -456,6 +456,19 @@ describe("supplierSaveSchema — tour operators price the tour type", () => {
     expect(result.success).toBe(true)
   })
 
+  it("accepts a blank itinerary name for a cruise line too, not just a tour operator (F-P7-2)", () => {
+    // isTypePricedSupplier covers tour_operator and cruise_line alike, and this schema-side check
+    // already agreed -- the 400 QA hit ("A route could not be named...") was the route handler
+    // never implementing the derivation this schema already promised for cruise itineraries.
+    const result = supplierSaveSchema.safeParse(
+      tourPayload({
+        kind: "cruise_line",
+        routes: [{ id: UUID_3, name: "", suiteTypeId: UUID_2, active: true }],
+      }),
+    )
+    expect(result.success).toBe(true)
+  })
+
   it("rejects two itineraries linked to the same tour type", () => {
     const result = supplierSaveSchema.safeParse(
       tourPayload({
