@@ -949,11 +949,17 @@ export async function resolveEnquiryCustomer(
     }
   }
 
+  // customers_email_unique is a functional index on lower(email) -- storage predates this
+  // normalization, so an existing row may still carry a mixed-case address. eq() compares bytes,
+  // which made a typed-lowercase email fail to match its own stored (mixed-case) record and create
+  // a second, duplicate customer instead (F-P5-1). ilike() with no wildcard characters in the
+  // pattern is an exact case-insensitive match, agreeing with what the unique index actually
+  // enforces.
   const { data: existingCustomer } = input.normalizedEmail
     ? await supabase
         .from("customers")
         .select("id")
-        .eq("email", input.normalizedEmail)
+        .ilike("email", input.normalizedEmail)
         .maybeSingle()
     : { data: null }
 

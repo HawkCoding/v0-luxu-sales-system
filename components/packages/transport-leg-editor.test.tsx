@@ -464,6 +464,16 @@ describe("TransportLegEditor date anchor", () => {
   })
 })
 
+describe("TransportLegEditor unit field labels (F-P4-4)", () => {
+  it("associates the Vehicle category select with its label", () => {
+    render(<TransportLegEditor leg={transferLeg} value={makeLegState([makeRequest()])} onChange={vi.fn()} />)
+
+    // Previously only reachable by placeholder text ("Not set", "Select category") -- unusable by
+    // a screen reader or any label-driven query.
+    expect(screen.getByLabelText(/vehicle category/i)).toBeInTheDocument()
+  })
+})
+
 describe("TransportLegEditor per-person pricing", () => {
   it("shows a single Passengers field on a per-vehicle transfer", () => {
     render(<TransportLegEditor leg={transferLeg} value={makeLegState([makeRequest()])} onChange={vi.fn()} />)

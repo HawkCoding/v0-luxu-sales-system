@@ -60,6 +60,7 @@ import {
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   PASSENGER_SUM_SUPPLIER_KINDS,
   toAirlineAnchorContext,
+  toTourAnchorContext,
   toApplySelections,
   toHotelAnchorContext,
   toPackageSelectionsPatch,
@@ -857,6 +858,11 @@ export function BuildBookingDialog({
     return toAirlineAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
   }
 
+  function tourAnchorContext(legId: string): TransferAnchorContext | null {
+    if (!packageDetail) return null
+    return toTourAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
+  }
+
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
 
   /** Re-reads booking_services.updated_at for every leg after a write this dialog made itself. */
@@ -1347,6 +1353,7 @@ export function BuildBookingDialog({
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
                         flightAnchorContext={airlineAnchorContext(leg.id)}
+                        tourAnchorContext={tourAnchorContext(leg.id)}
                         primarySupplierId={savedState?.primarySupplierId ?? null}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
