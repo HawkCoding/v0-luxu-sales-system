@@ -266,8 +266,10 @@ const styles = StyleSheet.create({
     color: "#312b24",
   },
 
-  // Departure information: paired label/value columns (left + right), mirroring
-  // the sales team's layout (Train | Days, Departure | Time, …).
+  // Departure information: paired label/value columns (left + right). Rows now come from
+  // invoiceRowsForBlock (lib/invoices/departure-rows.ts), which fills the right column where the
+  // row has a second fact to state — Train | Days, Departure | Time, Suite Type | Qty — and leaves
+  // it blank otherwise.
   sectionHeading: {
     fontSize: 10.5,
     fontFamily: "Montserrat",

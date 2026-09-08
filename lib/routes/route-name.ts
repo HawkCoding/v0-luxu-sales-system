@@ -85,6 +85,32 @@ export interface RouteEndpointCodes {
 /** The separator between the two halves of a route name. Only the first one splits. */
 const ROUTE_ENDPOINT_SEPARATOR = /\s*(?:>|<|→|←|↔|–|—|-|\/)\s*|\s+to\s+/i
 
+/**
+ * Whether two route names describe travel between the same pair of places, ignoring direction —
+ * `"Pretoria ↔ Cape Town"` matches both `"Pretoria → Cape Town"` and the reversed
+ * `"Cape Town → Pretoria"`.
+ *
+ * Used to suppress a document row that would otherwise restate the row above it with a different
+ * arrow, since a train route's name is auto-derived from its own endpoints (`buildRouteName`). A
+ * name that is not an endpoint pair at all ("Pride of Africa") never matches, so a genuinely named
+ * journey still prints alongside its route.
+ */
+export function sameRouteEndpoints(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = splitEndpoints(a)
+  const right = splitEndpoints(b)
+  if (!left || !right) return false
+  return left[0] === right[0] && left[1] === right[1]
+}
+
+/** The route name's two halves, lowercased and sorted so direction can't affect the comparison. */
+function splitEndpoints(name: string | null | undefined): [string, string] | null {
+  const parts = name?.trim().split(ROUTE_ENDPOINT_SEPARATOR)
+  if (!parts || parts.length !== 2) return null
+  const [first, second] = parts.map((part) => part.trim().toLowerCase())
+  if (!first || !second) return null
+  return first <= second ? [first, second] : [second, first]
+}
+
 /** IATA is 3 letters, ICAO 4 — the same shape `booking_services` and its Zod schema enforce. */
 const AIRPORT_CODE = /^[A-Z]{3,4}$/
 

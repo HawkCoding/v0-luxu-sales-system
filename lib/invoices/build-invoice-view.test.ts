@@ -284,4 +284,42 @@ describe("buildDeparture", () => {
     })
     expect(departure?.legs.map((leg) => leg.heading)).toEqual(["Your Journey", "Return Journey"])
   })
+
+  it("drops the Tour row when the booking route names the same endpoints as the leg's route", () => {
+    const trainBlock: VoucherServiceBlock = {
+      serviceType: "train",
+      title: "The Blue Train",
+      contactDetails: { name: "The Blue Train" },
+      displayOrder: 0,
+      serviceData: { route: "Cape Town → Pretoria" },
+    }
+    const departure = buildDeparture([trainBlock], "Your Journey", {
+      tourName: "Pretoria ↔ Cape Town",
+      durationNights: 2,
+      durationUnit: null,
+      suites: 1,
+      adults: 2,
+      children: 0,
+    })
+    expect(departure?.tourName).toBeNull()
+  })
+
+  it("keeps the Tour row when the route carries a name of its own", () => {
+    const trainBlock: VoucherServiceBlock = {
+      serviceType: "train",
+      title: "Rovos Rail",
+      contactDetails: { name: "Rovos Rail" },
+      displayOrder: 0,
+      serviceData: { route: "Pretoria → Victoria Falls" },
+    }
+    const departure = buildDeparture([trainBlock], "Your Journey", {
+      tourName: "Pride of Africa",
+      durationNights: 2,
+      durationUnit: null,
+      suites: 1,
+      adults: 2,
+      children: 0,
+    })
+    expect(departure?.tourName).toBe("Pride of Africa")
+  })
 })

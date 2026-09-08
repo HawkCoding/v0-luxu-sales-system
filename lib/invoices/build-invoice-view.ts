@@ -8,6 +8,7 @@ import { foldCommissionLines } from "@/lib/invoices/fold-commission-line"
 import { logError } from "@/lib/error-log"
 import { primaryProductDurationCount, primaryProductOf } from "@/lib/enquiry/primary-product"
 import { nightsBetween } from "@/lib/packages/trip-date-range"
+import { sameRouteEndpoints } from "@/lib/routes/route-name"
 import type { Database } from "@/lib/supabase/types"
 import type { PricingSnapshot, SupplierKind } from "@/lib/types"
 import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
@@ -181,10 +182,17 @@ export function buildDeparture(
   // no_of_suites is an enquiry-time scalar that drifts once the package is configured in detail.
   const resolvedSuites = outbound.serviceData.numberOfSuites ?? context.suites
 
+  // A train route's name is auto-derived from its own endpoints, so the booking-level "Tour" row
+  // and the leg's "Route" row below it print the same two places with a different arrow. Only a
+  // route named something other than its endpoints ("Pride of Africa") earns both rows.
+  const tourName = sameRouteEndpoints(context.tourName, outbound.serviceData.route)
+    ? null
+    : context.tourName
+
   return {
     productLabel: INVOICE_PRODUCT_LABEL[outbound.serviceType],
     trainName: outbound.contactDetails.name ?? null,
-    tourName: context.tourName,
+    tourName,
     daysLabel: buildDaysLabel(context.durationNights, context.durationUnit),
     qty: resolvedSuites > 0 ? String(resolvedSuites) : null,
     adults: String(context.adults),
