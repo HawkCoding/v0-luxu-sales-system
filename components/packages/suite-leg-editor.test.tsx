@@ -252,6 +252,42 @@ describe("SuiteLegEditor hotel date anchor", () => {
 
     expect(screen.getByText(/work out this hotel's check-in/i)).toBeInTheDocument()
   })
+
+  it("names the anchor leg on the Pre/Post buttons instead of the bare vocabulary noun", () => {
+    const anchorContext: HotelAnchorContext = {
+      trainLabel: "The Blue Train",
+      anchorKind: "train_operator",
+      departureDate: "2026-09-15",
+      durationDays: 3,
+      stayDates: { checkIn: "2026-09-14", checkOut: "2026-09-15" },
+    }
+
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), dateAnchor: "pre", nights: 1 }}
+        onChange={vi.fn()}
+        anchorContext={anchorContext}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Before The Blue Train" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "After The Blue Train" })).toBeInTheDocument()
+  })
+
+  it("falls back to the vocabulary noun when no anchor has resolved yet", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), dateAnchor: "pre", nights: 1 }}
+        onChange={vi.fn()}
+        anchorContext={null}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Pre-journey" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Post-journey" })).toBeInTheDocument()
+  })
 })
 
 describe("SuiteLegEditor luggage storage", () => {
@@ -505,17 +541,17 @@ describe("SuiteLegEditor flight date anchor", () => {
   it("renders the pre/post/custom toggle on a flight and shows the manual picker on custom", () => {
     render(<SuiteLegEditor leg={airlineLeg} value={makeAirlineState()} onChange={vi.fn()} />)
 
-    expect(screen.getByRole("button", { name: "Pre" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Post" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Pre-journey" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Post-journey" })).toBeInTheDocument()
     expect(screen.getByLabelText(/departure date/i)).toBeInTheDocument()
   })
 
   it("disables pre/post when there's no primary leg to anchor to", () => {
     render(<SuiteLegEditor leg={airlineLeg} value={makeAirlineState()} onChange={vi.fn()} />)
 
-    expect(screen.getByRole("button", { name: "Pre" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Post" })).toBeDisabled()
-    expect(screen.getByText(/this package has no primary leg to anchor to/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Pre-journey" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Post-journey" })).toBeDisabled()
+    expect(screen.getByText(/nothing above this flight has a date to anchor to/i)).toBeInTheDocument()
   })
 
   it("shows the resolved departure date instead of a picker once anchored, given context", () => {
@@ -529,10 +565,12 @@ describe("SuiteLegEditor flight date anchor", () => {
     )
 
     expect(screen.queryByLabelText(/^departure date$/i)).not.toBeInTheDocument()
-    // "Table Bay Hotel" in flightAnchorContext is now the trip's own edge (see
-    // lib/packages/flight-dates.ts), not necessarily the leg directly above -- the editor renders
-    // it as "the trip" rather than repeating a leg name that may not be what actually drove the date.
-    expect(screen.getByText(/end of the trip/i)).toBeInTheDocument()
+    // "Table Bay Hotel" in flightAnchorContext is the leg directly above the flight (see
+    // lib/packages/flight-dates.ts) -- the resolved-date line names it directly.
+    expect(screen.getByText(/end of Table Bay Hotel/i)).toBeInTheDocument()
+    // isPrimaryProduct: false on the fixture -- a hotel is never the primary product on this
+    // train-headed leg set, so the not-the-main-product warning should surface too.
+    expect(screen.getByText(/anchored to Table Bay Hotel, not the booking's main product/i)).toBeInTheDocument()
   })
 
   it("setting the anchor updates dateAnchor without touching other flight fields", () => {
@@ -546,7 +584,7 @@ describe("SuiteLegEditor flight date anchor", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Pre" }))
+    fireEvent.click(screen.getByRole("button", { name: "Before Table Bay Hotel" }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dateAnchor: "pre" }))
   })
 })

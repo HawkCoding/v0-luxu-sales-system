@@ -12,7 +12,7 @@ import type { AnchoredStay, HotelStayDates } from "@/lib/packages/hotel-dates"
 import { findAnchorLeg, resolveChainedHotelStayDates } from "@/lib/packages/hotel-dates"
 import type { AnchorLegDates } from "@/lib/packages/transfer-dates"
 import { findTransferAnchorLeg, resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
-import { resolveTripEdgeDates } from "@/lib/packages/flight-dates"
+import { findFlightAnchorLeg } from "@/lib/packages/flight-dates"
 import type { ServiceDateSpan } from "@/lib/packages/trip-date-range"
 import { dateOnly, selectedRouteDurationDays, serviceDateSpan } from "@/lib/packages/trip-date-range"
 import { splitAppZoneDateTime, joinAppZoneDateTime } from "@/lib/date-time-field"
@@ -733,58 +733,93 @@ export function applyAnchoredTransferDates(
   })
 }
 
-/** View-model form of {@link resolveTripEdgeDates} — what the airline leg editor takes as a prop.
- * Reuses TransferAnchorContext's shape: `startDate`/`endDate` are the trip's own edges rather than
- * a single neighbouring leg's span, but the editor only ever reads them as "what Pre/Post resolve
- * to", so no new prop type is needed. */
+/** The leg a flight's Pre/Post anchor hangs off — the nearest dated leg above it, falling back to
+ * the nearest one below — plus that leg's start/end dates as the airline editor needs them.
+ * Mirrors {@link getTransferAnchorContext} exactly; a flight anchors the same way a transfer does,
+ * just via {@link findFlightAnchorLeg}'s extra downward fallback. Null when nothing on either side
+ * is dateable. */
+export function getFlightAnchorContext(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  flightLegId: string,
+): { anchorLeg: PackageLeg; span: ServiceDateSpan | null } | null {
+  const anchorLeg = findFlightAnchorLeg(detail.legs, flightLegId)
+  if (!anchorLeg) return null
+
+  const anchorState = states.find((candidate) => candidate.legId === anchorLeg.id)
+  if (anchorState?.kind !== "suite") return null
+
+  const span = serviceDateSpan({
+    supplierKind: anchorLeg.supplierKind,
+    serviceDate: anchorState.serviceDate,
+    nights: anchorState.nights,
+    routeDurationDays: selectedRouteDurationDays(anchorLeg, anchorState.routeId),
+    arrivalDate: anchorState.arrivalDate,
+  })
+
+  return { anchorLeg, span }
+}
+
+/** View-model form of {@link getFlightAnchorContext} — what the airline leg editor takes as a
+ * prop. Reuses TransferAnchorContext's shape, same as the transfer editor's own context. */
 export function toAirlineAnchorContext(
   detail: PackageDetail,
   states: ApplyLegState[],
-  primarySupplierId?: string | null,
+  flightLegId: string,
+  primarySupplierId: string | null,
 ): TransferAnchorContext | null {
-  const edge = resolveTripEdgeDates(detail, states, primarySupplierId)
-  if (!edge.primaryLeg) return null
+  const context = getFlightAnchorContext(detail, states, flightLegId)
+  if (!context) return null
 
   return {
-    legLabel: edge.primaryLeg.label ?? edge.primaryLeg.supplierName,
-    legKind: edge.primaryLeg.supplierKind,
-    startDate: edge.preDate,
-    endDate: edge.postDate,
-    endDateAssumed: edge.preDate != null && edge.preDate === edge.postDate,
-    // Always the primary product: resolveTripEdgeDates only returns a primaryLeg, and the edges
-    // are measured from it. The false case this flag exists for is a transfer anchoring to its
-    // nearest dated neighbour (toTransferAnchorContext), which a flight never does.
-    isPrimaryProduct: true,
+    legLabel: context.anchorLeg.label ?? context.anchorLeg.supplierName,
+    legKind: context.anchorLeg.supplierKind,
+    startDate: context.span?.start ?? null,
+    endDate: context.span?.end ?? null,
+    endDateAssumed: context.span != null && context.span.end === context.span.start,
+    isPrimaryProduct: isCoreBookingLeg(context.anchorLeg, primarySupplierId),
   }
 }
 
-/** Recomputes the departure date of every pre/post-anchored airline leg from the trip's own edges
- * — see {@link resolveTripEdgeDates}. Only `serviceDate` (departure) is derived; `arrivalDate`/
- * times stay independent manual fields. */
+/** Recomputes the departure date of every pre/post-anchored airline leg from the leg it hangs off
+ * — see {@link findFlightAnchorLeg}. Only `serviceDate` (departure) is derived; `arrivalDate`/times
+ * stay independent manual fields.
+ *
+ * Resolved in `sortOrder` order, threading each result into the next leg's lookup, so a flight
+ * chaining off the flight above it sees that flight's already-settled date rather than its stale
+ * pre-recompute one (a plain `states.map` would only ever see the latter). */
 export function applyAnchoredAirlineDates(
   detail: PackageDetail,
   states: ApplyLegState[],
-  primarySupplierId?: string | null,
 ): ApplyLegState[] {
-  const edge = resolveTripEdgeDates(detail, states, primarySupplierId)
+  const airlineLegIds = detail.legs
+    .filter((leg) => leg.supplierKind === "airline")
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((leg) => leg.id)
 
-  return states.map((state) => {
-    if (state.kind !== "suite" || state.supplierKind !== "airline") return state
-    if (state.dateAnchor !== "pre" && state.dateAnchor !== "post") return state
+  let working = states
+  for (const legId of airlineLegIds) {
+    const state = working.find((candidate) => candidate.legId === legId)
+    if (state?.kind !== "suite" || state.dateAnchor !== "pre" && state.dateAnchor !== "post") continue
 
-    const targetDate = state.dateAnchor === "pre" ? edge.preDate : edge.postDate
-    if (!targetDate || targetDate === state.serviceDate) return state
+    const context = getFlightAnchorContext(detail, working, legId)
+    const targetDate =
+      state.dateAnchor === "pre" ? context?.span?.start ?? null : context?.span?.end ?? null
+    if (!targetDate || targetDate === state.serviceDate) continue
 
-    return { ...state, serviceDate: targetDate }
-  })
+    working = working.map((candidate) =>
+      candidate.legId === legId ? { ...candidate, serviceDate: targetDate } : candidate,
+    )
+  }
+  return working
 }
 
 /** Runs the hotel, airline, and transfer date-anchor recomputes in the order that makes chaining
  * work: a hotel anchors only to the primary product, so it settles first; an airline anchors to
- * the trip's own edges -- which a settled pre/post-stay hotel can push out past the primary
- * product's own date -- so it settles second; a transfer can anchor to any of those, including a
- * now-settled airline leg, so it settles last. Each recompute reads only already-settled kinds
- * ahead of it in this chain, so one pass each (rather than repeating to a fixed point) is enough. */
+ * the leg directly above it -- which may itself be a hotel that just settled -- so it settles
+ * second; a transfer can anchor to any of those, including a now-settled airline leg, so it
+ * settles last. Each recompute reads only already-settled kinds ahead of it in this chain, so one
+ * pass each (rather than repeating to a fixed point) is enough. */
 export function applyAnchoredDates(
   detail: PackageDetail,
   states: ApplyLegState[],
@@ -792,11 +827,7 @@ export function applyAnchoredDates(
 ): ApplyLegState[] {
   return applyAnchoredTransferDates(
     detail,
-    applyAnchoredAirlineDates(
-      detail,
-      applyAnchoredHotelDates(detail, states, primarySupplierId),
-      primarySupplierId,
-    ),
+    applyAnchoredAirlineDates(detail, applyAnchoredHotelDates(detail, states, primarySupplierId)),
   )
 }
 

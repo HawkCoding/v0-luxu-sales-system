@@ -1,12 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { CheckCircle2, ChevronDown, FileText, Info, Send, ShieldAlert } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog,
@@ -16,16 +15,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getPipelineStageLabel, type PipelineStage } from "@/lib/types"
 import { formatMoney } from "@/lib/money"
 
-// final_payment_confirmation is a manual tick, and cancel_reason /
-// refund_capture have no owning tab — all three are deliberately absent
-// here, which is what makes `showFix` false for them.
+// final_payment_confirmation, cancel_reason and refund_capture have no owning
+// tab — all three are deliberately absent here, which is what makes `showFix`
+// false for them.
 const GATE_TAB_CONFIG: Record<string, { path: string; label: string }> = {
   customer_complete: { path: "?tab=enquiry", label: "Enquiry" },
   quote_sent_required: { path: "?tab=quotes", label: "Quotes" },
@@ -95,7 +93,7 @@ interface StageTransitionModalProps {
    * When provided, a blocking `final_payment_confirmation` failure (F-P1-8: real money still
    * owed) renders an inline "Record the balance payment" button. Recording the payment derives
    * invoice_balance from actual payments and, once it reaches zero, advances the booking to Paid
-   * in Full on its own (see lib/invoices/sync-booking-payment-state.ts) — no tick required.
+   * in Full on its own (see lib/invoices/sync-booking-payment-state.ts).
    */
   onRecordBalancePayment?: (amountOutstanding: number) => void
 }
@@ -108,8 +106,16 @@ export function gateIdToTabLabel(gateId: string): string {
   return GATE_TAB_CONFIG[gateId]?.label ?? ""
 }
 
+/**
+ * Which manual-confirmation flag a gate stands for, or null if it is not a
+ * confirmable gate. Severity matters: the blocking shape of
+ * `final_payment_confirmation` (money still owed) can never be confirmed away,
+ * so it maps to nothing and pressing Confirm cannot assert its flag.
+ */
 export function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
-  if (failure.gateId === "final_payment_confirmation") return "finalPaymentReceived"
+  if (failure.gateId === "final_payment_confirmation" && failure.severity === "confirm") {
+    return "finalPaymentReceived"
+  }
   return null
 }
 
@@ -128,30 +134,22 @@ export function StageTransitionModal({
   onSendDepositInvoice,
   onRecordBalancePayment,
 }: StageTransitionModalProps) {
-  const [confirmations, setConfirmations] = useState<ManualConfirmations>({})
   const [overrideReason, setOverrideReason] = useState("")
   const [overrideOpen, setOverrideOpen] = useState(false)
   const overrideTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const confirmationFailures = useMemo(
-    () => failures.filter((failure) => failure.severity === "confirm"),
-    [failures],
-  )
   const hasBlockingFailures = failures.some((failure) => failure.severity === "block")
   const allConfirmationsOnly = failures.length > 0 && !hasBlockingFailures
-  const allConfirmationsChecked = confirmationFailures.every((failure) => {
-    const key = confirmationKeyForFailure(failure)
-    return key ? confirmations[key] === true : true
-  })
-
-  const handleConfirmationChange = (failure: GateFailure, checked: boolean) => {
-    const key = confirmationKeyForFailure(failure)
-    if (!key) return
-    setConfirmations((current) => ({ ...current, [key]: checked }))
-  }
 
   const handleProceed = async () => {
-    await onProceed(confirmations)
-    setConfirmations({})
+    // There is no tick to read: the button *is* the confirmation, so every
+    // confirm-severity gate on screen is affirmed by pressing it. A blocking
+    // gate contributes nothing (confirmationKeyForFailure returns null) and the
+    // button is not rendered while one is present anyway.
+    const manualConfirmations = failures.reduce<ManualConfirmations>((accumulated, failure) => {
+      const key = confirmationKeyForFailure(failure)
+      return key ? { ...accumulated, [key]: true } : accumulated
+    }, {})
+    await onProceed(manualConfirmations)
   }
 
   const handleOverride = async () => {
@@ -192,16 +190,15 @@ export function StageTransitionModal({
           </DialogTitle>
           <DialogDescription>
             {allConfirmationsOnly
-              ? `Confirm the checks below to move ${jobNumber} to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"}.`
+              ? `Nothing is blocking ${jobNumber}. Read the item${failures.length > 1 ? "s" : ""} below, then confirm the move to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"}.`
               : `${jobNumber} can move to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"} once the items below are done.`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           {failures.map((failure) => {
-            const confirmationKey = confirmationKeyForFailure(failure)
-            // No Fix link for gates with no target tab (manual-confirmation
-            // ticks and cancel/refund gates handled elsewhere).
+            // No Fix link for gates with no target tab (final-payment
+            // confirmation and cancel/refund gates handled elsewhere).
             const showFix = gateIdToTabPath(failure.gateId) !== ""
             const showSendPaymentConfirmation =
               failure.gateId === "final_invoice_correspondence" &&
@@ -220,93 +217,77 @@ export function StageTransitionModal({
               <Alert key={failure.gateId} variant="default" className="bg-muted/30">
                 <GateIcon failure={failure} />
                 <AlertDescription>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{failure.message}</span>
-                          <Badge variant="secondary">{gateBadgeLabel(failure)}</Badge>
-                        </div>
-                        <p className="mt-1 text-sm">{failure.fixHint}</p>
-                        {typeof failure.amountTotal === "number" && (
-                          <p className="mt-1.5 text-sm text-muted-foreground">
-                            Quoted <span className="font-medium text-foreground">{formatMoney(failure.amountTotal)}</span>
-                            {" · Received "}
-                            <span className="font-medium text-foreground">{formatMoney(failure.amountPaid ?? 0)}</span>
-                            {" · Outstanding "}
-                            <span
-                              className={
-                                (failure.amountOutstanding ?? 0) > 0
-                                  ? "font-medium text-destructive"
-                                  : "font-medium text-foreground"
-                              }
-                            >
-                              {formatMoney(failure.amountOutstanding ?? 0)}
-                            </span>
-                          </p>
-                        )}
+                  <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{failure.message}</span>
+                        <Badge variant="secondary">{gateBadgeLabel(failure)}</Badge>
                       </div>
-                      <div className="flex shrink-0 flex-wrap items-center gap-2">
-                        {showRecordBalancePayment ? (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => onRecordBalancePayment?.(failure.amountOutstanding!)}
-                            disabled={submitting}
+                      <p className="mt-1 text-sm">{failure.fixHint}</p>
+                      {typeof failure.amountTotal === "number" && (
+                        <p className="mt-1.5 text-sm text-muted-foreground">
+                          Quoted <span className="font-medium text-foreground">{formatMoney(failure.amountTotal)}</span>
+                          {" · Received "}
+                          <span className="font-medium text-foreground">{formatMoney(failure.amountPaid ?? 0)}</span>
+                          {" · Outstanding "}
+                          <span
+                            className={
+                              (failure.amountOutstanding ?? 0) > 0
+                                ? "font-medium text-destructive"
+                                : "font-medium text-foreground"
+                            }
                           >
-                            <FileText data-icon="inline-start" />
-                            Record the balance payment
-                          </Button>
-                        ) : null}
-                        {showSendPaymentConfirmation ? (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => onSendPaymentConfirmation?.()}
-                            disabled={submitting}
-                          >
-                            <FileText data-icon="inline-start" />
-                            Send payment confirmation
-                          </Button>
-                        ) : null}
-                        {showSendDepositInvoice ? (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => onSendDepositInvoice?.()}
-                            disabled={submitting}
-                            data-testid="send-deposit-invoice"
-                          >
-                            <FileText data-icon="inline-start" />
-                            Send deposit invoice
-                          </Button>
-                        ) : null}
-                        {showFix ? (
-                          <Button asChild size="sm" variant="outline">
-                            <Link
-                              href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}
-                              onClick={onCancel}
-                            >
-                              Go to {gateIdToTabLabel(failure.gateId)} tab
-                            </Link>
-                          </Button>
-                        ) : null}
-                      </div>
+                            {formatMoney(failure.amountOutstanding ?? 0)}
+                          </span>
+                        </p>
+                      )}
                     </div>
-                    {confirmationKey && (
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={`${failure.gateId}-confirm`}
-                          checked={confirmations[confirmationKey] === true}
-                          onCheckedChange={(checked) => handleConfirmationChange(failure, checked === true)}
-                        />
-                        <Label htmlFor={`${failure.gateId}-confirm`} className="text-sm">
-                          {/* Falls back to the heading only for a gate that
-                              hasn't been given tick wording of its own. */}
-                          {failure.confirmLabel ?? failure.message}
-                        </Label>
-                      </div>
-                    )}
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      {showRecordBalancePayment ? (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => onRecordBalancePayment?.(failure.amountOutstanding!)}
+                          disabled={submitting}
+                        >
+                          <FileText data-icon="inline-start" />
+                          Record the balance payment
+                        </Button>
+                      ) : null}
+                      {showSendPaymentConfirmation ? (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => onSendPaymentConfirmation?.()}
+                          disabled={submitting}
+                        >
+                          <FileText data-icon="inline-start" />
+                          Send payment confirmation
+                        </Button>
+                      ) : null}
+                      {showSendDepositInvoice ? (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => onSendDepositInvoice?.()}
+                          disabled={submitting}
+                          data-testid="send-deposit-invoice"
+                        >
+                          <FileText data-icon="inline-start" />
+                          Send deposit invoice
+                        </Button>
+                      ) : null}
+                      {showFix ? (
+                        <Button asChild size="sm" variant="outline">
+                          <Link
+                            href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}
+                            onClick={onCancel}
+                          >
+                            Go to {gateIdToTabLabel(failure.gateId)} tab
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 </AlertDescription>
               </Alert>
@@ -351,7 +332,7 @@ export function StageTransitionModal({
             Cancel move
           </Button>
           {!hasBlockingFailures && (
-            <Button onClick={handleProceed} disabled={submitting || !allConfirmationsChecked}>
+            <Button onClick={handleProceed} disabled={submitting}>
               <CheckCircle2 data-icon="inline-start" />
               Confirm and move
             </Button>

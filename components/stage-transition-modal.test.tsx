@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
-import { StageTransitionModal, gateIdToTabPath } from "./stage-transition-modal"
-import type { GateFailure } from "@/lib/pipeline/validate-transition"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { StageTransitionModal, confirmationKeyForFailure, gateIdToTabPath } from "./stage-transition-modal"
+import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 
 describe("gateIdToTabPath", () => {
   it("routes customer-completeness failures to the enquiry tab", () => {
@@ -36,7 +36,15 @@ describe("gateIdToTabPath", () => {
 
 const noop = async () => {}
 
-function renderModal(failures: GateFailure[], options: { canOverride?: boolean; onOverride?: (reason: string) => Promise<void> } = {}) {
+function renderModal(
+  failures: GateFailure[],
+  options: {
+    canOverride?: boolean
+    onOverride?: (reason: string) => Promise<void>
+    onProceed?: (manualConfirmations: ManualConfirmations) => Promise<void>
+    onRecordBalancePayment?: (amountOutstanding: number) => void
+  } = {},
+) {
   return render(
     <StageTransitionModal
       open
@@ -47,8 +55,9 @@ function renderModal(failures: GateFailure[], options: { canOverride?: boolean; 
       canOverride={options.canOverride ?? false}
       submitting={false}
       onCancel={() => {}}
-      onProceed={noop}
+      onProceed={options.onProceed ?? noop}
       onOverride={options.onOverride ?? noop}
+      onRecordBalancePayment={options.onRecordBalancePayment}
     />,
   )
 }
@@ -63,9 +72,22 @@ const depositGate: GateFailure = {
 const finalPaymentGate: GateFailure = {
   gateId: "final_payment_confirmation",
   message: "Payment in full needs confirming.",
-  fixHint: "No amount entry needed — the balance is already on record.",
+  fixHint: "The full balance is on record. Confirm to move this booking to Paid in Full.",
   severity: "confirm",
-  confirmLabel: "I confirm the full balance has been received.",
+  amountTotal: 97000,
+  amountPaid: 97000,
+  amountOutstanding: 0,
+}
+
+const finalPaymentOutstandingGate: GateFailure = {
+  gateId: "final_payment_confirmation",
+  message: "R69 112,50 of R97 000,00 has not been received.",
+  fixHint:
+    "Record the outstanding payment on the Payments tab — the booking moves to Paid in Full on its own once the balance clears.",
+  severity: "block",
+  amountTotal: 97000,
+  amountPaid: 27887.5,
+  amountOutstanding: 69112.5,
 }
 
 describe("StageTransitionModal", () => {
@@ -114,6 +136,39 @@ describe("StageTransitionModal", () => {
     renderModal([depositGate])
     expect(screen.queryByRole("button", { name: /Confirm and move/i })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Cancel move/i })).toBeInTheDocument()
+  })
+
+  it("renders no checkbox for the confirm-only final-payment gate — the button is the confirmation", () => {
+    renderModal([finalPaymentGate])
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Confirm and move/i })).toBeEnabled()
+  })
+
+  it("sends finalPaymentReceived when Confirm and move is pressed on the confirm-only gate", async () => {
+    const onProceed = vi.fn(async () => {})
+    renderModal([finalPaymentGate], { onProceed })
+    fireEvent.click(screen.getByRole("button", { name: /Confirm and move/i }))
+    await waitFor(() => expect(onProceed).toHaveBeenCalledWith({ finalPaymentReceived: true }))
+  })
+
+  it("renders no checkbox and no Confirm and move when the final-payment gate is blocking", () => {
+    renderModal([finalPaymentOutstandingGate], {
+      onRecordBalancePayment: () => {},
+    })
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Confirm and move/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Record the balance payment/i })).toBeInTheDocument()
+  })
+
+  it("shows the real figures on the blocking final-payment gate", () => {
+    renderModal([finalPaymentOutstandingGate])
+    expect(screen.getByText("R69 112,50 of R97 000,00 has not been received.")).toBeInTheDocument()
+    expect(screen.getByText("Needs action")).toBeInTheDocument()
+  })
+
+  it("never maps a blocking final-payment gate to a manual confirmation flag", () => {
+    expect(confirmationKeyForFailure(finalPaymentOutstandingGate)).toBeNull()
+    expect(confirmationKeyForFailure(finalPaymentGate)).toBe("finalPaymentReceived")
   })
 
   it("blocks the unsent-deposit-invoice gate with no self-attest checkbox or Confirm and move", () => {

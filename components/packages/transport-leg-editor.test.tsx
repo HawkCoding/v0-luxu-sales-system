@@ -351,8 +351,8 @@ describe("TransportLegEditor date anchor", () => {
       />,
     )
 
-    expect(screen.getByRole("button", { name: "Pre" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Post" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Pre-journey" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Post-journey" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Custom" })).toBeEnabled()
     expect(screen.getByRole("button", { name: /pickup date/i })).toBeEnabled()
     expect(screen.getByText(/nothing above this transfer has a date to anchor to/i)).toBeInTheDocument()
