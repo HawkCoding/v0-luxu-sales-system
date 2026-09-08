@@ -13,6 +13,7 @@ import { fetchDefaultAgeBuckets, resolveAgeBuckets } from "@/lib/pricing/age-buc
 import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
 import { isRateCardValidOn, selectRateCard } from "@/lib/rate-cards/resolve"
 import { loadSupplierRateTiersResolver } from "@/lib/rate-types/load-supplier-rate-tiers"
+import { displayRouteName } from "@/lib/routes/route-name"
 import {
   buildCommissionBreakdown,
   calculateCommissionAmount,
@@ -175,8 +176,11 @@ export async function priceExtraLineItems(
   )
   // Naming the itinerary in a tour operator's error would send the user hunting for a price that
   // was never keyed to it.
-  const where = route
-    ? `"${suiteType.name}" on "${route.name}" (${supplier.name})`
+  // A tour operator's itinerary has no name of its own (it stores as its own id), so
+  // displayRouteName also collapses this to the type-only wording rather than naming a uuid.
+  const displayedRouteName = displayRouteName(route?.name)
+  const where = displayedRouteName
+    ? `"${suiteType.name}" on "${displayedRouteName}" (${supplier.name})`
     : `"${suiteType.name}" (${supplier.name})`
 
   if (validCards.length === 0) {
@@ -246,7 +250,7 @@ export async function priceExtraLineItems(
   const routeRow = route
   const suiteRow = suiteType
   const kind = supplierRow.kind as SupplierKind
-  const description = [supplierRow.name, suiteRow.name, routeRow?.name].filter(Boolean).join(" - ")
+  const description = [supplierRow.name, suiteRow.name, displayedRouteName].filter(Boolean).join(" - ")
   const lineItems: QuoteLineItem[] = []
 
   const cardCurrency = normaliseCurrency(card.currency)
@@ -295,7 +299,7 @@ export async function priceExtraLineItems(
         supplierName: supplierRow.name,
         supplierKind: kind,
         routeId: routeRow?.id ?? null,
-        routeName: routeRow?.name ?? null,
+        routeName: displayedRouteName,
         suiteTypeId: suiteRow.id,
         suiteTypeName: suiteRow.name,
         rateCardId: card.id,

@@ -1,4 +1,5 @@
-import { REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
+import { primaryProductOf } from "@/lib/enquiry/primary-product"
+import { INTAKE_REVIEW_REASONS, REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import type { DraftSuiteUnit } from "@/lib/suites/draft-suite-unit"
 import { matchSupplierInText, type SupplierMatcher } from "@/lib/suppliers/match-phrases"
 import type { SupplierKind } from "@/lib/types"
@@ -172,17 +173,9 @@ export interface ValidateDraftOptions {
   requireResolvedSupplier?: boolean
 }
 
-const REQUIRED_FIELDS = [
-  'customer.firstName',
-  'customer.surname',
-  'customer.email',
-  'customer.country',
-  'trip.supplier',
-  'trip.route',
-  'trip.departureDate',
-  'guests.adults',
-  'guests.suites'
-]
+// The required-field list used to be this flat array of nine. It is now derived per supplier kind
+// in requiredShapeFields / countRequiredComplete, because a transfer states no unit count and no
+// end date -- counting nine of it left the review badge permanently short.
 
 const FORM_FIELD_LABEL_PATTERNS = [
   /^title$/i,
@@ -860,20 +853,23 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   const supplier = supplierMatch?.name ?? ''
   const supplierKind: SupplierKind | '' = supplierMatch?.kind ?? ''
   if (supplierMatch) confidence['trip.supplier'] = 'high'
-  // A stay, not a journey: no route, no departure, and the customer states its length directly.
-  const isStay = supplierKind === 'hotel_property'
+  // What shape of enquiry this is -- which dates it states, whether it has a direction at all --
+  // comes from the matched supplier's kind. An unmatched supplier falls back to a rail journey,
+  // which is what an unresolved draft has always been treated as.
+  const product = primaryProductOf(supplierKind || null)
+  const capturesRoute = product.routeFieldLabel !== null
 
   // Extract route/direction (high confidence). The labelled "Direction" field wins when present --
   // trusted verbatim (title-cased) whatever route pair it names, so a new route added to the
   // operator's book is recognised without editing this parser. Falls back to scanning free-form
   // prose for an "X to Y" pattern when no such label exists (e.g. a "Route:" label, or an
   // unstructured enquiry).
-  const directionLabelValue = isStay ? '' : getLabeledFieldValue(text, [/^direction$/i])
+  const directionLabelValue = capturesRoute ? getLabeledFieldValue(text, [/^direction$/i]) : ''
   let route = ''
   if (directionLabelValue) {
     route = titleCase(directionLabelValue)
     confidence['trip.route'] = 'high'
-  } else if (!isStay) {
+  } else if (capturesRoute) {
     const proseRoute = extractProseRoute(text)
     if (proseRoute) {
       route = proseRoute
@@ -886,9 +882,13 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   // for dates inferred from free-form prose, not for a form field the customer filled in directly.
   const departureDateLabelValue = getLabeledFieldValue(text, [
     /^departure\s*date$/i,
-    // A stay states its start as a check-in date. Same field on the draft either way -- the trip's
-    // first day -- only the label the consultant sees differs.
+    // Every kind states its start under its own word for it. Same field on the draft either way --
+    // the trip's first day -- only the label the consultant sees differs. All the patterns are
+    // scanned whatever the supplier, because a form is not obliged to use the word we expect.
     /^check[\s-]*in\s*date$/i,
+    /^(?:pickup|collection)\s*date$/i,
+    /^transfer\s*date$/i,
+    /^tour\s*(?:start\s*)?date$/i,
     // Some templates (Rovos) glue the direction into the date label itself, e.g.
     // "Date: Pretoria to Cape Town" with the actual date on the next line -- the generic same-line
     // splitter would otherwise misread "Pretoria to Cape Town" as the value. Scoped to labels that
@@ -919,10 +919,19 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
     }
   }
 
-  // Check-out (stay enquiries only). Nights is what actually gets stored -- see the note on
-  // ParsedDraft.trip.checkOutDate -- so a check-out earlier than check-in yields no nights rather
-  // than a negative stay, and is left for the consultant to correct.
-  const checkOutLabelValue = getLabeledFieldValue(text, [/^check[\s-]*out\s*date$/i])
+  // The end date, for the kinds that state one -- a stay's check-out, a rental's return, a tour's
+  // last day. Nights is what actually gets stored (see the note on ParsedDraft.trip.checkOutDate),
+  // so an end date earlier than the start yields no span rather than a negative one, and is left
+  // for the consultant to correct. The arithmetic is the same whether the kind counts the span in
+  // nights or in days; only the word for it differs.
+  const checkOutLabelValue = product.endDateLabel
+    ? getLabeledFieldValue(text, [
+        /^check[\s-]*out\s*date$/i,
+        /^return\s*date$/i,
+        /^tour\s*end\s*date$/i,
+        /^end\s*date$/i,
+      ])
+    : ''
   const checkOutDate = checkOutLabelValue ? extractDateString(checkOutLabelValue) : ''
   if (checkOutDate) confidence['trip.checkOutDate'] = 'high'
   const nights = nightsBetween(departureDate, checkOutDate)
@@ -1121,11 +1130,33 @@ function hasSupplier(draft: ParsedDraft, options?: ValidateDraftOptions): boolea
 
 /**
  * Whether this enquiry is a stay rather than a journey -- a standalone hotel booking such as Kruger
- * Shalati, which is priced per room per night and has no route or departure date to state. Both
- * shapes have exactly nine required fields; which nine is all that differs.
+ * Shalati, which is priced per room per night and has no route or departure date to state.
+ *
+ * Kept as a thin wrapper over the vocabulary so existing callers reading "is this a stay" keep
+ * working. New code should ask `primaryProductOf(kind)` for the specific fact it needs instead:
+ * a tour and a vehicle rental also state an end date without being stays.
  */
 export function isStayDraft(draft: ParsedDraft): boolean {
   return draft.trip.supplierKind === "hotel_property"
+}
+
+/** The intake rules for a draft's supplier kind, with the unresolved-supplier fallback applied. */
+function draftProduct(draft: ParsedDraft) {
+  return primaryProductOf(draft.trip.supplierKind || null)
+}
+
+/** Which of the three shape-dependent fields this draft is required to state. */
+function requiredShapeFields(draft: ParsedDraft) {
+  const product = draftProduct(draft)
+  const kind = (draft.trip.supplierKind || "train_operator") as SupplierKind
+  const reasons = INTAKE_REVIEW_REASONS[kind]
+  return {
+    route: product.routeFieldLabel !== null,
+    startDate: true,
+    endDate: product.endDateLabel !== null,
+    unitCount: product.capturesUnitCount,
+    reasons,
+  }
 }
 
 export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions): ValidationResult {
@@ -1140,20 +1171,19 @@ export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions
     missingRequired.push(REVIEW_REASON.contact)
   }
   if (!hasSupplier(draft, options)) missingRequired.push(REVIEW_REASON.supplier)
-  // A stay has no route and no departure: its shape is check-in, check-out, rooms. Nights is the
-  // whole price, so check-out is required here exactly as a route is on a journey. Same nine
-  // fields, same order -- only which three of them differ.
-  const stay = isStayDraft(draft)
-  if (stay) {
-    if (!draft.trip.departureDate) missingRequired.push(REVIEW_REASON.checkIn)
-    if (!draft.trip.checkOutDate) missingRequired.push(REVIEW_REASON.checkOut)
-  } else {
-    if (!draft.trip.route) missingRequired.push(REVIEW_REASON.route)
-    if (!draft.trip.departureDate) missingRequired.push(REVIEW_REASON.departureDate)
+  // The shape-dependent middle of the list. Every kind states when its product starts; only some
+  // state a direction, an end date, or a count of units. A stay names check-in/check-out/rooms
+  // where a journey names route/departure/suites, and a cruise filed under tours names its own
+  // start and end -- same questions, the customer's words for them.
+  const shape = requiredShapeFields(draft)
+  if (shape.route && !draft.trip.route) missingRequired.push(REVIEW_REASON.route)
+  if (!draft.trip.departureDate) missingRequired.push(shape.reasons.startDate)
+  if (shape.endDate && !draft.trip.checkOutDate && shape.reasons.endDate) {
+    missingRequired.push(shape.reasons.endDate)
   }
   if (!draft.guests.adults || draft.guests.adults < 1) missingRequired.push(REVIEW_REASON.adults)
-  if (!draft.guests.suites || draft.guests.suites < 1) {
-    missingRequired.push(stay ? REVIEW_REASON.rooms : REVIEW_REASON.suites)
+  if (shape.unitCount && shape.reasons.unitCount && (!draft.guests.suites || draft.guests.suites < 1)) {
+    missingRequired.push(shape.reasons.unitCount)
   }
 
   // Suite type is reported but NOT required: an enquiry saves with it blank rather than being
@@ -1183,27 +1213,45 @@ export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions
   }
 }
 
+/**
+ * Progress for the review modal's "x / y required" badge.
+ *
+ * The total is derived rather than fixed: a train and a stay both ask nine questions, but a
+ * transfer states no unit count and no end date, so demanding nine of it would leave the badge
+ * permanently short and the consultant hunting for fields that are not on the form.
+ */
 export function countRequiredComplete(
   draft: ParsedDraft,
   options?: ValidateDraftOptions,
 ): { completed: number; total: number } {
-  let completed = 0
-  const total = REQUIRED_FIELDS.length
+  const shape = requiredShapeFields(draft)
 
+  // The five every enquiry states, whatever it is for.
+  let completed = 0
+  let total = 5
   if (draft.customer.firstName) completed++
   if (draft.customer.surname) completed++
   if (draft.customer.email || draft.customer.phone) completed++
   if (draft.customer.country) completed++
   if (hasSupplier(draft, options)) completed++
-  if (isStayDraft(draft)) {
-    if (draft.trip.departureDate) completed++
-    if (draft.trip.checkOutDate) completed++
-  } else {
+
+  if (shape.route) {
+    total++
     if (draft.trip.route) completed++
-    if (draft.trip.departureDate) completed++
   }
+  total++
+  if (draft.trip.departureDate) completed++
+  if (shape.endDate) {
+    total++
+    if (draft.trip.checkOutDate) completed++
+  }
+
+  total++
   if (draft.guests.adults > 0) completed++
-  if (draft.guests.suites > 0) completed++
-  
+  if (shape.unitCount) {
+    total++
+    if (draft.guests.suites > 0) completed++
+  }
+
   return { completed, total }
 }

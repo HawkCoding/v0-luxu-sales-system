@@ -66,6 +66,35 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).not.toContain("Stay:</strong>")
   })
 
+  /**
+   * With the booking's own product known, the label stops being inferred from the blocks. A stay
+   * with an airport transfer is still a stay -- the pickup does not promote it to a journey.
+   */
+  it("names the trip after the booking's primary product when one is known", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks,
+      primarySupplierKind: "hotel_property",
+    })
+    expect(html).toContain("Stay:</strong>")
+    expect(html).not.toContain("Journey:</strong>")
+  })
+
+  it("calls a cruise sold under tours a tour", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks,
+      primarySupplierKind: "tour_operator",
+    })
+    expect(html).toContain("Tour:</strong>")
+  })
+
+  it("falls back to the block-shape rule when no product is passed", () => {
+    expect(buildQuoteSummaryBlock({ ...base, itineraryBlocks, primarySupplierKind: null })).toContain(
+      "Journey:</strong>",
+    )
+  })
+
   it("omits the quote number and quote date while the reference is hidden", () => {
     // Salespeople never reference either, so they are noise to the customer.
     // QUOTE_REFERENCE_ENABLED is false; flipping it restores both lines.

@@ -71,6 +71,12 @@ class FakeQuery {
     return this
   }
 
+  neq(column: string, value: unknown): FakeQuery {
+    this.filters[`${column}!neq`] = value
+    this.operation.filters = this.filters
+    return this
+  }
+
   in(column: string, value: unknown): FakeQuery {
     this.filters[column] = value
     this.operation.filters = this.filters

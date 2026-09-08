@@ -1762,6 +1762,59 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.itinerary).toBe("Kimberley Day Tour")
   })
 
+  it("spans a multi-day tour off its own nights, giving it an arrival date (F-P3-4)", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-tour",
+            selected: true,
+            supplier_id: "supplier-tour",
+            route_id: "route-tour",
+            suite_type_id: null,
+            service_date: "2026-11-20",
+            nights: 3,
+            notes: null,
+            sort_order: 0, label: "4-Day Kruger Safari",
+            suppliers: supplier({ kind: "tour_operator", name: "Sabi Wilderness Journeys" }),
+            routes: { name: "Kruger Itinerary", duration_days: null },
+            suite_types: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.departureDate).toBe("2026-11-20")
+    expect(blocks[0].serviceData.arrivalDate).toBe("2026-11-23")
+  })
+
+  it("leaves a hotel with unset nights without an arrival date, not a route duration", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-hotel",
+            selected: true,
+            supplier_id: "supplier-hotel",
+            route_id: null,
+            suite_type_id: "suite-1",
+            service_date: "2026-11-18",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "Stay",
+            suppliers: supplier({ kind: "hotel_property", name: "Ivory Manor Boutique Hotel" }),
+            routes: null,
+            suite_types: { name: "Deluxe Room" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.arrivalDate).toBeNull()
+  })
+
   it("leaves a tour leg's suite type name untouched — no noun appended for non-train/hotel kinds", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({

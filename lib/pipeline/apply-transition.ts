@@ -193,6 +193,23 @@ export async function applyTransition(
     })
   }
 
+  // Only the winning quote was ever closed out. Any sibling still sitting at 'sent' -- an older
+  // version, or a second option the customer didn't take -- stayed 'sent' for the life of the
+  // booking, so the quote follow-up worker re-read and re-skipped it once a day forever, and it
+  // kept showing as live in quote lists and reporting. Runs whenever `accepted` is crossed, not
+  // only when the winner flipped just now: a booking whose winner was already accepted can still
+  // carry stale siblings.
+  if (crossedStages.includes("accepted") && latestQuote) {
+    const { error: supersedeError } = await supabase
+      .from("quotes")
+      .update({ status: "superseded", updated_at: nowIso })
+      .eq("booking_id", input.booking.id)
+      .eq("status", "sent")
+      .neq("id", latestQuote.id)
+
+    if (supersedeError) throw new Error(supersedeError.message)
+  }
+
   if (crossedStages.includes("final_paid")) {
     // The gate above (final_payment_confirmation) already refuses this crossing while a real
     // balance remains, unless a manager overrides it -- so this call is what actually derives

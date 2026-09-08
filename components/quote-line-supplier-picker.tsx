@@ -54,6 +54,7 @@ const DEFAULT_KINDS: SupplierKind[] = [
   "tour_operator",
   "train_operator",
   "airline",
+  "cruise_line",
 ]
 
 function routeLabelFor(kind: SupplierKind): string {
@@ -66,7 +67,7 @@ function routeLabelFor(kind: SupplierKind): string {
 function suiteLabelFor(kind: SupplierKind): string {
   if (kind === "hotel_property") return "Room type"
   if (kind === "transfers" || kind === "vehicle_rental") return "Vehicle type"
-  if (kind === "airline") return "Cabin"
+  if (kind === "airline" || kind === "cruise_line") return "Cabin"
   return "Type"
 }
 

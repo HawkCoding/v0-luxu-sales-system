@@ -7,6 +7,7 @@ import { loadAllowedSuiteVariantIds, findInvalidVariantField } from "@/lib/packa
 import { computeLegPassengerTotals } from "@/lib/packages/passenger-totals"
 import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
 import { learnSuiteAliasesFromUnits } from "@/lib/suites/learn-from-units"
+import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
 
@@ -312,7 +313,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, no_of_adults, no_of_children, child_ages, primary_supplier_id")
+    .select(
+      "id, no_of_adults, no_of_children, child_ages, primary_supplier_id, email_import_needs_review, email_import_missing_fields",
+    )
     .eq("id", id)
     .maybeSingle()
 
@@ -770,6 +773,41 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   if (!parsed.data.deferTripDateRecompute) {
     const recompute = await recomputeBookingTripDates(supabase, id)
     if (recompute.error) return jsonError(recompute.error, 500)
+  }
+
+  // F-P3-1: the flag intake sets for an unresolved suite/tour type is source-agnostic (see
+  // app/api/enquiries/route.ts) but nothing ever recomputed it once the consultant picked one on
+  // the job -- a manual enquiry stayed "needs review" forever. Clear the "Suite type" reason (and
+  // the flag itself, if nothing else is outstanding) the moment every selected unit has a type.
+  if (booking.email_import_needs_review) {
+    const { data: unitRowsForReview, error: unitRowsError } = await supabase
+      .from("booking_services")
+      .select("id, booking_service_units(suite_type_id)")
+      .eq("booking_id", id)
+      .eq("selected", true)
+
+    if (unitRowsError) return safeSupabaseError("services:load-units-for-review", unitRowsError)
+
+    const hasUnresolvedSuites = (unitRowsForReview ?? []).some((service) =>
+      (service.booking_service_units ?? []).some((unit) => !unit.suite_type_id),
+    )
+    const nextMissingFields = withSuiteTypeMissingField(
+      booking.email_import_missing_fields ?? [],
+      hasUnresolvedSuites,
+    )
+    if (nextMissingFields.length !== (booking.email_import_missing_fields ?? []).length) {
+      const { error: reviewUpdateError } = await supabase
+        .from("bookings")
+        .update({
+          email_import_missing_fields: nextMissingFields,
+          email_import_needs_review: nextMissingFields.length > 0,
+          ...(nextMissingFields.length === 0
+            ? { email_import_review_resolved_at: new Date().toISOString(), email_import_review_resolved_by: user.id }
+            : {}),
+        })
+        .eq("id", id)
+      if (reviewUpdateError) return safeSupabaseError("services:clear-review", reviewUpdateError)
+    }
   }
 
   await writeAuditLog(supabase, {

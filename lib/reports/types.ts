@@ -15,16 +15,22 @@ export interface BookingInputRow {
   assigned_salesperson_id: string | null
   route_id: string | null
   /**
+   * The supplier this booking is headed by, whatever its kind — a train operator, a standalone
+   * property, a cruise line filed under tour operators. Null on bookings predating the column,
+   * which fall back to the route lookup.
+   */
+  primary_supplier_id?: string | null
+  /**
    * Resolved owner display name (from assigned_salesperson_id → profiles).
    * Populated by the report routes before the pure report functions run so
    * ownership reflects reassignments rather than the legacy `consultant` code.
    */
   owner_name?: string | null
   /**
-   * Train operator actually booked, resolved via route → supplier by the report
-   * routes before the pure report functions run. The booking number carries no
-   * product information, so this is the only trustworthy source: it follows the
-   * package the salesperson actually priced.
+   * Product actually booked, resolved by the report routes before the pure report functions run:
+   * primary_supplier_id first, then route → supplier for older bookings. The booking number carries
+   * no product information, so this is the only trustworthy source — it follows what the
+   * salesperson actually priced.
    */
   product_supplier_id?: string | null
   product_supplier_name?: string | null

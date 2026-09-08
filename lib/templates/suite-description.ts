@@ -26,6 +26,7 @@ const KIND_PRIORITY: SupplierKind[] = [
   "hotel_property",
   "airline",
   "tour_operator",
+  "cruise_line",
   "vehicle_rental",
   "transfers",
 ]
@@ -41,6 +42,7 @@ const SUITE_NOUN: Record<SupplierKind, string> = {
   hotel_property: "Room",
   airline: "Cabin",
   tour_operator: "Tour",
+  cruise_line: "Cabin",
   vehicle_rental: "Vehicle",
   transfers: "Vehicle",
 }
@@ -179,8 +181,19 @@ function describeConfiguration(selection: SuiteSelection): string {
  * kind, and are returned untouched when nothing else is present so those older
  * quotes keep rendering exactly as they did.
  */
-export function pickAccommodationSelections(selections: SuiteSelection[]): SuiteSelection[] {
-  for (const kind of KIND_PRIORITY) {
+export function pickAccommodationSelections(
+  selections: SuiteSelection[],
+  primarySupplierKind?: SupplierKind | null,
+): SuiteSelection[] {
+  // The booking's own product outranks the fixed list. Without this a tour-primary booking with a
+  // hotel night rendered the hotel's room as {{suiteType}}, because hotels rank above tours. No
+  // effect on a train- or hotel-primary booking: a train already ranks first, and a hotel-primary
+  // booking has no train leg to lose to.
+  const priority = primarySupplierKind
+    ? [primarySupplierKind, ...KIND_PRIORITY.filter((kind) => kind !== primarySupplierKind)]
+    : KIND_PRIORITY
+
+  for (const kind of priority) {
     const matches = selections.filter((selection) => selection.supplierKind === kind)
     if (matches.length > 0) return matches
   }
@@ -194,9 +207,12 @@ export function pickAccommodationSelections(selections: SuiteSelection[]): Suite
  * selection list yields empty strings so a send degrades to a missing line
  * rather than failing.
  */
-export function buildSuiteTokens(selections: SuiteSelection[]): SuiteTokens {
+export function buildSuiteTokens(
+  selections: SuiteSelection[],
+  primarySupplierKind?: SupplierKind | null,
+): SuiteTokens {
   const named = selections.filter((selection) => clean(selection.suiteTypeName).length > 0)
-  const usable = pickAccommodationSelections(named)
+  const usable = pickAccommodationSelections(named, primarySupplierKind)
   if (usable.length === 0) return { ...EMPTY_TOKENS }
 
   return {

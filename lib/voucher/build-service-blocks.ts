@@ -10,8 +10,8 @@ import { voucherServiceTypeLabel } from "@/lib/generate-voucher"
 import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
 import { getHotelDefaultTimes, type HotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
 import type { Database } from "@/lib/supabase/types"
-import type { SupplierKind } from "@/lib/types"
-import { resolveDirectedArrivalName, resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { legStatesOwnSpan, type SupplierKind } from "@/lib/types"
+import { displayRouteName, resolveDirectedArrivalName, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { resolveRouteSchedule, toHoursMinutes } from "@/lib/routes/route-schedule"
 import { formatSuitePhrase, type SuiteSelection } from "@/lib/templates/suite-description"
 import { firstRecord } from "@/lib/utils"
@@ -494,7 +494,9 @@ export function resolveVoucherRouteName(
   if (!route) return null
   const origin = firstRecord(route.origin)?.name
   const destination = firstRecord(route.destination)?.name
-  if (route.direction_mode !== "round_trip" || !origin || !destination) return route.name
+  // displayRouteName drops a tour operator's itinerary, whose stored "name" is its own id and
+  // would otherwise print verbatim on the voucher's Itinerary row.
+  if (route.direction_mode !== "round_trip" || !origin || !destination) return displayRouteName(route.name)
   return resolveDirectedRouteName(origin, destination, reversed)
 }
 
@@ -864,13 +866,19 @@ export async function buildVoucherServiceBlocks(
     }
 
     const serviceDate = row.service_date ?? null
-    const nights = isHotel ? (row.nights && row.nights > 0 ? row.nights : null) : null
+    // A stay and a multi-day tour both state their own length on the leg (legStatesOwnSpan) rather
+    // than deriving it from a route duration — neither kind's route carries one. Only the hotel
+    // surfaces it as a printed "Nights" row (service-block-rows.ts); a tour's span dates the block
+    // without being shown as a count.
+    const ownSpanNights =
+      legStatesOwnSpan(supplier?.kind ?? null) && row.nights && row.nights > 0 ? row.nights : null
+    const nights = isHotel ? ownSpanNights : null
     const durationDays = route?.duration_days ?? null
 
     let arrivalDate: string | null = null
     if (serviceDate) {
-      if (isHotel) {
-        if (nights) arrivalDate = addDays(serviceDate, nights)
+      if (legStatesOwnSpan(supplier?.kind ?? null)) {
+        if (ownSpanNights) arrivalDate = addDays(serviceDate, ownSpanNights)
       } else if (durationDays && durationDays > 0) {
         // A 1-day route arrives on its departure day — still a real arrival date, so it must
         // print. Only an unconfigured duration leaves this null, where the voucher's "TBC" is

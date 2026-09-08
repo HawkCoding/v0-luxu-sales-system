@@ -202,6 +202,48 @@ describe("POST /api/templates", () => {
     expect(res.status).toBe(400)
   })
 
+  it("creates a per-kind variant with the parent's system key and no supplier_id", async () => {
+    const built = buildCreateAuth()
+    authMocks.requireAnyRole.mockResolvedValue(built.context)
+    const req = new Request("http://localhost/api/templates", {
+      method: "POST",
+      body: JSON.stringify({
+        key: "quote_email",
+        supplierKind: "hotel_property",
+        name: "Quote Email — Hotel",
+        subject: "Subject",
+        bodyHtml: "<p>Body</p>",
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(built.insertedRows[0]).toMatchObject({
+      key: "quote_email",
+      supplier_id: null,
+      supplier_kind: "hotel_property",
+      is_system: false,
+    })
+  })
+
+  it("rejects a variant naming both supplierId and supplierKind", async () => {
+    authMocks.requireAnyRole.mockResolvedValue(buildCreateAuth().context)
+    const req = new Request("http://localhost/api/templates", {
+      method: "POST",
+      body: JSON.stringify({
+        key: "quote_email",
+        supplierId: SUPPLIER_ID,
+        supplierKind: "hotel_property",
+        name: "Both",
+        subject: "Subject",
+        bodyHtml: "<p/>",
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(400)
+  })
+
   it("returns 409 when a variant already exists for that key and train", async () => {
     const built = buildCreateAuth({ insertError: { code: "23505" } })
     authMocks.requireAnyRole.mockResolvedValue(built.context)

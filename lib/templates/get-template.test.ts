@@ -9,12 +9,17 @@ interface TemplateRow {
   subject: string
   body_html: string
   supplier_id: string | null
+  supplier_kind?: string | null
   active: boolean
 }
 
 // Minimal fluent stand-in for the supabase chain getTemplate builds: any number of
 // .eq()/.is() calls narrow the candidate rows, then .maybeSingle() resolves.
-function makeSupabase(rows: TemplateRow[]) {
+function makeSupabase(rawRows: TemplateRow[]) {
+  // Normalises an omitted supplier_kind to null, the same default a real DB column with no value
+  // given gets, so a row literal written before the per-kind layer existed keeps matching the
+  // ".is('supplier_kind', null)" step of the fallback chain without every test needing the field.
+  const rows = rawRows.map((row) => ({ supplier_kind: null, ...row }))
   return {
     from(table: string) {
       if (table !== "templates") throw new Error(`Unexpected table: ${table}`)
@@ -109,6 +114,89 @@ describe("getTemplate — supplier variants", () => {
     const supabase = makeSupabase([])
     const result = await getTemplate(supabase as never, "not_a_real_key", SUPPLIER_ID)
     expect(result).toBeNull()
+  })
+})
+
+describe("getTemplate — per-kind variants", () => {
+  it("resolves the (key, supplierKind) variant when no supplier-specific row matches", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+      {
+        key: "quote_email",
+        subject: "Hotel subject",
+        body_html: "<p>Hotel</p>",
+        supplier_id: null,
+        supplier_kind: "hotel_property",
+        active: true,
+      },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email", null, "hotel_property")
+    expect(result).toEqual({ key: "quote_email", subject: "Hotel subject", bodyHtml: "<p>Hotel</p>" })
+  })
+
+  it("prefers a specific supplier's own variant over its kind's variant", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+      {
+        key: "quote_email",
+        subject: "Hotel subject",
+        body_html: "<p>Hotel</p>",
+        supplier_id: null,
+        supplier_kind: "hotel_property",
+        active: true,
+      },
+      {
+        key: "quote_email",
+        subject: "Shalati subject",
+        body_html: "<p>Shalati</p>",
+        supplier_id: SUPPLIER_ID,
+        active: true,
+      },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email", SUPPLIER_ID, "hotel_property")
+    expect(result).toEqual({ key: "quote_email", subject: "Shalati subject", bodyHtml: "<p>Shalati</p>" })
+  })
+
+  it("falls back to the shared row when the supplier has no variant and the kind variant is inactive", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+      {
+        key: "quote_email",
+        subject: "Hotel subject",
+        body_html: "<p>Hotel</p>",
+        supplier_id: null,
+        supplier_kind: "hotel_property",
+        active: false,
+      },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email", SUPPLIER_ID, "hotel_property")
+    expect(result).toEqual({ key: "quote_email", subject: "Shared subject", bodyHtml: "<p>Shared</p>" })
+  })
+
+  it("falls back past a kind variant of a different kind", async () => {
+    const supabase = makeSupabase([
+      { key: "quote_email", subject: "Shared subject", body_html: "<p>Shared</p>", supplier_id: null, active: true },
+      {
+        key: "quote_email",
+        subject: "Hotel subject",
+        body_html: "<p>Hotel</p>",
+        supplier_id: null,
+        supplier_kind: "hotel_property",
+        active: true,
+      },
+    ])
+    const result = await getTemplate(supabase as never, "quote_email", null, "tour_operator")
+    expect(result).toEqual({ key: "quote_email", subject: "Shared subject", bodyHtml: "<p>Shared</p>" })
+  })
+
+  it("falls back to the code-level default when neither hint matches anything", async () => {
+    const supabase = makeSupabase([])
+    const result = await getTemplate(supabase as never, "quote_email", SUPPLIER_ID, "cruise_line")
+    expect(result).toEqual({
+      key: "quote_email",
+      subject: DEFAULT_TEMPLATES.quote_email.subject,
+      bodyHtml: DEFAULT_TEMPLATES.quote_email.bodyHtml,
+    })
   })
 })
 

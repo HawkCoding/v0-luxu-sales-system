@@ -8,7 +8,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import type { PricingSnapshot } from "@/lib/types"
+import { getSupplierVocabulary, type PricingSnapshot, type SupplierKind } from "@/lib/types"
 import { formatDisplayDateLong, formatDisplayDateShort } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { firstRecord } from "@/lib/utils"
@@ -37,9 +37,10 @@ import {
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
-import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
+import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
 import { getPaymentMethod } from "@/lib/payment-methods"
 import { getDocumentTextSettings } from "@/lib/settings-access"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import {
   loadQuoteConfig,
   loadQuoteDisplayTokens,
@@ -55,6 +56,10 @@ export interface SharedEmailTokens {
    * through as composeEmail's templateSupplierId so every system email, not just the quote email,
    * can carry a per-supplier variant. Null when nothing could be resolved. */
   primarySupplierId: string | null
+  /** That supplier's kind -- pass straight through as composeEmail's templateSupplierKind for the
+   * per-kind template layer (a hotel_property quote_email every stay uses unless its own supplier
+   * overrides it). Null exactly when primarySupplierId is null. */
+  primarySupplierKind: SupplierKind | null
 }
 
 function orPlaceholder(value: string | null | undefined): string {
@@ -280,7 +285,9 @@ export async function resolveSharedEmailTokens(
     children: booking?.no_of_children ?? 0,
   })
 
-  const suiteTokens = buildSuiteTokens(suiteSelections)
+  // Resolved after the quote block below sets primarySupplierKind, so {{suiteType}} names what the
+  // booking is actually for rather than whichever leg the fixed kind ranking prefers.
+  let suiteTokens = buildSuiteTokens(suiteSelections)
 
   const lastQuoteSentAt = latestByCreatedAt(
     (correspondences ?? [])
@@ -307,6 +314,7 @@ export async function resolveSharedEmailTokens(
   // resolveSharedEmailTokens' return) can never name two different suppliers. Falls back to the
   // booking's own primary_supplier_id pre-quote (reservation/follow-up sends).
   let primarySupplierId: string | null = booking?.primary_supplier_id ?? null
+  let primarySupplierKind: SupplierKind | null = null
   if (latestQuote) {
     try {
       const { data: lineItems } = await supabase
@@ -343,8 +351,22 @@ export async function resolveSharedEmailTokens(
         inclusionFilter: { journeyClass: quoteConfig.journeyClass, rateAudience: quoteConfig.rateAudience },
       })
 
-      const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
-      trainDepartureDate = deriveTrainDepartureFromBlocks(itineraryBlocks)
+      // The primary product's kind decides both which leg dates the trip and what the summary line
+      // calls it. Without it {{departureDate}} silently fell back to the enquiry-time booking date
+      // on anything that is not a train.
+      primarySupplierKind = await loadSupplierKind(supabase, primarySupplierId)
+      suiteTokens = buildSuiteTokens(suiteSelections, primarySupplierKind)
+
+      // Narrowed to the primary product's own legs where it has any (F-P3-4), so a tour's dates
+      // aren't stretched by an add-on hotel or transfer.
+      const journey = deriveJourneyFromBlocks(
+        itineraryBlocks,
+        mapSupplierKindToServiceType(primarySupplierKind),
+      ) ?? { start: null, end: null }
+      trainDepartureDate = deriveTrainDepartureFromBlocks(
+        itineraryBlocks,
+        mapSupplierKindToServiceType(primarySupplierKind),
+      )
       const documentText = await getDocumentTextSettings(supabase)
 
       quoteSummaryTable = buildQuoteSummaryBlock({
@@ -358,6 +380,7 @@ export async function resolveSharedEmailTokens(
         total: latestQuote.total ?? 0,
         currency: quoteCurrency,
         itineraryBlocks,
+        primarySupplierKind,
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,
@@ -445,6 +468,10 @@ export async function resolveSharedEmailTokens(
     suiteType: orPlaceholder(suiteTokens.suiteType),
     suiteConfiguration: orPlaceholder(suiteTokens.suiteConfiguration),
     suiteDescription: orPlaceholder(suiteTokens.suiteDescription),
+    // F-P3-12: a rail template's "your selected suite" reached a tour client unchanged. Falls back
+    // to the rail vocabulary before primarySupplierKind resolves, same as primaryProductOf.
+    unitNoun: getSupplierVocabulary(primarySupplierKind ?? "train_operator").unitNoun,
+    unitNounPlural: getSupplierVocabulary(primarySupplierKind ?? "train_operator").unitNounPlural,
     roomType: orPlaceholder(roomTokens.suiteType),
     roomDescription: orPlaceholder(roomTokens.suiteDescription),
     propertyName: orPlaceholder(stay.propertyName),
@@ -497,5 +524,5 @@ export async function resolveSharedEmailTokens(
     trainOnlyNote: trainOnlyNote ?? "",
   }
 
-  return { tokens, blocks, primarySupplierId }
+  return { tokens, blocks, primarySupplierId, primarySupplierKind }
 }

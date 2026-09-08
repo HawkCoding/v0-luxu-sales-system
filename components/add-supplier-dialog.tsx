@@ -51,13 +51,15 @@ interface CreateSupplierFormState {
   location: string
   locationId: string | null
   notes: string
+  /** Whether this supplier can head a booking of its own -- see suppliers.sells_standalone. */
+  sellsStandalone: boolean
   /** Set when the user ticks "Linked": the sibling record whose contact details this one reuses. */
   parentSupplierId: string | null
 }
 
 type SupplierFormField = Exclude<
   keyof CreateSupplierFormState,
-  "notes" | "emails" | "parentSupplierId" | "locationId"
+  "notes" | "emails" | "parentSupplierId" | "locationId" | "sellsStandalone"
 >
 type SupplierFormErrors = Record<SupplierFormField | "emails", string | null>
 type SupplierFormTouched = Partial<Record<SupplierFormField, boolean>>
@@ -76,6 +78,7 @@ function getInitialFormState(): CreateSupplierFormState {
     location: "",
     locationId: null,
     notes: "",
+    sellsStandalone: false,
     parentSupplierId: null,
   }
 }
@@ -264,6 +267,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
           location: form.kind === "train_operator" ? form.location : "",
           locationId: form.kind === "train_operator" ? null : form.locationId,
           notes: form.notes,
+          sellsStandalone: form.sellsStandalone,
           parentSupplierId: linkedParent?.id ?? null,
         }),
       })
@@ -309,7 +313,13 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
             <Select
               value={form.kind || ""}
               onValueChange={(value: SupplierKind) =>
-                setForm((current) => ({ ...current, kind: value }))
+                // A train operator always heads its own bookings, so picking Train ticks the box;
+                // any other category starts as an add-on, and the user may tick it themselves.
+                setForm((current) => ({
+                  ...current,
+                  kind: value,
+                  sellsStandalone: value === "train_operator",
+                }))
               }
             >
               <SelectTrigger id="supplier-kind">
@@ -325,6 +335,28 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
             </Select>
             {touched.kind && errors.kind ? (
               <p className="text-xs text-destructive">{errors.kind}</p>
+            ) : null}
+
+            {/* Offered here as well as on the supplier page, so a main product can be marked as one
+                the moment it is added rather than saving and reopening the record. */}
+            {form.kind ? (
+              <div className="flex items-start gap-3 pt-1">
+                <Checkbox
+                  id="create-supplier-sells-standalone"
+                  checked={form.sellsStandalone}
+                  onCheckedChange={(checked) =>
+                    setForm((current) => ({ ...current, sellsStandalone: checked === true }))
+                  }
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="create-supplier-sells-standalone">Can be the main product</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Lets this supplier head a booking of its own: it appears in the New Enquiry
+                    supplier list, and enquiry emails naming it are imported against it. Leave off
+                    for suppliers that are only ever added to someone else&apos;s trip.
+                  </p>
+                </div>
+              </div>
             ) : null}
           </div>
 

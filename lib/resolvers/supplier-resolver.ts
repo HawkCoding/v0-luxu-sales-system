@@ -14,7 +14,7 @@ type ServiceClient = ReturnType<typeof createServiceClient>
  */
 async function resolveSupplierIdByKind(
   supabase: ServiceClient,
-  kind: "train_operator" | "hotel_property",
+  kind: SupplierKind,
   freeText: unknown,
 ): Promise<string | null> {
   if (typeof freeText !== "string" || !freeText.trim()) return null
@@ -36,7 +36,7 @@ export async function findHotelSupplierId(supabase: ServiceClient, hotelOption: 
   return resolveSupplierIdByKind(supabase, "hotel_property", hotelOption)
 }
 
-/** A booking's primary supplier: the train operator, or the hotel on a standalone hotel booking. */
+/** A booking's primary supplier -- the thing it was sold on, whatever kind of supplier that is. */
 export interface PrimarySupplier {
   id: string
   kind: SupplierKind

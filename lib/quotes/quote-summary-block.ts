@@ -10,6 +10,8 @@ import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
+import { primaryProductOf } from "@/lib/enquiry/primary-product"
+import type { SupplierKind } from "@/lib/types"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import {
   AGENT_COMMISSION_COLOR,
@@ -45,6 +47,15 @@ export interface QuoteSummaryInput {
   currency?: string
   /** Package itinerary; empty array omits the section entirely. */
   itineraryBlocks: VoucherServiceBlock[]
+  /** Kind of the booking's primary supplier, which names the trip on the summary line ("Journey",
+   *  "Stay", "Tour"). Omit when the caller has no booking: the label is then inferred from the
+   *  blocks, as it was before bookings.primary_supplier_id existed. */
+  primarySupplierKind?: SupplierKind | null
+  /** Settings-resolved override for that noun (see resolveProductCopy in settings-access.ts) --
+   *  wins over primarySupplierKind's own code-vocabulary noun when supplied, so a Kruger Shalati
+   *  quote can read "Getaway:" instead of "Stay:" without a code change. Omit to keep the
+   *  vocabulary noun, which is what every caller got before per-kind document copy existed. */
+  productBookingNoun?: string | null
   /** Heading for the itinerary section (document-text setting). */
   packageIncludesHeading?: string
   /** Heading for the exclusions section (document-text setting). */
@@ -97,13 +108,20 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const pax = { adults: input.adults, children: input.children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(input.journeyStart, input.journeyEnd)
-  // A standalone hotel booking (Kruger Shalati) is a stay, not a journey -- nothing in it
-  // travels anywhere. Any transport at all makes it a journey again.
+  // What the client is being sold, in a word: "Journey", "Stay", "Tour". Taken from the booking's
+  // own primary product when the caller knows it, so a stay with a transfer extra still reads
+  // "Stay" rather than being promoted to a journey by its airport pickup.
+  //
+  // The fallback -- every block is a hotel -- is what callers that hold no booking still use, and
+  // is exactly how this read before a primary product was recorded.
   const journeyLabel =
-    input.itineraryBlocks.length > 0 &&
-    input.itineraryBlocks.every((block) => block.serviceType === "hotel")
-      ? "Stay"
-      : "Journey"
+    input.productBookingNoun ??
+    (input.primarySupplierKind
+      ? primaryProductOf(input.primarySupplierKind).bookingNoun
+      : input.itineraryBlocks.length > 0 &&
+          input.itineraryBlocks.every((block) => block.serviceType === "hotel")
+        ? "Stay"
+        : "Journey")
   const agentCommission = input.agentCommission ?? 0
   const hasAgentCommission = agentCommission > 0
   // Per-person rate is always the gross rate — the discount is the agency's cut, not the

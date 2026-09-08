@@ -9,6 +9,7 @@ import {
   formatDisplayDateTime,
   formatTimeHHMM,
   normalizeDateOfBirth,
+  zonedDateTimeToIso,
 } from "./date-format"
 
 describe("formatDisplayDate", () => {
@@ -160,5 +161,23 @@ describe("formatDayOfMonth", () => {
 
   it("returns an empty string for null input", () => {
     expect(formatDayOfMonth(null)).toBe("")
+  })
+})
+
+describe("zonedDateTimeToIso", () => {
+  it("resolves a 00:00 SAST pickup to the previous day in UTC (F-P3-5)", () => {
+    expect(zonedDateTimeToIso("2026-11-18", "00:00")).toBe("2026-11-17T22:00:00.000Z")
+  })
+
+  it("round-trips through formatDateISO and formatTimeHHMM", () => {
+    const iso = zonedDateTimeToIso("2026-07-04", "13:45")
+    expect(formatDateISO(iso)).toBe("2026-07-04")
+    expect(formatTimeHHMM(iso)).toBe("13:45")
+  })
+
+  it("returns null for a malformed date or time", () => {
+    expect(zonedDateTimeToIso("2026-13-40", "09:00")).toBeNull()
+    expect(zonedDateTimeToIso("2026-07-04", "9:00")).toBeNull()
+    expect(zonedDateTimeToIso("2026-07-04", "25:00")).toBeNull()
   })
 })

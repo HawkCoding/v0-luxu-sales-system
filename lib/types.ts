@@ -237,6 +237,7 @@ export type SupplierKind =
   | "vehicle_rental"
   | "tour_operator"
   | "airline"
+  | "cruise_line"
 export type SupplierStatus = "draft" | "active" | "inactive" | "temporary"
 export type TransportRequestServiceType = "transfer" | "rental"
 export type TransportServiceType = TransportRequestServiceType
@@ -265,6 +266,47 @@ export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   vehicle_rental: "Vehicle Rental",
   tour_operator: "Tours",
   airline: "Airlines",
+  cruise_line: "Cruises",
+}
+
+/**
+ * Everything that changes when a supplier of this kind heads a booking of its own rather than
+ * hanging off someone else's trip.
+ *
+ * Required, never optional: a new SupplierKind cannot be added without answering every question
+ * here, which is what makes ticking "Can be the main product" on a supplier a zero-code change.
+ * Before this existed the answers were spread across a dozen `kind === "hotel_property"` branches,
+ * so a cruise line filed under tour_operator was asked for a check-in date.
+ */
+export interface SupplierPrimaryProduct {
+  /** What the whole booking is called on client-facing documents ("Journey:", "Stay:"). */
+  bookingNoun: string
+  /** Enquiry intake: label on the trip's start-date field. Title Case — these are rendered labels. */
+  startDateLabel: string
+  /** Enquiry intake: label on the end-date field, or null when this kind states no end date and
+   *  its length comes from the route or the type instead. */
+  endDateLabel: string | null
+  /** Appended after "N nights"/"N days" in the hint under the end-date field. Null when the kind
+   *  captures no end date, or has nothing to add beyond the count. */
+  endDateHintSuffix: string | null
+  /** Shown under the end-date field when the range is not forward. Null when no end date. */
+  endDateInvalidHint: string | null
+  /** Enquiry intake: label on the free-text route field. Null exactly when `routeHasLocations` is
+   *  false — a kind whose "route" is a meal plan or an itinerary has no direction to state. */
+  routeFieldLabel: string | null
+  routeFieldPlaceholder: string | null
+  /** What the span between the two dates counts, and what bookings.duration_nights holds for this
+   *  kind. Null when intake captures no span. */
+  durationUnit: "nights" | "days" | null
+  /** Does the customer state a unit count at intake? False for the transport kinds, whose legs
+   *  carry booking_transport_requests rather than booking_service_units. */
+  capturesUnitCount: boolean
+  /** Can a booking headed by this kind hang an add-on hotel off it? False only for a hotel, which
+   *  already is one. */
+  capturesHotelOption: boolean
+  /** A leg of this kind cannot be priced without a route row chosen, because rate cards key off it.
+   *  A hotel's "route" is its meal plan, so an unset one prices off nothing. */
+  routeRequiredForPricing: boolean
 }
 
 export interface SupplierVocabulary {
@@ -292,7 +334,6 @@ export interface SupplierVocabulary {
   /** Whether the route name is auto-filled from origin/destination + direction while the name is empty; user edits always win. Train operators only. */
   routeNameAutoDerived: boolean
   showSingleSupplement: boolean
-  showDurationNights: boolean
   originLabel: string
   destinationLabel: string
   durationLabel: string
@@ -302,6 +343,8 @@ export interface SupplierVocabulary {
     timeStartLabel: string
     timeEndLabel: string
   }
+  /** How this kind behaves when it is the booking's primary product. */
+  primaryProduct: SupplierPrimaryProduct
 }
 
 const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
@@ -323,7 +366,6 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   routeHasSchedule: true,
   routeNameAutoDerived: true,
   showSingleSupplement: true,
-  showDurationNights: true,
   originLabel: "Origin",
   destinationLabel: "Destination",
   durationLabel: "nights",
@@ -332,6 +374,20 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
     dateToLabel: "Arrival date",
     timeStartLabel: "Departure time",
     timeEndLabel: "Arrival time",
+  },
+  primaryProduct: {
+    bookingNoun: "Journey",
+    startDateLabel: "Departure Date",
+    // A rail journey states no end date at intake -- its length comes from the route.
+    endDateLabel: null,
+    endDateHintSuffix: null,
+    endDateInvalidHint: null,
+    routeFieldLabel: "Route / Direction",
+    routeFieldPlaceholder: "e.g., Pretoria to Cape Town",
+    durationUnit: null,
+    capturesUnitCount: true,
+    capturesHotelOption: true,
+    routeRequiredForPricing: true,
   },
 }
 
@@ -357,7 +413,6 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
-    showDurationNights: false,
     originLabel: "Origin",
     destinationLabel: "Destination",
     durationLabel: "nights",
@@ -366,6 +421,21 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       dateToLabel: "Check-out date",
       timeStartLabel: "Check-in time",
       timeEndLabel: "Check-out time",
+    },
+    primaryProduct: {
+      bookingNoun: "Stay",
+      startDateLabel: "Check-in Date",
+      endDateLabel: "Check-out Date",
+      endDateHintSuffix: "- the stay is priced per room per night.",
+      endDateInvalidHint: "Check-out must fall after check-in.",
+      // A meal plan is not a direction, so a stay offers no route field at intake.
+      routeFieldLabel: null,
+      routeFieldPlaceholder: null,
+      durationUnit: "nights",
+      capturesUnitCount: true,
+      // A stay already is the hotel.
+      capturesHotelOption: false,
+      routeRequiredForPricing: true,
     },
   },
 
@@ -388,10 +458,30 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
-    showDurationNights: false,
     originLabel: "Pickup",
     destinationLabel: "Drop-off",
     durationLabel: "nights",
+    scheduleFields: {
+      dateFromLabel: "Transfer date",
+      dateToLabel: "Transfer date",
+      timeStartLabel: "Pickup time",
+      timeEndLabel: "Drop-off time",
+    },
+    primaryProduct: {
+      bookingNoun: "Transfer",
+      startDateLabel: "Transfer Date",
+      endDateLabel: null,
+      endDateHintSuffix: null,
+      endDateInvalidHint: null,
+      routeFieldLabel: "Pickup / Drop-off",
+      routeFieldPlaceholder: "e.g., O.R. Tambo to Sandton",
+      durationUnit: null,
+      // A transfer leg carries a booking_transport_request, not booking_service_units, so there is
+      // no unit count to state at intake -- vehicles are added in Build Booking.
+      capturesUnitCount: false,
+      capturesHotelOption: true,
+      routeRequiredForPricing: false,
+    },
   },
 
   vehicle_rental: {
@@ -413,7 +503,6 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
-    showDurationNights: false,
     originLabel: "Pickup point",
     destinationLabel: "Return point",
     durationLabel: "days",
@@ -422,6 +511,19 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       dateToLabel: "Return date",
       timeStartLabel: "Pickup time",
       timeEndLabel: "Return time",
+    },
+    primaryProduct: {
+      bookingNoun: "Rental",
+      startDateLabel: "Pickup Date",
+      endDateLabel: "Return Date",
+      endDateHintSuffix: "- the rental is priced per day.",
+      endDateInvalidHint: "Return must fall after pickup.",
+      routeFieldLabel: "Pickup / Return",
+      routeFieldPlaceholder: "e.g., Cape Town Airport to Cape Town Airport",
+      durationUnit: "days",
+      capturesUnitCount: false,
+      capturesHotelOption: true,
+      routeRequiredForPricing: false,
     },
   },
 
@@ -444,10 +546,33 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasSchedule: false,
     routeNameAutoDerived: true,
     showSingleSupplement: true,
-    showDurationNights: true,
     originLabel: "Origin",
     destinationLabel: "Destination",
     durationLabel: "days",
+    scheduleFields: {
+      dateFromLabel: "Tour date",
+      dateToLabel: "Tour end date",
+      timeStartLabel: "Start time",
+      timeEndLabel: "End time",
+    },
+    primaryProduct: {
+      bookingNoun: "Tour",
+      startDateLabel: "Tour Date",
+      // A multi-day tour -- a cruise is the driving example -- states its own end date. The span is
+      // counted in days rather than nights: the same arithmetic, the customer's word for it.
+      endDateLabel: "Tour End Date",
+      endDateHintSuffix: "- the tour is priced per person.",
+      endDateInvalidHint: "The end date must fall after the start date.",
+      // A tour's "route" is an itinerary with no origin or destination, so there is nothing to type.
+      routeFieldLabel: null,
+      routeFieldPlaceholder: null,
+      durationUnit: "days",
+      capturesUnitCount: true,
+      capturesHotelOption: true,
+      // Tours price off the type alone (isTypePricedSupplier), so a leg with no itinerary chosen
+      // still prices.
+      routeRequiredForPricing: false,
+    },
   },
 
   airline: {
@@ -469,10 +594,78 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: true,
-    showDurationNights: false,
     originLabel: "Origin",
     destinationLabel: "Destination",
     durationLabel: "nights",
+    scheduleFields: {
+      dateFromLabel: "Departure date",
+      dateToLabel: "Arrival date",
+      timeStartLabel: "Departure time",
+      timeEndLabel: "Arrival time",
+    },
+    primaryProduct: {
+      bookingNoun: "Flight",
+      startDateLabel: "Departure Date",
+      // A return flight is a second leg, not a duration -- the date is captured, the span is not.
+      endDateLabel: "Return Date",
+      endDateHintSuffix: null,
+      endDateInvalidHint: "Return must fall after departure.",
+      routeFieldLabel: "Route / Direction",
+      routeFieldPlaceholder: "e.g., Johannesburg to Cape Town",
+      durationUnit: null,
+      capturesUnitCount: true,
+      capturesHotelOption: true,
+      routeRequiredForPricing: false,
+    },
+  },
+
+  cruise_line: {
+    suiteType: "Cabin Type",
+    suiteTypePlural: "Cabin Types",
+    unitNoun: "cabin",
+    unitNounPlural: "cabins",
+    package: "Season",
+    packagePlural: "Seasons",
+    route: "Itinerary",
+    routePlural: "Itineraries",
+    sectionTitle: "Cabin Types, Itineraries and Rates",
+    sectionDescription:
+      "Manage the cabin types this cruise line offers, itineraries, and per-person pricing.",
+    priceLabel: "per person sharing",
+    routeHasLocations: false,
+    routeHasDirection: false,
+    routeHasDuration: false,
+    routeHasSchedule: false,
+    routeNameAutoDerived: true,
+    showSingleSupplement: true,
+    originLabel: "Origin",
+    destinationLabel: "Destination",
+    durationLabel: "nights",
+    scheduleFields: {
+      dateFromLabel: "Sailing date",
+      dateToLabel: "Return date",
+      timeStartLabel: "Sailing time",
+      timeEndLabel: "Arrival time",
+    },
+    primaryProduct: {
+      bookingNoun: "Voyage",
+      startDateLabel: "Sailing Date",
+      // A multi-night cruise states its own return date, the same shape as a tour's end date --
+      // priced per person by cabin type, not by a route. Counted in nights (the travel-industry
+      // word for a cruise), unlike a tour's days.
+      endDateLabel: "Return Date",
+      endDateHintSuffix: "- the voyage is priced per person.",
+      endDateInvalidHint: "The return date must fall after the sailing date.",
+      // A cruise's "route" is an itinerary with no origin or destination, so there is nothing to type.
+      routeFieldLabel: null,
+      routeFieldPlaceholder: null,
+      durationUnit: "nights",
+      capturesUnitCount: true,
+      capturesHotelOption: true,
+      // Cruises price off the cabin type alone (isTypePricedSupplier), so a leg with no itinerary
+      // chosen still prices.
+      routeRequiredForPricing: false,
+    },
   },
 }
 
@@ -482,6 +675,18 @@ export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
 
 export function isTransportSupplier(kind: SupplierKind): boolean {
   return kind === "transfers" || kind === "vehicle_rental"
+}
+
+/**
+ * Kinds whose leg states its own length on `booking_services.nights` rather than deriving it from
+ * a route's `duration_days` — a stay's nights and a tour's day count are the same N-night interval
+ * stored the same way, only counted in different words (see `SupplierPrimaryProduct.durationUnit`).
+ * Neither kind's route carries a duration (`routeHasDuration: false` on both), so there is nothing
+ * else to derive it from. Rentals also count in days but are dated by their transport request's
+ * pickup/return, never by a `booking_services` row, so they never reach this check at all.
+ */
+export function legStatesOwnSpan(kind: SupplierKind | string | null | undefined): boolean {
+  return kind === "hotel_property" || kind === "tour_operator" || kind === "cruise_line"
 }
 
 /**
@@ -513,12 +718,13 @@ export function resolveSupplierPriceLabel(
 
 /**
  * True for suppliers whose price hangs off the type alone (a tour operator sells a tour type at one
- * price, whatever itinerary it is described by), so their rate cards carry no route and their
- * routes are descriptive instead: one itinerary belongs to one tour type and holds its own copy.
- * Every other kind prices route x type, where the route genuinely changes the fare.
+ * price, whatever itinerary it is described by; a cruise line prices its cabin type the same way),
+ * so their rate cards carry no route and their routes are descriptive instead: one itinerary
+ * belongs to one type and holds its own copy. Every other kind prices route x type, where the
+ * route genuinely changes the fare.
  */
 export function isTypePricedSupplier(kind: SupplierKind): boolean {
-  return kind === "tour_operator"
+  return kind === "tour_operator" || kind === "cruise_line"
 }
 
 /**
@@ -814,6 +1020,14 @@ export interface PricingSnapshot {
   manualTourPriceSetByName?: string | null
   /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
   unit?: string | null
+  /** Hotel per-person legs only: how the line's qty was arrived at. The qty on such a line is
+   *  person-nights (occupants × charged nights), which reads as a headcount next to a "per person
+   *  per night" basis — two guests for one night and one guest for two both show as 2. Stamped so
+   *  the internal quote view can spell the multiplication out instead of leaving it ambiguous. */
+  occupantCount?: number | null
+  /** The nights `occupantCount` was multiplied by — the charged nights, so a gifted night is
+   *  already excluded (see complimentaryNights). */
+  chargedNights?: number | null
 }
 
 export interface SupplierPackage {
@@ -1391,9 +1605,14 @@ export interface Template {
   active: boolean
   isSystem: boolean
   sortOrder: number
-  /** Set only on a per-train variant of a system key (e.g. a Rovos-specific quote_email body) --
-   * null on every other template, including the shared/default row for that same key. */
+  /** Set only on a per-supplier variant of a system key (e.g. a Rovos-specific quote_email body) --
+   * null on every other template, including the shared/default row for that same key. Mutually
+   * exclusive with supplierKind. */
   supplierId: string | null
+  /** Set only on a per-kind variant of a system key (e.g. the hotel_property quote_email every
+   * stay uses unless its own supplier overrides it) -- null on every other template. Mutually
+   * exclusive with supplierId. */
+  supplierKind: SupplierKind | null
 }
 
 export interface Correspondence {

@@ -213,6 +213,7 @@ describe("SuiteLegEditor hotel date anchor", () => {
     // stayDates rather than recomputing its own from anchorContext.departureDate/durationDays.
     const chainedAnchorContext: HotelAnchorContext = {
       trainLabel: "The Blue Train",
+      anchorKind: "train_operator",
       departureDate: "2026-09-15",
       durationDays: null,
       stayDates: { checkIn: "2026-09-14", checkOut: "2026-09-15" },
@@ -234,6 +235,7 @@ describe("SuiteLegEditor hotel date anchor", () => {
   it("shows the unresolved-anchor fallback copy when the context has no stayDates yet", () => {
     const unresolvedAnchorContext: HotelAnchorContext = {
       trainLabel: "The Blue Train",
+      anchorKind: "train_operator",
       departureDate: null,
       durationDays: null,
       stayDates: null,
@@ -508,12 +510,12 @@ describe("SuiteLegEditor flight date anchor", () => {
     expect(screen.getByLabelText(/departure date/i)).toBeInTheDocument()
   })
 
-  it("disables pre/post when there's no leg above to anchor to", () => {
+  it("disables pre/post when there's no primary leg to anchor to", () => {
     render(<SuiteLegEditor leg={airlineLeg} value={makeAirlineState()} onChange={vi.fn()} />)
 
     expect(screen.getByRole("button", { name: "Pre" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Post" })).toBeDisabled()
-    expect(screen.getByText(/nothing above this flight has a date to anchor to/i)).toBeInTheDocument()
+    expect(screen.getByText(/this package has no primary leg to anchor to/i)).toBeInTheDocument()
   })
 
   it("shows the resolved departure date instead of a picker once anchored, given context", () => {
@@ -527,26 +529,10 @@ describe("SuiteLegEditor flight date anchor", () => {
     )
 
     expect(screen.queryByLabelText(/^departure date$/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/end of table bay hotel/i)).toBeInTheDocument()
-  })
-
-  it("names the anchor leg in the option itself and warns when it isn't the primary product", () => {
-    render(
-      <SuiteLegEditor
-        leg={airlineLeg}
-        value={makeAirlineState({ dateAnchor: "post" })}
-        onChange={vi.fn()}
-        flightAnchorContext={flightAnchorContext}
-      />,
-    )
-
-    // F-P1-4: bare "Pre"/"Post" read as anchored to the primary leg -- once the anchor resolves,
-    // the option itself names what it actually resolved to.
-    expect(screen.getByRole("button", { name: "Before Table Bay Hotel" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "After Table Bay Hotel" })).toBeInTheDocument()
-    expect(
-      screen.getByText(/anchored to table bay hotel, not the booking's main product/i),
-    ).toBeInTheDocument()
+    // "Table Bay Hotel" in flightAnchorContext is now the trip's own edge (see
+    // lib/packages/flight-dates.ts), not necessarily the leg directly above -- the editor renders
+    // it as "the trip" rather than repeating a leg name that may not be what actually drove the date.
+    expect(screen.getByText(/end of the trip/i)).toBeInTheDocument()
   })
 
   it("setting the anchor updates dateAnchor without touching other flight fields", () => {
@@ -560,7 +546,7 @@ describe("SuiteLegEditor flight date anchor", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Before Table Bay Hotel" }))
+    fireEvent.click(screen.getByRole("button", { name: "Pre" }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dateAnchor: "pre" }))
   })
 })

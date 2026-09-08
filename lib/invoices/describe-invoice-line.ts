@@ -1,3 +1,4 @@
+import { displayRouteName } from "@/lib/routes/route-name"
 import type { PricingSnapshot } from "@/lib/types"
 
 /**
@@ -20,8 +21,10 @@ export function describeInvoiceLine(
   // tour line is descriptive copy shared by every tour on the leg, so two different tours would
   // otherwise render identically. Falls back to routeName only for snapshots stamped before the
   // tour type was captured here.
+  // displayRouteName also guards the fallback: snapshots stamped between the itinerary-name
+  // retirement and this fix carry the itinerary's id as routeName, which must never render.
   const isTour = snapshot?.supplierKind === "tour_operator"
-  const detail = (isTour ? snapshot?.suiteTypeName?.trim() : null) || snapshot?.routeName?.trim() || null
+  const detail = (isTour ? snapshot?.suiteTypeName?.trim() : null) || displayRouteName(snapshot?.routeName)
 
   let base: string
   if (supplier) {

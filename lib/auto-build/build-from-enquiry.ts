@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import { isCoreBookingLeg, type SupplierKind } from "@/lib/types"
+import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_VOCABULARY, type SupplierKind } from "@/lib/types"
+import { primaryProductOf } from "@/lib/enquiry/primary-product"
 import { addDays } from "@/lib/packages/hotel-dates"
 import { seedUnitsForServices } from "@/lib/packages/seed-service-units"
 
@@ -106,11 +107,13 @@ export async function autoBuildBookingServices(
   if (existingError) return NOOP_RESULT(`Failed to check existing services: ${existingError.message}`)
   if ((existingServices ?? []).length > 0) return NOOP_RESULT("Booking already has services — left untouched")
 
-  const isStandaloneStay = input.primarySupplierKind === "hotel_property"
+  const primaryProduct = primaryProductOf(input.primarySupplierKind)
   // On a standalone stay the primary supplier already IS the hotel, so an add-on hotel id pointing
   // at the same row would build the same leg twice.
   const addOnHotelSupplierId =
-    isStandaloneStay || input.hotelSupplierId === input.primarySupplierId ? null : input.hotelSupplierId
+    !primaryProduct.capturesHotelOption || input.hotelSupplierId === input.primarySupplierId
+      ? null
+      : input.hotelSupplierId
 
   const supplierIds = [input.primarySupplierId, addOnHotelSupplierId].filter(
     (id): id is string => Boolean(id),
@@ -149,12 +152,20 @@ export async function autoBuildBookingServices(
 
   if (planned.length === 0) return { servicesCreated: 0, unitsCreated: 0, skipped }
 
-  // A standalone stay's meal plan decides whether its quote can be priced at all, so fill it when
-  // the supplier files exactly one. A journey's route came from intake's own route match.
-  const primaryRouteId = isStandaloneStay
+  // A kind that states no direction at intake has no route to have matched, so its route can only
+  // come from the supplier's own book -- fill it when there is exactly one to fill. That matters
+  // for a stay, whose meal plan decides whether the quote can be priced at all. A tour is
+  // deliberately excluded even though it also states no direction: it prices off the tour type
+  // alone (isTypePricedSupplier), and lib/quotes/build-from-package.ts already refuses to trust an
+  // itinerary that does not belong to the chosen type.
+  const resolvesRouteFromSupplier =
+    primaryProduct.routeFieldLabel === null &&
+    input.primarySupplierKind !== null &&
+    !isTypePricedSupplier(input.primarySupplierKind)
+  const primaryRouteId = resolvesRouteFromSupplier
     ? await resolveSoleRouteId(supabase, input.primarySupplierId)
     : input.routeId
-  if (isStandaloneStay && !primaryRouteId) {
+  if (resolvesRouteFromSupplier && !primaryRouteId) {
     skipped.push("Meal plan not set — this supplier files more than one, so it must be chosen in Build Booking")
   }
 
@@ -184,12 +195,24 @@ export async function autoBuildBookingServices(
       // (or, for a standalone stay, the supplier's sole meal plan). An add-on hotel leg has no
       // meal-plan signal an enquiry could have carried.
       route_id: isPrimaryLeg ? primaryRouteId : null,
-      route_reversed: isPrimaryLeg && service.kind === "train_operator" ? (input.routeReversed ?? false) : false,
+      // Only a kind whose route runs in a direction can be travelled in reverse.
+      route_reversed:
+        isPrimaryLeg && SUPPLIER_VOCABULARY[service.kind].routeHasDirection
+          ? (input.routeReversed ?? false)
+          : false,
       service_date: serviceDate,
       // The enquiry never states a night count for an add-on stay, so a single night is the
-      // conservative default. A standalone stay states its own length: check-out minus check-in.
-      nights: service.kind === "hotel_property" ? (isPrimaryLeg ? stayNights : HOTEL_AUTO_BUILD_NIGHTS) : null,
-      // A standalone stay has no train to anchor to, so its dates are its own -- see
+      // conservative default. A primary leg that captures a span states its own length: end minus
+      // start, in whatever unit that kind counts.
+      nights:
+        service.kind === "hotel_property"
+          ? isPrimaryLeg
+            ? stayNights
+            : HOTEL_AUTO_BUILD_NIGHTS
+          : isPrimaryLeg && primaryProduct.durationUnit
+            ? stayNights
+            : null,
+      // A booking's own primary leg has nothing to anchor to -- its dates are stated outright. See
       // lib/packages/hotel-dates.ts, which already returns null for an unanchorable stay.
       date_anchor: isAddOnHotelLeg ? null : service.kind === "hotel_property" ? "custom" : null,
       // Mirrors buildDefaultPackageSelections: only the core leg starts selected, every optional
@@ -214,7 +237,16 @@ export async function autoBuildBookingServices(
       supplier_id: row.supplier_id,
       kind: kindBySupplierId.get(row.supplier_id) ?? null,
     })),
-    { tripStartDate: input.departureDate, tripEndDate: null },
+    // A kind counting its span in days needs a real end date seeded, or a transport request gets no
+    // return_at and serviceDateSpan cannot work out how long it runs -- a vehicle rental would
+    // price for zero days.
+    {
+      tripStartDate: input.departureDate,
+      tripEndDate:
+        primaryProduct.durationUnit === "days" && input.departureDate && input.nights
+          ? addDays(input.departureDate, input.nights)
+          : null,
+    },
     "auto",
   )
   if (seedResult.error) skipped.push(`Services created, but seeding suite units failed: ${seedResult.error}`)

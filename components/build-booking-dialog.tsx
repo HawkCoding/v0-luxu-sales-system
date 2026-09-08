@@ -27,7 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
-import { SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
+import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
@@ -56,8 +56,10 @@ import {
   applyAnchoredDates,
   buildDefaultLegStates,
   hydrateFromSaved,
+  mergeLegStatesAfterRebuild,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   PASSENGER_SUM_SUPPLIER_KINDS,
+  toAirlineAnchorContext,
   toApplySelections,
   toHotelAnchorContext,
   toPackageSelectionsPatch,
@@ -101,13 +103,20 @@ interface QuotePatchResponse {
   updatedAt: string
 }
 
-interface ServiceRow {
+export interface ServiceRow {
   key: string
   legId?: string
   supplierId: string
   supplierKind: SupplierKind
   supplierName: string
 }
+
+/** The subset of a PackageLeg the helpers below actually need -- keeps their tests from having to
+ *  fabricate every rate-card/pricing field a full PackageLeg carries. */
+type ServiceRowSourceLeg = Pick<
+  PackageDetail["legs"][number],
+  "id" | "sortOrder" | "supplierId" | "supplierKind" | "supplierName"
+>
 
 /**
  * Step 1 renders nothing but a supplier name and kind per row, and GET /api/jobs/[id]/services now
@@ -134,6 +143,151 @@ function savedSelectionsToServiceRows(selections: readonly SavedSelectionRow[]):
       supplierKind: row.supplier_kind,
       supplierName: row.supplier_name as string,
     }))
+}
+
+/**
+ * The authoritative step-1 list: every row carries the id of the `booking_services` row it stands
+ * for. POST /build-booking reconciles by `legId` and refuses to guess when a supplier appears on
+ * more than one leg (two transfers, two hotels), so a row that reaches it without one is a bug --
+ * hence this runs both on open and after every build, not only on open.
+ */
+export function legsToServiceRows(legs: readonly ServiceRowSourceLeg[]): ServiceRow[] {
+  return legs
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((leg) => ({
+      key: leg.id,
+      legId: leg.id,
+      supplierId: leg.supplierId,
+      supplierKind: leg.supplierKind,
+      supplierName: leg.supplierName,
+    }))
+}
+
+/**
+ * Re-attaches `legId`s to the service rows coming out of a restored draft. A draft taken before the
+ * first build (or by a client older than legsToServiceRows above) holds rows with no `legId`, and
+ * replaying those against a booking that has since been built is what produces the server's
+ * "more than one service for X" refusal. Each drafted row adopts the leg it stands for: by id first,
+ * then by supplier among the legs no earlier row has claimed -- in draft order, so two legs on the
+ * same supplier (arrival/departure transfers) pair up the way they are listed rather than at random.
+ * A row with no counterpart is genuinely new and survives untouched; a leg the draft doesn't mention
+ * stays omitted, since the draft is the user's newer intent and a rebuild deletes by omission.
+ */
+export function reconcileDraftServiceRows(
+  draftRows: readonly ServiceRow[],
+  legs: readonly ServiceRowSourceLeg[],
+): ServiceRow[] {
+  const legRows = legsToServiceRows(legs)
+  if (legRows.length === 0) return draftRows.slice()
+
+  const legRowById = new Map(legRows.map((row) => [row.key, row]))
+  const claimed = new Set<string>()
+
+  return draftRows.map((row) => {
+    const byId = row.legId ? legRowById.get(row.legId) : undefined
+    if (byId && !claimed.has(byId.key)) {
+      claimed.add(byId.key)
+      return byId
+    }
+    const candidate = legRows.find((leg) => leg.supplierId === row.supplierId && !claimed.has(leg.key))
+    if (!candidate) return row
+    claimed.add(candidate.key)
+    return candidate
+  })
+}
+
+/** The subset of a PackageLeg collectForeignCurrencies reads -- see ServiceRowSourceLeg above for
+ *  why these helpers take a narrowed shape. */
+type ForeignCurrencySourceLeg = Pick<
+  PackageDetail["legs"][number],
+  "id" | "supplierKind" | "pricingMode" | "rateCards" | "quoteRateTypeId" | "baseRateTypeId"
+>
+
+/**
+ * Currencies in play on this build that are not the quote's — i.e. the ones that will actually be
+ * converted. Empty means every price is already native and the FX banner stays hidden, which is the
+ * common case and must not cost the salesperson any screen space.
+ *
+ * Mirrors the resolution build-from-package.ts and validateConfigureState use (route + suite + date
+ * + rate type → selectRateCard), not just "does this leg own a foreign card anywhere" — a supplier
+ * with both a USD and a ZAR card must not flag foreign just because one of its cards happens to be.
+ * A leg that isn't configured enough to resolve yet contributes nothing rather than guessing, so the
+ * banner never flashes speculatively.
+ */
+export function collectForeignCurrencies({
+  legs,
+  legStates,
+  quoteCurrency,
+  systemDefaultRateTypeId,
+}: {
+  legs: readonly ForeignCurrencySourceLeg[]
+  legStates: readonly ApplyLegState[]
+  quoteCurrency: string
+  systemDefaultRateTypeId: string | null
+}): string[] {
+  const legById = new Map(legs.map((leg) => [leg.id, leg]))
+  const found = new Set<string>()
+
+  for (const state of legStates) {
+    if (!state.selected) continue
+    const leg = legById.get(state.legId)
+    if (!leg) continue
+
+    if (state.kind === "transport") {
+      for (const request of state.requests) {
+        if (request.priceOverride != null) {
+          found.add(state.priceCurrency)
+          continue
+        }
+        const pricingDate = dateOnly(request.pickupAt)
+        if (!request.routeId || !request.suiteTypeId || !pricingDate) continue
+        const candidates = findRateCardCandidates(leg.rateCards, request.routeId, request.suiteTypeId, pricingDate)
+        const selection = selectRateCard(
+          candidates,
+          state.rateTypeId,
+          leg.quoteRateTypeId,
+          leg.baseRateTypeId,
+          systemDefaultRateTypeId,
+        )
+        if (selection?.ok) found.add(selection.card.currency)
+      }
+      continue
+    }
+
+    if (leg.pricingMode === "manual") {
+      found.add(state.priceCurrency)
+      continue
+    }
+
+    // A tour operator prices the tour type, not the itinerary: its cards carry no route and
+    // coversRoute matches any route string, so a leg with no itinerary selected (the usual case --
+    // one is only auto-derived when exactly one matches the chosen tour type) still resolves off
+    // "". Requiring a route here is what kept the FX banner hidden on a USD tour. Same rule as the
+    // pricing path in lib/quotes/build-from-package.ts.
+    const typePriced = isTypePricedSupplier(leg.supplierKind)
+    if (!state.serviceDate) continue
+    if (!typePriced && !state.routeId) continue
+    const routeId = state.routeId ?? ""
+
+    for (const unit of state.units) {
+      if (!unit.suiteTypeId) continue
+      const candidates = findRateCardCandidates(leg.rateCards, routeId, unit.suiteTypeId, state.serviceDate)
+      const selection = selectRateCard(
+        candidates,
+        // Tours resolve their rate type per unit, and two rate types can price in different
+        // currencies -- taking the leg's alone can resolve the wrong card, or none.
+        unit.rateTypeId ?? state.rateTypeId,
+        leg.quoteRateTypeId,
+        leg.baseRateTypeId,
+        systemDefaultRateTypeId,
+      )
+      if (selection?.ok) found.add(selection.card.currency)
+    }
+  }
+
+  found.delete(quoteCurrency)
+  return Array.from(found).sort()
 }
 
 interface BuildBookingResponse {
@@ -290,7 +444,9 @@ export function BuildBookingDialog({
       draft.legStates.length === 0 ||
       (packageDetail !== null && draftLegIds.every((id) => availableLegIds.has(id)))
 
-    if (draft.services.length > 0) setServices(draft.services)
+    if (draft.services.length > 0) {
+      setServices(reconcileDraftServiceRows(draft.services, packageDetail?.legs ?? []))
+    }
     if (draft.commission.type !== null) setCommission(draft.commission)
     if (draft.travellerDraft) setTravellerDraft(draft.travellerDraft)
 
@@ -470,18 +626,7 @@ export function BuildBookingDialog({
         if (cancelled || !built.packageDetail) return
         setPackageDetail(built.packageDetail)
         detailPopulatedServices = true
-        setServices(
-          built.packageDetail.legs
-            .slice()
-            .sort((a, b) => a.sortOrder - b.sortOrder)
-            .map((leg) => ({
-              key: leg.id,
-              legId: leg.id,
-              supplierId: leg.supplierId,
-              supplierKind: leg.supplierKind,
-              supplierName: leg.supplierName,
-            })),
-        )
+        setServices(legsToServiceRows(built.packageDetail.legs))
       } catch {
         // Step 1 still renders from the saved-state read above, and the Next click rebuilds
         // packageDetail server-side regardless -- nothing here is the only path to it.
@@ -502,71 +647,16 @@ export function BuildBookingDialog({
     [packageDetail],
   )
 
-  /**
-   * Currencies in play on this build that are not the quote's — i.e. the ones that will actually
-   * be converted. Empty means every price is already native and the FX banner stays hidden, which
-   * is the common case and must not cost the salesperson any screen space.
-   *
-   * Mirrors the resolution build-from-package.ts and validateConfigureState use (route + suite +
-   * date + rate type → selectRateCard), not just "does this leg own a foreign card anywhere" — a
-   * supplier with both a USD and a ZAR card must not flag foreign just because one of its cards
-   * happens to be. A leg that isn't configured enough to resolve yet (no route/date picked)
-   * contributes nothing rather than guessing, so the banner never flashes speculatively.
-   */
-  const foreignCurrencies = useMemo(() => {
-    const legById = new Map(sortedLegs.map((leg) => [leg.id, leg]))
-    const systemDefaultRateTypeId = rateTypes.find((rt) => rt.isDefault)?.id ?? null
-    const found = new Set<string>()
-
-    for (const state of legStates) {
-      if (!state.selected) continue
-      const leg = legById.get(state.legId)
-      if (!leg) continue
-
-      if (state.kind === "transport") {
-        for (const request of state.requests) {
-          if (request.priceOverride != null) {
-            found.add(state.priceCurrency)
-            continue
-          }
-          const pricingDate = dateOnly(request.pickupAt)
-          if (!request.routeId || !request.suiteTypeId || !pricingDate) continue
-          const candidates = findRateCardCandidates(leg.rateCards, request.routeId, request.suiteTypeId, pricingDate)
-          const selection = selectRateCard(
-            candidates,
-            state.rateTypeId,
-            leg.quoteRateTypeId,
-            leg.baseRateTypeId,
-            systemDefaultRateTypeId,
-          )
-          if (selection?.ok) found.add(selection.card.currency)
-        }
-        continue
-      }
-
-      if (leg.pricingMode === "manual") {
-        found.add(state.priceCurrency)
-        continue
-      }
-
-      if (!state.routeId || !state.serviceDate) continue
-      for (const unit of state.units) {
-        if (!unit.suiteTypeId) continue
-        const candidates = findRateCardCandidates(leg.rateCards, state.routeId, unit.suiteTypeId, state.serviceDate)
-        const selection = selectRateCard(
-          candidates,
-          state.rateTypeId,
-          leg.quoteRateTypeId,
-          leg.baseRateTypeId,
-          systemDefaultRateTypeId,
-        )
-        if (selection?.ok) found.add(selection.card.currency)
-      }
-    }
-
-    found.delete(quoteCurrency)
-    return Array.from(found).sort()
-  }, [sortedLegs, legStates, quoteCurrency, rateTypes])
+  const foreignCurrencies = useMemo(
+    () =>
+      collectForeignCurrencies({
+        legs: sortedLegs,
+        legStates,
+        quoteCurrency,
+        systemDefaultRateTypeId: rateTypes.find((rt) => rt.isDefault)?.id ?? null,
+      }),
+    [sortedLegs, legStates, quoteCurrency, rateTypes],
+  )
 
   // Surfaced next to the blocking validation error too — hitting Next with a stale booking total
   // shouldn't be a dead end; the fix is one click away right where the error is shown.
@@ -621,6 +711,16 @@ export function BuildBookingDialog({
     setTravellerDraft(null)
     clearQuoteConflict()
   }
+
+  // The Add-service picker opens on whatever this booking is actually for. Defaulting to Train was
+  // the visible tell that a cruise- or hotel-headed booking was second-class here. Runs once the
+  // services list has loaded, since the booking's own primary leg is what names the kind.
+  const primaryServiceKind = services.find((service) =>
+    isCoreBookingLeg(service, savedState?.primarySupplierId ?? null),
+  )?.supplierKind
+  useEffect(() => {
+    if (primaryServiceKind) setPickerKind(primaryServiceKind)
+  }, [primaryServiceKind])
 
   const resolvedCommission = resolveCommissionValue(commission)
   // Manual/extra lines added previously survive a rebuild.
@@ -678,6 +778,12 @@ export function BuildBookingDialog({
       }
       const built = payload as BuildBookingResponse
       setPackageDetail(built.packageDetail)
+      // Rows added here start with no `legId` (addService can't know one yet). Without adopting the
+      // ids the build just minted, a second Next -- Back, or adding another service -- would send
+      // those rows untagged again, and the server can no longer tell which of two same-supplier legs
+      // each one means: "already has more than one service for X -- send the legId of the one you
+      // mean". Re-keying off the response also drops rows the build removed.
+      setServices(legsToServiceRows(built.packageDetail.legs))
 
       const totals = await refreshPassengerTotals(built.packageDetail)
 
@@ -699,7 +805,15 @@ export function BuildBookingDialog({
       // Every service the salesperson explicitly added should start selected — unlike the
       // predefined-package flow (which defaults optional legs to unselected), a leg the user
       // just picked here has no "optional" concept; only respect an existing saved deselection.
-      setLegStates(states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true })))
+      const seeded = states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true }))
+      // F-P2-8: `seeded` above is derived entirely from the server (savedState / defaults), which
+      // knows nothing about configure-step edits made since the dialog opened -- nothing reaches
+      // the server until validateAndPreview's PATCH. Re-entering step 1 (Back, or adding another
+      // service) must not throw that work away, so carry it across the rebuild and re-anchor
+      // dates against the new packageDetail (removing/adding a leg can change what a surviving
+      // leg anchors to).
+      const merged = mergeLegStatesAfterRebuild(legStates, seeded)
+      setLegStates(applyAnchoredDates(built.packageDetail, merged, stateOptions.primarySupplierId))
       setStep("configure")
       // The reorder pass in build-booking bumps updated_at on every kept leg, not just moved ones;
       // legStates above still carries the pre-build stamps from the dialog's initial load, so the
@@ -721,18 +835,26 @@ export function BuildBookingDialog({
     const edited: ApplyLegState = next.origin === "auto" ? { ...next, origin: "consultant" } : next
     setLegStates((prev) => {
       const merged = prev.map((state) => (state.legId === edited.legId ? edited : state))
-      return packageDetail ? applyAnchoredDates(packageDetail, merged) : merged
+      return packageDetail
+        ? applyAnchoredDates(packageDetail, merged, savedState?.primarySupplierId ?? null)
+        : merged
     })
   }
 
   function hotelAnchorContext(legId: string): HotelAnchorContext | null {
     if (!packageDetail) return null
-    return toHotelAnchorContext(packageDetail, legStates, legId)
+    // Anchor to whatever this booking is actually for -- a cruise or a flight, not only a train.
+    return toHotelAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
   }
 
   function transferAnchorContext(legId: string): TransferAnchorContext | null {
     if (!packageDetail) return null
     return toTransferAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
+  }
+
+  function airlineAnchorContext(): TransferAnchorContext | null {
+    if (!packageDetail) return null
+    return toAirlineAnchorContext(packageDetail, legStates, savedState?.primarySupplierId ?? null)
   }
 
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
@@ -1224,7 +1346,7 @@ export function BuildBookingDialog({
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
-                        flightAnchorContext={transferAnchorContext(leg.id)}
+                        flightAnchorContext={airlineAnchorContext()}
                         primarySupplierId={savedState?.primarySupplierId ?? null}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}

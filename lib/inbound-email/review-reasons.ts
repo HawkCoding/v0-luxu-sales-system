@@ -1,4 +1,5 @@
 import { SUITE_TYPE_MISSING_FIELD } from "@/lib/suites/missing-fields"
+import type { SupplierKind } from "@/lib/types"
 
 /**
  * Every reason an enquiry can be flagged Needs Review, in one place.
@@ -30,6 +31,18 @@ export const REVIEW_REASON = {
   checkIn: "Check-in date",
   checkOut: "Check-out date",
   rooms: "Rooms",
+  // The same three slots again for the kinds a supplier can head a booking under once it is ticked
+  // "Can be the main product". Every kind names its own start date, end date and unit count; see
+  // INTAKE_REVIEW_REASONS below for which trio belongs to which.
+  transferDate: "Transfer date",
+  pickupDate: "Pickup date",
+  returnDate: "Return date",
+  tourDate: "Tour date",
+  tourEndDate: "Tour end date",
+  sailingDate: "Sailing date",
+  vehicles: "Vehicles",
+  tours: "Tours",
+  cabins: "Cabins",
   // Parsed fine, but matched no active row once the DB lookups ran (lib/inbound-email/import-booking.ts).
   suiteType: SUITE_TYPE_MISSING_FIELD,
   supplierUnmatched: "Train operator not matched to an active supplier",
@@ -115,6 +128,42 @@ export const REVIEW_REASON_DETAIL: Record<ReviewReason, ReviewReasonDetail> = {
     label: "No room count was found in the email",
     fixHint: "Set how many rooms the party needs.",
   },
+  [REVIEW_REASON.transferDate]: {
+    label: "No transfer date was found in the email",
+    fixHint: "Add the date of the transfer from the original email before quoting.",
+  },
+  [REVIEW_REASON.pickupDate]: {
+    label: "No pickup date was found in the email",
+    fixHint: "Add the collection date from the original email before quoting.",
+  },
+  [REVIEW_REASON.returnDate]: {
+    label: "No return date was found in the email",
+    fixHint: "Set the return date -- the rental is priced per day, so its length decides the total.",
+  },
+  [REVIEW_REASON.tourDate]: {
+    label: "No start date was found in the email",
+    fixHint: "Add the date the tour starts from the original email before quoting.",
+  },
+  [REVIEW_REASON.tourEndDate]: {
+    label: "No end date was found in the email",
+    fixHint: "Set the date the tour ends -- its length decides the dates on every other service.",
+  },
+  [REVIEW_REASON.sailingDate]: {
+    label: "No sailing date was found in the email",
+    fixHint: "Add the date the voyage departs from the original email before quoting.",
+  },
+  [REVIEW_REASON.vehicles]: {
+    label: "No vehicle count was found in the email",
+    fixHint: "Set how many vehicles the party needs.",
+  },
+  [REVIEW_REASON.tours]: {
+    label: "No tour count was found in the email",
+    fixHint: "Set how many tours the party is booking.",
+  },
+  [REVIEW_REASON.cabins]: {
+    label: "No cabin count was found in the email",
+    fixHint: "Set how many cabins the party needs.",
+  },
   [REVIEW_REASON.suiteType]: {
     label: "A suite type could not be identified from the wording used",
     fixHint: "Pick the matching suite type -- a quote cannot be built without it.",
@@ -146,6 +195,49 @@ export const REVIEW_REASON_DETAIL: Record<ReviewReason, ReviewReasonDetail> = {
   [REVIEW_REASON.unspecified]: {
     label: "This enquiry was flagged before reasons were recorded",
     fixHint: "Check the parsed fields against the original email, then mark it reviewed.",
+  },
+}
+
+/**
+ * Which reason stands in for each of the three shape-dependent required fields, per supplier kind.
+ *
+ * The trio is always the same question -- when does it start, when does it end, how many of them --
+ * asked in the customer's words for that product. `null` means the kind does not capture that field
+ * at intake at all, so its absence is not a reason to flag anything.
+ *
+ * Lives here rather than in lib/types.ts because these are the catalogue's own strings, and
+ * lib/types.ts must not import from lib/inbound-email/.
+ */
+export const INTAKE_REVIEW_REASONS: Record<
+  SupplierKind,
+  { startDate: ReviewReason; endDate: ReviewReason | null; unitCount: ReviewReason | null }
+> = {
+  train_operator: { startDate: REVIEW_REASON.departureDate, endDate: null, unitCount: REVIEW_REASON.suites },
+  hotel_property: {
+    startDate: REVIEW_REASON.checkIn,
+    endDate: REVIEW_REASON.checkOut,
+    unitCount: REVIEW_REASON.rooms,
+  },
+  transfers: { startDate: REVIEW_REASON.transferDate, endDate: null, unitCount: null },
+  vehicle_rental: {
+    startDate: REVIEW_REASON.pickupDate,
+    endDate: REVIEW_REASON.returnDate,
+    unitCount: null,
+  },
+  tour_operator: {
+    startDate: REVIEW_REASON.tourDate,
+    endDate: REVIEW_REASON.tourEndDate,
+    unitCount: REVIEW_REASON.tours,
+  },
+  airline: {
+    startDate: REVIEW_REASON.departureDate,
+    endDate: REVIEW_REASON.returnDate,
+    unitCount: REVIEW_REASON.cabins,
+  },
+  cruise_line: {
+    startDate: REVIEW_REASON.sailingDate,
+    endDate: REVIEW_REASON.returnDate,
+    unitCount: REVIEW_REASON.cabins,
   },
 }
 

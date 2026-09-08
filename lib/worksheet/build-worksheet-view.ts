@@ -3,6 +3,8 @@ import type { Database } from "@/lib/supabase/types"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { resolveAcceptedQuoteScope, scopeLegIdsFilter } from "@/lib/quotes/accepted-quote-scope"
 import { firstRecord } from "@/lib/utils"
+import { resolveProductCopy } from "@/lib/settings-access"
+import type { SupplierKind } from "@/lib/types"
 import {
   buildWorksheetServiceLines,
   scopeWorksheetRows,
@@ -73,7 +75,7 @@ export async function buildWorksheetView(
     supabase
       .from("bookings")
       .select(
-        `id, booking_number, customer_invoice_number, assigned_salesperson_id, departure_date, trip_end_date, no_of_adults, no_of_children, primary_supplier_id,
+        `id, booking_number, customer_invoice_number, assigned_salesperson_id, departure_date, trip_start_date, trip_end_date, no_of_adults, no_of_children, primary_supplier_id,
          voucher_sent_at, deposit_paid_at, final_paid_at, invoice_balance,
          customer:customers(title, first_name, last_name, email, phone, country)`,
       )
@@ -139,7 +141,11 @@ export async function buildWorksheetView(
     consultant = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim() || null
   }
 
-  const arriveDate = bookingRaw.departure_date
+  // departure_date now anchors to the primary product's own leg, not the trip's earliest dated
+  // leg (F-P3-4) -- a pre-arrival transfer running days before the product itself would otherwise
+  // make ARRIVE and the traveller-age calculation below both read the wrong day. trip_start_date
+  // is the full window every dated leg spans, which is what the worksheet actually wants here.
+  const arriveDate = bookingRaw.trip_start_date ?? bookingRaw.departure_date
   const departDate = bookingRaw.trip_end_date
 
   const depositInvoice = (invoices ?? []).find((i) => i.kind === "deposit") ?? null
@@ -190,8 +196,15 @@ export async function buildWorksheetView(
     .filter((row) => Boolean(row.service_date))
     .sort((a, b) => (a.service_date ?? "").localeCompare(b.service_date ?? ""))
   // A core leg with no date still names the Service cell — it just cannot supply a departure date.
-  const serviceName = firstRecord((datedCoreServices[0] ?? coreServices[0])?.suppliers)?.name ?? null
+  const coreSupplier = firstRecord((datedCoreServices[0] ?? coreServices[0])?.suppliers)
+  const serviceName = coreSupplier?.name ?? null
   const trainDepartureDate = datedCoreServices[0]?.service_date ?? null
+  // "Departure Date" on a journey, "Check-in Date" on a stay, "Tour Date" on a cruise — the date
+  // cell should say what the operations team is actually looking at. Settings-overridable per kind
+  // (see resolveProductCopy), falling back to the code vocabulary when nothing has been set.
+  const departureDateLabel = (
+    await resolveProductCopy(supabase, (coreSupplier?.kind as SupplierKind | undefined) ?? null)
+  ).startDateLabel
 
   const paymentRows: WorksheetPayment[] = (payments ?? []).map((p) => ({
     date: p.received_at,
@@ -210,6 +223,7 @@ export async function buildWorksheetView(
     }),
     serviceName,
     trainDepartureDate,
+    departureDateLabel,
     consultant,
     arriveDate,
     departDate,

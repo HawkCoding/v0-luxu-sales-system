@@ -3,9 +3,14 @@ import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { humanizeTemplateKey } from "@/lib/templates/humanize-key"
 import { SYSTEM_TEMPLATE_KEYS } from "@/lib/templates/registry"
+import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
 
 const TEMPLATE_COLUMNS =
-  "id, key, name, subject, body_html, version, active, is_system, sort_order, supplier_id"
+  "id, key, name, subject, body_html, version, active, is_system, sort_order, supplier_id, supplier_kind"
+
+const supplierKindSchema = z.enum(
+  Object.keys(SUPPLIER_KIND_LABELS) as [SupplierKind, ...SupplierKind[]],
+)
 
 const templatePatchSchema = z
   .object({
@@ -51,6 +56,7 @@ export async function GET() {
       isSystem: t.is_system,
       sortOrder: t.sort_order,
       supplierId: t.supplier_id,
+      supplierKind: t.supplier_kind,
     })),
   )
 }
@@ -62,14 +68,23 @@ const templateCreateSchema = z.object({
   /**
    * Set only to create a per-supplier variant of a system template (e.g. a Rovos-specific or a
    * Kruger Shalati-specific quote_email body) -- `key` names the system key to vary and
-   * `supplierId` the supplier (any supplier with sells_standalone = true) it applies to.
-   * Uniqueness is (key, supplierId) at the DB level, not the slugified-name scheme below, which is
-   * for standalone custom templates only.
+   * `supplierId` the supplier (any supplier with sells_standalone = true) it applies to. Mutually
+   * exclusive with `supplierKind` below -- a variant is scoped to one supplier or one product kind,
+   * never both. Uniqueness is (key, supplierId, supplierKind) at the DB level (see
+   * ux_templates_key_supplier_kind), not the slugified-name scheme below, which is for standalone
+   * custom templates only.
    */
   key: z.enum(SYSTEM_TEMPLATE_KEYS).optional(),
   supplierId: z.string().uuid().optional(),
-}).refine((v) => (v.supplierId === undefined) === (v.key === undefined), {
-  message: "key and supplierId must be given together",
+  /**
+   * Set only to create a per-kind variant (e.g. the hotel_property quote_email every stay uses
+   * unless its own supplier overrides it) -- `key` names the system key to vary, same as above.
+   */
+  supplierKind: supplierKindSchema.optional(),
+}).refine((v) => (v.supplierId === undefined && v.supplierKind === undefined) === (v.key === undefined), {
+  message: "key must be given together with exactly one of supplierId or supplierKind",
+}).refine((v) => v.supplierId === undefined || v.supplierKind === undefined, {
+  message: "A variant is scoped to one supplier or one product kind, not both",
 })
 
 // Slugify a display name into a stable, unique template key (custom templates
@@ -108,9 +123,9 @@ export async function POST(req: Request) {
   let key: string
   let nextSortOrder: number
   if (isVariant) {
-    // A variant reuses the system key -- (key, supplierId) is the DB's own uniqueness check
-    // (ux_templates_key_supplier), so a duplicate surfaces as a 23505 below rather than needing
-    // the slug dance. Sort order groups it with its parent key.
+    // A variant reuses the system key -- (key, supplierId, supplierKind) is the DB's own
+    // uniqueness check (ux_templates_key_supplier_kind), so a duplicate surfaces as a 23505 below
+    // rather than needing the slug dance. Sort order groups it with its parent key.
     key = parsed.data.key!
     const { data: siblingRow } = await supabase
       .from("templates")
@@ -154,19 +169,26 @@ export async function POST(req: Request) {
       version: 1,
       active: true,
       // A variant is deletable even though it reuses a system key -- only the untagged parent row
-      // (supplier_id null) is protected, since that is the one every other train falls back to.
-      // is_system here only governs the DELETE guard (app/api/templates/[id]/route.ts) and the
-      // "System" badge; getTemplate()'s (key, supplierId) lookup does not consult it at all.
+      // (supplier_id and supplier_kind both null) is protected, since that is the one every other
+      // supplier falls back to. is_system here only governs the DELETE guard
+      // (app/api/templates/[id]/route.ts) and the "System" badge; getTemplate()'s lookup does not
+      // consult it at all.
       is_system: false,
       sort_order: nextSortOrder,
-      supplier_id: isVariant ? parsed.data.supplierId : null,
+      supplier_id: isVariant ? (parsed.data.supplierId ?? null) : null,
+      supplier_kind: isVariant ? (parsed.data.supplierKind ?? null) : null,
     })
     .select(TEMPLATE_COLUMNS)
     .single()
 
   if (error || !created) {
     if (error?.code === "23505") {
-      return jsonError("A variant already exists for this template and supplier.", 409)
+      return jsonError(
+        parsed.data.supplierKind
+          ? "A variant already exists for this template and product kind."
+          : "A variant already exists for this template and supplier.",
+        409,
+      )
     }
     return safeSupabaseError("templates:create", error)
   }
@@ -177,7 +199,7 @@ export async function POST(req: Request) {
     entity_type: "Template",
     entity_id: created.id,
     action: "template_created",
-    after_json: { key: created.key, supplierId: created.supplier_id },
+    after_json: { key: created.key, supplierId: created.supplier_id, supplierKind: created.supplier_kind },
   })
 
   return Response.json(
@@ -192,6 +214,7 @@ export async function POST(req: Request) {
       isSystem: created.is_system,
       sortOrder: created.sort_order,
       supplierId: created.supplier_id,
+      supplierKind: created.supplier_kind,
     },
     { status: 201 },
   )

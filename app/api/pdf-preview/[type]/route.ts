@@ -7,6 +7,7 @@ import {
   getDocumentBrandSettings,
   getDocumentTextSettings,
   resolveDocumentBrand,
+  resolveProductCopy,
 } from "@/lib/settings-access"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
@@ -18,7 +19,7 @@ import { sampleItineraryData } from "@/lib/itinerary/sample-data"
 import { sampleQuotePdfData } from "@/lib/quotes/pdf/sample-data"
 import { sampleInvoicePdfData } from "@/lib/invoices/sample-data"
 import { sampleWorksheetData } from "@/lib/worksheet/pdf/sample-data"
-import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
+import { SUPPLIER_VOCABULARY, VOUCHER_TEMPLATE_DEFAULTS, type SupplierKind, type VoucherTemplate } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 
@@ -27,6 +28,9 @@ export const dynamic = "force-dynamic"
 
 const typeSchema = z.enum(["voucher", "itinerary", "quote", "invoice", "worksheet"])
 export type PdfPreviewType = z.infer<typeof typeSchema>
+
+const supplierKinds = Object.keys(SUPPLIER_VOCABULARY) as [SupplierKind, ...SupplierKind[]]
+const kindSchema = z.enum(supplierKinds)
 
 async function fetchVoucherTemplate(supabase: SupabaseClient<Database>): Promise<VoucherTemplate> {
   const { data } = await supabase
@@ -40,7 +44,7 @@ async function fetchVoucherTemplate(supabase: SupabaseClient<Database>): Promise
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ type: string }> },
 ) {
   const auth = await requireAnyRole()
@@ -51,17 +55,24 @@ export async function GET(
   if (!parsed.success) return jsonError("Unknown preview type", 400)
   const type = parsed.data
 
+  // Lets Settings > Document Text preview a supplier kind's own copy overrides (see
+  // supplier_kind_document_text) rather than only ever the global rail wording. An absent or
+  // unrecognized kind previews exactly what every caller saw before per-kind copy existed.
+  const kindRaw = new URL(req.url).searchParams.get("kind")
+  const kindParsed = kindRaw ? kindSchema.safeParse(kindRaw) : null
+  const kind: SupplierKind | null = kindParsed?.success ? kindParsed.data : null
+
   const { supabase } = auth.value
 
   let buffer: Buffer
   try {
-    const { brand, position } = resolveDocumentBrand(await getDocumentBrandSettings(supabase))
+    const { brand, position } = resolveDocumentBrand(await getDocumentBrandSettings(supabase, kind))
     const brandLogo = await loadBrandLogo(brand.logoUrl)
 
     if (type === "voucher") {
       const [template, documentText] = await Promise.all([
         fetchVoucherTemplate(supabase),
-        getDocumentTextSettings(supabase),
+        getDocumentTextSettings(supabase, kind),
       ])
       buffer = await renderVoucherPdf({
         data: { ...sampleVoucherData(), serviceBlocks: sampleVoucherServiceBlocks() },
@@ -73,7 +84,7 @@ export async function GET(
     } else if (type === "itinerary") {
       const [template, documentText] = await Promise.all([
         fetchVoucherTemplate(supabase),
-        getDocumentTextSettings(supabase),
+        getDocumentTextSettings(supabase, kind),
       ])
       buffer = await renderItineraryPdf({
         data: sampleItineraryData(),
@@ -84,7 +95,10 @@ export async function GET(
         brandLogo,
       })
     } else if (type === "quote") {
-      const documentText = await getDocumentTextSettings(supabase)
+      const [documentText, productCopy] = await Promise.all([
+        getDocumentTextSettings(supabase, kind),
+        resolveProductCopy(supabase, kind),
+      ])
       buffer = await renderQuotePdf({
         ...sampleQuotePdfData(),
         title: documentText.quote_doc_title,
@@ -92,6 +106,8 @@ export async function GET(
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,
+        primarySupplierKind: kind,
+        productBookingNoun: productCopy.bookingNoun,
         brand,
         brandPosition: position.quote,
         brandLogo,
@@ -104,7 +120,7 @@ export async function GET(
     } else {
       const [method, documentText] = await Promise.all([
         getPaymentMethod(supabase, null),
-        getDocumentTextSettings(supabase),
+        getDocumentTextSettings(supabase, kind),
       ])
       buffer = await renderInvoicePdf({
         ...sampleInvoicePdfData(),

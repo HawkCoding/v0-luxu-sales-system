@@ -8,14 +8,20 @@ import {
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
-import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
+import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
-import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
+import {
+  getDocumentBrandSettings,
+  getDocumentTextSettings,
+  resolveDocumentBrand,
+  resolveProductCopy,
+} from "@/lib/settings-access"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { logError } from "@/lib/error-log"
 import { QUOTE_REFERENCE_ENABLED } from "@/lib/feature-flags"
 import type { PricingSnapshot } from "@/lib/types"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
 
 export const QUOTE_BUCKET = "quotes"
@@ -122,10 +128,6 @@ export async function ensureQuotePdf(
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
   const customerName = formatCustomerSalutation(customer)
 
-  const documentText = await getDocumentTextSettings(supabase)
-  const { brand, position } = resolveDocumentBrand(await getDocumentBrandSettings(supabase))
-  const brandLogo = await loadBrandLogo(brand.logoUrl)
-
   // Scope the itinerary to legs actually priced into this quote version, not whatever is
   // currently selected live on the job — an empty set means a manual/no-package quote, so fall
   // back to unfiltered (today's behavior) rather than rendering an empty itinerary.
@@ -147,6 +149,20 @@ export async function ensureQuotePdf(
   if (quoteConfig.unresolved.length > 0) {
     throw new Error(quoteConfig.unresolved[0])
   }
+
+  // Names the meta line ("Journey"/"Stay"/"Tour") — same lookup the summary block and email
+  // preview use, so the PDF stapled to a send never disagrees with the body text.
+  const primarySupplierKind = await loadSupplierKind(supabase, quoteConfig.primarySupplierId)
+
+  // Document copy is resolved per the primary product's kind, so a Kruger Shalati quote can carry
+  // stay wording (Settings > Document Text) while a rail quote keeps its own -- see
+  // getDocumentTextSettings/getDocumentBrandSettings/resolveProductCopy in settings-access.ts.
+  const documentText = await getDocumentTextSettings(supabase, primarySupplierKind)
+  const { brand, position } = resolveDocumentBrand(
+    await getDocumentBrandSettings(supabase, primarySupplierKind),
+  )
+  const brandLogo = await loadBrandLogo(brand.logoUrl)
+  const productCopy = await resolveProductCopy(supabase, primarySupplierKind)
 
   // Itinerary degrades to an empty section rather than blocking the PDF —
   // correspondence relies on a quote email never going out without its PDF.
@@ -171,9 +187,13 @@ export async function ensureQuotePdf(
     })
   }
 
-  // Journey window comes from the priced legs, not the booking's enquiry-time
-  // scalar dates which drift out of sync once the package changes.
-  const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
+  // Journey window comes from the priced legs, not the booking's enquiry-time scalar dates which
+  // drift out of sync once the package changes -- narrowed to the primary product's own legs
+  // where it has any (F-P3-4), so a tour's dates aren't stretched by an add-on hotel or transfer.
+  const journey = deriveJourneyFromBlocks(
+    itineraryBlocks,
+    mapSupplierKindToServiceType(primarySupplierKind),
+  ) ?? { start: null, end: null }
 
   let pdfBuffer: Buffer
   try {
@@ -189,6 +209,8 @@ export async function ensureQuotePdf(
       validUntil: quote.validity_until,
       journeyStart: journey.start,
       journeyEnd: journey.end,
+      primarySupplierKind,
+      productBookingNoun: productCopy.bookingNoun,
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,
       total: quote.total,

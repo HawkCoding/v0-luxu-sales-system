@@ -78,6 +78,11 @@ describe("supplierSaveSchema", () => {
     expect(parsed.emails).toEqual([])
   })
 
+  it("accepts an optional publish flag, undefined when omitted (F-P3-7)", () => {
+    expect(supplierSaveSchema.parse(buildValidPayload()).publish).toBeUndefined()
+    expect(supplierSaveSchema.parse({ ...buildValidPayload(), publish: true }).publish).toBe(true)
+  })
+
   it("rejects invalid top-level fields", () => {
     expect(
       supplierSaveSchema.safeParse({ ...buildValidPayload(), name: "A" }).success,
@@ -405,7 +410,7 @@ describe("supplierSaveSchema — tour operators price the tour type", () => {
     )
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error.issues[0].message).toMatch(/must belong to a tour type/)
+    expect(result.error.issues[0].message).toMatch(/must belong to a type/)
   })
 
   it("rejects an itinerary pointing at another supplier's tour type", () => {

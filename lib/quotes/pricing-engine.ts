@@ -95,6 +95,23 @@ export function stayNights(lineItem: QuoteLineItem): number {
   return typeof nights === "number" && nights > 0 ? nights : lineItem.qty
 }
 
+/**
+ * Spells out how a hotel per-person line's qty was arrived at, e.g. "1 guest × 2 nights".
+ *
+ * Those lines carry person-nights on qty while the basis beside it reads "per person per night",
+ * so a bare 2 is read as two guests — the same 2 a single guest staying two nights produces. Null
+ * for every other line, whose qty already means exactly what its basis says.
+ */
+export function describeQtyBasis(lineItem: QuoteLineItem): string | null {
+  const occupants = lineItem.pricingSnapshot?.occupantCount
+  const nights = lineItem.pricingSnapshot?.chargedNights
+  if (typeof occupants !== "number" || typeof nights !== "number") return null
+  // A single guest for a single night is just 1 — there is no multiplication to explain.
+  if (occupants === 1 && nights === 1) return null
+  const guests = `${occupants} ${occupants === 1 ? "guest" : "guests"}`
+  return `${guests} × ${nights} ${nights === 1 ? "night" : "nights"}`
+}
+
 /** True when a hotel room had one or more nights gifted but is still charged for the rest. */
 export function hasComplimentaryNight(lineItem: QuoteLineItem): boolean {
   return complimentaryNights(lineItem) > 0

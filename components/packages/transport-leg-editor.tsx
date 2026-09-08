@@ -635,6 +635,13 @@ export function TransportLegEditor({
                   placeholder=""
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label>Flight number</Label>
+                <Input
+                  value={request.flightNumber ?? ""}
+                  onChange={(event) => updateRequest(request.id, { flightNumber: event.target.value || null })}
+                />
+              </div>
               {isRental ? (
                 <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
                   <Label>Pickup date/time</Label>
@@ -723,63 +730,87 @@ export function TransportLegEditor({
                   />
                 </div>
               ) : null}
-              {leg.suiteTypes.length > 0 ? (
-                <div className="space-y-1.5">
-                  <Label>Vehicle category</Label>
-                  <Select
-                    value={request.suiteTypeId ?? NONE_VALUE}
-                    onValueChange={(next) =>
-                      updateRequest(request.id, { suiteTypeId: next === NONE_VALUE ? null : next })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE_VALUE}>Not set</SelectItem>
-                      {leg.suiteTypes.map((suiteType) => (
-                        <SelectItem key={suiteType.id} value={suiteType.id}>
-                          {suiteType.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                <div className="space-y-1.5 md:col-span-2">
-                  <Label>Vehicle category</Label>
-                  <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                    No vehicle categories configured for {leg.supplierName} — add one under Suppliers before booking it.
-                  </p>
-                </div>
-              )}
-              {isPerPerson ? (
-                <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
-                  <Label>Passengers</Label>
-                  <div className="flex items-center gap-2">
-                    {(
-                      [
-                        { key: "adultCount", label: "Adults", fallback: fallbackTotals.adultCount },
-                        { key: "childCount", label: "Children", fallback: fallbackTotals.childCount },
-                        { key: "infantCount", label: "Infants", fallback: fallbackTotals.infantCount },
-                      ] as const
-                    ).map((field) => (
-                      <div key={field.key} className="space-y-1">
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {field.label}
-                        </span>
-                        <NumericInput
-                          min="0"
-                          step="1"
-                          nullable
-                          placeholder={String(field.fallback)}
-                          value={request[field.key]}
-                          onValueChange={(next) => updateRequest(request.id, { [field.key]: next })}
-                          aria-label={`${field.label} for transfer ${index + 1}`}
-                        />
-                      </div>
-                    ))}
+              <div className="flex flex-wrap items-end gap-3 md:col-span-2 xl:col-span-3">
+                {leg.suiteTypes.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <Label>Vehicle category</Label>
+                    <Select
+                      value={request.suiteTypeId ?? NONE_VALUE}
+                      onValueChange={(next) =>
+                        updateRequest(request.id, { suiteTypeId: next === NONE_VALUE ? null : next })
+                      }
+                    >
+                      <SelectTrigger className="h-8 w-56">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE_VALUE}>Not set</SelectItem>
+                        {leg.suiteTypes.map((suiteType) => (
+                          <SelectItem key={suiteType.id} value={suiteType.id}>
+                            {suiteType.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label>Vehicle category</Label>
+                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      No vehicle categories configured for {leg.supplierName} — add one under Suppliers before booking
+                      it.
+                    </p>
+                  </div>
+                )}
+                {isPerPerson ? (
+                  (
+                    [
+                      { key: "adultCount", label: "Adults", fallback: fallbackTotals.adultCount },
+                      { key: "childCount", label: "Children", fallback: fallbackTotals.childCount },
+                      { key: "infantCount", label: "Infants", fallback: fallbackTotals.infantCount },
+                    ] as const
+                  ).map((field) => (
+                    <div key={field.key} className="space-y-1.5">
+                      <Label>{field.label}</Label>
+                      <NumericInput
+                        min="0"
+                        step="1"
+                        nullable
+                        className="h-8 w-16 text-center"
+                        placeholder={String(field.fallback)}
+                        value={request[field.key]}
+                        onValueChange={(next) => updateRequest(request.id, { [field.key]: next })}
+                        aria-label={`${field.label} for transfer ${index + 1}`}
+                      />
+                    </div>
+                  ))
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label>Passengers</Label>
+                    <NumericInput
+                      min="0"
+                      step="1"
+                      nullable
+                      className="h-8 w-16 text-center"
+                      value={request.passengerCount}
+                      onValueChange={(next) => updateRequest(request.id, { passengerCount: next })}
+                    />
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label>Luggage</Label>
+                  <NumericInput
+                    min="0"
+                    step="1"
+                    nullable
+                    className="h-8 w-16 text-center"
+                    value={request.luggageCount}
+                    onValueChange={(next) => updateRequest(request.id, { luggageCount: next })}
+                  />
+                </div>
+              </div>
+              {isPerPerson ? (
+                <div className="space-y-1 md:col-span-2 xl:col-span-3">
                   <p className="text-xs text-muted-foreground">
                     Blank uses the booking's totals ({fallbackTotals.adultCount} adults,{" "}
                     {fallbackTotals.childCount} children, {fallbackTotals.infantCount} infants). Priced total:{" "}
@@ -791,35 +822,7 @@ export function TransportLegEditor({
                     </p>
                   ) : null}
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label>Passengers</Label>
-                  <NumericInput
-                    min="0"
-                    step="1"
-                    nullable
-                    value={request.passengerCount}
-                    onValueChange={(next) => updateRequest(request.id, { passengerCount: next })}
-                  />
-                </div>
-              )}
-              <div className="space-y-1.5">
-                <Label>Luggage</Label>
-                <NumericInput
-                  min="0"
-                  step="1"
-                  nullable
-                  value={request.luggageCount}
-                  onValueChange={(next) => updateRequest(request.id, { luggageCount: next })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Flight number</Label>
-                <Input
-                  value={request.flightNumber ?? ""}
-                  onChange={(event) => updateRequest(request.id, { flightNumber: event.target.value || null })}
-                />
-              </div>
+              ) : null}
               <RequestPriceOverride
                 request={request}
                 index={index}

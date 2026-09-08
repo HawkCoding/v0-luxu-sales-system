@@ -17,7 +17,15 @@ const EMAIL_LABEL_MAX_LENGTH = 100
 
 
 const createSupplierSchema = z.object({
-  kind: z.enum(["train_operator", "hotel_property", "transfers", "vehicle_rental", "tour_operator", "airline"]),
+  kind: z.enum([
+    "train_operator",
+    "hotel_property",
+    "transfers",
+    "vehicle_rental",
+    "tour_operator",
+    "airline",
+    "cruise_line",
+  ]),
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   email: z
     .string()
@@ -54,6 +62,9 @@ const createSupplierSchema = z.object({
     }),
   locationId: z.string().uuid().nullable().optional(),
   streetAddress: z.string().trim().max(255).nullable().optional(),
+  /** Whether this supplier may head a booking of its own -- see suppliers.sells_standalone.
+   *  Omitted defaults by kind, exactly as it did before the create form offered the choice. */
+  sellsStandalone: z.boolean().optional(),
   notes: z.string().trim().max(5000),
   emails: z
     .array(
@@ -209,10 +220,11 @@ export async function POST(req: Request) {
       // manually-priced by default, same as the backfill for existing ones.
       pricing_mode: parsed.kind === "airline" ? "manual" : "rate_card",
       name: supplierName,
-      // A train operator always heads its own bookings, so it is standalone from the start.
-      // Anything else is an add-on until someone ticks it on the supplier page -- which is how
-      // a hotel sold on its own (Kruger Shalati) becomes selectable on New Enquiry.
-      sells_standalone: parsed.kind === "train_operator",
+      // A train operator always heads its own bookings, so it is a main product from the start.
+      // Anything else is an add-on unless the creator ticks "Can be the main product" -- which is
+      // how a hotel sold on its own (Kruger Shalati), or a cruise line filed under Tours, becomes
+      // selectable on New Enquiry.
+      sells_standalone: parsed.sellsStandalone ?? parsed.kind === "train_operator",
       slug,
       email: normalizedEmails[0]?.email ?? null,
       phone: parsed.phone.trim() || null,

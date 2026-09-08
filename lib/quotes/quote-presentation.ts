@@ -127,13 +127,7 @@ export function formatFlightCapLine(amountFormatter: (amount: number) => string,
   return `Flights are capped at ${amountFormatter(capPerPerson)}pp — incl. baggage & fees`
 }
 
-/**
- * Journey window derived from the legs actually priced into the quote, not the
- * booking's enquiry-time scalar dates (departure_date/trip_*), which drift out
- * of sync once package legs change. start = earliest leg date, end = latest
- * (covers hotel check-out). Returns null when no block carries a date.
- */
-export function deriveJourneyFromBlocks(blocks: VoucherServiceBlock[]): QuoteJourneyDates | null {
+function journeyRangeOf(blocks: VoucherServiceBlock[]): QuoteJourneyDates | null {
   const dates: string[] = []
   for (const block of blocks) {
     const d = block.serviceData
@@ -148,17 +142,50 @@ export function deriveJourneyFromBlocks(blocks: VoucherServiceBlock[]): QuoteJou
 }
 
 /**
- * Train leg's own departure date — the earliest serviceType === "train" block's
- * departureDate — distinct from deriveJourneyFromBlocks, which mixes in hotel
- * pre-nights and other leg kinds. Mirrors the worksheet's top-right "Departure
- * Date" cell (lib/worksheet/build-worksheet-view.ts), which isolates the train
- * leg the same way via suppliers.kind === "train_operator".
- * Returns null when the booking has no dated train leg.
+ * Journey window derived from the legs actually priced into the quote, not the booking's
+ * enquiry-time scalar dates (departure_date/trip_*), which drift out of sync once package legs
+ * change. start = earliest date, end = latest.
+ *
+ * `serviceType`, when given, narrows this to the booking's own primary product (F-P3-4): a
+ * "TOUR 18 – 22 November" line built from every leg — a pre-arrival transfer, an add-on hotel —
+ * quoted a window that was never the tour's own. Falls back to every block when the primary
+ * product has none of its own type dated yet, or when no `serviceType` is passed at all (every
+ * caller written before a booking could be headed by something other than a train keeps its exact
+ * prior behaviour). Mirrors `deriveTrainDepartureFromBlocks`, which does the same isolation for
+ * the header departure date alone.
  */
-export function deriveTrainDepartureFromBlocks(blocks: VoucherServiceBlock[]): string | null {
+export function deriveJourneyFromBlocks(
+  blocks: VoucherServiceBlock[],
+  serviceType?: VoucherServiceBlock["serviceType"],
+): QuoteJourneyDates | null {
+  if (serviceType) {
+    const ownBlocks = blocks.filter((block) => block.serviceType === serviceType)
+    const ownRange = journeyRangeOf(ownBlocks)
+    if (ownRange) return ownRange
+  }
+  return journeyRangeOf(blocks)
+}
+
+/**
+ * The main product's own start date — the earliest block of that service type, by its
+ * departureDate — distinct from deriveJourneyFromBlocks, which mixes in hotel pre-nights and other
+ * leg kinds. Mirrors the worksheet's top-right date cell (lib/worksheet/build-worksheet-view.ts),
+ * which isolates the same leg.
+ *
+ * `serviceType` defaults to "train" so every caller written before bookings could be headed by
+ * something else keeps its exact behaviour. A caller that knows the booking's primary product
+ * should pass that product's service type, or {{departureDate}} silently falls back to the
+ * enquiry-time booking date on anything that is not a train.
+ *
+ * Returns null when the booking has no dated leg of that type.
+ */
+export function deriveTrainDepartureFromBlocks(
+  blocks: VoucherServiceBlock[],
+  serviceType: VoucherServiceBlock["serviceType"] = "train",
+): string | null {
   const dates: string[] = []
   for (const block of blocks) {
-    if (block.serviceType !== "train") continue
+    if (block.serviceType !== serviceType) continue
     const parsed = parseIsoDate(block.serviceData.departureDate)
     if (parsed) dates.push(toIsoDateString(parsed))
   }
@@ -281,9 +308,12 @@ function describeBlock(block: VoucherServiceBlock): string {
       // suiteType (the full configuration) is the fallback for blocks built before that field
       // existed. The voucher/invoice keep reading suiteType directly, unaffected by this.
       const suiteLabel = d.itinerarySuiteType ?? d.suiteType
+      // withLeadingThe already skips a supplier name that types its own article ("The Blue
+      // Train") -- reused here rather than a bare template literal, which produced "the The Blue
+      // Train" on every quote (F-P3-8).
       return joinSentence(
         [
-          `${onBoard} the ${supplier || "train"}`,
+          `${onBoard} ${supplier ? withLeadingThe(supplier) : "the train"}`,
           suiteLabel ? `in a ${suiteLabel}` : null,
           "on an all-inclusive basis",
           d.route ? `— ${toProseRoute(d.route)}` : null,

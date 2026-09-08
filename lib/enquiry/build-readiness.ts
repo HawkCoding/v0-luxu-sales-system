@@ -1,4 +1,4 @@
-import { SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY, type SupplierKind } from "@/lib/types"
+import { isCoreBookingLeg, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY, type SupplierKind } from "@/lib/types"
 
 export type ReadinessState = "not_built" | "auto_built" | "confirmed"
 
@@ -71,6 +71,9 @@ export interface BuildEnquiryReadinessInput {
   services: ReadinessServiceInput[]
   suites: ReadinessSuiteInput[]
   noOfSuites: number
+  /** bookings.primary_supplier_id — which leg is the thing being sold. Null on bookings predating
+   *  the column, which fall back to the train leg exactly as before. */
+  primarySupplierId?: string | null
   /** Resolved hotel supplier name, falling back to the customer's raw wording — same value the
    * Enquiry tab's Hotel & Additional Services card shows as "Hotel". */
   hotelOptionResolved: string | null
@@ -107,16 +110,21 @@ const NON_TRANSPORT_UNIT_KINDS = new Set<SupplierKind>([
   "hotel_property",
   "tour_operator",
   "airline",
+  "cruise_line",
 ])
 /**
- * Kinds whose leg cannot be priced without a route row chosen. A hotel's "route" is its meal plan
- * (SUPPLIER_VOCABULARY relabels the same table per kind), and rate_cards key off it — so a hotel
- * leg with none set prices off nothing and renders an empty {{mealPlan}} on the quote email. This
- * was invisible while Kruger Shalati filed exactly one meal plan and auto-build filled it in;
- * a second one, or any other lodge, makes it reachable. Transfers and rentals are deliberately
- * absent: their route is optional, and flagging it would fire on legs that are already complete.
+ * Whether this kind's leg can be priced without a route row chosen.
+ *
+ * A hotel's "route" is its meal plan (SUPPLIER_VOCABULARY relabels the same table per kind), and
+ * rate_cards key off it — so a hotel leg with none set prices off nothing and renders an empty
+ * {{mealPlan}} on the quote email. This was invisible while Kruger Shalati filed exactly one meal
+ * plan and auto-build filled it in; a second one, or any other lodge, makes it reachable. Transfers
+ * and rentals answer false: their route is optional, and flagging it would fire on legs that are
+ * already complete.
  */
-const ROUTE_REQUIRED_KINDS = new Set<SupplierKind>(["train_operator", "hotel_property"])
+function routeRequiredForPricing(kind: SupplierKind): boolean {
+  return SUPPLIER_VOCABULARY[kind].primaryProduct.routeRequiredForPricing
+}
 
 function hasText(value: string | null | undefined): boolean {
   return Boolean(value?.trim())
@@ -137,7 +145,7 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
     // A hotel's "route" is its meal plan, and rate cards key off it -- an unset one prices off
     // nothing, so it blocks exactly as a train with no route does.
     const missingRoute = Boolean(
-      service.supplierKind && ROUTE_REQUIRED_KINDS.has(service.supplierKind) && !service.routeId,
+      service.supplierKind && routeRequiredForPricing(service.supplierKind) && !service.routeId,
     )
     const missingUnits =
       service.supplierKind &&
@@ -185,13 +193,24 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
   // --- Gaps: asked for, not built. ---
   const gaps: ReadinessNote[] = []
 
-  const trainService = orderedServices.find((s) => s.supplierKind === "train_operator")
-  const trainUnitCount = trainService?.unitCount ?? 0
-  if (trainService && input.noOfSuites > trainUnitCount) {
+  // The shortfall is measured against the leg the booking is actually for. It used to look for a
+  // train specifically, so a standalone stay asking for three rooms and built with one was silently
+  // short. Bookings with no primary supplier recorded still fall back to the train leg.
+  const primaryService = orderedServices.find((s) =>
+    isCoreBookingLeg(
+      { supplierId: s.supplierId, supplierKind: s.supplierKind ?? "train_operator" },
+      input.primarySupplierId ?? null,
+    ),
+  )
+  const primaryUnitCount = primaryService?.unitCount ?? 0
+  if (primaryService && input.noOfSuites > primaryUnitCount) {
+    const unitNoun = primaryService.supplierKind
+      ? SUPPLIER_VOCABULARY[primaryService.supplierKind].unitNounPlural
+      : "suites"
     gaps.push({
       id: "suites_short",
       severity: "warn",
-      title: `Enquiry asks for ${input.noOfSuites} suites; the booking is built with ${trainUnitCount}.`,
+      title: `Enquiry asks for ${input.noOfSuites} ${unitNoun}; the booking is built with ${primaryUnitCount}.`,
       detail:
         "Suite phrases that didn't match a suite type are skipped when the booking is built. Add the missing suites in Build Booking, step 2.",
     })
@@ -252,7 +271,11 @@ export function buildEnquiryReadiness(input: BuildEnquiryReadinessInput): Enquir
   }
 
   const hasAdditionalServiceBuilt = orderedServices.some(
-    (s) => s.supplierKind && (TRANSPORT_KINDS.has(s.supplierKind) || s.supplierKind === "tour_operator"),
+    (s) =>
+      s.supplierKind &&
+      (TRANSPORT_KINDS.has(s.supplierKind) ||
+        s.supplierKind === "tour_operator" ||
+        s.supplierKind === "cruise_line"),
   )
   if (input.additionalServicesRequested && !hasAdditionalServiceBuilt) {
     gaps.push({

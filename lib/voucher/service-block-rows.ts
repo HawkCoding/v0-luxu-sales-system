@@ -24,7 +24,9 @@ export interface VoucherRow {
 
 // Only ISO date-ish values are reformatted; anything else is already display text
 // and must be passed through untouched (re-parsing "04/07/2026" would flip d/m).
-function fmt(value: string | null | undefined): string | null {
+// Exported so the invoice adapter (lib/invoices/departure-rows.ts) can rebuild its two-column date
+// rows from the same serviceData rather than unpicking a rendered "<date> at <time>" string.
+export function formatBlockDate(value: string | null | undefined): string | null {
   if (!value) return null
   if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return value
   return formatDisplayDateLong(value) || value
@@ -40,7 +42,7 @@ function fmtWithTime(date: string | null, time: string | null | undefined): stri
 }
 
 /** "13h00" — HH:MM converted to the house style used on client documents. */
-function houseTime(time: string): string {
+export function houseTime(time: string): string {
   const [hours, minutes] = time.split(":")
   return `${hours}h${minutes}`
 }
@@ -65,8 +67,8 @@ export function voucherRowsForBlock(
 ): VoucherRow[] {
   const rows: VoucherRow[] = []
   const d = block.serviceData
-  const departureDate = fmt(d.departureDate)
-  const arrivalDate = fmt(d.arrivalDate)
+  const departureDate = formatBlockDate(d.departureDate)
+  const arrivalDate = formatBlockDate(d.arrivalDate)
   // Airline bookings have no named contact — a flight's "reference" is its booking number, and
   // the flight number gets its own row below (see the airline branch).
   rows.push(

@@ -1,5 +1,6 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
+import { primaryProductOf } from "@/lib/enquiry/primary-product"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
@@ -20,6 +21,7 @@ import {
   VAT_INCLUSIVE_SUFFIX,
 } from "@/lib/quotes/quote-presentation"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
+import type { SupplierKind } from "@/lib/types"
 
 export interface QuotePdfData {
   quoteNumber: string
@@ -40,6 +42,13 @@ export interface QuotePdfData {
   agentCommission?: number
   /** Package itinerary; empty array omits the section entirely. */
   itineraryBlocks: VoucherServiceBlock[]
+  /** Kind of the booking's primary supplier, which names the trip on the meta line ("Journey",
+   *  "Stay", "Tour"). Omit to keep the historic "Journey" label. */
+  primarySupplierKind?: SupplierKind | null
+  /** Settings-resolved override for that noun (see resolveProductCopy in settings-access.ts) --
+   *  wins over primarySupplierKind's own code-vocabulary noun when supplied. Omit to keep the
+   *  vocabulary noun. */
+  productBookingNoun?: string | null
   currency?: string
   title?: string
   footerText?: string
@@ -248,6 +257,8 @@ export function QuoteDocument({
   subtotal,
   agentCommission = 0,
   itineraryBlocks,
+  primarySupplierKind,
+  productBookingNoun,
   currency = "ZAR",
   title = "QUOTATION",
   footerText = DEFAULT_FOOTER_TEXT,
@@ -266,6 +277,9 @@ export function QuoteDocument({
   const pax = { adults, children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
+  // What the client is being sold, in a word -- mirrors the quote email summary block
+  // (lib/quotes/quote-summary-block.ts), so the PDF stapled to that email never disagrees with it.
+  const journeyLabel = productBookingNoun ?? primaryProductOf(primarySupplierKind).bookingNoun
   const hasAgentCommission = agentCommission > 0
   // Per-person rate is always the gross rate — the discount is the agency's cut, not the
   // traveller's. Falls back to `total` when no subtotal is supplied (pre-existing callers).
@@ -317,7 +331,7 @@ export function QuoteDocument({
             <Text style={styles.metaValue}>{customerName || "Valued Guest"}</Text>
           </View>
           <View>
-            <Text style={styles.metaLabel}>Journey</Text>
+            <Text style={styles.metaLabel}>{journeyLabel}</Text>
             <Text style={styles.metaValue}>{journeyRange ?? "To be confirmed"}</Text>
           </View>
           {paxLabel ? (

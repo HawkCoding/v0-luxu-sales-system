@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { isSystemTemplateKey, type SystemTemplateKey } from "@/lib/templates/registry"
+import type { SupplierKind } from "@/lib/types"
 
 export interface EmailTemplate {
   key: string
@@ -68,15 +69,24 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
  * back to the code-level default when the DB row is missing or inactive.
  * Custom keys return null when not found.
  *
- * `supplierId`, when given, tries the (key, supplierId) variant row first
- * (e.g. a Rovos-specific quote_email body) and falls back to the untagged
- * (key, null) row — so a train with no variant of its own keeps using the
- * shared default without any special-casing at the call site.
+ * Four-step fallback, narrowest first:
+ *  1. `supplierId`, when given: the (key, supplierId) variant (e.g. a Rovos-specific quote_email
+ *     body) — a supplier's own wording always wins.
+ *  2. `supplierKind`, when given: the (key, supplierKind) variant (e.g. the hotel_property
+ *     quote_email every stay uses unless its own supplier overrides it) — lets a product type's
+ *     wording be written once rather than per supplier.
+ *  3. The untagged (key, null, null) row — the shared default every kind used before either
+ *     variant layer existed.
+ *  4. DEFAULT_TEMPLATES, for a system key with no row in the table at all.
+ *
+ * A caller with neither hint (or whose hints match nothing) still resolves — every layer falls
+ * through to the next without needing any special-casing at the call site.
  */
 export async function getTemplate(
   supabase: SupabaseClient<Database>,
   key: string,
   supplierId?: string | null,
+  supplierKind?: SupplierKind | null,
 ): Promise<EmailTemplate | null> {
   if (supplierId) {
     const { data: variant } = await supabase
@@ -92,11 +102,26 @@ export async function getTemplate(
     }
   }
 
+  if (supplierKind) {
+    const { data: kindVariant } = await supabase
+      .from("templates")
+      .select("key, subject, body_html")
+      .eq("key", key)
+      .eq("supplier_kind", supplierKind)
+      .eq("active", true)
+      .maybeSingle()
+
+    if (kindVariant) {
+      return { key: kindVariant.key, subject: kindVariant.subject, bodyHtml: kindVariant.body_html }
+    }
+  }
+
   const { data } = await supabase
     .from("templates")
     .select("key, subject, body_html")
     .eq("key", key)
     .is("supplier_id", null)
+    .is("supplier_kind", null)
     .eq("active", true)
     .maybeSingle()
 

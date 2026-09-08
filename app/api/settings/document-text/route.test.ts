@@ -35,8 +35,20 @@ import { GET, PATCH } from "./route"
 
 const USER_ID = "00000000-0000-4000-8000-000000000001"
 
-function makeAuth(overrides: { supabaseUpsertError?: { message: string } | null } = {}) {
+function makeAuth(
+  overrides: {
+    supabaseUpsertError?: { message: string } | null
+    kindOverrideRows?: { key: string; value: string }[]
+  } = {},
+) {
   const upsertError = overrides.supabaseUpsertError ?? null
+  const appSettingsUpsert = vi.fn(async () => ({ error: upsertError }))
+  const kindUpsert = vi.fn(async () => ({ error: null }))
+  const kindDelete = vi.fn(() => ({
+    eq: vi.fn(() => ({
+      in: vi.fn(async () => ({ error: null })),
+    })),
+  }))
   const supabase = {
     from: vi.fn((table: string) => {
       if (table === "app_settings") {
@@ -47,7 +59,18 @@ function makeAuth(overrides: { supabaseUpsertError?: { message: string } | null 
               error: null,
             })),
           })),
-          upsert: vi.fn(async () => ({ error: upsertError })),
+          upsert: appSettingsUpsert,
+        }
+      }
+      if (table === "supplier_kind_document_text") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(async () => ({ data: overrides.kindOverrideRows ?? [], error: null })),
+            })),
+          })),
+          upsert: kindUpsert,
+          delete: kindDelete,
         }
       }
       throw new Error(`Unexpected table: ${table}`)
@@ -73,7 +96,7 @@ function makeAuth(overrides: { supabaseUpsertError?: { message: string } | null 
     },
   })
 
-  return { supabase }
+  return { supabase, appSettingsUpsert, kindUpsert, kindDelete }
 }
 
 function makeRequest(body: unknown) {
@@ -118,6 +141,30 @@ describe("GET /api/settings/document-text", () => {
     // Email wording now lives in the templates table, not settings.
     expect(body.quote_email_accept_text).toBeUndefined()
     expect(body.invoice_email_closing).toBeUndefined()
+  })
+
+  it("overlays a per-kind override on top of the global value when ?kind= is a known supplier kind", async () => {
+    makeAuth({ kindOverrideRows: [{ key: "quote_doc_footer_text", value: "Luxury Stays." }] })
+
+    const res = await GET(
+      new Request("http://localhost/api/settings/document-text?kind=hotel_property"),
+    )
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.quote_doc_footer_text).toBe("Luxury Stays.")
+    // Untouched keys still fall through to the global value.
+    expect(body.quote_doc_title).toBe("OLD TITLE")
+  })
+
+  it("ignores an unrecognized ?kind= and returns the global settings unchanged", async () => {
+    makeAuth()
+
+    const res = await GET(new Request("http://localhost/api/settings/document-text?kind=not-a-kind"))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.quote_doc_title).toBe("OLD TITLE")
   })
 })
 
@@ -209,5 +256,63 @@ describe("PATCH /api/settings/document-text", () => {
         after: { quote_doc_title: "NEW TITLE" },
       }),
     )
+  })
+
+  describe("per-kind override (kind field present in the body)", () => {
+    it("writes the per-kind table, not app_settings, and requires no minimum length", async () => {
+      const { appSettingsUpsert, kindUpsert } = makeAuth()
+
+      const res = await PATCH(
+        makeRequest({ kind: "hotel_property", quote_doc_footer_text: "Luxury Stays." }),
+      )
+      const body = await res.json()
+
+      expect(res.status).toBe(200)
+      expect(kindUpsert).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            kind: "hotel_property",
+            key: "quote_doc_footer_text",
+            value: "Luxury Stays.",
+          }),
+        ],
+        { onConflict: "kind,key" },
+      )
+      // app_settings is still read (to resolve the response as an overlay on the global value) but
+      // never written by a kind-scoped patch -- only supplier_kind_document_text is.
+      expect(appSettingsUpsert).not.toHaveBeenCalled()
+      // Response is the resolved overlay (global getDocumentTextSettings still returns "OLD TITLE"
+      // for the untouched key), not just the raw written override.
+      expect(body.quote_doc_title).toBe("OLD TITLE")
+    })
+
+    it("treats an empty value as deleting the override, not as blanking a required field", async () => {
+      const { kindDelete } = makeAuth()
+
+      const res = await PATCH(makeRequest({ kind: "hotel_property", quote_doc_title: "" }))
+
+      expect(res.status).toBe(200)
+      expect(kindDelete).toHaveBeenCalled()
+    })
+
+    it("returns 400 for an unrecognized kind", async () => {
+      makeAuth()
+
+      const res = await PATCH(
+        makeRequest({ kind: "not-a-real-kind", quote_doc_footer_text: "Luxury Stays." }),
+      )
+      expect(res.status).toBe(400)
+    })
+
+    it("writes the audit log entity id scoped to the kind", async () => {
+      makeAuth()
+
+      await PATCH(makeRequest({ kind: "hotel_property", quote_doc_footer_text: "Luxury Stays." }))
+
+      expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ entityId: "document-text:hotel_property" }),
+      )
+    })
   })
 })

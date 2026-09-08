@@ -57,6 +57,25 @@ export function resolveDirectedArrivalName(
   return reversed ? originName : destinationName
 }
 
+/** A bare UUID and nothing else — the shape a tour operator's itinerary name is stored in. */
+const ID_SHAPED_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * The route's name as it may be shown to a person, or null when it has none.
+ *
+ * A tour operator's itinerary has no name of its own: it can't be blank (routes carries
+ * UNIQUE(name, supplier_id)), so it saves as the route's own id instead — see
+ * app/api/suppliers/[slug]/route.ts and migration 20260828090000_retire_tour_itinerary_names.sql.
+ * Every caller that composes a route name into text a person reads must route it through here, or
+ * that id renders verbatim ("Robben Island - 1f514c73-… — Robben Island Museum Tour"). Blank and
+ * id-shaped names both mean the same thing: no name to show.
+ */
+export function displayRouteName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim()
+  if (!trimmed || ID_SHAPED_NAME.test(trimmed)) return null
+  return trimmed
+}
+
 /** The pair of airport codes an airline route travels between, in booked-direction order. */
 export interface RouteEndpointCodes {
   departure: string
@@ -65,6 +84,32 @@ export interface RouteEndpointCodes {
 
 /** The separator between the two halves of a route name. Only the first one splits. */
 const ROUTE_ENDPOINT_SEPARATOR = /\s*(?:>|<|→|←|↔|–|—|-|\/)\s*|\s+to\s+/i
+
+/**
+ * Whether two route names describe travel between the same pair of places, ignoring direction —
+ * `"Pretoria ↔ Cape Town"` matches both `"Pretoria → Cape Town"` and the reversed
+ * `"Cape Town → Pretoria"`.
+ *
+ * Used to suppress a document row that would otherwise restate the row above it with a different
+ * arrow, since a train route's name is auto-derived from its own endpoints (`buildRouteName`). A
+ * name that is not an endpoint pair at all ("Pride of Africa") never matches, so a genuinely named
+ * journey still prints alongside its route.
+ */
+export function sameRouteEndpoints(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = splitEndpoints(a)
+  const right = splitEndpoints(b)
+  if (!left || !right) return false
+  return left[0] === right[0] && left[1] === right[1]
+}
+
+/** The route name's two halves, lowercased and sorted so direction can't affect the comparison. */
+function splitEndpoints(name: string | null | undefined): [string, string] | null {
+  const parts = name?.trim().split(ROUTE_ENDPOINT_SEPARATOR)
+  if (!parts || parts.length !== 2) return null
+  const [first, second] = parts.map((part) => part.trim().toLowerCase())
+  if (!first || !second) return null
+  return first <= second ? [first, second] : [second, first]
+}
 
 /** IATA is 3 letters, ICAO 4 — the same shape `booking_services` and its Zod schema enforce. */
 const AIRPORT_CODE = /^[A-Z]{3,4}$/

@@ -370,8 +370,11 @@ export interface DocumentTextSettings {
   itinerary_doc_intro_text: string
 }
 
-export function useDocumentTextSettings() {
-  return useSWR<DocumentTextSettings>("/api/settings/document-text", fetcher, swrOptions)
+/** `kind` previews/edits that supplier kind's own overrides (see supplier_kind_document_text) --
+ *  omit for the global (all-products) settings, unchanged from before per-kind copy existed. */
+export function useDocumentTextSettings(kind?: string | null) {
+  const key = kind ? `/api/settings/document-text?kind=${encodeURIComponent(kind)}` : "/api/settings/document-text"
+  return useSWR<DocumentTextSettings>(key, fetcher, swrOptions)
 }
 
 export interface DocumentBrandSettings {
@@ -383,8 +386,11 @@ export interface DocumentBrandSettings {
   brand_block_position_email: string
 }
 
-export function useDocumentBrandSettings() {
-  return useSWR<DocumentBrandSettings>("/api/settings/document-brand", fetcher, swrOptions)
+/** `kind` previews/edits that supplier kind's own heading/subheading override -- omit for the
+ *  global (all-products) settings, unchanged from before per-kind copy existed. */
+export function useDocumentBrandSettings(kind?: string | null) {
+  const key = kind ? `/api/settings/document-brand?kind=${encodeURIComponent(kind)}` : "/api/settings/document-brand"
+  return useSWR<DocumentBrandSettings>(key, fetcher, swrOptions)
 }
 
 export interface EmailAppearanceSettings {

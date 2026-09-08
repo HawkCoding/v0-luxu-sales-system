@@ -59,6 +59,16 @@ const VOCABULARY_COPY: Partial<Record<SupplierKind, VocabularyCopy>> = {
       description: "e.g. En-suite, Shower, Bath.",
     },
   },
+  cruise_line: {
+    cardTitle: "Cabin Vocabulary",
+    cardDescription: "Configure the bedroom and bathroom variants this cruise line offers. Drag to reorder.",
+    bedroomTypes: { title: "Bedroom Types", description: "e.g. Twin, Double, King." },
+    bedroomLayouts: {
+      title: "Cabin Layouts",
+      description: "e.g. Interior, Ocean View, Balcony.",
+    },
+    bathroomTypes: { title: "Bathroom Types", description: "e.g. Shower, Bath." },
+  },
 }
 
 // TODO: Bedroom Types is hidden for hotel_property below (UI-only — tables, columns, and

@@ -8,6 +8,7 @@ import { sendEmail } from "@/lib/email/transport"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
 import { getTemplate, type EmailTemplate } from "@/lib/templates/get-template"
 import { loadQuoteConfig } from "@/lib/quotes/load-quote-config"
+import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import type { PricingSnapshot } from "@/lib/types"
 
 export interface FollowUpWorkerResult {
@@ -18,6 +19,33 @@ export interface FollowUpWorkerResult {
 }
 
 const NO_OVERRIDES = { journeyClass: null, rateAudience: null, showTrainOnlyNote: null }
+
+/**
+ * Stages past the point where chasing a quote decision makes sense. Canonical stages plus their
+ * legacy aliases (payment_schedule → deposit_requested, trip_active → voucher_sent) since older
+ * bookings may still carry legacy values, and `lost` — a cancelled booking's quotes are never
+ * cancelled with it, so without this a customer who already said no keeps getting nudged.
+ * Shared by the DB query (which filters these out up front) and the in-loop guard.
+ */
+const TERMINAL_STAGES = [
+  "deposit_requested",
+  "payment_schedule",
+  "deposit_paid",
+  "final_paid",
+  "voucher_sent",
+  "trip_active",
+  "closed",
+  "lost",
+] as const
+
+/**
+ * Compared against a lower-cased `bookings.outcome`. The column is free text whose written values
+ * are capitalised ("Won", "Lost", "Cancelled"), so a case-sensitive match here silently never
+ * fired. `won` is included because a won booking at a non-terminal stage is just as dead.
+ */
+const TERMINAL_OUTCOMES = new Set(["won", "lost", "cancelled"])
+
+const TERMINAL_STAGE_SET = new Set<string>(TERMINAL_STAGES)
 
 export async function runQuoteFollowUpWorker(
   supabase: SupabaseClient<Database>,
@@ -34,27 +62,37 @@ export async function runQuoteFollowUpWorker(
     throw new Error("Follow-up template could not be resolved")
   }
   const defaultTemplate: EmailTemplate = defaultTemplateRow
-  // A supplier-tagged variant is fetched at most once per distinct primary supplier in this run,
-  // not once per quote -- most runs only ever see one or two trains.
+  // A supplier- or kind-tagged variant is fetched at most once per distinct primary supplier in
+  // this run, not once per quote -- most runs only ever see one or two trains.
   const templateBySupplierId = new Map<string, EmailTemplate>([["", defaultTemplate]])
   async function templateFor(primarySupplierId: string | null): Promise<EmailTemplate> {
     const key = primarySupplierId ?? ""
     const cached = templateBySupplierId.get(key)
     if (cached) return cached
-    const resolved = (await getTemplate(supabase, "follow_up", primarySupplierId)) ?? defaultTemplate
+    const supplierKind = await loadSupplierKind(supabase, primarySupplierId)
+    const resolved =
+      (await getTemplate(supabase, "follow_up", primarySupplierId, supplierKind)) ?? defaultTemplate
     templateBySupplierId.set(key, resolved)
     return resolved
   }
 
   const today = new Date()
 
-  // Find quotes in 'sent' status with follow-ups not disabled and a known sent date
+  // Find quotes in 'sent' status with follow-ups not disabled and a known sent date, whose booking
+  // has not already moved past the point of chasing. The booking (and its customer) is embedded
+  // rather than read per quote: the old shape re-read one booking row per quote on every run, and
+  // a quote left at 'sent' under a finished booking was re-read forever, once a day, for nothing.
   const { data: sentQuotes, error: quotesError } = await supabase
     .from("quotes")
-    .select("id, booking_id, last_sent_at, follow_ups_disabled")
+    // Kept on one line: PostgREST's type parser only understands a single string literal, and a
+    // concatenated one widens to `string`, which loses the row types entirely.
+    .select(
+      "id, booking_id, last_sent_at, follow_ups_disabled, bookings!inner(id, booking_number, stage, outcome, assigned_salesperson_id, primary_supplier_id, customers!inner(title, first_name, last_name, email))",
+    )
     .eq("status", "sent")
     .eq("follow_ups_disabled", false)
     .not("last_sent_at", "is", null)
+    .not("bookings.stage", "in", `(${TERMINAL_STAGES.join(",")})`)
 
   if (quotesError) {
     throw new Error(`Failed to fetch sent quotes: ${quotesError.message}`)
@@ -70,6 +108,26 @@ export async function runQuoteFollowUpWorker(
 
   for (const quote of sentQuotes) {
     if (!quote.last_sent_at) continue
+
+    // Embedded by the query above. A many-to-one embed comes back as a single row, but the
+    // generated types allow the array shape, so both are handled -- same as `customers` below.
+    const booking = Array.isArray(quote.bookings) ? quote.bookings[0] : quote.bookings
+
+    if (!booking) {
+      skipped++
+      continue
+    }
+
+    // Belt-and-braces: the query already excludes terminal stages, but a booking can move between
+    // that read and this send. `outcome` is only checked here -- PostgREST cannot match it
+    // case-insensitively, and the column's written values are capitalised.
+    if (
+      TERMINAL_STAGE_SET.has(booking.stage ?? "") ||
+      TERMINAL_OUTCOMES.has((booking.outcome ?? "").toLowerCase())
+    ) {
+      skipped++
+      continue
+    }
 
     // Normalize to UTC midnight so time-of-day doesn't skew day diffs
     const sentDateStr = new Date(quote.last_sent_at).toISOString().slice(0, 10)
@@ -101,47 +159,6 @@ export async function runQuoteFollowUpWorker(
     const dueDays = cadence.filter((day) => day <= daysSinceSent && !sentDays.has(day))
 
     if (dueDays.length === 0) {
-      skipped++
-      continue
-    }
-
-    // Fetch booking + customer + salesperson details (once per quote)
-    const { data: booking } = await supabase
-      .from("bookings")
-      .select(
-        "id, booking_number, stage, outcome, assigned_salesperson_id, primary_supplier_id, customers!inner(title, first_name, last_name, email)",
-      )
-      .eq("id", quote.booking_id)
-      .single()
-
-    if (!booking) {
-      skipped++
-      continue
-    }
-
-    // Skip if booking has progressed past quote_sent stage.
-    // Canonical stages plus their legacy aliases (payment_schedule → deposit_requested,
-    // trip_active → voucher_sent) since older bookings may still carry legacy values.
-    const terminalStages = new Set([
-      "deposit_requested",
-      "payment_schedule",
-      "deposit_paid",
-      "final_paid",
-      "voucher_sent",
-      "trip_active",
-      "closed",
-    ])
-    const terminalOutcomes = new Set(["lost", "cancelled"])
-    if (
-      terminalStages.has(booking.stage ?? "") ||
-      terminalOutcomes.has(booking.outcome ?? "")
-    ) {
-      void logError({
-        severity: "Info",
-        source: "quote-follow-up",
-        message: `Follow-up skipped — booking ${booking.booking_number} has progressed`,
-        details: { quoteId: quote.id, stage: booking.stage, outcome: booking.outcome },
-      })
       skipped++
       continue
     }
@@ -276,12 +293,15 @@ export async function runQuoteFollowUpWorker(
     }
   }
 
-  if (skipped > 0) {
+  // Only a run that actually did something is worth a log row. A skip is the expected outcome for
+  // every quote inside its cadence window, and `error_logs` has no retention -- logging it daily
+  // buried real failures under rows staff had to resolve by hand.
+  if (sent > 0 || failed > 0) {
     void logError({
       severity: "Info",
       source: "quote-follow-up",
-      message: `${skipped} quote(s) skipped — all cadence points already sent or booking progressed`,
-      details: { skipped },
+      message: `${sent} follow-up(s) sent, ${failed} failed, ${skipped} quote(s) skipped`,
+      details: { sent, failed, skipped },
     })
   }
 

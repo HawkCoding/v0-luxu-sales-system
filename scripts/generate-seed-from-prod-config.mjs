@@ -71,7 +71,11 @@ function toJsonLiteral(rows) {
   return `${DOLLAR_TAG}${json}${DOLLAR_TAG}`
 }
 
-/** insert ... select * from json_populate_recordset(...) on conflict (conflictCols) do update ... */
+// Columns are named rather than `select *`: a column added to the table after this snapshot was
+// pulled is absent from the JSON, and json_populate_recordset would hand it back as an explicit
+// NULL -- which defeats a NOT NULL DEFAULT and aborts the whole overlay. Naming the snapshot's
+// columns lets every newer column take its default instead.
+/** insert (cols) select cols from json_populate_recordset(...) on conflict (conflictCols) do update ... */
 function upsertBlock(table, rows, conflictCols, { skipUpdateCols = [], conflictTarget } = {}) {
   if (rows.length === 0) return ""
   const cols = Object.keys(rows[0])
@@ -83,8 +87,8 @@ function upsertBlock(table, rows, conflictCols, { skipUpdateCols = [], conflictT
 
   return [
     `alter table public.${table} disable trigger user;`,
-    `insert into public.${table}`,
-    `select * from json_populate_recordset(null::public.${table}, ${toJsonLiteral(rows)}::json)`,
+    `insert into public.${table} (${cols.join(", ")})`,
+    `select ${cols.join(", ")} from json_populate_recordset(null::public.${table}, ${toJsonLiteral(rows)}::json)`,
     `on conflict ${conflictTarget ?? `(${conflictCols.join(", ")})`} ${updateClause};`,
     `alter table public.${table} enable trigger user;`,
     "",
@@ -94,10 +98,11 @@ function upsertBlock(table, rows, conflictCols, { skipUpdateCols = [], conflictT
 /** insert ... on conflict do nothing — for composite-PK join tables. */
 function insertOnlyBlock(table, rows) {
   if (rows.length === 0) return ""
+  const cols = Object.keys(rows[0])
   return [
     `alter table public.${table} disable trigger user;`,
-    `insert into public.${table}`,
-    `select * from json_populate_recordset(null::public.${table}, ${toJsonLiteral(rows)}::json)`,
+    `insert into public.${table} (${cols.join(", ")})`,
+    `select ${cols.join(", ")} from json_populate_recordset(null::public.${table}, ${toJsonLiteral(rows)}::json)`,
     `on conflict do nothing;`,
     `alter table public.${table} enable trigger user;`,
     "",
@@ -315,9 +320,14 @@ out += upsertBlock("outcome_reasons", load("outcome_reasons"), ["id"])
 out += "-- APP SETTINGS\n"
 out += upsertBlock("app_settings", load("app_settings"), ["key"])
 
-out += "-- EMAIL TEMPLATES (conflict on `key`: the unify-email-templates migration\n"
-out += "-- pre-inserts system keys with locally-generated ids)\n"
-out += upsertBlock("templates", load("templates"), ["key"], { skipUpdateCols: ["id"] })
+// Conflict columns must match ux_templates_key_supplier_kind in full: Postgres infers an
+// arbiter only from an index's whole column set, so `(key)` alone raises 42P10.
+out += "-- EMAIL TEMPLATES (conflict on the full (key, supplier_id, supplier_kind) unique\n"
+out += "-- index: the unify-email-templates migration pre-inserts system keys with\n"
+out += "-- locally-generated ids, and per-supplier/per-kind variants stay distinct)\n"
+out += upsertBlock("templates", load("templates"), ["key", "supplier_id", "supplier_kind"], {
+  skipUpdateCols: ["id"],
+})
 
 out += "-- VOUCHER TEMPLATE (singleton — update in place, keep local id)\n"
 out += singletonUpdateBlock("voucher_template", load("voucher_template")[0])

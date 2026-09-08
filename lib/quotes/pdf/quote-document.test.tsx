@@ -45,6 +45,38 @@ describe("QuoteDocument", () => {
     expect(text).toContain("Journey")
   })
 
+  describe("primary product label", () => {
+    // No primarySupplierKind supplied (existing callers, e.g. pdf-preview's sample data): the meta
+    // line keeps saying "Journey", matching primaryProductOf's null fallback.
+    it("labels the meta line Journey when no primary supplier kind is known", () => {
+      const doc = QuoteDocument({
+        ...sampleQuotePdfData(),
+        quoteNumber: QUOTE_NUMBER,
+        quoteDate: "2026-07-16",
+        primarySupplierKind: null,
+      }) as React.ReactElement
+      const text = renderedText(doc).join(" | ")
+
+      expect(text).toContain("Journey")
+    })
+
+    // Mirrors the quote email summary block (lib/quotes/quote-summary-block.test.ts): a
+    // hotel-primary booking is a Stay, so the PDF stapled to that email must read the same.
+    it("labels the meta line Stay for a hotel-primary booking", () => {
+      const doc = QuoteDocument({
+        ...sampleQuotePdfData(),
+        quoteNumber: QUOTE_NUMBER,
+        quoteDate: "2026-07-16",
+        primarySupplierKind: "hotel_property",
+      }) as React.ReactElement
+      const text = renderedText(doc).join(" | ")
+
+      // Not a negative "Journey" assertion: the default footer/masthead copy
+      // ("Luxury Rail Journeys") still says it regardless of the meta label.
+      expect(text).toContain("Stay")
+    })
+  })
+
   it("keeps the quote number out of the PDF viewer's title bar", () => {
     // Document metadata is customer-visible chrome, so it follows the same rule
     // as the page body.
