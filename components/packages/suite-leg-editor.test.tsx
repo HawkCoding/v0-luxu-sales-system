@@ -454,7 +454,9 @@ describe("SuiteLegEditor accommodation pricing basis", () => {
 describe("SuiteLegEditor unit field labels (F-P4-4)", () => {
   const legWithSuiteType: PackageLeg = {
     ...leg,
-    suiteTypes: [{ id: "suite-type-1", supplierId: "supplier-1", name: "Deluxe", active: true, createdAt: "" }],
+    suiteTypes: [
+      { id: "suite-type-1", supplierId: "supplier-1", name: "Deluxe", active: true, createdAt: "", updatedAt: "" },
+    ],
   }
 
   it("associates the Suite Type select with its label", () => {

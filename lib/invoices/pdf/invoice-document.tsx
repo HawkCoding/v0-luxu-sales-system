@@ -1,4 +1,4 @@
-import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import {
   FOOTER_BRAND_DIVISION_LINE,
   FOOTER_BRAND_PRODUCT_LINE,
@@ -123,6 +123,16 @@ function orDash(value: string | null | undefined): string {
   return value?.trim() || EMPTY
 }
 
+/** One label/value pair in the header's meta strip, e.g. "Invoice No.  LTT-2026-0001-INV". */
+function MetaField({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.headerMetaField}>
+      <Text style={styles.headerMetaLabel}>{label}</Text>
+      <Text style={styles.headerMetaValue}>{value}</Text>
+    </View>
+  )
+}
+
 
 /**
  * "25% Deposit due now" reads as a fresh demand once the deposit has actually
@@ -147,58 +157,35 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
   },
 
-  // Header: seal left, brand lines centre, invoice identity right.
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
+  // Header: BrandBlock (seal + full-width brand lines + rule) sits above a
+  // compact two-row strip of invoice identity fields.
+  headerRule: {
     borderBottomWidth: 2,
     borderBottomColor: "#8b5a2b",
-    paddingBottom: 10,
     marginBottom: 12,
   },
-  headerSeal: {
-    width: 58,
-    height: 58,
-    objectFit: "contain",
-    marginRight: 12,
-  },
-  headerBrand: {
-    flex: 1,
-    alignItems: "center",
-  },
-  headerDivision: {
-    fontSize: 13,
-    fontFamily: "Montserrat",
-    fontWeight: 700,
-    color: "#172018",
-  },
-  headerProduct: {
-    fontSize: 7.5,
-    color: "#8a7f74",
-    letterSpacing: 0.6,
-    marginTop: 3,
-  },
-  headerMeta: {
-    width: 168,
+  headerMetaStrip: {
+    marginBottom: 12,
   },
   headerMetaRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    marginBottom: 2,
+    marginBottom: 3,
+  },
+  headerMetaField: {
+    flexDirection: "row",
+    flex: 1,
   },
   headerMetaLabel: {
     fontSize: 8,
     fontFamily: "Montserrat",
     fontWeight: 700,
     color: "#6f675d",
-    textAlign: "right",
-    marginRight: 8,
+    marginRight: 6,
   },
   headerMetaValue: {
     fontSize: 8,
     color: "#312b24",
-    width: 74,
-    textAlign: "right",
+    flex: 1,
   },
 
   // Guest + billing identity.
@@ -608,37 +595,20 @@ export function InvoiceDocument({
       title={`Invoice ${invoiceNumber} — ${customerName}`}
     >
       <Page size="A4" style={styles.page}>
-        <View style={styles.header}>
-          {showBrandTop ? (
-            <>
-              {brandLogo ? <Image src={brandLogo} style={styles.headerSeal} /> : null}
-              <View style={styles.headerBrand}>
-                <Text style={styles.headerDivision}>{resolvedBrand.heading}</Text>
-                <Text style={styles.headerProduct}>{resolvedBrand.subheading}</Text>
-              </View>
-            </>
-          ) : (
-            // Empty flex:1 spacer keeps the meta box right-aligned when the brand
-            // block has been moved to the bottom (or hidden).
-            <View style={styles.headerBrand} />
-          )}
-          <View style={styles.headerMeta}>
-            <View style={styles.headerMetaRow}>
-              <Text style={styles.headerMetaLabel}>Invoice No.</Text>
-              <Text style={styles.headerMetaValue}>{invoiceNumber}</Text>
-            </View>
-            <View style={styles.headerMetaRow}>
-              <Text style={styles.headerMetaLabel}>Status</Text>
-              <Text style={styles.headerMetaValue}>{statusLabel}</Text>
-            </View>
-            <View style={styles.headerMetaRow}>
-              <Text style={styles.headerMetaLabel}>Invoice date</Text>
-              <Text style={styles.headerMetaValue}>{formatDate(issueDate)}</Text>
-            </View>
-            <View style={styles.headerMetaRow}>
-              <Text style={styles.headerMetaLabel}>Consultant</Text>
-              <Text style={styles.headerMetaValue}>{orDash(consultant)}</Text>
-            </View>
+        {showBrandTop ? (
+          <BrandBlock brand={resolvedBrand} logoImage={brandLogo} placement="top" />
+        ) : (
+          // Keep the rule when the brand block has been moved to the bottom (or hidden).
+          <View style={styles.headerRule} />
+        )}
+        <View style={styles.headerMetaStrip}>
+          <View style={styles.headerMetaRow}>
+            <MetaField label="Invoice No." value={invoiceNumber} />
+            <MetaField label="Status" value={statusLabel} />
+          </View>
+          <View style={styles.headerMetaRow}>
+            <MetaField label="Invoice date" value={formatDate(issueDate)} />
+            <MetaField label="Consultant" value={orDash(consultant)} />
           </View>
         </View>
 

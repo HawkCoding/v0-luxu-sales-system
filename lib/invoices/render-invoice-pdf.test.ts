@@ -3,7 +3,11 @@
 // "No PDFJS.workerSrc specified" path).
 import { describe, expect, it } from "vitest"
 import type { InvoiceTotals } from "./pdf/invoice-document"
-import { extractPdfText } from "@/lib/pdf/extract-text.fixtures"
+import {
+  FOOTER_BRAND_DIVISION_LINE,
+  FOOTER_BRAND_PRODUCT_LINE,
+} from "@/lib/assets/footer-brand"
+import { extractPdfPageTexts, extractPdfText } from "@/lib/pdf/extract-text.fixtures"
 import { makeBankingSettings } from "@/lib/settings-access.fixtures"
 import { renderInvoicePdf } from "./render-invoice-pdf"
 
@@ -88,6 +92,33 @@ describe("renderInvoicePdf smoke", () => {
     expect(text).not.toContain("Commission")
   })
 
+  it("renders the brand letterhead unbroken and the invoice identity fields below it", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "LTT-2026-0001-INV",
+      bookingNumber: "LTT-2026-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      consultant: "LB",
+      statusLabel: "Provisional",
+      departure: null,
+      items,
+      totals: depositTotals,
+      banking,
+    })
+
+    const text = await extractPdfText(buffer)
+    // extractPdfText starts a new line whenever the text baseline changes, so a
+    // heading that wraps onto a second line would break this substring match.
+    expect(text).toContain(FOOTER_BRAND_PRODUCT_LINE)
+    expect(text).toContain(FOOTER_BRAND_DIVISION_LINE)
+    expect(text).toContain("Invoice No.")
+    expect(text).toContain("LTT-2026-0001-INV")
+    expect(text).toContain("Provisional")
+    expect(text).toContain("Consultant")
+    expect(text).toContain("LB")
+  })
+
   it("renders every billing address line alongside the phone and e-mail rows", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "LTT-2026-0001-INV",
@@ -126,6 +157,9 @@ describe("renderInvoicePdf smoke", () => {
     expect(text).toContain("rachel.obrien@eircom.ie")
     expect(text).toContain("112223456")
     expect(text).toContain("7535")
+    // The taller header (brand block + meta strip stacked, vs. the old side-by-side
+    // layout) must not push this densely-filled invoice onto a second page.
+    expect((await extractPdfPageTexts(buffer)).length).toBe(1)
   })
 
   it("renders custom notes and footer text", async () => {

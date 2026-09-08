@@ -16,9 +16,11 @@ interface BrandBlockProps {
 }
 
 /**
- * The SARAIL brand mark shared by the quote and invoice PDFs. The invoice's own
- * page header is a separate, meta-bearing letterhead that mirrors the `top`
- * styling here; this component covers every other slot.
+ * The SARAIL brand mark shared by the quote and invoice PDFs, in every slot both
+ * documents place it. A `top` block owns the full content width so the heading
+ * always sets on one line — the invoice used to inline its own copy of this
+ * styling beside a fixed-width meta column, which squeezed the heading into a
+ * wrap. Its meta now sits below the rule instead.
  */
 export function BrandBlock({ brand, logoImage, placement }: BrandBlockProps) {
   const s = placement === "top" ? topStyles : bottomStyles
@@ -56,7 +58,8 @@ const topStyles = StyleSheet.create({
   },
   heading: {
     fontSize: 13,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
   },
   subheading: {
@@ -84,6 +87,7 @@ const bottomStyles = StyleSheet.create({
   },
   heading: {
     fontSize: 9,
+    fontFamily: "Montserrat",
     color: "#554c42",
   },
   subheading: {
