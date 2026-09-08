@@ -1030,7 +1030,7 @@ describe("airline date anchors", () => {
     expect(patch.selections.find((s) => s.packageLegId === "leg-airline")?.dateAnchor).toBe("pre")
   })
 
-  it("applyAnchoredAirlineDates resolves departure from the trip's own edge, leaving arrivalDate untouched", () => {
+  it("applyAnchoredAirlineDates resolves departure from the leg directly above it, not the primary's own date", () => {
     const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
     suiteState(states, "leg-train").serviceDate = "2026-09-01"
     const hotel = suiteState(states, "leg-hotel")
@@ -1045,18 +1045,18 @@ describe("airline date anchors", () => {
     airline.arrivalDate = "2026-09-01" // untouched sentinel
 
     const recomputed = applyAnchoredAirlineDates(chainPkg, states)
-    // F-P2-4: post resolves to the trip's own end -- the 3-day train route's arrival day
-    // (09-01 + 2 = 09-03) -- not the custom-dated hotel that happens to sit directly above it in
-    // the leg list (which would derive 09-04). A custom-anchored leg is never part of the pre/post
-    // chain, so position alone must not make it the flight's anchor -- that was the old bug.
-    expect(suiteState(recomputed, "leg-airline").serviceDate).toBe("2026-09-03")
+    // A flight anchors to whatever sits directly above it, whatever *that* leg's own anchor is --
+    // here the custom-dated hotel checking out 09-04 (09-02 + 2 nights), not the 3-day train
+    // route's own arrival day (09-01 + 2 = 09-03). Anchoring is purely positional now, same as a
+    // transfer's.
+    expect(suiteState(recomputed, "leg-airline").serviceDate).toBe("2026-09-04")
     expect(suiteState(recomputed, "leg-airline").arrivalDate).toBe("2026-09-01")
   })
 
-  it("applyAnchoredAirlineDates pre-anchors before a pre-stay hotel, not the primary's own departure day (F-P2-4)", () => {
-    // The QA-P2 scenario: a flight anchored Pre must land before a pre-stay hotel, which itself
-    // sits between the flight and the primary leg in the list -- proving the fix isn't merely
-    // "read primarySupplierId", since the leg directly above the flight already is the primary.
+  it("applyAnchoredAirlineDates pre-anchors before whatever leg sits directly above it, not the primary product", () => {
+    // A flight anchored Pre lands on the day the leg directly above it starts -- here a pre-stay
+    // hotel sitting between the flight and the primary train, so the flight follows the hotel's
+    // own check-in day, not the train's departure day two legs up.
     const primaryTrain = { ...chainTrain, id: "leg-primary", supplierId: "supplier-leg-primary", sortOrder: 0 }
     const preHotel = { ...hotelLeg, id: "leg-pre-hotel", sortOrder: 1 }
     const flight = leg({ id: "leg-pre-flight", supplierKind: "airline", sortOrder: 2 })
@@ -1075,12 +1075,39 @@ describe("airline date anchors", () => {
     flightState.dateAnchor = "pre"
 
     states = applyAnchoredHotelDates(pkg, states, "supplier-leg-primary")
-    states = applyAnchoredAirlineDates(pkg, states, "supplier-leg-primary")
+    states = applyAnchoredAirlineDates(pkg, states)
 
     // Pre-hotel checks in 2 nights before the 15th (09-13) and checks out on the 15th; the flight
     // lands the same day the hotel checks in, not on the primary's own 09-15 departure.
     expect(suiteState(states, "leg-pre-hotel").serviceDate).toBe("2026-09-13")
     expect(suiteState(states, "leg-pre-flight").serviceDate).toBe("2026-09-13")
+  })
+
+  it("chains two flights: the lower flight anchors to the upper flight's own departure/arrival dates", () => {
+    const rail = { ...chainTrain, id: "leg-rail-chain", sortOrder: 0 }
+    const flight1 = leg({ id: "leg-flight-1", supplierKind: "airline", sortOrder: 1 })
+    const flight2 = leg({ id: "leg-flight-2", supplierKind: "airline", sortOrder: 2 })
+    const pkg = detail([rail, flight1, flight2])
+
+    let states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01" })
+    suiteState(states, "leg-rail-chain").serviceDate = "2026-09-01"
+
+    const upper = suiteState(states, "leg-flight-1")
+    upper.selected = true
+    upper.dateAnchor = "custom" // manually dated, so its own date isn't re-derived from the train
+    upper.serviceDate = "2026-09-01"
+    upper.arrivalDate = "2026-09-02" // overnight connection
+
+    const lower = suiteState(states, "leg-flight-2")
+    lower.selected = true
+    lower.dateAnchor = "post"
+
+    states = applyAnchoredAirlineDates(pkg, states)
+
+    // The lower flight's Post resolves off the leg directly above it (leg-flight-1), which is
+    // itself another flight -- not the train two legs up -- landing on flight-1's own captured
+    // arrival day (the overnight connection), not its departure day.
+    expect(suiteState(states, "leg-flight-2").serviceDate).toBe("2026-09-02")
   })
 
   it("chains hotel -> airline -> transfer through applyAnchoredDates", () => {
@@ -1116,7 +1143,7 @@ describe("airline date anchors", () => {
     airline.dateAnchor = "custom"
     airline.serviceDate = "2026-12-25"
 
-    const recomputed = applyAnchoredAirlineDates(chainPkg, states, "supplier-leg-train")
+    const recomputed = applyAnchoredAirlineDates(chainPkg, states)
 
     expect(suiteState(recomputed, "leg-airline").serviceDate).toBe("2026-12-25")
   })

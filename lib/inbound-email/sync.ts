@@ -330,13 +330,10 @@ async function filterAlreadyProcessed(
   const existingUids = new Set((existing ?? []).map((row) => row.uid))
   if (existingUids.size === 0) return candidateUids
 
+  // Skipping an already-seen UID is the normal steady state of every run, not an incident: the
+  // count lands on the run summary and in `inbound_email_sync_runs`, so logging a row per batch
+  // only buried real errors.
   summary.duplicateCount += existingUids.size
-  void logError({
-    severity: "Info",
-    source: "inbound-email-sync",
-    message: "Duplicate emails ignored",
-    details: { accountId: account.id, uids: Array.from(existingUids) },
-  })
   return candidateUids.filter((uid) => !existingUids.has(uid))
 }
 

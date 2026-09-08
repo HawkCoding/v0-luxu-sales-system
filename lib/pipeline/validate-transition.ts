@@ -12,12 +12,6 @@ export interface GateFailure {
   severity: GateSeverity
   autoFixable?: GateAutoFix
   /**
-   * Wording for the tick itself on a `confirm` gate. Without it the modal
-   * reuses `message` for both the heading and the checkbox, which reads as two
-   * demands where there is one.
-   */
-  confirmLabel?: string
-  /**
    * Set on `final_payment_confirmation` when there is a priced accepted quote to compare
    * payments against, so the modal can show real figures and pre-fill a payment instead of
    * asking the user to assert a money fact with nothing on screen.
@@ -515,8 +509,9 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
       })
     } else if (!manualConfirmations.finalPaymentReceived) {
       // Balance is verified at zero (or there is no priced accepted quote to check against, which
-      // fails safe to the same tick rather than inventing a number) -- still ask for the tick so a
-      // human eye is on the move, but it can no longer manufacture a balance.
+      // fails safe to the same confirmation rather than inventing a number) -- still ask for a
+      // deliberate confirmation so a human eye is on the move, but it can no longer manufacture a
+      // balance. The modal has no tick: pressing "Confirm and move" is the confirmation.
       failures.push({
         gateId: "final_payment_confirmation",
         message: "Payment in full needs confirming.",
@@ -525,7 +520,6 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
             ? "The full balance is on record. Confirm to move this booking to Paid in Full."
             : "No accepted quote total is on record to check the balance against — confirm to proceed.",
         severity: "confirm",
-        confirmLabel: "I confirm the full balance has been received.",
         ...(quoteTotal !== null ? { amountTotal: quoteTotal, amountPaid: totalPaid, amountOutstanding: 0 } : {}),
       })
     }

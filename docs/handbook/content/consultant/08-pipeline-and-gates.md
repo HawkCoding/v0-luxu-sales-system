@@ -119,7 +119,8 @@ gives you a **Go to … tab** button for the ones marked with a tab name.
 | *A payment must be recorded before the deposit can be marked received.* | Crossing into **Deposit Paid** with no payment on the booking. | **Payments** tab. Record the payment, then send the payment confirmation. See Chapter 6. |
 | *An invoice is required before marking the booking paid in full.* | Crossing into **Paid in Full** with no live invoice at all. | **Documents** tab. Generate the booking's invoice. This one is a confirmation, not a block — you can proceed past it. |
 | *The payment confirmation hasn't gone out yet.* | Crossing into **Paid in Full** with no payment-confirmation or final-invoice email sent. | **Emails Sent** tab, or the **Send payment confirmation** button in the modal. A manager can also move the booking on with a reason. |
-| *Confirm the booking is paid in full.* | Every move into **Paid in Full**. | Nothing to fix — tick the box in the modal. No amount is entered; the system zeroes the balance itself. |
+| *R… of R… has not been received.* | Crossing into **Paid in Full** while the accepted quote total is still short of the payments on record. | A genuine blocker — no confirmation can wave it through. **Payments** tab, or the **Record the balance payment** button in the modal. Once the balance clears, the booking moves to Paid in Full on its own. |
+| *Payment in full needs confirming.* | Crossing into **Paid in Full** with the balance already at zero. | Nothing to fix — press **Confirm and move**. There is no box to tick; the button is the confirmation. |
 | *A voucher PDF is required before moving to Voucher Sent.* | Crossing into **Voucher Sent** with no voucher PDF. | **Documents** tab → **Generate Voucher**. Or take **Fix and continue**. Note that supplier references must be complete first — see Chapter 7. |
 | *The voucher email hasn't been created yet.* | Crossing into **Voucher Sent** with no voucher email drafted or sent. | **Emails Sent** tab, or send the voucher from the generate dialog. See Chapter 7. |
 | *A cancellation reason is required before moving a booking to Lost.* | Any move to **Lost**. | Use **Cancel Booking** rather than a stage move — it asks for the reason properly. See below. |
@@ -144,20 +145,23 @@ Each item carries a badge:
 |---|---|
 | **Needs action** | A genuine blocker. The move will not happen until it is resolved. |
 | **Not sent yet** | The document exists; only the email is outstanding. Nothing has gone wrong. |
-| **Confirmation** | Not a failure at all. Tick it, or take the offered fix, and continue. |
+| **Confirmation** | Not a failure at all. Read it, or take the offered fix, and continue with **Confirm and move**. |
 
 Below each message is the fix instruction, and to the right, up to three controls:
 
 - **Go to … tab** — closes the modal and opens the relevant tab on the booking. Present
-  for every gate with an owning tab; absent for the invoice-number, paid-in-full tick, and
-  cancellation gates, which have nowhere to send you.
+  for every gate with an owning tab; absent for the invoice-number, paid-in-full confirmation,
+  and cancellation gates, which have nowhere to send you.
+- **Record the balance payment** — on a Paid in Full move with money still owed, opens
+  Record Payment pre-filled with the outstanding amount. Only on the booking screen.
 - **Send deposit invoice** / **Send payment confirmation** — opens that send dialog
   without leaving the modal. Only on the booking screen; the board cannot mount those
   dialogs, so from the board you get the tab link alone.
 - **Fix and continue** — see below.
 
-At the foot: **Cancel move** always; **Confirm and move**, enabled only when every
-confirmation is ticked and nothing is blocking; and, for managers, **Force move**.
+At the foot: **Cancel move** always; **Confirm and move**, shown only when nothing is
+blocking — pressing it confirms every confirmation item listed; and, for managers,
+**Force move**.
 
 ### Fix and continue
 

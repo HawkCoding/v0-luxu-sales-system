@@ -15,7 +15,10 @@ import type { PackageLeg, ServiceDateAnchor, SupplierKind } from "@/lib/types"
  * arrival dates or hotel checkout dates a second time.
  */
 
-const TRANSPORT_LEG_KINDS = new Set<SupplierKind>(["transfers", "vehicle_rental"])
+/** Legs that never anchor anything themselves — a transfer or rental walks past these to find the
+ *  leg it actually belongs to. Shared with flight-dates.ts, which walks the same way for airline
+ *  legs. */
+export const TRANSPORT_LEG_KINDS = new Set<SupplierKind>(["transfers", "vehicle_rental"])
 
 export interface AnchorLegDates {
   start: string | null

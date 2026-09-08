@@ -26,6 +26,7 @@ import {
   type TransferAnchorContext,
   type TransportLegState,
 } from "@/lib/packages/apply-dialog-state"
+import { anchorPresetLabels } from "@/lib/packages/anchor-labels"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
 // TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
@@ -44,26 +45,22 @@ import { resolveTransferPax, resolveTransferPricingBasis, type TransferPricingBa
 
 const NONE_VALUE = "__none"
 
-/**
- * F-P1-4: bare "Pre"/"Post" read as anchored to the booking's primary leg (the train), but a
- * transfer always anchors to the nearest *dated* leg directly above it in the itinerary, whatever
- * that is (see findTransferAnchorLeg's doc comment) -- a hotel add-on placed between the train and
- * the transfer silently becomes "Pre". Naming the leg in the option itself, once it is known,
- * means the consultant sees what it resolved to before saving, not after reading a small caption.
- */
+/** See anchorPresetLabels (lib/packages/anchor-labels.ts) for why the anchor leg is named on the
+ *  buttons rather than left to the caption below them. */
 function buildAnchorOptions(
   anchorContext: TransferAnchorContext | null,
 ): { value: ServiceDateAnchor; label: string; hint: string }[] {
   const legLabel = anchorContext?.legLabel ?? null
+  const labels = anchorPresetLabels(legLabel, anchorContext?.legKind)
   return [
     {
       value: "pre",
-      label: legLabel ? `Before ${legLabel}` : "Pre",
+      label: labels.pre,
       hint: legLabel ? `The day ${legLabel} starts` : "The day the leg above starts",
     },
     {
       value: "post",
-      label: legLabel ? `After ${legLabel}` : "Post",
+      label: labels.post,
       hint: legLabel ? `The day ${legLabel} ends` : "The day the leg above ends",
     },
     { value: "custom", label: "Custom", hint: "Pick the pickup date manually" },

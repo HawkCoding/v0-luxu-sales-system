@@ -852,9 +852,9 @@ export function BuildBookingDialog({
     return toTransferAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
   }
 
-  function airlineAnchorContext(): TransferAnchorContext | null {
+  function airlineAnchorContext(legId: string): TransferAnchorContext | null {
     if (!packageDetail) return null
-    return toAirlineAnchorContext(packageDetail, legStates, savedState?.primarySupplierId ?? null)
+    return toAirlineAnchorContext(packageDetail, legStates, legId, savedState?.primarySupplierId ?? null)
   }
 
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
@@ -1346,7 +1346,7 @@ export function BuildBookingDialog({
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
-                        flightAnchorContext={airlineAnchorContext()}
+                        flightAnchorContext={airlineAnchorContext(leg.id)}
                         primarySupplierId={savedState?.primarySupplierId ?? null}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}

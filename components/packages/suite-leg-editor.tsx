@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { PackageLeg, RateType, ServiceDateAnchor, SupplierKind, SupplierRateCard } from "@/lib/types"
+import type { PackageLeg, RateType, ServiceDateAnchor, SupplierRateCard } from "@/lib/types"
 import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import {
   getSupplierVocabulary,
@@ -35,6 +35,7 @@ import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/
 import { addDays } from "@/lib/packages/hotel-dates"
 import { nightsBetween } from "@/lib/packages/trip-date-range"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
+import { anchorPresetLabels } from "@/lib/packages/anchor-labels"
 import { formatPrimaryProductDuration } from "@/lib/enquiry/primary-product"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
 // TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
@@ -566,28 +567,42 @@ interface SuiteLegEditorProps {
   fxRates?: FxRateMap
 }
 
-// F-P2-7: wording follows the primary product's own vocabulary (Journey/Stay/Tour/...), not a
-// hardcoded "train" — a hotel or flight anchored to a tour reads "Pre-tour", not "Pre-train".
-// `anchorKind` falls back to "train_operator" when nothing has resolved yet (the picker still
-// needs labels to render before a primary leg or its date exists).
-function hotelAnchorOptions(anchorKind: SupplierKind): { value: ServiceDateAnchor; label: string; hint: string }[] {
-  const noun = getSupplierVocabulary(anchorKind).primaryProduct.bookingNoun.toLowerCase()
+// Names the anchor leg on the buttons once it has resolved, falling back to the primary product's
+// own vocabulary noun before then — see anchorPresetLabels (lib/packages/anchor-labels.ts).
+function hotelAnchorOptions(
+  anchorContext: HotelAnchorContext | null | undefined,
+): { value: ServiceDateAnchor; label: string; hint: string }[] {
+  const legLabel = anchorContext?.trainLabel ?? null
+  const labels = anchorPresetLabels(legLabel, anchorContext?.anchorKind)
+  const noun = getSupplierVocabulary(anchorContext?.anchorKind ?? "train_operator").primaryProduct.bookingNoun.toLowerCase()
   return [
-    { value: "pre", label: `Pre-${noun}`, hint: `Night(s) before the ${noun} starts` },
-    { value: "post", label: `Post-${noun}`, hint: `From the day the ${noun} ends` },
-    { value: "custom", label: "Custom date", hint: "Pick the check-in date manually" },
+    {
+      value: "pre",
+      label: labels.pre,
+      hint: legLabel ? `Night(s) before ${legLabel} starts` : `Night(s) before the ${noun} starts`,
+    },
+    {
+      value: "post",
+      label: labels.post,
+      hint: legLabel ? `From the day ${legLabel} ends` : `From the day the ${noun} ends`,
+    },
+    { value: "custom", label: "Custom", hint: "Pick the check-in date manually" },
   ]
 }
 
 // The flight anchor resolves off the whole trip's edges (see lib/packages/flight-dates.ts), not a
-// single neighbouring leg — "Pre"/"Post" here mean before/after the trip built around the primary
-// product, worded with its noun so it reads the same as the hotel's anchor above.
-function airlineAnchorOptions(anchorKind: SupplierKind): { value: ServiceDateAnchor; label: string; hint: string }[] {
-  const noun = getSupplierVocabulary(anchorKind).primaryProduct.bookingNoun.toLowerCase()
+// single neighbouring leg — "Before X"/"After X" here mean before/after the trip built around the
+// primary product, so it reads the same as the hotel's anchor above.
+function airlineAnchorOptions(
+  flightAnchorContext: TransferAnchorContext | null | undefined,
+): { value: ServiceDateAnchor; label: string; hint: string }[] {
+  const legLabel = flightAnchorContext?.legLabel ?? null
+  const labels = anchorPresetLabels(legLabel, flightAnchorContext?.legKind)
+  const noun = getSupplierVocabulary(flightAnchorContext?.legKind ?? "train_operator").primaryProduct.bookingNoun.toLowerCase()
   return [
-    { value: "pre", label: "Pre", hint: `Before the ${noun} starts` },
-    { value: "post", label: "Post", hint: `After the ${noun} ends` },
-    { value: "custom", label: "Custom date", hint: "Pick the departure date manually" },
+    { value: "pre", label: labels.pre, hint: legLabel ? `Before ${legLabel} starts` : `Before the ${noun} starts` },
+    { value: "post", label: labels.post, hint: legLabel ? `After ${legLabel} ends` : `After the ${noun} ends` },
+    { value: "custom", label: "Custom", hint: "Pick the departure date manually" },
   ]
 }
 
@@ -1129,7 +1144,7 @@ export function SuiteLegEditor({
           {isHotel ? (
             <AnchorDateSection
               label="Stay dates"
-              options={hotelAnchorOptions(anchorContext?.anchorKind ?? "train_operator")}
+              options={hotelAnchorOptions(anchorContext)}
               value={value.dateAnchor}
               onChange={setAnchor}
               disabledValues={anchorContext ? [] : ["pre", "post"]}
@@ -1244,7 +1259,7 @@ export function SuiteLegEditor({
                 <div className="space-y-1.5">
                   <AnchorDateSection
                     label="Departure date"
-                    options={airlineAnchorOptions(flightAnchorContext?.legKind ?? "train_operator")}
+                    options={airlineAnchorOptions(flightAnchorContext)}
                     value={value.dateAnchor}
                     onChange={setAnchor}
                     disabledValues={flightAnchorContext ? [] : ["pre", "post"]}
@@ -1262,10 +1277,7 @@ export function SuiteLegEditor({
                             <span className="font-medium text-foreground">
                               {formatDisplayDate(flightAnchoredDate)}
                             </span>
-                            {/* This is the trip's own edge (see lib/packages/flight-dates.ts), which
-                                a pre/post-stay hotel can push earlier/later than the primary leg's own
-                                date -- so it's worded as "the trip", not the primary leg's name. */}
-                            {` (${value.dateAnchor === "pre" ? "start" : "end"} of the trip)`}
+                            {` (${value.dateAnchor === "pre" ? "start" : "end"} of ${flightAnchorContext?.legLabel})`}
                           </>
                         ) : (
                           `Set ${flightAnchorContext?.legLabel}'s date to work out this flight's departure.`
@@ -1292,7 +1304,8 @@ export function SuiteLegEditor({
 
                     {!flightAnchorContext ? (
                       <p className="text-xs text-muted-foreground">
-                        This package has no primary leg to anchor to — pick the departure date manually.
+                        Nothing above this flight has a date to anchor to — pick the departure date
+                        manually.
                       </p>
                     ) : null}
 
@@ -1301,6 +1314,18 @@ export function SuiteLegEditor({
                         {flightAnchorContext.legLabel} has no journey length set, so the departure falls
                         on its start day. Set the route&apos;s duration in Suppliers, or pick a custom
                         date.
+                      </p>
+                    ) : null}
+
+                    {(value.dateAnchor === "pre" || value.dateAnchor === "post") &&
+                    flightAnchorContext &&
+                    !flightAnchorContext.isPrimaryProduct ? (
+                      // Same F-P1-4 shape the transfer editor warns about: this flight's Pre/Post
+                      // resolved to the nearest dated leg above it, and that leg isn't the booking's
+                      // primary product -- worth a flag rather than a silent assumption.
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        Anchored to {flightAnchorContext.legLabel}, not the booking&apos;s main product.
+                        If this flight belongs to a different leg, pick Custom.
                       </p>
                     ) : null}
                   </AnchorDateSection>
