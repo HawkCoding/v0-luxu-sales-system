@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { blankDraftSuiteUnit } from "@/lib/suites/draft-suite-unit"
 import {
   countRequiredComplete,
   isStayDraft,
@@ -409,6 +410,87 @@ John Smith
     }
 
     expect(validateDraft(draft).missingRequired).toEqual([])
+  })
+
+  it("words the unresolved-suite-type warning by the supplier's own kind (F-P6-1/F-P7-3)", () => {
+    // This string used to say "Suite" unconditionally, even for a hotel or cruise whose own
+    // intake dialog correctly says Room/Cabin everywhere else.
+    const baseDraft: ParsedDraft = {
+      customer: {
+        title: "",
+        firstName: "John",
+        surname: "Smith",
+        email: "john@example.com",
+        phone: "",
+        country: "South Africa",
+        province: "",
+      },
+      trip: {
+        supplier: "Kruger Shalati",
+        supplierKind: "hotel_property",
+        route: "",
+        departureDate: "2026-05-15",
+        checkOutDate: "2026-05-17",
+        nights: 2,
+        purpose: "quote",
+        packageOption: "",
+        hotelOption: "",
+        hotelPhase: "",
+        extendStay: null,
+        flightBooking: "",
+        flightDepartureDate: "",
+      },
+      guests: {
+        adults: 2,
+        children: 0,
+        childAges: [],
+        suites: 1,
+        suitePhrases: [],
+        suiteType: "",
+        suiteUnits: [blankDraftSuiteUnit(1)],
+      },
+      additionalServices: { requested: false, details: "" },
+      termsAccepted: true,
+      notes: "",
+      customerComments: "",
+      formFields: {
+        title: "",
+        country: "South Africa",
+        province: "",
+        packageOption: "",
+        hotelOption: "",
+        flightBooking: "",
+        flightDepartureDate: "",
+        direction: "",
+        supplier: "Kruger Shalati",
+        departureDateRaw: "2026-05-15",
+        checkOutDateRaw: "2026-05-17",
+        promotionCode: "",
+        suitePhrases: [],
+        childAges: [],
+        hotelPhase: "",
+        extendStay: null,
+        additionalServicesDetails: "",
+      },
+      confidence: {},
+      rawText: "",
+    }
+
+    const hotelWarnings = validateDraft(baseDraft).warnings
+    expect(hotelWarnings).toContain("Room Type not identified — select one before building a quote")
+    expect(hotelWarnings.some((warning) => warning.startsWith("Suite"))).toBe(false)
+
+    const cruiseWarnings = validateDraft({
+      ...baseDraft,
+      trip: { ...baseDraft.trip, supplierKind: "cruise_line" },
+    }).warnings
+    expect(cruiseWarnings).toContain("Cabin Type not identified — select one before building a quote")
+
+    const trainWarnings = validateDraft({
+      ...baseDraft,
+      trip: { ...baseDraft.trip, supplierKind: "train_operator" },
+    }).warnings
+    expect(trainWarnings).toContain("Suite Type not identified — select one before building a quote")
   })
 
   it("adds warnings for low confidence fields", () => {

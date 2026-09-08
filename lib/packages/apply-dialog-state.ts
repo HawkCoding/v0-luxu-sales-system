@@ -125,9 +125,10 @@ export interface SuiteLegState {
   arrivalAirportCode: string | null
   handLuggageKg: number | null
   checkedLuggageKg: number | null
-  /** Hotel and airline legs only. Hotel: `pre`/`post` derive serviceDate from the train leg.
-   *  Airline: `pre`/`post` derive serviceDate (departure) from the leg above it, same as a
-   *  transfer's pickup date. `custom` leaves it manual either way. */
+  /** Hotel, airline, and tour legs only. Hotel: `pre`/`post` derive serviceDate from the train leg.
+   *  Airline and tour: `pre`/`post` derive serviceDate (departure/service date) from the leg above
+   *  it, same as a transfer's pickup date (F-P4-3: a tour used to have no anchor at all).
+   *  `custom` leaves it manual either way. */
   dateAnchor: ServiceDateAnchor | null
   notes: string | null
   /** Hotel legs only: the property lets guests store luggage at reception, printed as a suffix on
@@ -440,6 +441,7 @@ function buildRawDefaultLegStates(
 
     const isHotel = leg.supplierKind === "hotel_property"
     const isAirline = leg.supplierKind === "airline"
+    const isTour = leg.supplierKind === "tour_operator"
     const routeId = defaultRouteId(leg)
     // Airport codes are the one part of a flight the system already knows, once a route is
     // resolved unambiguously (a single route on the leg) — its name is the code pair itself
@@ -467,9 +469,11 @@ function buildRawDefaultLegStates(
       arrivalAirportCode: defaultEndpointCodes?.arrival ?? null,
       handLuggageKg: null,
       checkedLuggageKg: null,
-      // An un-anchored hotel/airline keeps today's behaviour: a manually picked service date.
-      // Airline package legs never carry a template anchor, so this always falls back to "custom".
-      dateAnchor: isHotel || isAirline ? leg.dateAnchor ?? "custom" : null,
+      // An un-anchored hotel/airline/tour keeps today's behaviour: a manually picked service date.
+      // Airline and tour package legs never carry a template anchor, so this always falls back to
+      // "custom" for them (F-P4-3: a tour used to have no anchor at all and silently kept whatever
+      // serviceDate default it was seeded with, below).
+      dateAnchor: isHotel || isAirline || isTour ? leg.dateAnchor ?? "custom" : null,
       notes: null,
       luggageStorageAvailable: false,
       // A brand-new stay inherits the property's current default, exactly as the DB trigger would.
@@ -781,6 +785,14 @@ export function toAirlineAnchorContext(
   }
 }
 
+/** A tour leg's Pre/Post anchor resolves exactly the way a flight's does — the nearest dated leg
+ * above it, falling back below (see {@link findFlightAnchorLeg}) — so this reuses
+ * {@link toAirlineAnchorContext}'s resolution rather than re-deriving it. Named separately only so
+ * the leg editor's props read as what they are: a tour used to have no anchor control at all and
+ * silently copied the primary leg's own departure date, which printed a Cape Town city tour on the
+ * day a guest was actually on a train out of Pretoria (F-P4-3). */
+export const toTourAnchorContext = toAirlineAnchorContext
+
 /** Recomputes the departure date of every pre/post-anchored airline leg from the leg it hangs off
  * — see {@link findFlightAnchorLeg}. Only `serviceDate` (departure) is derived; `arrivalDate`/times
  * stay independent manual fields.
@@ -814,12 +826,39 @@ export function applyAnchoredAirlineDates(
   return working
 }
 
-/** Runs the hotel, airline, and transfer date-anchor recomputes in the order that makes chaining
- * work: a hotel anchors only to the primary product, so it settles first; an airline anchors to
- * the leg directly above it -- which may itself be a hotel that just settled -- so it settles
- * second; a transfer can anchor to any of those, including a now-settled airline leg, so it
- * settles last. Each recompute reads only already-settled kinds ahead of it in this chain, so one
- * pass each (rather than repeating to a fixed point) is enough. */
+/** Recomputes the service date of every pre/post-anchored tour leg from the leg it hangs off — see
+ * {@link findFlightAnchorLeg}, reused as-is since a tour anchors to its neighbour exactly like a
+ * flight does. Resolved in `sortOrder` order for the same chaining reason
+ * {@link applyAnchoredAirlineDates} is. */
+export function applyAnchoredTourDates(detail: PackageDetail, states: ApplyLegState[]): ApplyLegState[] {
+  const tourLegIds = detail.legs
+    .filter((leg) => leg.supplierKind === "tour_operator")
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((leg) => leg.id)
+
+  let working = states
+  for (const legId of tourLegIds) {
+    const state = working.find((candidate) => candidate.legId === legId)
+    if (state?.kind !== "suite" || (state.dateAnchor !== "pre" && state.dateAnchor !== "post")) continue
+
+    const context = getFlightAnchorContext(detail, working, legId)
+    const targetDate =
+      state.dateAnchor === "pre" ? context?.span?.start ?? null : context?.span?.end ?? null
+    if (!targetDate || targetDate === state.serviceDate) continue
+
+    working = working.map((candidate) =>
+      candidate.legId === legId ? { ...candidate, serviceDate: targetDate } : candidate,
+    )
+  }
+  return working
+}
+
+/** Runs the hotel, airline, tour, and transfer date-anchor recomputes in the order that makes
+ * chaining work: a hotel anchors only to the primary product, so it settles first; an airline and
+ * a tour both anchor to the leg directly above them -- which may itself be a hotel that just
+ * settled -- so they settle next; a transfer can anchor to any of those, including a now-settled
+ * airline or tour leg, so it settles last. Each recompute reads only already-settled kinds ahead of
+ * it in this chain, so one pass each (rather than repeating to a fixed point) is enough. */
 export function applyAnchoredDates(
   detail: PackageDetail,
   states: ApplyLegState[],
@@ -827,7 +866,10 @@ export function applyAnchoredDates(
 ): ApplyLegState[] {
   return applyAnchoredTransferDates(
     detail,
-    applyAnchoredAirlineDates(detail, applyAnchoredHotelDates(detail, states, primarySupplierId)),
+    applyAnchoredTourDates(
+      detail,
+      applyAnchoredAirlineDates(detail, applyAnchoredHotelDates(detail, states, primarySupplierId)),
+    ),
   )
 }
 
@@ -931,6 +973,7 @@ export function hydrateFromSaved(
 
     const isHotel = fallback.supplierKind === "hotel_property"
     const isAirline = fallback.supplierKind === "airline"
+    const isTour = fallback.supplierKind === "tour_operator"
     const leg = legById.get(fallback.legId)
     const chosenSuiteTypeIds = new Set(
       units.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])),
@@ -963,7 +1006,9 @@ export function hydrateFromSaved(
       checkedLuggageKg: isAirline ? row.checked_luggage_kg ?? null : null,
       // No saved anchor (pre-existing booking, or seeded by intake) falls back to the package's.
       dateAnchor:
-        isHotel || isAirline ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
+        isHotel || isAirline || isTour
+          ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor
+          : null,
       notes: row.notes,
       luggageStorageAvailable: isHotel ? row.luggage_storage_available ?? false : false,
       // The saved stay's own basis wins; a row with none falls back to the property's default
@@ -1090,7 +1135,9 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
             }
           : {}),
         dateAnchor:
-          state.supplierKind === "hotel_property" || state.supplierKind === "airline"
+          state.supplierKind === "hotel_property" ||
+          state.supplierKind === "airline" ||
+          state.supplierKind === "tour_operator"
             ? state.dateAnchor
             : null,
         rateTypeId: state.rateTypeId,

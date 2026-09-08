@@ -46,6 +46,7 @@ const supplierRow = {
   notes: null as string | null,
   active: true,
   single_supplement_pct: 0,
+  sells_standalone: false,
   parent_supplier_id: null as string | null,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-02T00:00:00.000Z",
@@ -395,6 +396,146 @@ describe("PATCH /api/suppliers/[slug]", () => {
     })
     expect(emailUpsert).toHaveBeenCalled()
     expect(suiteTypeUpsert).toHaveBeenCalled()
+  })
+
+  it("persists sellsStandalone when the client sends it (F-P7-1)", async () => {
+    const supplierUpdatePayloads: Array<Record<string, unknown>> = []
+    const supplierMaybeSingle = vi.fn(async () => ({
+      data: { updated_at: "2026-01-03T00:00:00.000Z" },
+      error: null,
+    }))
+    const supplierEqMock = vi.fn()
+    const supplierUpdateQuery = {
+      eq: supplierEqMock,
+      select: () => ({ maybeSingle: supplierMaybeSingle }),
+    }
+    supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+    mockAuth()
+    mockSupplierDetail({ sells_standalone: false })
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "suppliers") {
+        return {
+          update: (payload: Record<string, unknown>) => {
+            supplierUpdatePayloads.push(payload)
+            return supplierUpdateQuery
+          },
+        }
+      }
+      if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+      if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+      if (
+        table === "suite_type_bedroom_types" ||
+        table === "suite_type_bedroom_layouts" ||
+        table === "suite_type_bathroom_types"
+      ) {
+        return {
+          delete: () => ({ in: async () => ({ error: null }) }),
+          insert: async () => ({ error: null }),
+        }
+      }
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Test Supplier",
+          kind: "hotel_property",
+          email: "ops@example.com",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          sellsStandalone: true,
+          emails: [{ id: EMAIL_ID, email: "ops@example.com", label: "General" }],
+          suiteTypes: [{ id: SUITE_TYPE_ID, name: "Suite", active: true }],
+          expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(supplierUpdatePayloads[0]).toMatchObject({ sells_standalone: true })
+  })
+
+  it("does not reset sellsStandalone to false when an unrelated edit omits the field (F-P7-1)", async () => {
+    const supplierUpdatePayloads: Array<Record<string, unknown>> = []
+    const supplierMaybeSingle = vi.fn(async () => ({
+      data: { updated_at: "2026-01-03T00:00:00.000Z" },
+      error: null,
+    }))
+    const supplierEqMock = vi.fn()
+    const supplierUpdateQuery = {
+      eq: supplierEqMock,
+      select: () => ({ maybeSingle: supplierMaybeSingle }),
+    }
+    supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+    mockAuth()
+    // The supplier already has the flag on -- a save that never mentions sellsStandalone (the
+    // shape JSON.stringify produces when the client omits an optional field entirely) used to
+    // fall back to `kind === "train_operator"`, silently flipping it back off for every other kind.
+    mockSupplierDetail({ sells_standalone: true })
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "suppliers") {
+        return {
+          update: (payload: Record<string, unknown>) => {
+            supplierUpdatePayloads.push(payload)
+            return supplierUpdateQuery
+          },
+        }
+      }
+      if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+      if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+      if (
+        table === "suite_type_bedroom_types" ||
+        table === "suite_type_bedroom_layouts" ||
+        table === "suite_type_bathroom_types"
+      ) {
+        return {
+          delete: () => ({ in: async () => ({ error: null }) }),
+          insert: async () => ({ error: null }),
+        }
+      }
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Test Supplier renamed",
+          kind: "hotel_property",
+          email: "ops@example.com",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [{ id: EMAIL_ID, email: "ops@example.com", label: "General" }],
+          suiteTypes: [{ id: SUITE_TYPE_ID, name: "Suite", active: true }],
+          expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(supplierUpdatePayloads[0]).toMatchObject({ sells_standalone: true })
   })
 
   it("discards free-text location for a non-train supplier, even if the client sends one", async () => {
@@ -1253,6 +1394,54 @@ describe("PATCH /api/suppliers/[slug]", () => {
       const routeRows = routeUpsertPayloads[0] as Array<{ name: string; id: string }>
       expect(routeRows[0].name).toBe(ROUTE_ID)
       expect(routeRows[0].name).not.toBe("Classic Hop-on-Hop-off Ticket")
+    })
+
+    it("names a cruise-line itinerary after its own id, the same as a tour operator's (F-P7-2)", async () => {
+      // A cruise itinerary's editor exposes only Description, Type and Active -- no Name, Origin
+      // or Destination field exists to satisfy a derived-name requirement through the UI. The
+      // schema already let a blank name through for every isTypePricedSupplier kind (tour_operator
+      // and cruise_line both), on the promise that the name derives from the linked type -- the
+      // handler only implemented that promise for tour_operator, so every cruise itinerary save
+      // 400'd with "A route could not be named from its origin and destination."
+      const SUITE_TYPE_ID = "00000000-0000-4000-8000-0000000000d4"
+      const { routeUpsertPayloads } = setup("cruise_line", { locationsFromDetail: true })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Supplier",
+            kind: "cruise_line",
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [{ id: SUITE_TYPE_ID, name: "Deluxe Balcony Cabin", active: true }],
+            routes: [
+              {
+                id: ROUTE_ID,
+                name: "",
+                suiteTypeId: SUITE_TYPE_ID,
+                description: "Cape Town to Walvis Bay via Luderitz, 5-night voyage",
+                active: true,
+                rateCards: [],
+              },
+            ],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      const routeRows = routeUpsertPayloads[0] as Array<{ name: string; id: string }>
+      expect(routeRows[0].name).toBe(ROUTE_ID)
+      expect(routeRows[0].name).not.toBe("Deluxe Balcony Cabin")
     })
 
     it("never collides on name when a supplier has one itinerary per tour type", async () => {

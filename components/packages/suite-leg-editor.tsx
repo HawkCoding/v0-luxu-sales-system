@@ -555,6 +555,10 @@ interface SuiteLegEditorProps {
    *  transfer legs), same resolver a transfer's pickup date anchors to. Absent when nothing dated
    *  precedes it. */
   flightAnchorContext?: TransferAnchorContext | null
+  /** Tour legs only — resolved exactly like flightAnchorContext (see toTourAnchorContext). A tour
+   *  used to have no anchor control at all and silently copied the primary leg's own departure
+   *  date (F-P4-3). */
+  tourAnchorContext?: TransferAnchorContext | null
   /** The booking's primary supplier. This leg is the core one when they match: always part of
    *  the booking, never untickable. Null falls back to the train rule -- see isCoreBookingLeg. */
   primarySupplierId?: string | null
@@ -590,9 +594,9 @@ function hotelAnchorOptions(
   ]
 }
 
-// The flight anchor resolves off the whole trip's edges (see lib/packages/flight-dates.ts), not a
-// single neighbouring leg — "Before X"/"After X" here mean before/after the trip built around the
-// primary product, so it reads the same as the hotel's anchor above.
+// The flight anchor resolves off the nearest dated neighbouring leg (see findFlightAnchorLeg in
+// lib/packages/flight-dates.ts), the same rule a transfer's pickup date follows — "Before X"/
+// "After X" name whatever leg it actually resolved to, once known.
 function airlineAnchorOptions(
   flightAnchorContext: TransferAnchorContext | null | undefined,
 ): { value: ServiceDateAnchor; label: string; hint: string }[] {
@@ -603,6 +607,22 @@ function airlineAnchorOptions(
     { value: "pre", label: labels.pre, hint: legLabel ? `Before ${legLabel} starts` : `Before the ${noun} starts` },
     { value: "post", label: labels.post, hint: legLabel ? `After ${legLabel} ends` : `After the ${noun} ends` },
     { value: "custom", label: "Custom", hint: "Pick the departure date manually" },
+  ]
+}
+
+// A tour leg anchors the same way a flight does (see toTourAnchorContext) — the nearest dated
+// neighbouring leg, not the primary product specifically. Previously a tour had no anchor control
+// at all and silently kept whatever serviceDate default it was seeded with (F-P4-3).
+function tourAnchorOptions(
+  tourAnchorContext: TransferAnchorContext | null | undefined,
+): { value: ServiceDateAnchor; label: string; hint: string }[] {
+  const legLabel = tourAnchorContext?.legLabel ?? null
+  const labels = anchorPresetLabels(legLabel, tourAnchorContext?.legKind)
+  const noun = getSupplierVocabulary(tourAnchorContext?.legKind ?? "train_operator").primaryProduct.bookingNoun.toLowerCase()
+  return [
+    { value: "pre", label: labels.pre, hint: legLabel ? `Before ${legLabel} starts` : `Before the ${noun} starts` },
+    { value: "post", label: labels.post, hint: legLabel ? `After ${legLabel} ends` : `After the ${noun} ends` },
+    { value: "custom", label: "Custom", hint: "Pick the service date manually" },
   ]
 }
 
@@ -622,6 +642,7 @@ export function SuiteLegEditor({
   expectedTotals,
   anchorContext,
   flightAnchorContext,
+  tourAnchorContext,
   primarySupplierId = null,
   rateTypes = [],
   quoteCurrency = BASE_CURRENCY,
@@ -805,6 +826,14 @@ export function SuiteLegEditor({
       })
     : null
 
+  const tourAnchored = value.dateAnchor === "pre" || value.dateAnchor === "post"
+  const tourAnchoredDate = tourAnchorContext
+    ? resolveTransferPickupDate(value.dateAnchor, {
+        start: tourAnchorContext.startDate,
+        end: tourAnchorContext.endDate,
+      })
+    : null
+
   function setAnchor(next: ServiceDateAnchor) {
     onChange({ ...value, dateAnchor: next })
   }
@@ -897,7 +926,7 @@ export function SuiteLegEditor({
     ) : null
   ) : (
     <div className="space-y-1.5">
-      <Label>{isHotel ? "Meal plan" : vocab.route}</Label>
+      <Label htmlFor={`route-${leg.id}`}>{isHotel ? "Meal plan" : vocab.route}</Label>
       <div className="flex items-center gap-2">
         <Select
           value={value.routeId ?? ""}
@@ -926,7 +955,7 @@ export function SuiteLegEditor({
             })
           }}
         >
-          <SelectTrigger>
+          <SelectTrigger id={`route-${leg.id}`}>
             <SelectValue placeholder={routePlaceholder} />
           </SelectTrigger>
           <SelectContent>
@@ -1083,7 +1112,7 @@ export function SuiteLegEditor({
           </div>
           <div className="text-xs text-muted-foreground">{leg.supplierName}</div>
         </div>
-        {isHotel || isAirline ? null : (
+        {isHotel || isAirline || isTour ? null : (
           <div className="space-y-1">
             <Label className="text-xs" htmlFor={`service-date-${leg.id}`}>
               Service date
@@ -1421,6 +1450,73 @@ export function SuiteLegEditor({
             </div>
           ) : null}
 
+          {isTour ? (
+            <div className="space-y-1.5">
+              <AnchorDateSection
+                label="Service date"
+                options={tourAnchorOptions(tourAnchorContext)}
+                value={value.dateAnchor}
+                onChange={setAnchor}
+                disabledValues={tourAnchorContext ? [] : ["pre", "post"]}
+              >
+                {tourAnchored ? (
+                  <p
+                    className={cn(
+                      "text-xs",
+                      tourAnchoredDate ? "text-muted-foreground" : "text-destructive",
+                    )}
+                  >
+                    {tourAnchoredDate ? (
+                      <>
+                        Service date{" "}
+                        <span className="font-medium text-foreground">
+                          {formatDisplayDate(tourAnchoredDate)}
+                        </span>
+                        {` (${value.dateAnchor === "pre" ? "start" : "end"} of ${tourAnchorContext?.legLabel})`}
+                      </>
+                    ) : (
+                      `Set ${tourAnchorContext?.legLabel}'s date to work out this ${vocab.unitNoun}'s service date.`
+                    )}
+                  </p>
+                ) : (
+                  <DatePicker
+                    id={`service-date-${leg.id}`}
+                    aria-label="Service date"
+                    value={value.serviceDate ?? ""}
+                    onChange={(date) => onChange({ ...value, serviceDate: date || null })}
+                    className="w-40"
+                  />
+                )}
+
+                {!tourAnchorContext ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nothing above this {vocab.unitNoun} has a date to anchor to — pick the service date
+                    manually.
+                  </p>
+                ) : null}
+
+                {value.dateAnchor === "post" && tourAnchorContext?.endDateAssumed ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    {tourAnchorContext.legLabel} has no journey length set, so the service date falls on
+                    its start day. Set the route&apos;s duration in Suppliers, or pick a custom date.
+                  </p>
+                ) : null}
+
+                {(value.dateAnchor === "pre" || value.dateAnchor === "post") &&
+                tourAnchorContext &&
+                !tourAnchorContext.isPrimaryProduct ? (
+                  // Same F-P1-4 shape the transfer and flight editors warn about: this tour's
+                  // Pre/Post resolved to the nearest dated leg above it, and that leg isn't the
+                  // booking's primary product -- worth a flag rather than a silent assumption.
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    Anchored to {tourAnchorContext.legLabel}, not the booking&apos;s main product. If
+                    this {vocab.unitNoun} belongs to a different leg, pick Custom.
+                  </p>
+                ) : null}
+              </AnchorDateSection>
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">
               {vocab.unitNounPlural.charAt(0).toUpperCase() + vocab.unitNounPlural.slice(1)}
@@ -1481,7 +1577,7 @@ export function SuiteLegEditor({
                   </p>
                 ) : null}
                 <div className="space-y-1.5">
-                  <Label>{vocab.suiteType}</Label>
+                  <Label htmlFor={`suite-type-${leg.id}-${unit.id}`}>{vocab.suiteType}</Label>
                   {activeSuiteTypes.length === 0 ? (
                     <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
                       {`No ${vocab.suiteTypePlural.toLowerCase()} set up for ${leg.supplierName} — add one under Suppliers first.`}
@@ -1491,7 +1587,7 @@ export function SuiteLegEditor({
                       value={unit.suiteTypeId ?? NONE_VALUE}
                       onValueChange={(next) => updateUnit(unit.id, { suiteTypeId: next === NONE_VALUE ? null : next })}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger id={`suite-type-${leg.id}-${unit.id}`} className="w-full">
                         <SelectValue className="truncate" placeholder="Select type" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1551,12 +1647,12 @@ export function SuiteLegEditor({
                     in the DB/quote/voucher layers — see suite-vocabulary-card.tsx. */}
                 {!isHotel && bedroomTypeIds.length > 0 ? (
                   <div className="space-y-1.5">
-                    <Label>Bed configuration</Label>
+                    <Label htmlFor={`bed-configuration-${leg.id}-${unit.id}`}>Bed configuration</Label>
                     <Select
                       value={unit.bedroomTypeId ?? NONE_VALUE}
                       onValueChange={(next) => updateUnit(unit.id, { bedroomTypeId: next === NONE_VALUE ? null : next })}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger id={`bed-configuration-${leg.id}-${unit.id}`} className="w-full">
                         <SelectValue className="truncate" placeholder="Select bed configuration" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1573,12 +1669,12 @@ export function SuiteLegEditor({
 
                 {bedroomLayoutIds.length > 0 ? (
                   <div className="space-y-1.5">
-                    <Label>Bedroom layout</Label>
+                    <Label htmlFor={`bedroom-layout-${leg.id}-${unit.id}`}>Bedroom layout</Label>
                     <Select
                       value={unit.bedroomLayoutId ?? NONE_VALUE}
                       onValueChange={(next) => updateUnit(unit.id, { bedroomLayoutId: next === NONE_VALUE ? null : next })}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger id={`bedroom-layout-${leg.id}-${unit.id}`} className="w-full">
                         <SelectValue className="truncate" placeholder="Select layout" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1595,12 +1691,12 @@ export function SuiteLegEditor({
 
                 {bathroomTypeIds.length > 0 ? (
                   <div className="space-y-1.5">
-                    <Label>Bathroom type</Label>
+                    <Label htmlFor={`bathroom-type-${leg.id}-${unit.id}`}>Bathroom type</Label>
                     <Select
                       value={unit.bathroomTypeId ?? NONE_VALUE}
                       onValueChange={(next) => updateUnit(unit.id, { bathroomTypeId: next === NONE_VALUE ? null : next })}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger id={`bathroom-type-${leg.id}-${unit.id}`} className="w-full">
                         <SelectValue className="truncate" placeholder="Select bathroom type" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1618,8 +1714,9 @@ export function SuiteLegEditor({
                 {showPassengerSplit ? (
                   <div className="flex items-end gap-3 md:col-span-2 xl:col-span-3">
                     <div className="space-y-1.5">
-                      <Label>Adults</Label>
+                      <Label htmlFor={`adults-${leg.id}-${unit.id}`}>Adults</Label>
                       <NumericInput
+                        id={`adults-${leg.id}-${unit.id}`}
                         min="0"
                         step="1"
                         integer
@@ -1629,8 +1726,9 @@ export function SuiteLegEditor({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label>Children</Label>
+                      <Label htmlFor={`children-${leg.id}-${unit.id}`}>Children</Label>
                       <NumericInput
+                        id={`children-${leg.id}-${unit.id}`}
                         min="0"
                         step="1"
                         integer
@@ -1640,8 +1738,9 @@ export function SuiteLegEditor({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label>Infants</Label>
+                      <Label htmlFor={`infants-${leg.id}-${unit.id}`}>Infants</Label>
                       <NumericInput
+                        id={`infants-${leg.id}-${unit.id}`}
                         min="0"
                         step="1"
                         integer

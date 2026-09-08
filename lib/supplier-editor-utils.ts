@@ -34,9 +34,14 @@ export function shouldHydrateFormFromServer(context: DraftHydrationContext): boo
   if (!context.hasLocalForm) {
     return true
   }
-  if (context.supplierStatus !== "draft" && context.supplierStatus !== "temporary") {
-    return true
-  }
+  // Used to also hydrate unconditionally for a published (active/inactive) supplier, on the
+  // reasoning that only a draft/temporary one is safe to protect mid-edit. But
+  // supplierIdentityChanged already catches every genuine external change (it's keyed on
+  // `${id}:${updatedAt}`), so that carve-out did nothing except let an ordinary SWR revalidation
+  // -- one returning the exact same, unchanged row -- silently discard in-progress edits on a
+  // published supplier. That is what let a ticked "Can be the main product" checkbox revert to
+  // unchecked before Save ever ran (F-P7-1). An active edit session is protected regardless of
+  // status; only a real change to the record forces a re-hydrate.
   return !context.isEditing
 }
 

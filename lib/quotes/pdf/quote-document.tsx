@@ -7,6 +7,7 @@ import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import { formatMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
+import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
   AGENT_COMMISSION_COLOR,
   AGENT_COMMISSION_LABEL,
@@ -270,6 +271,10 @@ export function QuoteDocument({
   brandPosition = "bottom",
   brandLogo = null,
 }: QuotePdfData) {
+  // BrandBlock's heading renders in Montserrat to match the invoice letterhead;
+  // register it here even though the rest of this document runs on base-14 Helvetica.
+  registerDocumentFonts()
+
   // The brand block is only shown when its copy is supplied; without it the
   // document keeps the plain wordmark masthead and no footer mark.
   const showBrandTop = brand !== undefined && brandPosition === "top"

@@ -60,7 +60,7 @@ describe("shouldHydrateFormFromServer", () => {
   })
 
   it.each(["active", "inactive"] as const)(
-    "hydrates for non-draft supplier status: %s",
+    "keeps local edits for a published supplier while actively editing it (F-P7-1)",
     (supplierStatus) => {
       expect(
         shouldHydrateFormFromServer({
@@ -69,20 +69,37 @@ describe("shouldHydrateFormFromServer", () => {
           supplierStatus,
           supplierIdentityChanged: false,
         }),
+      ).toBe(false)
+    },
+  )
+
+  it.each(["draft", "temporary", "active", "inactive"] as const)(
+    "hydrates a %s supplier when it is not actively being edited",
+    (supplierStatus) => {
+      expect(
+        shouldHydrateFormFromServer({
+          hasLocalForm: true,
+          isEditing: false,
+          supplierStatus,
+          supplierIdentityChanged: false,
+        }),
       ).toBe(true)
     },
   )
 
-  it("hydrates when draft is not actively being edited", () => {
-    expect(
-      shouldHydrateFormFromServer({
-        hasLocalForm: true,
-        isEditing: false,
-        supplierStatus: "draft",
-        supplierIdentityChanged: false,
-      }),
-    ).toBe(true)
-  })
+  it.each(["active", "inactive"] as const)(
+    "still hydrates a published supplier while editing if the record actually changed underneath it",
+    (supplierStatus) => {
+      expect(
+        shouldHydrateFormFromServer({
+          hasLocalForm: true,
+          isEditing: true,
+          supplierStatus,
+          supplierIdentityChanged: true,
+        }),
+      ).toBe(true)
+    },
+  )
 })
 
 describe("getOverlapValidationSignature", () => {

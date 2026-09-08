@@ -5,6 +5,7 @@ import {
   applyAnchoredAirlineDates,
   applyAnchoredDates,
   applyAnchoredHotelDates,
+  applyAnchoredTourDates,
   applyAnchoredTransferDates,
   buildDefaultLegStates,
   createDraftTransportRequest,
@@ -1146,6 +1147,114 @@ describe("airline date anchors", () => {
     const recomputed = applyAnchoredAirlineDates(chainPkg, states)
 
     expect(suiteState(recomputed, "leg-airline").serviceDate).toBe("2026-12-25")
+  })
+})
+
+// F-P4-3: a tour add-on used to have no anchor control at all and silently kept whatever
+// serviceDate default it was seeded with (the primary leg's own departure date), which printed a
+// city tour on a day the guest was actually travelling. It anchors exactly the way an airline leg
+// does -- the nearest dated neighbour, not the primary product specifically.
+describe("tour date anchors", () => {
+  const chainTrain = {
+    ...trainLeg,
+    routes: [{ ...trainLeg.routes[0], durationDays: 3 }] as PackageLeg["routes"],
+  }
+  const chainHotel2 = { ...hotelLeg, sortOrder: 2 }
+  const chainTour = leg({ id: "leg-tour", supplierKind: "tour_operator", sortOrder: 3 })
+  const chainTransfer = leg({ id: "leg-transfer-3", supplierKind: "transfers", sortOrder: 4 })
+  const chainPkg = detail([chainTrain, chainHotel2, chainTour, chainTransfer])
+
+  it("defaults dateAnchor to custom for a tour leg, unlike before this fix where it was always null", () => {
+    const defaults = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
+    expect(suiteState(defaults, "leg-tour").dateAnchor).toBe("custom")
+  })
+
+  it("round-trips a saved anchor for a tour leg through hydrate and the PATCH payload", () => {
+    const saved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-tour",
+          package_leg_id: "leg-tour",
+          date_anchor: "pre",
+          selected: true,
+          supplier_id: "supplier-leg-tour",
+          route_id: null,
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-03",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [],
+        },
+      ],
+    }
+    const hydrated = hydrateFromSaved(chainPkg, saved, [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(hydrated, "leg-tour").dateAnchor).toBe("pre")
+
+    const patch = toPackageSelectionsPatch(hydrated)
+    expect(patch.selections.find((s) => s.packageLegId === "leg-tour")?.dateAnchor).toBe("pre")
+  })
+
+  it("applyAnchoredTourDates resolves the service date from the leg directly above it, not the primary's own date", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-01"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "custom"
+    hotel.serviceDate = "2026-09-02"
+    hotel.nights = 2
+
+    const tour = suiteState(states, "leg-tour")
+    tour.selected = true
+    tour.dateAnchor = "post"
+
+    const recomputed = applyAnchoredTourDates(chainPkg, states)
+    // A tour anchors to whatever sits directly above it -- here the custom-dated hotel checking
+    // out 09-04 (09-02 + 2 nights), not the train's own arrival day. Anchoring is purely
+    // positional, same as a transfer's or a flight's.
+    expect(suiteState(recomputed, "leg-tour").serviceDate).toBe("2026-09-04")
+  })
+
+  it("never rewrites a custom-anchored tour leg's serviceDate", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-01"
+    const tour = suiteState(states, "leg-tour")
+    tour.selected = true
+    tour.dateAnchor = "custom"
+    tour.serviceDate = "2026-12-25"
+
+    const recomputed = applyAnchoredTourDates(chainPkg, states)
+
+    expect(suiteState(recomputed, "leg-tour").serviceDate).toBe("2026-12-25")
+  })
+
+  it("chains hotel -> tour -> transfer through applyAnchoredDates", () => {
+    let states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-01"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "post"
+    hotel.nights = 2
+
+    const tour = suiteState(states, "leg-tour")
+    tour.selected = true
+    tour.dateAnchor = "post"
+
+    const transfer = transportState(states, "leg-transfer-3")
+    transfer.selected = true
+    transfer.requests[0] = { ...transfer.requests[0], dateAnchor: "pre" }
+
+    states = applyAnchoredDates(chainPkg, states)
+
+    expect(suiteState(states, "leg-hotel").serviceDate).toBe("2026-09-03") // train arrival day
+    expect(suiteState(states, "leg-tour").serviceDate).toBe("2026-09-05") // hotel check-out day
+    expect(splitAppZoneDateTime(transportState(states, "leg-transfer-3").requests[0].pickupAt).date).toBe(
+      "2026-09-05",
+    ) // pre-tour: pickup on the tour's own service day, a transfer still anchors off a settled tour
   })
 })
 

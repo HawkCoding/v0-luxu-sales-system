@@ -59,10 +59,13 @@ async function findPossibleDuplicateBookingId(
   since.setDate(since.getDate() - 14)
 
   if (parsed.customer.email) {
+    // See the matching comment in resolveEnquiryCustomer (app/api/enquiries/route.ts) -- the unique
+    // index is case-insensitive (lower(email)), so the lookup has to be too, or a stored mixed-case
+    // address is invisible to it (F-P5-1).
     const { data: customer } = await supabase
       .from("customers")
       .select("id")
-      .eq("email", parsed.customer.email.toLowerCase().trim())
+      .ilike("email", parsed.customer.email.toLowerCase().trim())
       .maybeSingle()
 
     if (customer) {
@@ -130,10 +133,12 @@ export async function createEmailBookingFromParsedDraft(
     .trim()
   const duplicateOfBookingId = await findPossibleDuplicateBookingId(supabase, parsed)
 
+  // See the matching comment in resolveEnquiryCustomer (app/api/enquiries/route.ts) -- ilike over
+  // eq so a stored mixed-case address still matches (F-P5-1).
   const { data: existingCustomer } = await supabase
     .from("customers")
     .select("id")
-    .eq("email", normalizedEmail)
+    .ilike("email", normalizedEmail)
     .maybeSingle()
 
   let customerId: string

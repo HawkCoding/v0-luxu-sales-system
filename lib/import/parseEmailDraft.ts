@@ -2,7 +2,7 @@ import { primaryProductOf } from "@/lib/enquiry/primary-product"
 import { INTAKE_REVIEW_REASONS, REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import type { DraftSuiteUnit } from "@/lib/suites/draft-suite-unit"
 import { matchSupplierInText, type SupplierMatcher } from "@/lib/suppliers/match-phrases"
-import type { SupplierKind } from "@/lib/types"
+import { getSupplierVocabulary, type SupplierKind } from "@/lib/types"
 
 export interface ParsedDraft {
   customer: {
@@ -1191,10 +1191,13 @@ export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions
   // a leg with no suite type (lib/quotes/build-from-package.ts).
   const unresolvedSuites = (draft.guests.suiteUnits ?? []).filter((unit) => !unit.suiteTypeId)
   if (draft.guests.suiteUnits && unresolvedSuites.length > 0) {
+    // F-P6-1/F-P7-3: this string used to say "Suite" for every kind, even a hotel or cruise whose
+    // own review dialog correctly says Room/Cabin everywhere else.
+    const vocabulary = getSupplierVocabulary((draft.trip.supplierKind || "train_operator") as SupplierKind)
     warnings.push(
       unresolvedSuites.length === 1
-        ? 'Suite type not identified — select one before building a quote'
-        : `${unresolvedSuites.length} suite types not identified — select them before building a quote`,
+        ? `${vocabulary.suiteType} not identified — select one before building a quote`
+        : `${unresolvedSuites.length} ${vocabulary.suiteTypePlural.toLowerCase()} not identified — select them before building a quote`,
     )
   }
   

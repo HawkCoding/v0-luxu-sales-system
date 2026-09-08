@@ -730,14 +730,14 @@ export function TransportLegEditor({
               <div className="flex flex-wrap items-end gap-3 md:col-span-2 xl:col-span-3">
                 {leg.suiteTypes.length > 0 ? (
                   <div className="space-y-1.5">
-                    <Label>Vehicle category</Label>
+                    <Label htmlFor={`vehicle-category-${leg.id}-${request.id}`}>Vehicle category</Label>
                     <Select
                       value={request.suiteTypeId ?? NONE_VALUE}
                       onValueChange={(next) =>
                         updateRequest(request.id, { suiteTypeId: next === NONE_VALUE ? null : next })
                       }
                     >
-                      <SelectTrigger className="h-8 w-56">
+                      <SelectTrigger id={`vehicle-category-${leg.id}-${request.id}`} className="h-8 w-56">
                         <SelectValue placeholder="Select category" />
                       </SelectTrigger>
                       <SelectContent>
@@ -752,8 +752,11 @@ export function TransportLegEditor({
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    <Label>Vehicle category</Label>
-                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    <Label id={`vehicle-category-${leg.id}-${request.id}-label`}>Vehicle category</Label>
+                    <p
+                      className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                      aria-labelledby={`vehicle-category-${leg.id}-${request.id}-label`}
+                    >
                       No vehicle categories configured for {leg.supplierName} — add one under Suppliers before booking
                       it.
                     </p>

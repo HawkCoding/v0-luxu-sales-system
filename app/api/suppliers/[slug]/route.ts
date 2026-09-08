@@ -516,11 +516,10 @@ export async function PATCH(
       // supabase/migrations/20260426110000_packages_multileg.sql), and a supplier can have more
       // than one itinerary. The route's own id is used instead -- trivially unique forever, and
       // never rendered anywhere (an itinerary has no name field in the supplier editor).
-      const derivedName =
-        parsed.kind === "tour_operator"
-          ? routeId
-          : autoDeriveRouteName && originName && destinationName
-            ? buildRouteName(originName, destinationName, directionMode)
+      const derivedName = isItineraryKind
+        ? routeId
+        : autoDeriveRouteName && originName && destinationName
+          ? buildRouteName(originName, destinationName, directionMode)
           : null
       return {
         id: routeId,
@@ -1002,8 +1001,12 @@ export async function PATCH(
     // lib/templates/suite-phrase-pattern.ts.
     suite_phrase_pattern: normalizeOptionalText(parsed.suitePhrasePattern),
     // A train operator always heads its own bookings; every other kind is opt-in, which is
-    // how a hotel sold on its own (Kruger Shalati) reaches the New Enquiry supplier list.
-    sells_standalone: parsed.sellsStandalone ?? parsed.kind === "train_operator",
+    // how a hotel sold on its own (Kruger Shalati) reaches the New Enquiry supplier list. On
+    // create, an absent field defaults sensibly (see POST /api/suppliers). On update there is
+    // already a stored value, and JSON.stringify drops an undefined `sellsStandalone` -- falling
+    // back to the kind-based default here would silently downgrade an already-true flag to false
+    // on any edit that didn't happen to touch this checkbox (F-P7-1). Keep the stored value instead.
+    sells_standalone: parsed.sellsStandalone ?? existingDetail.supplier.sells_standalone,
     email_match_phrases: normalizeOptionalText(parsed.emailMatchPhrases),
     base_rate_type_id: requestedBaseRateTypeId,
     // Normalised: nominating the base rate is the same as nominating nothing.

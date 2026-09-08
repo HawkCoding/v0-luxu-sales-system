@@ -5,6 +5,11 @@ import { mkdirSync, writeFileSync } from "fs"
 import path from "path"
 import { describe, expect, it } from "vitest"
 
+import {
+  FOOTER_BRAND_DIVISION_LINE,
+  FOOTER_BRAND_PRODUCT_LINE,
+} from "@/lib/assets/footer-brand"
+import { extractPdfText } from "@/lib/pdf/extract-text.fixtures"
 import { sampleQuotePdfData } from "../sample-data"
 import { renderQuotePdf, type QuotePdfData } from "../../render-quote-pdf"
 
@@ -44,5 +49,23 @@ describe("renderQuotePdf smoke", () => {
       adults: 2,
       children: 2,
     })
+  })
+
+  it("renders the top brand letterhead unbroken", async () => {
+    const buffer = await renderAndAssert("brand-top", {
+      ...sampleQuotePdfData(),
+      brand: {
+        heading: FOOTER_BRAND_PRODUCT_LINE,
+        subheading: FOOTER_BRAND_DIVISION_LINE,
+        logoUrl: null,
+      },
+      brandPosition: "top",
+    })
+
+    const text = await extractPdfText(buffer)
+    // extractPdfText starts a new line whenever the text baseline changes, so a
+    // heading that wraps onto a second line would break this substring match.
+    expect(text).toContain(FOOTER_BRAND_PRODUCT_LINE)
+    expect(text).toContain(FOOTER_BRAND_DIVISION_LINE)
   })
 })

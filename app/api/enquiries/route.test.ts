@@ -35,13 +35,27 @@ function createSupabase(state: MockState) {
   return {
     from: vi.fn((table: string) => {
       if (table === "customers") {
+        // Route code looks customers up by ilike("email", ...), a case-insensitive exact match
+        // against the functional unique index on lower(email) -- not eq(), which is case-sensitive
+        // and used to miss a stored mixed-case address entirely (F-P5-1). Keeping eq() genuinely
+        // case-sensitive here (rather than also lowercasing) is what makes the mixed-case test
+        // below actually exercise the fix instead of passing either way.
         return {
           select: vi.fn(() => ({
             eq: vi.fn((_column: string, value: string) => ({
               maybeSingle: vi.fn(async () => ({
-                data: state.customersByEmail.get(value.toLowerCase()) ?? null,
+                data: state.customersByEmail.get(value) ?? null,
                 error: null,
               })),
+            })),
+            ilike: vi.fn((_column: string, value: string) => ({
+              maybeSingle: vi.fn(async () => {
+                const target = value.toLowerCase()
+                for (const [email, customer] of state.customersByEmail) {
+                  if (email.toLowerCase() === target) return { data: customer, error: null }
+                }
+                return { data: null, error: null }
+              }),
             })),
           })),
           update: vi.fn((payload: Record<string, unknown>) => ({
@@ -299,6 +313,28 @@ describe("POST /api/enquiries customer CRM matching", () => {
     expect(result.customerId).toBe(CUSTOMER_ID)
     expect(state.customerInsertRows).toHaveLength(0)
     expect(state.customerUpdateRows[0]?.id).toBe(CUSTOMER_ID)
+  })
+
+  it("matches an existing customer whose stored email is mixed-case, not just an exact-case one (F-P5-1)", async () => {
+    // customers_email_unique enforces uniqueness on lower(email), but storage predates that
+    // normalization -- a record written before it (or by some other path) can still carry
+    // "Simon@SKPeng.co.za". A typed-lowercase email used to miss it entirely and create a
+    // duplicate customer instead.
+    const state = createMockState({
+      customersByEmail: new Map([
+        ["Simon@SKPeng.co.za", { id: CUSTOMER_ID, first_name: "Simon", last_name: "Osborn" }],
+      ]),
+    })
+    const supabase = createSupabase(state)
+
+    const result = await resolveEnquiryCustomer(supabase as never, enquiryCustomerInput({
+      normalizedEmail: "simon@skpeng.co.za",
+      firstName: "Simon",
+      lastName: "Osborn",
+    }))
+
+    expect(result.customerId).toBe(CUSTOMER_ID)
+    expect(state.customerInsertRows).toHaveLength(0)
   })
 
   it("creates a customer for a new email", async () => {

@@ -451,6 +451,24 @@ describe("SuiteLegEditor accommodation pricing basis", () => {
   })
 })
 
+describe("SuiteLegEditor unit field labels (F-P4-4)", () => {
+  const legWithSuiteType: PackageLeg = {
+    ...leg,
+    suiteTypes: [
+      { id: "suite-type-1", supplierId: "supplier-1", name: "Deluxe", active: true, createdAt: "", updatedAt: "" },
+    ],
+  }
+
+  it("associates the Suite Type select with its label", () => {
+    render(<SuiteLegEditor leg={legWithSuiteType} value={makeLegState(mismatchedUnits)} onChange={vi.fn()} />)
+
+    // Previously only reachable by placeholder text ("Not set", "Select type") -- unusable by a
+    // screen reader or any label-driven query, which is also why the QA automation that found this
+    // had to fall back to matching visible placeholders instead.
+    expect(screen.getByLabelText(/suite type/i)).toBeInTheDocument()
+  })
+})
+
 const airlineRoutes: PackageLeg["routes"] = [
   {
     id: "route-cpt-ort",

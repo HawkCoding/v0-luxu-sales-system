@@ -837,12 +837,15 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       return (
                         <div key={index} className="space-y-2 rounded-md border p-3">
                           <div className="flex items-center justify-between gap-2">
-                            <Label className="text-xs font-medium">Suite {index + 1}</Label>
+                            <Label className="text-xs font-medium">
+                              {vocabulary.unitNoun.charAt(0).toUpperCase() + vocabulary.unitNoun.slice(1)}{" "}
+                              {index + 1}
+                            </Label>
                             {!unit.suiteTypeId && selectedSupplier && !supplierDetailLoading ? (
                               <Badge
                                 variant="outline"
                                 className="text-[10px] h-4 border-yellow-600 text-yellow-700"
-                                title="We could not identify this suite from the enquiry wording — please choose it"
+                                title={`We could not identify this ${vocabulary.unitNoun} from the enquiry wording — please choose it`}
                               >
                                 Not identified
                               </Badge>
@@ -858,7 +861,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
 
                           <div className="space-y-1.5">
                             <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                              Suite Type
+                              {vocabulary.suiteType}
                               <FieldFlags
                                 learned={suiteTypeLearned}
                                 dirty={unit.editedAxes?.includes("suiteType")}
@@ -883,7 +886,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                                     : "",
                                 )}
                               >
-                                <SelectValue placeholder="Select suite type" />
+                                <SelectValue placeholder={`Select ${vocabulary.suiteType.toLowerCase()}`} />
                               </SelectTrigger>
                               <SelectContent>
                                 {suiteTypeCandidates.length > 0 && !unit.suiteTypeId ? (
@@ -1054,10 +1057,13 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     <CardContent className="p-3 space-y-2">
                       <div className="flex items-center gap-2 text-sm font-medium text-yellow-700">
                         <AlertCircle className="w-4 h-4" />
-                        {unresolvedSuiteCount === 1 ? "Suite not identified" : `${unresolvedSuiteCount} suites not identified`}
+                        {unresolvedSuiteCount === 1
+                          ? `${vocabulary.suiteType} not identified`
+                          : `${unresolvedSuiteCount} ${vocabulary.suiteTypePlural.toLowerCase()} not identified`}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        This enquiry will still save. A suite type must be chosen before a quote can be built.
+                        This enquiry will still save. A {vocabulary.suiteType.toLowerCase()} must be chosen
+                        before a quote can be built.
                       </p>
                     </CardContent>
                   </Card>
