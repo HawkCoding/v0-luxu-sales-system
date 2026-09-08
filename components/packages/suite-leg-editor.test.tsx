@@ -495,6 +495,10 @@ const flightAnchorContext: TransferAnchorContext = {
   startDate: "2026-09-24",
   endDate: "2026-09-27",
   endDateAssumed: false,
+  // F-P1-4: a hotel is never the primary product on a train-headed booking (the fixtures in this
+  // file are all trains) -- exercises the "anchored to something that isn't the main product"
+  // warning alongside the existing resolved-date assertions below.
+  isPrimaryProduct: false,
 }
 
 describe("SuiteLegEditor flight date anchor", () => {

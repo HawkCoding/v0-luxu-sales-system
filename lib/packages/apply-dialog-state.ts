@@ -634,6 +634,11 @@ export function getTransferAnchorContext(
   states: ApplyLegState[],
   transferLegId: string,
 ): { anchorLeg: PackageLeg; span: ServiceDateSpan | null } | null {
+  // primarySupplierId is deliberately not a parameter here: it decides nothing about *which* leg
+  // a transfer anchors to (see findTransferAnchorLeg's doc comment -- that resolution is directional
+  // and neighbour-based by design, F-P1-4). It is only consumed downstream by
+  // toTransferAnchorContext, to flag when the resolved neighbour is not the booking's primary
+  // product, so the display can warn instead of silently anchoring "Pre" to, say, a hotel.
   const anchorLeg = findTransferAnchorLeg(detail.legs, transferLegId)
   if (!anchorLeg) return null
 
@@ -662,12 +667,19 @@ export interface TransferAnchorContext {
    *  for a flight, no arrival captured yet) — same situation the hotel editor flags for a train
    *  with no route duration. */
   endDateAssumed: boolean
+  /** F-P1-4: whether the leg "Pre"/"Post" actually resolved to is the booking's primary product
+   *  (isCoreBookingLeg — the same test the leg-selection default uses). A transfer always anchors
+   *  to its nearest dated neighbour by design (see findTransferAnchorLeg), which on a train-headed
+   *  booking with a hotel add-on in between is that hotel, not the train — false here is what
+   *  should turn the resolved date into a warning rather than a quiet assumption. */
+  isPrimaryProduct: boolean
 }
 
 export function toTransferAnchorContext(
   detail: PackageDetail,
   states: ApplyLegState[],
   transferLegId: string,
+  primarySupplierId: string | null,
 ): TransferAnchorContext | null {
   const context = getTransferAnchorContext(detail, states, transferLegId)
   if (!context) return null
@@ -678,6 +690,7 @@ export function toTransferAnchorContext(
     startDate: context.span?.start ?? null,
     endDate: context.span?.end ?? null,
     endDateAssumed: context.span != null && context.span.end === context.span.start,
+    isPrimaryProduct: isCoreBookingLeg(context.anchorLeg, primarySupplierId),
   }
 }
 
@@ -738,6 +751,10 @@ export function toAirlineAnchorContext(
     startDate: edge.preDate,
     endDate: edge.postDate,
     endDateAssumed: edge.preDate != null && edge.preDate === edge.postDate,
+    // Always the primary product: resolveTripEdgeDates only returns a primaryLeg, and the edges
+    // are measured from it. The false case this flag exists for is a transfer anchoring to its
+    // nearest dated neighbour (toTransferAnchorContext), which a flight never does.
+    isPrimaryProduct: true,
   }
 }
 
@@ -1363,7 +1380,10 @@ export function validateConfigureState(
         // no date yet) leaves pickupAt null — catch that here with a readable next step, rather
         // than letting it fall through to a generic missing-date error further down.
         if (request.dateAnchor === "pre" || request.dateAnchor === "post") {
-          const anchorContext = toTransferAnchorContext(detail, states, state.legId)
+          // Only whether the date resolves matters here, not whether it resolved to the primary
+          // product -- that distinction is a display concern (see the isPrimaryProduct warning in
+          // transport-leg-editor.tsx), not a validation error.
+          const anchorContext = toTransferAnchorContext(detail, states, state.legId, null)
           const resolved = resolveTransferPickupDate(
             request.dateAnchor,
             anchorContext ? { start: anchorContext.startDate, end: anchorContext.endDate } : null,

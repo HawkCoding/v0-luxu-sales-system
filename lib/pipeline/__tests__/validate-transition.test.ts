@@ -332,12 +332,46 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
     })
 
+    // F-P1-8: no payments were recorded, so the whole 1000 is outstanding and the money gate
+    // blocks in its own right -- it no longer degrades to a tickable "confirm" just because
+    // nothing was paid.
     expect(failures).toEqual([
       expect.objectContaining({
         gateId: "final_invoice",
         severity: "block",
       }),
-      expect.objectContaining({ gateId: "final_payment_confirmation", severity: "confirm" }),
+      expect.objectContaining({
+        gateId: "final_payment_confirmation",
+        severity: "block",
+        amountTotal: 1000,
+        amountPaid: 0,
+        amountOutstanding: 1000,
+      }),
+    ])
+  })
+
+  it("blocks paid in full when only part of the total has been paid (F-P1-8 exact repro)", () => {
+    // LTT-2026-0034: quote total R174 795,00, one deposit payment of R52 438,50 recorded, the
+    // tick checked. Ticking a box must not be able to manufacture the missing R122 356,50.
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 174795 }],
+      invoices: [{ kind: "deposit", status: "sent" }],
+      correspondences: [{ kind: "payment_received", subject: "Payment received — LTT-2026-0034", status: "sent" }],
+      payments: [{ amount: 52438.5 }],
+      manualConfirmations: { finalPaymentReceived: true },
+    })
+
+    expect(failures).toEqual([
+      expect.objectContaining({
+        gateId: "final_payment_confirmation",
+        severity: "block",
+        amountTotal: 174795,
+        amountPaid: 52438.5,
+        amountOutstanding: 122356.5,
+      }),
     ])
   })
 
@@ -349,6 +383,7 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       invoices: [{ kind: "final", status: "sent" }],
       correspondences: [{ kind: "invoice", subject: "Deposit invoice", status: "sent" }],
+      payments: [{ amount: 1000 }],
       manualConfirmations: { finalPaymentReceived: true },
     })
 
@@ -365,6 +400,7 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       invoices: [{ kind: "final", status: "sent" }],
       correspondences: [{ kind: "invoice", subject: "Final invoice BT-2026-0001-FIN1", status: "sent" }],
+      payments: [{ amount: 1000 }],
       manualConfirmations: { finalPaymentReceived: true },
     })
 
@@ -379,6 +415,7 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       invoices: [{ kind: "deposit", status: "sent" }],
       correspondences: [{ kind: "payment_received", subject: "Payment received — BT-2026-0001", status: "sent" }],
+      payments: [{ amount: 1000 }],
       manualConfirmations: { finalPaymentReceived: true },
     })
 
@@ -447,6 +484,7 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       invoices: [{ kind: "final", status: "sent" }],
       correspondences: [{ kind: "invoice", subject: "Final invoice BT-2026-0001-FIN1", status: "sent" }],
+      payments: [{ amount: 1000 }],
       manualConfirmations: { finalPaymentReceived: true },
       legReferences: [{ label: "Rovos Rail", supplierReference: null }],
     })
@@ -486,6 +524,7 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       invoices: [{ kind: "full", status: "sent" }],
       correspondences: [{ kind: "invoice", subject: "Confirmation Invoice BT-2026-0001-INV", status: "sent" }],
+      payments: [{ amount: 1000 }],
       manualConfirmations: { finalPaymentReceived: true },
     })
 

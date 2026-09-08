@@ -121,8 +121,8 @@ export default function EnquiriesPage() {
   }
 
   const handleResolveReview = async (enquiryId: string) => {
-    // The PATCH is manager/admin only. Without this check a consultant got a 403 and a success
-    // toast, and the badge silently stayed put.
+    // The PATCH permits admin, manager and consultant (app/api/jobs/[id]/route.ts). Without an ok
+    // check here a rejected request could still show a success toast while the badge stayed put.
     const response = await fetch(`/api/jobs/${enquiryId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

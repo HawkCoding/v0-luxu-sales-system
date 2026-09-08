@@ -21,6 +21,7 @@ import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getPipelineStageLabel, type PipelineStage } from "@/lib/types"
+import { formatMoney } from "@/lib/money"
 
 // final_payment_confirmation is a manual tick, and cancel_reason /
 // refund_capture have no owning tab — all three are deliberately absent
@@ -89,6 +90,14 @@ interface StageTransitionModalProps {
    * button so the user can finish the send instead of getting stuck.
    */
   onSendDepositInvoice?: () => void
+  /**
+   * Optional callback that opens a Record Payment dialog pre-filled with the outstanding balance.
+   * When provided, a blocking `final_payment_confirmation` failure (F-P1-8: real money still
+   * owed) renders an inline "Record the balance payment" button. Recording the payment derives
+   * invoice_balance from actual payments and, once it reaches zero, advances the booking to Paid
+   * in Full on its own (see lib/invoices/sync-booking-payment-state.ts) — no tick required.
+   */
+  onRecordBalancePayment?: (amountOutstanding: number) => void
 }
 
 export function gateIdToTabPath(gateId: string): string {
@@ -117,6 +126,7 @@ export function StageTransitionModal({
   onOverride,
   onSendPaymentConfirmation,
   onSendDepositInvoice,
+  onRecordBalancePayment,
 }: StageTransitionModalProps) {
   const [confirmations, setConfirmations] = useState<ManualConfirmations>({})
   const [overrideReason, setOverrideReason] = useState("")
@@ -200,6 +210,12 @@ export function StageTransitionModal({
             const showSendDepositInvoice =
               failure.gateId === "invoice_correspondence" &&
               typeof onSendDepositInvoice === "function"
+            const showRecordBalancePayment =
+              failure.gateId === "final_payment_confirmation" &&
+              failure.severity === "block" &&
+              typeof failure.amountOutstanding === "number" &&
+              failure.amountOutstanding > 0 &&
+              typeof onRecordBalancePayment === "function"
             return (
               <Alert key={failure.gateId} variant="default" className="bg-muted/30">
                 <GateIcon failure={failure} />
@@ -212,8 +228,36 @@ export function StageTransitionModal({
                           <Badge variant="secondary">{gateBadgeLabel(failure)}</Badge>
                         </div>
                         <p className="mt-1 text-sm">{failure.fixHint}</p>
+                        {typeof failure.amountTotal === "number" && (
+                          <p className="mt-1.5 text-sm text-muted-foreground">
+                            Quoted <span className="font-medium text-foreground">{formatMoney(failure.amountTotal)}</span>
+                            {" · Received "}
+                            <span className="font-medium text-foreground">{formatMoney(failure.amountPaid ?? 0)}</span>
+                            {" · Outstanding "}
+                            <span
+                              className={
+                                (failure.amountOutstanding ?? 0) > 0
+                                  ? "font-medium text-destructive"
+                                  : "font-medium text-foreground"
+                              }
+                            >
+                              {formatMoney(failure.amountOutstanding ?? 0)}
+                            </span>
+                          </p>
+                        )}
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {showRecordBalancePayment ? (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => onRecordBalancePayment?.(failure.amountOutstanding!)}
+                            disabled={submitting}
+                          >
+                            <FileText data-icon="inline-start" />
+                            Record the balance payment
+                          </Button>
+                        ) : null}
                         {showSendPaymentConfirmation ? (
                           <Button
                             size="sm"

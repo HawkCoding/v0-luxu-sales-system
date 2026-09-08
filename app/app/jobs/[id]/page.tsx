@@ -49,6 +49,7 @@ import { JobAuditTab } from "@/components/job-audit-tab"
 import { BookingStageStepper } from "@/components/booking-stage-stepper"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
+import { RecordPaymentDialog } from "@/components/record-payment-dialog"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
 import { QuoteRevisionBanner } from "@/components/quote-revision-banner"
 import { SendPaymentConfirmationButton } from "@/components/send-payment-confirmation-button"
@@ -187,6 +188,11 @@ export default function JobDetailPage() {
   // when there is an unsent draft to resume.
   const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
   const [paymentConfirmationOpen, setPaymentConfirmationOpen] = useState(false)
+  // F-P1-8: the final_payment_confirmation gate's "Record the balance payment" action opens this
+  // pre-filled with the outstanding amount the gate computed, instead of a tick that asserts money
+  // no one recorded.
+  const [balancePaymentOpen, setBalancePaymentOpen] = useState(false)
+  const [balancePaymentDefaultAmount, setBalancePaymentDefaultAmount] = useState<number | null>(null)
   const [depositPaymentConfirmationOpen, setDepositPaymentConfirmationOpen] = useState(false)
   const [voucherOpen, setVoucherOpen] = useState(false)
   const [voucherAutoPreview, setVoucherAutoPreview] = useState(false)
@@ -631,7 +637,7 @@ export default function JobDetailPage() {
         throw new Error(payload.error ?? "Could not resolve import review")
       }
       await mutate()
-      toast.success("Import review cleared")
+      toast.success("Review cleared")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not resolve import review")
     } finally {
@@ -1244,6 +1250,19 @@ export default function JobDetailPage() {
         onSendDepositInvoice={() => {
           setDepositInvoiceOpen(true)
         }}
+        onRecordBalancePayment={(amountOutstanding) => {
+          setBalancePaymentDefaultAmount(amountOutstanding)
+          setBalancePaymentOpen(true)
+        }}
+      />
+
+      <RecordPaymentDialog
+        open={balancePaymentOpen}
+        onOpenChange={setBalancePaymentOpen}
+        jobId={id}
+        mutate={mutate}
+        currency={billingCurrency}
+        defaultAmount={balancePaymentDefaultAmount}
       />
 
       <GenerateDepositInvoiceDialog
