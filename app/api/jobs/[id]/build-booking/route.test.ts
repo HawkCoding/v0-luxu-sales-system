@@ -303,6 +303,67 @@ describe("POST /api/jobs/[id]/build-booking", () => {
     expect(built.serviceDelete).not.toHaveBeenCalled()
   })
 
+  it("issues zero booking_services updates when a rebuild changes nothing (Sev-1, 2026-09-07 QA)", async () => {
+    const SERVICE_C = "00000000-0000-4000-8000-0000000000a3"
+    const built = mockAuth({
+      existingServices: [
+        { id: SERVICE_A, supplier_id: SUPPLIER_A, sort_order: 0 },
+        { id: SERVICE_C, supplier_id: SUPPLIER_B, sort_order: 1 },
+      ],
+    })
+
+    const res = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({
+          services: [
+            { legId: SERVICE_A, supplierId: SUPPLIER_A, supplierKind: "train_operator" },
+            { legId: SERVICE_C, supplierId: SUPPLIER_B, supplierKind: "hotel_property" },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    // This is the regression test: a plain reopen-and-Next used to bump updated_at on every kept
+    // leg even though nothing changed, which then 409'd the very next save as a false-positive
+    // concurrency conflict ("someone else changed this booking's services"). No genuine change
+    // means no write, which means the optimistic-lock token this dialog is holding stays valid.
+    expect(built.serviceUpdate).not.toHaveBeenCalled()
+    expect(built.serviceInsert).not.toHaveBeenCalled()
+  })
+
+  it("writes sort_order only for legs whose position actually moved, and never collides a new leg's sort_order with a kept one's (F-P4-1/D1)", async () => {
+    const SERVICE_C = "00000000-0000-4000-8000-0000000000a3"
+    const built = mockAuth({
+      existingServices: [
+        { id: SERVICE_A, supplier_id: SUPPLIER_A, sort_order: 0 },
+        { id: SERVICE_C, supplier_id: SUPPLIER_B, sort_order: 1 },
+      ],
+    })
+
+    // [keptA, new, keptC] -- before the fix, `new` and `keptC` both computed sort_order 2.
+    const res = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({
+          services: [
+            { legId: SERVICE_A, supplierId: SUPPLIER_A, supplierKind: "train_operator" },
+            { supplierId: SUPPLIER_B, supplierKind: "hotel_property" },
+            { legId: SERVICE_C, supplierId: SUPPLIER_B, supplierKind: "hotel_property" },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    // keptA stays at 0 (unchanged, no write); the new leg claims 1; keptC moves from 1 to 2.
+    expect(built.serviceInsert).toHaveBeenCalledWith([expect.objectContaining({ sort_order: 1 })])
+    expect(built.serviceUpdate).toHaveBeenCalledTimes(1)
+  })
+
   it("removes services that are no longer in the requested list, cascading their transport requests first", async () => {
     const SERVICE_REMOVED = "00000000-0000-4000-8000-0000000000f1"
     const built = mockAuth({

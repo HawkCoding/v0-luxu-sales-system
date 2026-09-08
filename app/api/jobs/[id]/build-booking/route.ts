@@ -198,22 +198,35 @@ export async function POST(req: Request, { params }: RouteParams) {
   if (suppliersError) return safeSupabaseError("build-booking:load-suppliers", suppliersError)
   const supplierNameById = new Map((addedSuppliers ?? []).map((row) => [row.id, row.name]))
 
-  const newServiceRows: BookingServiceInsert[] = addedServices.map((service, index) => ({
-    id: crypto.randomUUID(),
-    booking_id: id,
-    supplier_id: service.supplierId,
-    label: supplierNameById.get(service.supplierId) ?? null,
-    sort_order: claimedServiceIds.size + index,
-  }))
+  // sort_order must be positional within parsed.data.services for every row -- kept legs get their
+  // index from the reorder loop below, so a new row has to use the same index, not a count of
+  // claimed ids. The two used to disagree (e.g. [keptA, new, keptC] gave both `new` and `keptC`
+  // sort_order 2), which meant a rebuild that changed nothing still looked different next time.
+  const newServiceRows: BookingServiceInsert[] = parsed.data.services
+    .map((service, index) => ({ service, index }))
+    .filter(({ index }) => !resolvedLegIds[index])
+    .map(({ service, index }) => ({
+      id: crypto.randomUUID(),
+      booking_id: id,
+      supplier_id: service.supplierId,
+      label: supplierNameById.get(service.supplierId) ?? null,
+      sort_order: index,
+    }))
 
   if (newServiceRows.length > 0) {
     const { error: insertServicesError } = await supabase.from("booking_services").insert(newServiceRows)
     if (insertServicesError) return safeSupabaseError("build-booking:insert-services", insertServicesError)
   }
 
-  // Reorder kept (and adopted) services to match the requested order.
+  // Reorder kept (and adopted) services to match the requested order -- but only the ones whose
+  // sort_order actually changed. booking_services.updated_at is the optimistic-lock token the step-2
+  // PATCH checks against (app/api/jobs/[id]/services/route.ts); a no-op write here used to bump every
+  // kept leg's stamp on every "Next" in step 1, which then 409'd the very next save with "someone
+  // else changed this booking's services" even though nothing had. Sev-1, 2026-09-07 QA pass.
+  const existingSortOrderById = new Map(existingRows.map((row) => [row.id, row.sort_order]))
   for (const [sortOrder, legId] of resolvedLegIds.entries()) {
     if (!legId) continue
+    if (existingSortOrderById.get(legId) === sortOrder) continue
     const { error: reorderError } = await supabase
       .from("booking_services")
       .update({ sort_order: sortOrder })
