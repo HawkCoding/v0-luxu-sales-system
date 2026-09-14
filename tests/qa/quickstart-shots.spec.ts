@@ -1,7 +1,7 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Locator, type Page } from "@playwright/test"
 import { createQaSupabase, loadQaEnv } from "../../qa/lib/db"
 import type { Json } from "../../lib/supabase/types"
-import { HANDBOOK_USERS, shot } from "./handbook-shots.fixtures"
+import { HANDBOOK_USERS, SHOT_VIEWPORT, shot } from "./handbook-shots.fixtures"
 
 // Quick Start Guide figure capture.
 //
@@ -383,6 +383,90 @@ test.describe("quickstart enquiries", () => {
 // Building the booking and sending the quote
 // ---------------------------------------------------------------------------
 
+/**
+ * The three Build Booking figures tell one story: the same train, transfer and
+ * hotel in every capture, matching the lines on the seeded quote. Added in travel
+ * order so the transfer's "After" anchor resolves to the train, not the hotel.
+ */
+async function addQuickStartServices(page: Page, dialog: Locator): Promise<void> {
+  const services: { category: string; supplier: string }[] = [
+    { category: "Train", supplier: "Blue Train" },
+    { category: "Transfers", supplier: "Ulysses Tours & Transfers" },
+    { category: "Hotel", supplier: "The President Hotel" },
+  ]
+  for (const service of services) {
+    // Radix select triggers expose no accessible name, so they are matched on
+    // position (category is the first) and on the placeholder text they render.
+    await dialog.getByRole("combobox").first().click()
+    await page.getByRole("option", { name: service.category, exact: true }).click()
+    await dialog.getByRole("combobox").filter({ hasText: "Select supplier" }).click()
+    await page.getByRole("option", { name: service.supplier, exact: true }).click()
+    await dialog.getByRole("button", { name: "Add service" }).click()
+    await expect(dialog.getByText(service.supplier, { exact: true }).first()).toBeVisible()
+  }
+}
+
+/** Fills every field step 3 needs to price all three services. */
+async function configureQuickStartServices(page: Page, dialog: Locator): Promise<void> {
+  // Train — route and suite type. The traveller split opens on the booking's 2 adults.
+  const routeTriggers = dialog.locator('[id^="route-"]')
+  await routeTriggers.nth(0).click()
+  await page.getByRole("option", { name: "Pretoria ↔ Cape Town" }).click()
+  const suiteTriggers = dialog.locator('[id^="suite-type-"]')
+  await suiteTriggers.nth(0).click()
+  await page.getByRole("option", { name: "Deluxe", exact: true }).click()
+
+  // Transfer — station to hotel on the day the train arrives, in a standard car.
+  await dialog.getByRole("combobox").filter({ hasText: "Quick-fill from a route" }).click()
+  await page.getByRole("option", { name: "CPT – STA HTL CBD" }).click()
+  await dialog
+    .locator("div")
+    .filter({ has: page.getByText("Pickup date/time", { exact: true }) })
+    .last()
+    .getByRole("button", { name: /^After / })
+    .click()
+  await dialog.locator('[id^="vehicle-category-"]').first().click()
+  await page.getByRole("option", { name: "Standard - Mazda" }).click()
+
+  // Hotel — check in the day the train arrives, breakfast, one room for both.
+  await dialog
+    .locator("div")
+    .filter({ has: page.getByText("Stay dates", { exact: true }) })
+    .last()
+    .getByRole("button", { name: /^After / })
+    .click()
+  if ((await routeTriggers.count()) > 1 && !(await routeTriggers.nth(1).textContent())?.includes("Breakfast")) {
+    await routeTriggers.nth(1).click()
+    await page.getByRole("option", { name: "Breakfast" }).click()
+  }
+  await suiteTriggers.nth(1).click()
+  await page.getByRole("option", { name: "Classic Room", exact: true }).click()
+}
+
+const QS_BOOKING_TRIP_COLUMNS =
+  "departure_date, trip_start_date, trip_end_date, package_travel_date, no_of_adults, no_of_children"
+
+/**
+ * Pricing a build writes the derived trip dates back to the booking. Snapshots
+ * them and returns a cleanup that puts them back.
+ */
+async function withBookingTripSnapshot(
+  supabase: ReturnType<typeof createQaSupabase>,
+  bookingId: string,
+): Promise<() => Promise<void>> {
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(QS_BOOKING_TRIP_COLUMNS)
+    .eq("id", bookingId)
+    .maybeSingle()
+  if (error || !data) {
+    throw new Error(`Cannot snapshot the booking's trip fields (${error?.message ?? "none found"}).`)
+  }
+  return async () => {
+    await supabase.from("bookings").update(data).eq("id", bookingId)
+  }
+}
+
 test.describe("quickstart quoting", () => {
   test("qs build booking step 1", async ({ browser }) => {
     loadQaEnv()
@@ -397,20 +481,7 @@ test.describe("quickstart quoting", () => {
 
       const dialog = page.getByRole("dialog")
       await expect(dialog.getByText("Build this booking's services")).toBeVisible({ timeout: 30_000 })
-
-      // Radix select triggers expose no accessible name, so they are matched on
-      // the placeholder text they render. Category opens on Train.
-      await dialog.getByRole("combobox").filter({ hasText: "Select supplier" }).click()
-      await page.getByRole("option", { name: "Blue Train" }).click()
-      await dialog.getByRole("button", { name: "Add service" }).click()
-
-      await dialog.getByRole("combobox").first().click()
-      await page.getByRole("option", { name: "Hotel", exact: true }).click()
-      await dialog.getByRole("combobox").filter({ hasText: "Select supplier" }).click()
-      await page.getByRole("option", { name: "The President Hotel" }).click()
-      await dialog.getByRole("button", { name: "Add service" }).click()
-
-      await expect(dialog.getByText("The President Hotel")).toBeVisible()
+      await addQuickStartServices(page, dialog)
       await shot(page, "qs-build-step-1")
 
       // Closed without pressing Next, so nothing is written to the booking.
@@ -424,6 +495,7 @@ test.describe("quickstart quoting", () => {
   test("qs build booking steps 2 and 3", async ({ browser }) => {
     loadQaEnv()
     const supabase = createQaSupabase()
+    const restoreTrip = await withBookingTripSnapshot(supabase, QS_ENQUIRY_BOOKING)
     const removeQuote = await seedQuote(supabase, QS_ENQUIRY_BOOKING, "LTT-2026-0033-Q1")
 
     try {
@@ -434,22 +506,25 @@ test.describe("quickstart quoting", () => {
 
       const dialog = page.getByRole("dialog")
       await expect(dialog.getByText("Build this booking's services")).toBeVisible({ timeout: 30_000 })
-      await dialog.getByRole("combobox").filter({ hasText: "Select supplier" }).click()
-      await page.getByRole("option", { name: "Blue Train" }).click()
-      await dialog.getByRole("button", { name: "Add service" }).click()
+      await addQuickStartServices(page, dialog)
       await dialog.getByRole("button", { name: "Next" }).click()
 
       await expect(dialog.getByText("Configure services")).toBeVisible({ timeout: 60_000 })
-      await dialog.getByRole("combobox").filter({ hasText: "Select route" }).click()
-      await page.getByRole("option", { name: "Pretoria ↔ Cape Town" }).click()
-      // The seeded suite unit opens on "Not set", which is also the first option
-      // in the list — pick the suite type by name so step 3 is not blocked.
-      await dialog.getByRole("combobox").filter({ hasText: "Not set" }).first().click()
-      await page.getByRole("option", { name: "Deluxe", exact: true }).click()
-      await shot(page, "qs-build-step-2")
+      await configureQuickStartServices(page, dialog)
+
+      // Three service panels do not fit in one 900px screen, and the dialog scrolls
+      // inside itself, so a full-page capture would still crop it. The viewport is
+      // stretched to the dialog's height for this one figure instead.
+      await dialog.evaluate((element) => element.scrollTo({ top: 0 }))
+      const contentHeight = await dialog.evaluate((element) => element.scrollHeight)
+      await page.setViewportSize({ width: SHOT_VIEWPORT.width, height: Math.ceil(contentHeight / 0.92) + 24 })
+      await shot(page, "qs-build-step-2", { settle: 1200 })
+      await page.setViewportSize(SHOT_VIEWPORT)
 
       await dialog.getByRole("button", { name: "Next" }).click()
       await expect(dialog.getByText("Confirm replacement")).toBeVisible({ timeout: 60_000 })
+      await expect(dialog.getByText(/not priced below/)).toHaveCount(0)
+      await expect(dialog.getByRole("button", { name: "Replace & apply" })).toBeEnabled()
       await shot(page, "qs-build-step-3")
 
       // Closed without applying: the seeded quote's lines stay as they were.
@@ -459,6 +534,7 @@ test.describe("quickstart quoting", () => {
       // Pressing Next in step 1 persists the booking's services — remove them.
       await supabase.from("booking_services").delete().eq("booking_id", QS_ENQUIRY_BOOKING)
       await removeQuote()
+      await restoreTrip()
     }
   })
 
