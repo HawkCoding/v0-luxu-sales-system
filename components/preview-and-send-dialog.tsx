@@ -308,6 +308,7 @@ export function PreviewAndSendDialog({
                     onChange={setContent}
                     disabled={sending}
                     baseFontSize={emailAppearance?.email_font_size}
+                    baseFontFamily={emailAppearance?.email_font_family}
                   />
                   <p className="text-xs text-muted-foreground">
                     Edits apply to this email only. Change the default wording on the Templates page.

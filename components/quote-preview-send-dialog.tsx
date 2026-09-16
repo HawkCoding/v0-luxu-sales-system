@@ -504,6 +504,7 @@ export function QuotePreviewSendDialog({
                     value={content}
                     onChange={setContent}
                     baseFontSize={emailAppearance?.email_font_size}
+                    baseFontFamily={emailAppearance?.email_font_family}
                   />
                   <p className="text-xs text-muted-foreground">
                     Default wording is edited on the Templates page (Quote Email template).
