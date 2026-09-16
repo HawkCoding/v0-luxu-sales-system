@@ -5,6 +5,7 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender, type ResolvedSenderReason } from "@/lib/email/resolve-sender"
+import { resolveSenderDisplayName } from "@/lib/email/sender-identity"
 import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { staleVersionResponse } from "@/lib/concurrency"
@@ -93,6 +94,8 @@ const correspondenceSchema = z
       .max(5)
       .optional(),
     libraryAttachmentIds: z.array(z.string().uuid()).max(10).optional(),
+    /** Signature brand chosen in the send dialog — also names the "<agent> - <brand>" From header. */
+    signatureBrandId: z.string().uuid().nullish(),
   })
   .refine((value) => Boolean(value.bookingId ?? value.jobId), {
     message: "bookingId or jobId is required",
@@ -339,6 +342,10 @@ export async function POST(req: Request) {
   }
 
   const from = sender.fromAddress ?? (await getEmailFromAddress(supabase))
+  const fromName = await resolveSenderDisplayName(
+    booking.assigned_salesperson_id,
+    parsed.data.signatureBrandId,
+  )
   const subject = parsed.data.subject.trim()
   const bodyHtml = parsed.data.bodyHtml?.trim() || null
   const text = parsed.data.text?.trim() || (bodyHtml ? getPlainTextFromHtml(bodyHtml) : null)
@@ -402,6 +409,7 @@ export async function POST(req: Request) {
 
   const sendResult = await sendEmail({
     from,
+    fromName,
     to: recipient ?? "",
     subject,
     html: bodyHtml,

@@ -4,6 +4,7 @@ import { getQuoteFollowUpSettings } from "@/lib/settings-access"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { logError } from "@/lib/error-log"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
+import { resolveSenderDisplayName } from "@/lib/email/sender-identity"
 import { sendEmail } from "@/lib/email/transport"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
 import { getTemplate, type EmailTemplate } from "@/lib/templates/get-template"
@@ -177,6 +178,7 @@ export async function runQuoteFollowUpWorker(
     // Resolve salesperson sender (email address + credential id for SMTP routing)
     let fromAddress = "reservations@luxustravel.co.za"
     let salespersonCredentialId: string | null = null
+    const fromName = await resolveSenderDisplayName(booking.assigned_salesperson_id)
 
     if (booking.assigned_salesperson_id) {
       const { data: credential } = await supabase
@@ -250,6 +252,7 @@ export async function runQuoteFollowUpWorker(
       // Send the email
       const result = await sendEmail({
         from: fromAddress,
+        fromName,
         to: customerEmail,
         subject,
         html: bodyHtml,

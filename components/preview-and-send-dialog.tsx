@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import { Paperclip, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -110,10 +110,35 @@ export function PreviewAndSendDialog({
   )
   const [content, setContent] = useState<string | null>(initialContent)
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null)
+  const [selectedBrandId, setSelectedBrandId] = useState<string | null>(signatureBrandId)
   const [sending, setSending] = useState(false)
   const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const optimisticSend = useOptimisticSend()
   const { data: emailAppearance } = useEmailAppearanceSettings()
+
+  // Callers keep this dialog mounted between sends and re-prepare into the same
+  // instance (e.g. a second payment confirmation after the final payment). The
+  // editable state must follow the fresh email, or the old body — with the old
+  // figures — gets spliced into the new wrapper and sent. Reset whenever the
+  // prepared email changes or the dialog is reopened (closing with edits
+  // already asked to discard them). Adjusted during render so a stale body
+  // never paints.
+  const [synced, setSynced] = useState({ subject: initialSubject, to, content: initialContent, open })
+  const sourceChanged =
+    synced.subject !== initialSubject || synced.to !== to || synced.content !== initialContent
+  if (sourceChanged || synced.open !== open) {
+    if (sourceChanged || (open && !synced.open)) {
+      setSubject(initialSubject)
+      setRecipient(to ?? "")
+      setContent(initialContent)
+      setLibraryAttachmentIds([])
+    }
+    setSynced({ subject: initialSubject, to, content: initialContent, open })
+  }
+
+  useEffect(() => {
+    setSelectedBrandId(signatureBrandId)
+  }, [signatureBrandId])
 
   const canEditBody = initialContent !== null
   const isDirty =
@@ -148,6 +173,7 @@ export function PreviewAndSendDialog({
     const capturedHtml = finalHtml
     const capturedRecipient = recipient.trim()
     const capturedLibraryIds = libraryAttachmentIds
+    const capturedBrandId = selectedBrandId
     // Close dialog immediately for Gmail-style undo flow. The send fires
     // ~5s later via the optimistic-send hook; if the user clicks Undo on
     // the toast, the fetch never runs.
@@ -175,6 +201,7 @@ export function PreviewAndSendDialog({
             sentAt: new Date().toISOString(),
             attachments,
             libraryAttachmentIds: capturedLibraryIds.length > 0 ? capturedLibraryIds : undefined,
+            signatureBrandId: capturedBrandId,
           }),
         })
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
@@ -276,6 +303,7 @@ export function PreviewAndSendDialog({
             profileId={signatureProfileId}
             initialBrandId={signatureBrandId}
             onSignatureHtmlChange={setSignatureHtml}
+            onBrandIdChange={setSelectedBrandId}
             disabled={sending}
           />
 

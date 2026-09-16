@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer"
 import { Resend } from "resend"
+import { formatFromHeader } from "@/lib/email/sender-identity"
 import { sendViaSalespersonSmtp } from "@/lib/email/smtp-transport"
 import {
   applyEmailTestMode,
@@ -177,6 +178,8 @@ async function sendWithResend(options: SendEmailOptions, apiKey: string): Promis
 
 export interface SendEmailOptions {
   from: string
+  /** Display name to render on the From header, e.g. "Carmen De Jongh - SA Rail". */
+  fromName?: string | null
   to: string | string[]
   subject: string
   html?: string | null
@@ -245,6 +248,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
     try {
       const result = await sendViaSalespersonSmtp({
         credentialId: options.salespersonCredentialId,
+        fromName: options.fromName,
         to: recipients,
         subject,
         htmlBody: options.html ?? "",
@@ -276,7 +280,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
 
   const apiKey = process.env.RESEND_API_KEY?.trim()
   if (apiKey) {
-    const result = await sendWithResend({ ...options, to: recipients, subject }, apiKey)
+    const result = await sendWithResend(
+      { ...options, from: formatFromHeader(options.fromName, options.from), to: recipients, subject },
+      apiKey,
+    )
     return { ...result, ...testModeFields }
   }
 
@@ -294,6 +301,8 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
     }
   }
 
-  const result = await sendWithMailpit({ ...options, to: recipients, subject })
+  const result = await sendWithMailpit(
+    { ...options, from: formatFromHeader(options.fromName, options.from), to: recipients, subject },
+  )
   return { ...result, ...testModeFields }
 }

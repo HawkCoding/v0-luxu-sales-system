@@ -7,10 +7,21 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import type { Payment, PipelineStage } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { useState } from "react"
-import { Plus } from "lucide-react"
+import { Plus, Pencil, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 import { formatDisplayDate } from "@/lib/date-format"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { RecordPaymentDialog } from "@/components/record-payment-dialog"
@@ -41,11 +52,33 @@ interface JobPaymentsTabProps {
 export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE_CURRENCY, overpaidAmount }: JobPaymentsTabProps) {
   const { can } = useRole()
   const [open, setOpen] = useState(false)
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
+  const [deletingPayment, setDeletingPayment] = useState<Payment | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const canRecordPayment = can("edit:payments")
   const stageAllowsRecording = stage ? PAYMENT_ENABLED_STAGES.has(stage) : true
 
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
   const isOverpaid = (overpaidAmount ?? 0) > 0
+
+  const handleDelete = async () => {
+    if (!deletingPayment) return
+    setDeleting(true)
+    try {
+      const response = await fetch(`/api/payments/${deletingPayment.id}`, { method: "DELETE" })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? "Failed to delete payment")
+      }
+      mutate()
+      toast.success("Payment deleted")
+      setDeletingPayment(null)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete payment")
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -88,6 +121,31 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
               mutate={mutate}
               currency={currency}
             />
+            <RecordPaymentDialog
+              open={Boolean(editingPayment)}
+              onOpenChange={(next) => !next && setEditingPayment(null)}
+              jobId={jobId}
+              mutate={mutate}
+              currency={currency}
+              existingPayment={editingPayment}
+            />
+            <AlertDialog open={Boolean(deletingPayment)} onOpenChange={(next) => !next && setDeletingPayment(null)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this payment?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {deletingPayment &&
+                      `This removes the ${formatMoney(deletingPayment.amount, currency)} payment from ${formatDisplayDate(deletingPayment.receivedAt)} and recalculates the booking's balance. This can't be undone.`}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void handleDelete()} disabled={deleting}>
+                    {deleting ? "Deleting..." : "Delete"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </>
         )}
       </div>
@@ -108,9 +166,31 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">Ref: {p.reference} {p.notes ? `| ${p.notes}` : ""}</p>
                 </div>
-                <span className="text-xs text-muted-foreground flex-shrink-0">
-                  {formatDisplayDate(p.receivedAt)}
-                </span>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <span className="text-xs text-muted-foreground">{formatDisplayDate(p.receivedAt)}</span>
+                  {canRecordPayment && (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        aria-label="Edit payment"
+                        onClick={() => setEditingPayment(p)}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-payment-red hover:text-payment-red"
+                        aria-label="Delete payment"
+                        onClick={() => setDeletingPayment(p)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}

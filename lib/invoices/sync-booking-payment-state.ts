@@ -136,6 +136,16 @@ export async function syncBookingPaymentState(
     bookingUpdates.final_paid_at = new Date().toISOString()
   }
 
+  // Mirror of the advance above: an edited/deleted payment can drop the balance back above
+  // zero after this same function already pushed the booking to final_paid. Only ever revert
+  // exactly that stage — voucher_sent/trip_active/closed/lost represent fulfillment progress
+  // unrelated to the payment total and must never be auto-undone.
+  const revertedFromFinalPaid = currentBooking?.stage === "final_paid" && invoiceBalance > 0
+  if (revertedFromFinalPaid) {
+    bookingUpdates.stage = "deposit_paid"
+    bookingUpdates.final_paid_at = null
+  }
+
   await supabase.from("bookings").update(bookingUpdates).eq("id", bookingId)
 
   const actorName = auditContext?.actorName ?? "system"
@@ -150,6 +160,18 @@ export async function syncBookingPaymentState(
       action: "booking_paid_in_full",
       before: { stage: currentBooking?.stage ?? null },
       after: { stage: "final_paid", invoice_balance: invoiceBalance },
+    })
+  }
+
+  if (revertedFromFinalPaid) {
+    await writeAuditLog(supabase, {
+      actor: actorName,
+      actorUserId,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "booking_final_paid_reverted",
+      before: { stage: "final_paid" },
+      after: { stage: "deposit_paid", invoice_balance: invoiceBalance },
     })
   }
 
@@ -185,6 +207,24 @@ export async function syncBookingPaymentState(
     })
   }
 
+  // Revert deposit invoice if an edit/delete dropped the total back below threshold
+  if (depositInvoice && !isDepositPaid && depositInvoice.status === "paid") {
+    await supabase
+      .from("invoices")
+      .update({ status: "sent", updated_at: new Date().toISOString() })
+      .eq("id", depositInvoice.id)
+
+    await writeAuditLog(supabase, {
+      actor: actorName,
+      actorUserId,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "deposit_marked_unpaid",
+      before: { invoice_id: depositInvoice.id, status: "paid" },
+      after: { invoice_id: depositInvoice.id, status: "sent", total_paid: totalPaid },
+    })
+  }
+
   // Mark final invoice as paid if balance is zero
   if (finalInvoice && invoiceBalance === 0 && finalInvoice.status !== "paid") {
     await supabase
@@ -203,6 +243,24 @@ export async function syncBookingPaymentState(
     })
   }
 
+  // Revert final invoice if an edit/delete dropped the balance back above zero
+  if (finalInvoice && invoiceBalance > 0 && finalInvoice.status === "paid") {
+    await supabase
+      .from("invoices")
+      .update({ status: "sent", updated_at: new Date().toISOString() })
+      .eq("id", finalInvoice.id)
+
+    await writeAuditLog(supabase, {
+      actor: actorName,
+      actorUserId,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "invoice_marked_unpaid",
+      before: { invoice_id: finalInvoice.id, status: "paid" },
+      after: { invoice_id: finalInvoice.id, status: "sent", invoice_balance: invoiceBalance },
+    })
+  }
+
   // Mark full-payment invoice as paid if balance is zero
   if (fullInvoice && invoiceBalance === 0 && fullInvoice.status !== "paid") {
     await supabase
@@ -218,6 +276,24 @@ export async function syncBookingPaymentState(
       action: "invoice_marked_paid",
       before: { invoice_id: fullInvoice.id, status: fullInvoice.status },
       after: { invoice_id: fullInvoice.id, status: "paid", invoice_balance: invoiceBalance },
+    })
+  }
+
+  // Revert full-payment invoice if an edit/delete dropped the balance back above zero
+  if (fullInvoice && invoiceBalance > 0 && fullInvoice.status === "paid") {
+    await supabase
+      .from("invoices")
+      .update({ status: "sent", updated_at: new Date().toISOString() })
+      .eq("id", fullInvoice.id)
+
+    await writeAuditLog(supabase, {
+      actor: actorName,
+      actorUserId,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "invoice_marked_unpaid",
+      before: { invoice_id: fullInvoice.id, status: "paid" },
+      after: { invoice_id: fullInvoice.id, status: "sent", invoice_balance: invoiceBalance },
     })
   }
 

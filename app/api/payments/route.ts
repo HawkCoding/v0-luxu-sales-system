@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateTime } from "@/lib/date-format"
 import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
+import { paymentKindSignIssue } from "@/lib/payments/payment-validation"
 import { getPaymentReferenceRequired } from "@/lib/settings-access"
 
 const paymentSchema = z
@@ -23,14 +24,10 @@ const paymentSchema = z
     message: "bookingId or jobId is required",
     path: ["bookingId"],
   })
-  .refine((v) => v.paymentKind !== "capture" || v.amount > 0, {
-    message: "capture payments must have a positive amount",
+  .refine((v) => paymentKindSignIssue(v.paymentKind, v.amount) === null, (v) => ({
+    message: paymentKindSignIssue(v.paymentKind, v.amount) ?? "",
     path: ["amount"],
-  })
-  .refine((v) => v.paymentKind !== "refund" || v.amount < 0, {
-    message: "refund payments must have a negative amount",
-    path: ["amount"],
-  })
+  }))
 
 export async function POST(req: Request) {
   const auth = await requireRole(["admin", "manager", "consultant"])

@@ -423,7 +423,6 @@ const PAYMENT_COLUMNS: Column[] = [
   { key: "notes", label: "Notes", flex: 1 },
   { key: "date", label: "Payment Made Date", flex: 1 },
   { key: "paidWith", label: "Paid With", flex: 1 },
-  { key: "payable", label: "Amounts Payable", flex: 1 },
   { key: "receivable", label: "Amounts Receivable", flex: 1 },
 ]
 
@@ -597,7 +596,6 @@ export function WorksheetDocument({
                 EMPTY,
                 dateOrBlank(p.date),
                 p.reference ? `${p.paidWith ?? ""} (${p.reference})`.trim() : (p.paidWith ?? EMPTY),
-                EMPTY,
                 formatAmount(p.amount),
               ]}
             />
@@ -606,12 +604,12 @@ export function WorksheetDocument({
           <SummaryRow
             head
             columns={PAYMENT_COLUMNS}
-            spans={[{ span: 3, label: "Totals" }, { span: 1, fill: true }, { span: 1, fill: true }]}
+            spans={[{ span: 3, label: "Totals" }, { span: 1, fill: true }]}
           />
           <SummaryRow
             last
             columns={PAYMENT_COLUMNS}
-            spans={[{ span: 4, label: "Gross Profit" }, { span: 1, fill: true }]}
+            spans={[{ span: 3, label: "Gross Profit" }, { span: 1, fill: true }]}
           />
         </View>
       </Page>

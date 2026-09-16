@@ -301,6 +301,7 @@ export function QuotePreviewSendDialog({
     const capturedSubject = subject
     const capturedHtml = finalHtml
     const capturedLibraryIds = libraryAttachmentIds
+    const capturedBrandId = signatureBrandId
     // Close dialog immediately for Gmail-style undo flow.
     setOpen(false)
     setSending(false)
@@ -322,6 +323,7 @@ export function QuotePreviewSendDialog({
             bodyHtml: capturedHtml,
             moveStage: "quote_sent",
             libraryAttachmentIds: capturedLibraryIds.length > 0 ? capturedLibraryIds : undefined,
+            signatureBrandId: capturedBrandId,
           }),
         })
         const payload = (await response.json()) as { error?: string }
@@ -494,6 +496,7 @@ export function QuotePreviewSendDialog({
                 profileId={signatureProfileId}
                 initialBrandId={signatureBrandId}
                 onSignatureHtmlChange={setSignatureHtml}
+                onBrandIdChange={setSignatureBrandId}
                 disabled={sending}
               />
               {content !== null && (

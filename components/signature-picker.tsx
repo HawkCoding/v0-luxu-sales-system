@@ -15,6 +15,8 @@ interface SignaturePickerProps {
   initialBrandId: string | null
   /** Called with a freshly rendered fragment whenever the salesperson switches brands. */
   onSignatureHtmlChange: (html: string) => void
+  /** Called with the newly selected brand id, so the send request can carry it for the From header. */
+  onBrandIdChange?: (brandId: string) => void
   disabled?: boolean
 }
 
@@ -29,6 +31,7 @@ export function SignaturePicker({
   profileId,
   initialBrandId,
   onSignatureHtmlChange,
+  onBrandIdChange,
   disabled,
 }: SignaturePickerProps) {
   const { data } = useSignatureBrands()
@@ -46,6 +49,7 @@ export function SignaturePicker({
 
   async function handleChange(brandId: string) {
     setSelectedBrandId(brandId)
+    onBrandIdChange?.(brandId)
     setLoading(true)
     try {
       const res = await fetch("/api/email-signature/render", {
