@@ -26,6 +26,7 @@ const GLOBAL_DEFAULTS = {
   signature_divisions_line: "DIVISIONS OF LUXUS TRAVEL & TOURS",
   signature_confidentiality: "CONFIDENTIALITY CAUTION: ...",
   signature_office_address: "",
+  signature_sender_layout: "",
 }
 
 const SA_RAIL_BRAND = {
@@ -44,6 +45,7 @@ const SA_RAIL_BRAND = {
   divisions_line: null,
   confidentiality: null,
   office_address: null,
+  sender_layout: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 }

@@ -194,10 +194,10 @@ const bankingDetails: TemplateTokenSpec = {
 }
 const guestInfo: TemplateTokenSpec = {
   name: "guestInfo",
-  description: "Each named guest with their ID/passport number, for the customer to confirm (falls back to guest counts if names aren't captured yet)",
+  description: "Each named guest with their DOB, country of residence and passport/ID number, for the customer to confirm (falls back to guest counts if names aren't captured yet)",
   kind: "block",
   sample:
-    "<p>Mr John Smith ID: 8001015800083</p><p>Mrs Jane Smith ID: 8203125800084</p>",
+    "<p>Mr John Adams DOB: 27/09/1959 UK 155510783</p><p>Mrs Caron Adams DOB: 30/01/1963 UK 128860381</p>",
 }
 const rateLabel: TemplateTokenSpec = {
   name: "rateLabel",

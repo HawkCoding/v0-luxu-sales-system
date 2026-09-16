@@ -3,8 +3,18 @@ import {
   detectCountryInText,
   levenshteinDistance,
   normalizeCountry,
+  resolveCountryCode,
   type CountryAliasMap,
+  type CountryCodeMap,
 } from "@/lib/countries"
+
+function createCodeMap(): CountryCodeMap {
+  return new Map<string, string>([
+    ["South Africa", "ZA"],
+    ["United States", "US"],
+    ["United Kingdom", "UK"],
+  ])
+}
 
 function createAliasMap(): CountryAliasMap {
   return new Map<string, string>([
@@ -64,6 +74,48 @@ describe("normalizeCountry", () => {
   it("keeps unmatched country values unchanged", () => {
     const aliasMap = createAliasMap()
     expect(normalizeCountry("Atlantis", aliasMap)).toBe("Atlantis")
+  })
+})
+
+describe("resolveCountryCode", () => {
+  it("resolves a canonical country name to its code", () => {
+    const aliasMap = createAliasMap()
+    const codeMap = createCodeMap()
+
+    expect(resolveCountryCode("South Africa", aliasMap, codeMap)).toBe("ZA")
+  })
+
+  it("resolves the United Kingdom to UK rather than GB", () => {
+    const aliasMap = createAliasMap()
+    const codeMap = createCodeMap()
+
+    expect(resolveCountryCode("United Kingdom", aliasMap, codeMap)).toBe("UK")
+    expect(resolveCountryCode("GB", aliasMap, codeMap)).toBe("UK")
+  })
+
+  it("resolves an alias through the alias map", () => {
+    const aliasMap = createAliasMap()
+    const codeMap = createCodeMap()
+
+    expect(resolveCountryCode("Great Britain", aliasMap, codeMap)).toBe("UK")
+    expect(resolveCountryCode("RSA", aliasMap, codeMap)).toBe("ZA")
+  })
+
+  it("returns null for nullish or empty input", () => {
+    const aliasMap = createAliasMap()
+    const codeMap = createCodeMap()
+
+    expect(resolveCountryCode(null, aliasMap, codeMap)).toBeNull()
+    expect(resolveCountryCode(undefined, aliasMap, codeMap)).toBeNull()
+    expect(resolveCountryCode("   ", aliasMap, codeMap)).toBeNull()
+  })
+
+  it("drops unresolved free text rather than printing it verbatim", () => {
+    const aliasMap = createAliasMap()
+    const codeMap = createCodeMap()
+
+    expect(resolveCountryCode("Atlantis", aliasMap, codeMap)).toBeNull()
+    expect(resolveCountryCode("Other", aliasMap, codeMap)).toBeNull()
   })
 })
 

@@ -237,6 +237,67 @@ describe("renderInvoicePdf smoke", () => {
     expect(text).toContain("Total incl. VAT")
   })
 
+  it("renders a visible Discount row independently of Agent Commission", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "LTT-2026-0001-INV",
+      bookingNumber: "LTT-2026-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      departure: null,
+      items,
+      totals: {
+        subtotalInclVat: 63900,
+        discount: 1300,
+        discountVisible: true,
+        totalInclVat: 62600,
+        depositPercentage: 25,
+        depositAmount: 15650,
+        finalAmount: 46950,
+        finalDueDate: "2026-07-19",
+        amountReceived: 0,
+        amountReceivedAt: null,
+        outstanding: 62600,
+      },
+      banking,
+    })
+
+    expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+    const text = await extractPdfText(buffer)
+    expect(text).toContain("Discount")
+    expect(text).toContain("Total incl. VAT")
+  })
+
+  it("hides the Discount row when discountVisible is false", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "LTT-2026-0001-INV",
+      bookingNumber: "LTT-2026-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      departure: null,
+      items,
+      totals: {
+        subtotalInclVat: 63900,
+        discount: 1300,
+        discountVisible: false,
+        totalInclVat: 62600,
+        depositPercentage: 25,
+        depositAmount: 15650,
+        finalAmount: 46950,
+        finalDueDate: "2026-07-19",
+        amountReceived: 0,
+        amountReceivedAt: null,
+        outstanding: 62600,
+      },
+      banking,
+    })
+
+    expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+    const text = await extractPdfText(buffer)
+    expect(text).not.toContain("Discount")
+  })
+
   it("renders a paid-up invoice without banking details configured", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "LTT-2026-0001-INV",

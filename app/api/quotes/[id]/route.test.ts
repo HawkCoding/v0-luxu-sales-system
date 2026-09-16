@@ -186,8 +186,32 @@ describe("PATCH /api/quotes/[id]", () => {
 
     expect(res.status).toBe(400)
     const body = await res.json()
-    expect(body.error).toBe("Invalid request payload")
+    expect(body.error).toContain("Line 1 (The Blue Train)")
+    expect(body.error).toContain("can't be negative")
     expect(body.details).toBeDefined()
+  })
+
+  // The bug this reproduces: a negative Commission line (from a legacy negative "Rounding")
+  // used to fail here with a bare "Invalid request payload (lineItems)" that named neither the
+  // line nor the reason -- see app/api/jobs/[id]/services/apply/route.ts for where it's now
+  // caught earlier, and app/api/quotes/[id]/commission-bonus/route.ts for why it can't recur.
+  it("names the Commission line when its price is negative", async () => {
+    buildAuth([prevLine()])
+
+    const res = await PATCH(
+      patchReq({
+        lineItems: [
+          { description: "The Blue Train", qty: 1, unitPrice: 5000, total: 5000 },
+          { description: "Commission", qty: 1, unitPrice: -46320, total: -46320 },
+        ],
+      }),
+      routeParams,
+    )
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toContain("Line 2 (Commission)")
+    expect(body.error).toContain("can't be negative")
   })
 
   it("deletes a line from an all-snapshot-less quote without an override reason", async () => {

@@ -43,7 +43,7 @@ export const PAYMENT_COLUMNS =
   "id, booking_id, amount, received_at, method, reference, notes, created_at"
 
 export const QUOTE_COLUMNS =
-  "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, total, currency, commission_bonus, agent_commission, last_sent_at, override_pin, override_reason, created_at, updated_at"
+  "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, total, currency, commission_bonus, agent_commission, discount_type, discount_value, discount_amount, discount_visible, last_sent_at, override_pin, override_reason, created_at, updated_at"
 
 export const QUOTE_LINE_ITEM_COLUMNS =
   "id, quote_id, description, supplier_description, pricing_snapshot, qty, unit_price, total, sort_order"
@@ -75,7 +75,7 @@ export const AUDIT_LOG_COLUMNS =
   "id, actor, actor_user_id, entity_type, entity_id, action, before_json, after_json, meta_json, created_at"
 
 export const SIGNATURE_BRAND_COLUMNS =
-  "id, slug, name, banner_url, banner_width, banner_height, badges, enabled, sort_order, company_line, registration_line, trading_hours, divisions_line, confidentiality, office_address, created_at, updated_at"
+  "id, slug, name, banner_url, banner_width, banner_height, badges, enabled, sort_order, company_line, registration_line, trading_hours, divisions_line, confidentiality, office_address, sender_layout, created_at, updated_at"
 
 export const PAYMENT_METHOD_COLUMNS =
   "id, name, enabled, is_default, sort_order, bank_name, bank_account_name, bank_account_number, bank_branch_code, bank_swift_code, company_address, company_reg_number, company_vat_number, company_tel, company_cell, company_fax, company_email, company_website, created_at, updated_at"

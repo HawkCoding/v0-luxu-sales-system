@@ -472,6 +472,10 @@ export const supplierSaveSchema = z.object({
   /** Train operators only: how much suite detail the quote itinerary sentence states. Defaults to
    * 'type_only' when omitted. */
   quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
+  /** Train operators only: minutes before departure the quote itinerary states check-in ("Check
+   * in at 10h00" / "Departure time: 12h00"). 0 means the operator publishes no check-in time, so
+   * the quote falls back to a single "Departs at …" line. Defaults to 120 when omitted. */
+  checkInOffsetMinutes: z.number().int().min(0).max(720).optional(),
   suitePhrasePattern: suitePhrasePatternSchema,
   /** Whether this supplier may head a booking of its own -- see suppliers.sells_standalone. */
   sellsStandalone: z.boolean().optional(),
@@ -651,6 +655,9 @@ export const supplierDraftSaveSchema = z.object({
   /** Train operators only: how much suite detail the quote itinerary sentence states. Defaults to
    * 'type_only' when omitted. */
   quoteSuiteDetail: z.enum(["type_only", "full"]).optional(),
+  /** Train operators only: minutes before departure the quote itinerary states check-in. 0 means
+   * the operator publishes no check-in time. Defaults to 120 when omitted. */
+  checkInOffsetMinutes: z.number().int().min(0).max(720).optional(),
   suitePhrasePattern: suitePhrasePatternSchema,
   /** Whether this supplier may head a booking of its own -- see suppliers.sells_standalone. */
   sellsStandalone: z.boolean().optional(),

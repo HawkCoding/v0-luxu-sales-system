@@ -4,8 +4,9 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
+import { HtmlBodyEditor } from "@/components/ui/html-body-editor"
 import { useEmailSignatureSettings, type EmailSignatureSettings } from "@/lib/use-data"
+import { SENDER_LAYOUT_TOKENS } from "@/lib/email/sender-layout"
 
 interface EmailSignatureSettingsEditorProps {
   canEdit: boolean
@@ -13,13 +14,14 @@ interface EmailSignatureSettingsEditorProps {
 
 type TextKey = Exclude<keyof EmailSignatureSettings, "signature_enabled">
 
-const TEXT_FIELDS: { key: TextKey; label: string; rows?: number }[] = [
-  { key: "signature_company_line", label: "Company line", rows: 2 },
+const TEXT_FIELDS: { key: TextKey; label: string }[] = [
+  { key: "signature_sender_layout", label: "Name & contact layout" },
+  { key: "signature_company_line", label: "Company line" },
   { key: "signature_registration_line", label: "Registration line" },
   { key: "signature_trading_hours", label: "Trading hours" },
   { key: "signature_divisions_line", label: "Divisions line" },
-  { key: "signature_confidentiality", label: "Confidentiality notice", rows: 3 },
-  { key: "signature_office_address", label: "Office address", rows: 2 },
+  { key: "signature_confidentiality", label: "Confidentiality notice" },
+  { key: "signature_office_address", label: "Office address" },
 ]
 
 /**
@@ -96,15 +98,16 @@ export function EmailSignatureSettingsEditor({ canEdit }: EmailSignatureSettings
         />
       </div>
 
-      {TEXT_FIELDS.map(({ key, label, rows }) => (
+      {TEXT_FIELDS.map(({ key, label }) => (
         <div key={key} className="space-y-1.5">
           <Label htmlFor={key}>{label}</Label>
-          <Textarea
+          <HtmlBodyEditor
             id={key}
-            rows={rows ?? 1}
+            variant="compact"
             value={values[key] ?? ""}
             disabled={!canEdit}
-            onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+            insertTokens={key === "signature_sender_layout" ? SENDER_LAYOUT_TOKENS : undefined}
+            onChange={(html) => setValues((v) => ({ ...v, [key]: html }))}
             onBlur={() => {
               if (values[key] !== data[key]) void patch({ [key]: values[key] ?? "" }, label, key)
             }}

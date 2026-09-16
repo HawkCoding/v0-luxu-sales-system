@@ -146,6 +146,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     longJourneyMinDays: row.long_journey_min_days ?? null,
     trainOnlyNote: row.train_only_note ?? null,
     quoteSuiteDetail: row.quote_suite_detail === "full" ? "full" : "type_only",
+    checkInOffsetMinutes: row.check_in_offset_minutes ?? 120,
     suitePhrasePattern: row.suite_phrase_pattern ?? null,
     sellsStandalone: row.sells_standalone ?? false,
     emailMatchPhrases: row.email_match_phrases ?? null,

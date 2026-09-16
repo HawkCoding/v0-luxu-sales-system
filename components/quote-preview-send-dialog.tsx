@@ -14,6 +14,7 @@ import { toast } from "sonner"
 import { QUOTE_REFERENCE_ENABLED } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
+import { useEmailAppearanceSettings } from "@/lib/use-data"
 import {
   Dialog,
   DialogContent,
@@ -161,6 +162,7 @@ export function QuotePreviewSendDialog({
   const [config, setConfig] = useState<QuoteConfigPreview | null>(null)
   const [savingConfig, setSavingConfig] = useState(false)
   const optimisticSend = useOptimisticSend()
+  const { data: emailAppearance } = useEmailAppearanceSettings()
   // What the server last rendered, so a hand-edit can be told apart from the template's own wording
   // -- reopening this dialog re-fetches the preview (moveStage/signature defaults can have changed),
   // and that used to silently overwrite whatever was typed the first time.
@@ -501,6 +503,7 @@ export function QuotePreviewSendDialog({
                     id={`quote-body-${quote.id}`}
                     value={content}
                     onChange={setContent}
+                    baseFontSize={emailAppearance?.email_font_size}
                   />
                   <p className="text-xs text-muted-foreground">
                     Default wording is edited on the Templates page (Quote Email template).

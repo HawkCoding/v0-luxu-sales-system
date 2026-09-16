@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
+import { describeValidationIssue } from "@/lib/api/describe-zod-issue"
 import { jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import {
@@ -57,7 +58,24 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const rawBody: unknown = await req.json().catch(() => null)
   const parseResult = patchQuoteSchema.safeParse(rawBody)
   if (!parseResult.success) {
-    return jsonZodError(parseResult.error, "Invalid request payload", "quotes:patch")
+    // Name which line failed (and by what description, when the client sent one) instead of a
+    // bare "Invalid request payload (lineItems)" the toast could show but the user could do
+    // nothing with -- see lib/format-error-details.ts.
+    const rawLineItems: unknown[] =
+      rawBody && typeof rawBody === "object" && Array.isArray((rawBody as Record<string, unknown>).lineItems)
+        ? ((rawBody as Record<string, unknown>).lineItems as unknown[])
+        : []
+    const firstIssue = parseResult.error.issues[0]
+    const message = firstIssue
+      ? describeValidationIssue(firstIssue, {
+          lineLabel: (index) => {
+            const line = rawLineItems[index] as { description?: unknown } | undefined
+            const description = typeof line?.description === "string" ? line.description : null
+            return description ? `Line ${index + 1} (${description})` : `Line ${index + 1}`
+          },
+        })
+      : "Invalid request payload"
+    return jsonZodError(parseResult.error, message, "quotes:patch")
   }
   const parsed = parseResult.data
 
@@ -73,7 +91,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     // primary supplier, or a transfer extra wins the route (see resolvePrimaryRoute). Kept as one
     // string literal — supabase-js infers the row type from the literal and gives up on a concat.
     .select(
-      "id, booking_id, subtotal, total, status, updated_at, override_reason, agent_commission, booking:bookings(primary_supplier_id)",
+      "id, booking_id, subtotal, total, status, updated_at, override_reason, agent_commission, discount_amount, booking:bookings(primary_supplier_id)",
     )
     .eq("id", id)
     .single()
@@ -152,9 +170,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     )
   }
 
-  // A line-item edit must not silently wipe out an existing agent commission — it's a
-  // total-level adjustment, unrelated to which lines make up the subtotal.
-  const { subtotal, total } = calculateQuoteTotals(normalizedLineItems, Number(quote.agent_commission ?? 0))
+  // A line-item edit must not silently wipe out an existing agent commission or discount —
+  // both are total-level adjustments, unrelated to which lines make up the subtotal.
+  const { subtotal, total } = calculateQuoteTotals(
+    normalizedLineItems,
+    Number(quote.agent_commission ?? 0),
+    Number(quote.discount_amount ?? 0),
+  )
 
   const lineItems = normalizedLineItems.map((li, idx) => ({
     description: li.description,

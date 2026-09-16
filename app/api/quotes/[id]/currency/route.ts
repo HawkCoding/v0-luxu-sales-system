@@ -59,7 +59,9 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, booking_id, currency, status, subtotal, total, commission_bonus, agent_commission")
+    .select(
+      "id, booking_id, currency, status, subtotal, total, commission_bonus, agent_commission, discount_type, discount_value, discount_amount",
+    )
     .eq("id", id)
     .single()
 
@@ -135,6 +137,17 @@ export async function POST(req: Request, { params }: RouteParams) {
   // otherwise re-pricing the quote would silently change how much discount was applied.
   const agentCommission = applyFxRate(Number(quote.agent_commission ?? 0), rate)
 
+  // A percent discount is currency-neutral (same as a percent Commission); fixed/per_person are
+  // typed rand amounts and must convert like agentCommission does, or the discount's real-world
+  // size would silently change with the currency.
+  const discountIsPercent = quote.discount_type === "percent"
+  const discountValue = discountIsPercent
+    ? Number(quote.discount_value ?? 0)
+    : applyFxRate(Number(quote.discount_value ?? 0), rate)
+  const discountAmount = discountIsPercent
+    ? Number(quote.discount_amount ?? 0)
+    : applyFxRate(Number(quote.discount_amount ?? 0), rate)
+
   const { subtotal, total } = calculateQuoteTotals(
     converted.map((line) => ({
       description: line.description,
@@ -144,6 +157,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       total: line.total,
     })),
     agentCommission,
+    discountAmount,
   )
 
   const { error: replaceError } = await supabase.rpc("replace_quote_line_items", {
@@ -165,6 +179,8 @@ export async function POST(req: Request, { params }: RouteParams) {
       currency: toCurrency,
       commission_bonus: commissionBonus,
       agent_commission: agentCommission,
+      discount_value: discountValue,
+      discount_amount: discountAmount,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

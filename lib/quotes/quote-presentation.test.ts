@@ -3,6 +3,7 @@ import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import type { QuoteLineItem } from "@/lib/types"
 import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
+import type { BulletLine } from "@/lib/inclusions/bullet-lines"
 import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
@@ -13,9 +14,36 @@ import {
   formatFlightCapLine,
   formatJourneyRange,
   formatPaxLabel,
+  formatPreparedForContact,
   formatTimeOfDay,
   formatTotalLabel,
+  TRAVEL_DATES_LABEL,
 } from "./quote-presentation"
+
+describe("TRAVEL_DATES_LABEL", () => {
+  it("is the product-neutral date label", () => {
+    expect(TRAVEL_DATES_LABEL).toBe("Travel Dates")
+  })
+})
+
+describe("formatPreparedForContact", () => {
+  it("lists phone then email", () => {
+    expect(formatPreparedForContact({ phone: " +27 81 580 6471 ", email: "adams@example.com" })).toEqual([
+      "+27 81 580 6471",
+      "adams@example.com",
+    ])
+  })
+
+  it("keeps whichever one is set", () => {
+    expect(formatPreparedForContact({ phone: "+27 81 580 6471", email: null })).toEqual(["+27 81 580 6471"])
+    expect(formatPreparedForContact({ phone: null, email: "adams@example.com" })).toEqual(["adams@example.com"])
+  })
+
+  it("returns nothing when both are blank", () => {
+    expect(formatPreparedForContact({ phone: "  ", email: "" })).toEqual([])
+    expect(formatPreparedForContact({})).toEqual([])
+  })
+})
 
 describe("formatPaxLabel", () => {
   it("pluralizes adults and children", () => {
@@ -209,6 +237,9 @@ const trainBlock: VoucherServiceBlock = {
     arrivalStation: "Cape Town",
     suiteType: "Deluxe Suite",
     durationDays: 3,
+    // 0 keeps the single "Departs at" wording these fixtures were written against; the check-in
+    // bullets have their own describe block below.
+    checkInOffsetMinutes: 0,
     inclusions: ["High Tea", "Wi-Fi"],
     exclusions: ["French Champagne, caviar, and gratuities"],
   },
@@ -263,27 +294,27 @@ describe("buildQuoteItineraryLines", () => {
     expect(lines[1].text).toBe("Check out at 10h00")
   })
 
-  it("appends a COMPLIMENTARY callout to a hotel line marked complimentary", () => {
+  it("never labels a comped hotel stay COMPLIMENTARY", () => {
     const lines = buildQuoteItineraryLines([
       { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, isComplimentary: true } },
     ])
 
     expect(lines[0].text).toBe(
-      "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00 – COMPLIMENTARY",
+      "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00",
     )
   })
 
-  it("calls out a gifted first night without shortening the stay it states", () => {
+  it("never labels a gifted first night, and still states the full stay", () => {
     const lines = buildQuoteItineraryLines([
       { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, isFirstNightComplimentary: true } },
     ])
 
     expect(lines[0].text).toBe(
-      "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00 – FIRST NIGHT COMPLIMENTARY",
+      "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00",
     )
   })
 
-  it("collapses first-night-comp wording to COMPLIMENTARY for a 1-night stay", () => {
+  it("never labels a comped 1-night stay", () => {
     const lines = buildQuoteItineraryLines([
       {
         ...hotelBlock,
@@ -292,8 +323,150 @@ describe("buildQuoteItineraryLines", () => {
     ])
 
     expect(lines[0].text).toBe(
-      "One night at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00 – COMPLIMENTARY",
+      "One night at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00",
     )
+  })
+
+  it("never labels a comped transfer COMPLIMENTARY", () => {
+    const [line] = buildQuoteItineraryLines([
+      {
+        serviceType: "transfer",
+        title: "Transfer",
+        contactDetails: { name: "Ulysses" },
+        serviceData: {
+          departureDate: "2027-03-25",
+          startTime: "10:00",
+          pickup: "Capital Park Station",
+          dropoff: "OR Tambo Airport",
+          vehicleType: "Standard - Mazda",
+          isComplimentary: true,
+        },
+        displayOrder: 1,
+      },
+    ])
+
+    expect(line.text).toBe(
+      "Transfer from the Capital Park Station to the OR Tambo Airport (Standard - Mazda) at 10h00",
+    )
+    expect(line.text).not.toMatch(/complimentary/i)
+  })
+
+  describe("guest notes", () => {
+    const NOTE = "Gluten Free Meals Mrs Adams"
+
+    it("never prints a leg's special requests on any block type", () => {
+      const lines = buildQuoteItineraryLines([
+        { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, notes: NOTE } },
+        { ...trainBlock, serviceData: { ...trainBlock.serviceData, notes: NOTE } },
+        {
+          serviceType: "transfer",
+          title: "Transfer",
+          contactDetails: {},
+          serviceData: { departureDate: "2026-07-22", notes: NOTE },
+          displayOrder: 3,
+        },
+      ])
+
+      for (const line of lines) {
+        expect(line.text).not.toContain(NOTE)
+        expect(line.bullets.map((bullet) => bullet.text)).not.toContain(NOTE)
+      }
+    })
+  })
+
+  describe("hotel description", () => {
+    const withFacilities: VoucherServiceBlock = {
+      ...hotelBlock,
+      serviceData: { ...hotelBlock.serviceData, inclusions: ["24-hour front desk", "WIFI"] },
+    }
+
+    it("replaces the facility bullets with the hotel's own description", () => {
+      const [checkIn, checkOut] = buildQuoteItineraryLines([
+        {
+          ...withFacilities,
+          contactDetails: { ...withFacilities.contactDetails, description: "  A boutique manor in Pretoria.  " },
+        },
+      ])
+
+      expect(checkIn.description).toBe("A boutique manor in Pretoria.")
+      expect(checkIn.bullets).toEqual([])
+      expect(checkOut.description).toBeUndefined()
+    })
+
+    it("falls back to the facility bullets when the hotel has no description", () => {
+      const [checkIn] = buildQuoteItineraryLines([
+        { ...withFacilities, contactDetails: { ...withFacilities.contactDetails, description: "   " } },
+      ])
+
+      expect(checkIn.description).toBeUndefined()
+      expect(checkIn.bullets).toEqual([
+        { kind: "item", text: "24-hour front desk" },
+        { kind: "item", text: "WIFI" },
+      ])
+    })
+
+    it("leaves a train's inclusions alone even when its operator has a description", () => {
+      const [boarding] = buildQuoteItineraryLines([
+        { ...trainBlock, contactDetails: { ...trainBlock.contactDetails, description: "Pride of Africa." } },
+      ])
+
+      expect(boarding.description).toBeUndefined()
+      expect(boarding.bullets).toEqual([
+        { kind: "item", text: "High Tea" },
+        { kind: "item", text: "Wi-Fi" },
+      ])
+    })
+  })
+
+  describe("train check-in", () => {
+    const withOffset = (offset: number | null | undefined, startTime: string | null = "12:00") =>
+      buildQuoteItineraryLines([
+        { ...trainBlock, serviceData: { ...trainBlock.serviceData, startTime, checkInOffsetMinutes: offset } },
+      ])[0]
+
+    it("states check-in and departure as two leading bullets instead of the Departs-at suffix", () => {
+      const boarding = withOffset(120)
+
+      expect(boarding.text).toBe(
+        "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town",
+      )
+      expect(boarding.bullets).toEqual([
+        { kind: "item", text: "Check in at 10h00" },
+        { kind: "item", text: "Departure time: 12h00" },
+        { kind: "item", text: "High Tea" },
+        { kind: "item", text: "Wi-Fi" },
+      ])
+    })
+
+    it("uses the supplier's own offset", () => {
+      expect(withOffset(90).bullets[0]).toEqual({ kind: "item", text: "Check in at 10h30" })
+    })
+
+    it("defaults to two hours for a block built before the offset existed", () => {
+      expect(withOffset(undefined).bullets[0]).toEqual({ kind: "item", text: "Check in at 10h00" })
+      expect(withOffset(null).bullets[0]).toEqual({ kind: "item", text: "Check in at 10h00" })
+    })
+
+    it("keeps the single Departs-at wording when the offset is 0", () => {
+      const boarding = withOffset(0)
+
+      expect(boarding.text).toContain("| Departs at 12h00")
+      expect(boarding.bullets.map((bullet) => bullet.text)).not.toContain("Departure time: 12h00")
+    })
+
+    it("clamps a check-in that would cross midnight to 00h00", () => {
+      expect(withOffset(120, "01:00").bullets[0]).toEqual({ kind: "item", text: "Check in at 00h00" })
+    })
+
+    it("states neither when the train has no departure time", () => {
+      const boarding = withOffset(120, null)
+
+      expect(boarding.text).not.toContain("Departs at")
+      expect(boarding.bullets).toEqual([
+        { kind: "item", text: "High Tea" },
+        { kind: "item", text: "Wi-Fi" },
+      ])
+    })
   })
 
   it("derives nights on board from durationDays and lists supplier inclusions as bullets", () => {
@@ -309,7 +482,7 @@ describe("buildQuoteItineraryLines", () => {
     expect(arrival).toEqual({
       dateISO: "2026-07-22",
       text: "Arrival at Cape Town station at 18h00",
-      bullets: [{ kind: "item", text: "Train arrival times cannot be guaranteed" }],
+      bullets: [{ kind: "warning", text: "Train arrival times cannot be guaranteed" }],
     })
   })
 
@@ -762,7 +935,7 @@ const ROVOS_INCLUSION_LINES: SupplierInclusionLine[] = [
   { kind: "item", text: "Guided excursions (where applicable)", journeyTag: "long", rateTag: null },
 ]
 
-function toRawInclusions(lines: { kind: "heading" | "item"; text: string }[]): string[] {
+function toRawInclusions(lines: BulletLine[]): string[] {
   return lines.map((line) => (line.kind === "heading" ? `# ${line.text}` : line.text))
 }
 

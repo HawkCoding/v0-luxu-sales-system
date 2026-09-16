@@ -9,6 +9,8 @@ function makeBalance(overrides: Partial<InvoiceBalance> = {}): InvoiceBalance {
       subtotal: 10000,
       total: 10000,
       agent_commission: 0,
+      discount_amount: 0,
+      discount_visible: true,
       currency: "ZAR",
       status: "accepted",
       created_at: "2026-07-01T00:00:00Z",
@@ -16,6 +18,8 @@ function makeBalance(overrides: Partial<InvoiceBalance> = {}): InvoiceBalance {
     quoteTotal: 10000,
     quoteSubtotal: 10000,
     agentCommission: 0,
+    discount: 0,
+    discountVisible: true,
     currency: "ZAR",
     totalPaid: 0,
     lastPaymentAt: null,
@@ -118,6 +122,19 @@ describe("buildUnifiedTotals", () => {
       })
       expect(totals.subtotalInclVat).toBe(totals.totalInclVat)
       expect(totals.agentCommission).toBe(0)
+    })
+  })
+
+  describe("discount", () => {
+    it("carries the discount and its visibility through", () => {
+      const totals = buildUnifiedTotals({
+        balance: makeBalance({ quoteSubtotal: 12000, quoteTotal: 10000, discount: 2000, discountVisible: false }),
+        departureDate: "2026-12-01",
+        depositPercentage: 25,
+        depositAmount: 2500,
+      })
+      expect(totals.discount).toBe(2000)
+      expect(totals.discountVisible).toBe(false)
     })
   })
 })

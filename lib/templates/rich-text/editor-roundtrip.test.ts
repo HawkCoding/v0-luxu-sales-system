@@ -71,6 +71,40 @@ describe("editor round-trip", () => {
     expect(normalizeForCompare(result)).toBe(normalizeForCompare(source))
   })
 
+  it("preserves an inline font-size span combined with bold", () => {
+    // Nesting order (textStyle outside bold) and the trailing ";" match the
+    // editor's own canonical output, so content it already produced is
+    // stable on reopen rather than reshuffling marks on every save.
+    const source =
+      '<p>Hi <span style="font-size: 24px;">big</span> and ' +
+      '<span style="font-size: 12px;"><strong>{{amountDue}}</strong></span>.</p>'
+    const result = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(normalizeForCompare(result)).toBe(normalizeForCompare(source))
+  })
+
+  it("preserves a span combining font size, text color, and highlight", () => {
+    // The DOM canonicalizes color/background-color to rgb(r, g, b) once
+    // touched by the editor (confirmed empirically) — this is the exact
+    // shape real saved content has on reopen, so it's what's authored here
+    // rather than the hex the toolbar itself passes to setColor/
+    // setBackgroundColor.
+    const source =
+      '<p>Hi <span style="font-size: 24px; color: rgb(180, 35, 24); background-color: rgb(255, 243, 163);">combo</span></p>'
+    const result = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(normalizeForCompare(result)).toBe(normalizeForCompare(source))
+  })
+
+  it("keeps a font-size span readable when it wraps a link, instead of lifting it to an opaque block", () => {
+    // Link's own attribute normalization (target/rel) is pre-existing editor
+    // behavior, unrelated to font size — so this checks the size and href
+    // both survive rather than requiring byte-identical output.
+    const source = '<p><a href="https://example.com"><span style="font-size: 20px;">link</span></a></p>'
+    const result = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(result).toContain("font-size: 20px")
+    expect(result).toContain('href="https://example.com"')
+    expect(result).not.toContain("data-preserved-block")
+  })
+
   it("preserves a real banking details block spliced between paragraphs", () => {
     const block = buildBankingDetailsBlock(
       {

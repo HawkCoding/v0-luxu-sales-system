@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
+import type { BulletLine } from "@/lib/inclusions/bullet-lines"
 import { formatMoney } from "@/lib/money"
 import { buildQuoteSummaryBlock, type QuoteSummaryInput } from "./quote-summary-block"
 
@@ -43,56 +44,65 @@ const base: QuoteSummaryInput = {
 }
 
 describe("buildQuoteSummaryBlock", () => {
-  it("renders quote meta with journey dates and guests", () => {
+  it("renders quote meta with travel dates and guests", () => {
     const html = buildQuoteSummaryBlock(base)
-    expect(html).toContain("Journey:</strong> 18 – 22 July 2026")
+    expect(html).toContain("Travel Dates:</strong> 18 – 22 July 2026")
     expect(html).toContain("Guests:</strong> 2 Adults")
   })
 
-  // A standalone hotel booking (Kruger Shalati) is a stay -- nothing in it travels anywhere, so
-  // "Journey:" was simply the wrong word on a client's quote.
-  it("labels a hotel-only quote a stay rather than a journey", () => {
+  // Every product reads "Travel Dates" -- a hotel-only stay and a rail journey alike.
+  it("labels the date line Travel Dates whatever the itinerary holds", () => {
+    for (const blocks of [[], [itineraryBlocks[1]], itineraryBlocks]) {
+      const html = buildQuoteSummaryBlock({ ...base, itineraryBlocks: blocks })
+      expect(html).toContain("Travel Dates:</strong>")
+      expect(html).not.toContain("Journey:</strong>")
+      expect(html).not.toContain("Stay:</strong>")
+    }
+  })
+
+  it("prints no COMPLIMENTARY label on a comped hotel", () => {
     const html = buildQuoteSummaryBlock({
       ...base,
-      itineraryBlocks: [itineraryBlocks[1]],
+      itineraryBlocks: [
+        { ...itineraryBlocks[1], serviceData: { ...itineraryBlocks[1].serviceData, isComplimentary: true } },
+      ],
     })
-    expect(html).toContain("Stay:</strong> 18 – 22 July 2026")
-    expect(html).not.toContain("Journey:")
+    expect(html).not.toMatch(/COMPLIMENTARY/i)
   })
 
-  it("still says journey as soon as anything travels", () => {
-    const html = buildQuoteSummaryBlock({ ...base, itineraryBlocks })
-    expect(html).toContain("Journey:</strong>")
-    expect(html).not.toContain("Stay:</strong>")
-  })
-
-  /**
-   * With the booking's own product known, the label stops being inferred from the blocks. A stay
-   * with an airport transfer is still a stay -- the pickup does not promote it to a journey.
-   */
-  it("names the trip after the booking's primary product when one is known", () => {
+  it("never prints a leg's guest notes", () => {
     const html = buildQuoteSummaryBlock({
       ...base,
-      itineraryBlocks,
-      primarySupplierKind: "hotel_property",
+      itineraryBlocks: [
+        { ...itineraryBlocks[0], serviceData: { ...itineraryBlocks[0].serviceData, notes: "Gluten Free Meals Mrs Adams" } },
+      ],
     })
-    expect(html).toContain("Stay:</strong>")
-    expect(html).not.toContain("Journey:</strong>")
+    expect(html).not.toContain("Gluten Free Meals")
   })
 
-  it("calls a cruise sold under tours a tour", () => {
+  it("prints a hotel's description in italics instead of its facilities", () => {
     const html = buildQuoteSummaryBlock({
       ...base,
-      itineraryBlocks,
-      primarySupplierKind: "tour_operator",
+      itineraryBlocks: [
+        {
+          ...itineraryBlocks[1],
+          contactDetails: { ...itineraryBlocks[1].contactDetails, description: "A lakeside lodge." },
+          serviceData: { ...itineraryBlocks[1].serviceData, inclusions: ["24-hour front desk"] },
+        },
+      ],
     })
-    expect(html).toContain("Tour:</strong>")
+    expect(html).toContain("font-style:italic;line-height:16px;\">A lakeside lodge.</p>")
+    expect(html).not.toContain("24-hour front desk")
   })
 
-  it("falls back to the block-shape rule when no product is passed", () => {
-    expect(buildQuoteSummaryBlock({ ...base, itineraryBlocks, primarySupplierKind: null })).toContain(
-      "Journey:</strong>",
-    )
+  it("prints the train arrival caveat in red", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks: [
+        { ...itineraryBlocks[0], serviceData: { ...itineraryBlocks[0].serviceData, arrivalDate: "2026-07-22" } },
+      ],
+    })
+    expect(html).toContain("color:#c0392b;font-size:11px;line-height:16px;\">- Train arrival times cannot be guaranteed</p>")
   })
 
   it("omits the quote number and quote date while the reference is hidden", () => {
@@ -107,7 +117,7 @@ describe("buildQuoteSummaryBlock", () => {
   it("still renders the details box when the quote reference is hidden", () => {
     const html = buildQuoteSummaryBlock(base)
     expect(html).toContain('data-label="Quote details"')
-    expect(html).toContain("Journey:</strong>")
+    expect(html).toContain("Travel Dates:</strong>")
   })
 
   it("renders per-person rate and bold VAT-inclusive total for adults-only bookings", () => {
@@ -158,7 +168,7 @@ describe("buildQuoteSummaryBlock", () => {
         },
       ],
     })
-    expect(html).toContain("font-weight:700;line-height:17px;\">Onboard</p>")
+    expect(html).toContain("font-weight:700;line-height:16px;\">Onboard</p>")
     expect(html).not.toContain("- Onboard")
     expect(html).not.toContain("# Onboard")
     expect(html).toContain(">- High Tea</p>")
@@ -253,7 +263,7 @@ describe("buildQuoteSummaryBlock", () => {
       journeyStart: null,
       journeyEnd: null,
     })
-    expect(html).toContain("Journey:</strong> To be confirmed")
+    expect(html).toContain("Travel Dates:</strong> To be confirmed")
   })
 
   it("falls back to a plain TOTAL label when pax is unknown", () => {
@@ -285,6 +295,21 @@ describe("buildQuoteSummaryBlock", () => {
       expect(html).not.toContain(formatMoney(43150))
     })
   })
+
+  describe("discount", () => {
+    it("renders the subtotal and a red Discount row when visible", () => {
+      const html = buildQuoteSummaryBlock({ ...base, subtotal: 91300, discount: 1300, discountVisible: true, total: 90000 })
+      expect(html).toContain("Subtotal:")
+      expect(html).toContain("Discount: -R")
+      expect(html).toContain("#d64545")
+    })
+
+    it("renders nothing extra when discountVisible is false", () => {
+      const html = buildQuoteSummaryBlock({ ...base, subtotal: 91300, discount: 1300, discountVisible: false, total: 90000 })
+      expect(html).not.toContain("Subtotal:")
+      expect(html).not.toContain("Discount")
+    })
+  })
 })
 
 // Rovos-style journey/rate tagged bullets, run through the real filter (lib/inclusions/filter-lines.ts)
@@ -300,7 +325,7 @@ const ROVOS_INCLUSION_LINES: SupplierInclusionLine[] = [
   { kind: "item", text: "Guided excursions (where applicable)", journeyTag: "long", rateTag: null },
 ]
 
-function toRawInclusions(lines: { kind: "heading" | "item"; text: string }[]): string[] {
+function toRawInclusions(lines: BulletLine[]): string[] {
   return lines.map((line) => (line.kind === "heading" ? `# ${line.text}` : line.text))
 }
 

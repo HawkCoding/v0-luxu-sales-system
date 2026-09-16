@@ -504,7 +504,7 @@ export function SalespersonCredentialsSettings() {
               <p className="text-sm font-medium">Signature</p>
               <p className="text-xs text-muted-foreground">
                 Appended to every email this salesperson sends. Company chrome underneath it is
-                shared and set in Templates › Email Signature.
+                shared and set in Settings › Email Signatures.
               </p>
             </div>
 

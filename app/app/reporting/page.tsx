@@ -7,6 +7,7 @@ import { useActiveSuppliers, useData } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate } from "@/lib/date-format"
 import { DatePicker } from "@/components/ui/date-picker"
+import { getWideCalendarYearBounds } from "@/components/ui/calendar"
 import {
   getCanonicalPipelineStage,
   PIPELINE_STAGES,
@@ -82,6 +83,7 @@ export default function ReportingPage() {
 
   const filterFrom = searchParams.get("from") ?? ""
   const filterTo = searchParams.get("to") ?? ""
+  const { fromYear: reportFromYear, toYear: reportToYear } = getWideCalendarYearBounds()
   const filterConsultant = searchParams.get("consultant") ?? ""
   const filterProduct = searchParams.get("product") ?? ""
   const filterStage = searchParams.get("stage") ?? ""
@@ -443,6 +445,8 @@ export default function ReportingPage() {
               placeholder="Any"
               className="w-40"
               buttonClassName="h-8"
+              fromYear={reportFromYear}
+              toYear={reportToYear}
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -455,6 +459,8 @@ export default function ReportingPage() {
               placeholder="Any"
               className="w-40"
               buttonClassName="h-8"
+              fromYear={reportFromYear}
+              toYear={reportToYear}
             />
           </div>
           <div className="flex flex-col gap-1">

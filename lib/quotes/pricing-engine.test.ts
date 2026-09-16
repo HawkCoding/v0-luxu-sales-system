@@ -33,6 +33,22 @@ describe("calculateQuoteTotals", () => {
   it("ignores a negative commission rather than adding it back", () => {
     expect(calculateQuoteTotals(lines, -5000)).toEqual({ subtotal: 100000, total: 100000 })
   })
+
+  it("subtracts a positive discount from the subtotal alongside agent commission", () => {
+    expect(calculateQuoteTotals(lines, 5000, 2000)).toEqual({ subtotal: 100000, total: 93000 })
+  })
+
+  it("subtracts a discount even with no agent commission", () => {
+    expect(calculateQuoteTotals(lines, 0, 10000)).toEqual({ subtotal: 100000, total: 90000 })
+  })
+
+  it("clamps the total at zero when agent commission and discount together exceed the subtotal", () => {
+    expect(calculateQuoteTotals(lines, 60000, 60000)).toEqual({ subtotal: 100000, total: 0 })
+  })
+
+  it("ignores a negative discount rather than adding it back", () => {
+    expect(calculateQuoteTotals(lines, 0, -5000)).toEqual({ subtotal: 100000, total: 100000 })
+  })
 })
 
 describe("isMissingPricing", () => {

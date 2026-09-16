@@ -1,5 +1,6 @@
 import { Hr, Img, Link, Section, Text } from "@react-email/components"
 import type { CSSProperties } from "react"
+import { renderSenderLayout } from "@/lib/email/sender-layout"
 import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
 interface EmailSignatureProps {
@@ -15,50 +16,23 @@ const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter
  * scale their message body, not the signature — same rule FooterBrandBlock
  * follows. The "Kind regards" sign-off deliberately lives in the template
  * body, not here, so it is never doubled up.
+ *
+ * The sender name/contact block and the brand's company-text lines are
+ * admin-authored, sanitized inline HTML (formatted with the same rich-text
+ * toolbar as email bodies — see lib/email/signature-html.ts and
+ * lib/email/sender-layout.ts), so they're injected via dangerouslySetInnerHTML
+ * rather than built from JSX — the source of truth for their markup is
+ * already-sanitized HTML, not React children.
  */
 export function EmailSignature({ signature }: EmailSignatureProps) {
   const { fullName, jobTitle, tel, cell, fax, email, website, brand } = signature
 
-  const contactLine = joinParts([tel && `Tel: ${tel}`, cell && `Cell: ${cell}`, fax && `Fax: ${fax}`])
+  const senderHtml = renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website })
   const smallPrintLine = joinParts([brand.registrationLine, brand.tradingHours])
 
   return (
     <Section style={block}>
-      <Text style={senderLines}>
-        <span style={nameSpan}>
-          <strong>{fullName}</strong>
-          {jobTitle ? (
-            <>
-              {" | "}
-              <span style={jobTitleStyle}>{jobTitle}</span>
-            </>
-          ) : null}
-        </span>
-        {contactLine ? (
-          <>
-            <br />
-            <span style={contactSpan}>{contactLine}</span>
-          </>
-        ) : null}
-        {email || website ? (
-          <>
-            <br />
-            <span style={contactSpan}>
-              {email ? (
-                <>
-                  Email: <Link href={`mailto:${email}`} style={link}>{email}</Link>
-                </>
-              ) : null}
-              {email && website ? " | " : null}
-              {website ? (
-                <>
-                  Web: <Link href={`https://${website.replace(/^https?:\/\//i, "")}`} style={link}>{website}</Link>
-                </>
-              ) : null}
-            </span>
-          </>
-        ) : null}
-      </Text>
+      <Text style={senderLines} dangerouslySetInnerHTML={{ __html: senderHtml }} />
 
       {brand.bannerUrl ? (
         <Img
@@ -70,14 +44,22 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
         />
       ) : null}
 
-      {brand.officeAddress ? <Text style={smallPrint}>{brand.officeAddress}</Text> : null}
+      {brand.officeAddress ? (
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.officeAddress }} />
+      ) : null}
 
       <Hr style={hr} />
 
-      {brand.companyLine ? <Text style={smallPrint}>{brand.companyLine}</Text> : null}
-      {smallPrintLine ? <Text style={smallPrint}>{smallPrintLine}</Text> : null}
-      {brand.divisionsLine ? <Text style={smallPrint}>{brand.divisionsLine}</Text> : null}
-      {brand.confidentiality ? <Text style={confidentiality}>{brand.confidentiality}</Text> : null}
+      {brand.companyLine ? (
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.companyLine }} />
+      ) : null}
+      {smallPrintLine ? <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: smallPrintLine }} /> : null}
+      {brand.divisionsLine ? (
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.divisionsLine }} />
+      ) : null}
+      {brand.confidentiality ? (
+        <Text style={confidentiality} dangerouslySetInnerHTML={{ __html: brand.confidentiality }} />
+      ) : null}
 
       {brand.badges.length > 0 ? (
         <table role="presentation" cellPadding={0} cellSpacing={0} style={badgeTable}>
@@ -129,24 +111,6 @@ const senderLines = {
   msoLineHeightRule: "exactly",
   color: "#3d3831",
 } as CSSProperties
-
-const nameSpan = {
-  color: "#2f2a24",
-}
-
-const jobTitleStyle = {
-  fontStyle: "italic" as const,
-  fontWeight: "normal" as const,
-}
-
-const contactSpan = {
-  fontSize: "12px",
-}
-
-const link = {
-  color: "#3d3831",
-  textDecoration: "underline",
-}
 
 const banner = {
   display: "block",

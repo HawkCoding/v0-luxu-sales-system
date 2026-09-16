@@ -98,6 +98,10 @@ interface BookingOpts {
   noOfChildren?: number
   /** Guest roster rows, for the roster-vs-pax warning. */
   travellers?: Array<{ prefix: string | null; first_name: string; last_name: string }>
+  /** The enquiry's "Briefly explain additional services" free text, stored on the booking. */
+  additionalServicesDetails?: string | null
+  /** The hand-typed voucher field — must stay independent of additionalServicesDetails. */
+  voucherSpecialRequests?: string | null
   blocks?: Array<{
     serviceType: "train" | "hotel" | "transfer" | "tour" | "airline" | "additional_service"
     title: string
@@ -116,6 +120,8 @@ function buildAuth({
   noOfAdults = 2,
   noOfChildren = 0,
   travellers = [],
+  additionalServicesDetails = null,
+  voucherSpecialRequests = null,
   blocks,
 }: BookingOpts) {
   const documentWrite = {
@@ -180,7 +186,7 @@ function buildAuth({
           no_of_suites: 1,
           no_of_adults: noOfAdults,
           no_of_children: noOfChildren,
-          additional_services_details: null,
+          additional_services_details: additionalServicesDetails,
           customer: { first_name: "Ada", last_name: "Lovelace", email: "ada@example.test", phone: "123", title: "Ms" },
           route: { name: "Pretoria to Cape Town", supplier: { name: "Blue Train" } },
         })
@@ -206,7 +212,13 @@ function buildAuth({
       }
       if (table === "booking_suites") return createSelectResult([{ suite_type_name: "Luxury" }])
       if (table === "travellers") return createSelectResult(travellers)
-      if (table === "booking_reservation_details") return createSelectResult(null)
+      if (table === "booking_reservation_details") {
+        return createSelectResult(
+          voucherSpecialRequests === null
+            ? null
+            : { voucher_special_requests: voucherSpecialRequests },
+        )
+      }
       if (table === "voucher_template") return createSelectResult(null)
 
       if (table === "app_settings") {
@@ -559,6 +571,36 @@ describe("POST /api/voucher/generate", () => {
     expect(res.status).toBe(422)
     expect(await res.json()).toMatchObject({ error: "The booking must be in Paid in Full, Voucher Sent, or Closed stage." })
     expect(renderVoucherPdf).not.toHaveBeenCalled()
+  })
+
+  it("prints only the hand-typed voucher field as Special Requests, never the enquiry's additional-services text", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      additionalServicesDetails: "Airport transfer requested via enquiry form",
+      voucherSpecialRequests: null,
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(vi.mocked(renderVoucherPdf).mock.calls[0]?.[0].data.specialRequests).toBe("")
+  })
+
+  it("prints the hand-typed voucher field as Special Requests when it is set, unaffected by the enquiry text", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      additionalServicesDetails: "Airport transfer requested via enquiry form",
+      voucherSpecialRequests: "Anniversary celebration",
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(vi.mocked(renderVoucherPdf).mock.calls[0]?.[0].data.specialRequests).toBe(
+      "Anniversary celebration",
+    )
   })
 
   it("allows voucher generation for paid-in-full bookings", async () => {

@@ -186,7 +186,7 @@ describe("POST /api/quotes/[id]/email-preview", () => {
     voucherBlocksMocks.buildVoucherServiceBlocks.mockResolvedValue({ blocks: [HOTEL_BLOCK, TRANSFER_BLOCK] })
   })
 
-  it("previews a hotel-primary quote as Stay, dated off the hotel leg -- not the transfer", async () => {
+  it("previews a hotel-primary quote dated off the hotel leg -- not the transfer", async () => {
     const res = await POST(new Request("http://localhost", { method: "POST", body: "{}" }), {
       params: Promise.resolve({ id: QUOTE_ID }),
     })
@@ -194,9 +194,10 @@ describe("POST /api/quotes/[id]/email-preview", () => {
     expect(res.status).toBe(200)
     expect(loadSupplierKindMocks.loadSupplierKind).toHaveBeenCalledWith(expect.anything(), HOTEL_SUPPLIER_ID)
 
-    // The summary block is named after the primary product, matching the sent-email path.
+    // The summary block's travel dates start at the primary product's own leg, matching the
+    // sent-email path. (The date label itself is product-neutral: "Travel Dates".)
     expect(summaryBlockMocks.buildQuoteSummaryBlock).toHaveBeenCalledWith(
-      expect.objectContaining({ primarySupplierKind: "hotel_property" }),
+      expect.objectContaining({ journeyStart: "2026-08-10" }),
     )
 
     // {{departureDate}} is the hotel's check-in (2026-08-10), not the transfer's pickup
@@ -228,7 +229,7 @@ describe("POST /api/quotes/[id]/email-preview", () => {
     })
 
     expect(summaryBlockMocks.buildQuoteSummaryBlock).toHaveBeenCalledWith(
-      expect.objectContaining({ primarySupplierKind: "train_operator" }),
+      expect.objectContaining({ journeyStart: "2026-08-10", journeyEnd: "2026-08-12" }),
     )
     const composeArgs = composeEmailMocks.composeEmail.mock.calls[0][2] as {
       tokens: Record<string, string>

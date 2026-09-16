@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { DatePicker } from "@/components/ui/date-picker"
+import { getWideCalendarYearBounds } from "@/components/ui/calendar"
 import {
   Select,
   SelectContent,
@@ -63,6 +64,7 @@ export function AuditLogView({ scope }: AuditLogViewProps) {
   const [entityType, setEntityType] = useState("all")
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
+  const { fromYear, toYear } = getWideCalendarYearBounds()
 
   const filters = useMemo(
     () => ({
@@ -144,6 +146,8 @@ export function AuditLogView({ scope }: AuditLogViewProps) {
           placeholder="From date"
           buttonClassName="h-9 text-sm"
           aria-label="From date"
+          fromYear={fromYear}
+          toYear={toYear}
         />
         <DatePicker
           value={to}
@@ -151,6 +155,8 @@ export function AuditLogView({ scope }: AuditLogViewProps) {
           placeholder="To date"
           buttonClassName="h-9 text-sm"
           aria-label="To date"
+          fromYear={fromYear}
+          toYear={toYear}
         />
       </div>
 

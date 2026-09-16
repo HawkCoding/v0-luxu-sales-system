@@ -2676,6 +2676,10 @@ export type Database = {
           commission_bonus: number
           created_at: string
           currency: string
+          discount_amount: number
+          discount_type: string | null
+          discount_value: number
+          discount_visible: boolean
           follow_ups_disabled: boolean
           id: string
           itinerary_id: string | null
@@ -2704,6 +2708,10 @@ export type Database = {
           commission_bonus?: number
           created_at?: string
           currency?: string
+          discount_amount?: number
+          discount_type?: string | null
+          discount_value?: number
+          discount_visible?: boolean
           follow_ups_disabled?: boolean
           id?: string
           itinerary_id?: string | null
@@ -2732,6 +2740,10 @@ export type Database = {
           commission_bonus?: number
           created_at?: string
           currency?: string
+          discount_amount?: number
+          discount_type?: string | null
+          discount_value?: number
+          discount_visible?: boolean
           follow_ups_disabled?: boolean
           id?: string
           itinerary_id?: string | null
@@ -3102,6 +3114,7 @@ export type Database = {
           name: string
           office_address: string | null
           registration_line: string | null
+          sender_layout: string | null
           slug: string
           sort_order: number
           trading_hours: string | null
@@ -3121,6 +3134,7 @@ export type Database = {
           name: string
           office_address?: string | null
           registration_line?: string | null
+          sender_layout?: string | null
           slug: string
           sort_order?: number
           trading_hours?: string | null
@@ -3140,6 +3154,7 @@ export type Database = {
           name?: string
           office_address?: string | null
           registration_line?: string | null
+          sender_layout?: string | null
           slug?: string
           sort_order?: number
           trading_hours?: string | null
@@ -3732,6 +3747,7 @@ export type Database = {
           accommodation_pricing_basis: Database["public"]["Enums"]["accommodation_pricing_basis"]
           active: boolean
           base_rate_type_id: string | null
+          check_in_offset_minutes: number
           child_max_age: number | null
           created_at: string
           default_contact_name: string | null
@@ -3772,6 +3788,7 @@ export type Database = {
           accommodation_pricing_basis?: Database["public"]["Enums"]["accommodation_pricing_basis"]
           active?: boolean
           base_rate_type_id?: string | null
+          check_in_offset_minutes?: number
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null
@@ -3812,6 +3829,7 @@ export type Database = {
           accommodation_pricing_basis?: Database["public"]["Enums"]["accommodation_pricing_basis"]
           active?: boolean
           base_rate_type_id?: string | null
+          check_in_offset_minutes?: number
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null

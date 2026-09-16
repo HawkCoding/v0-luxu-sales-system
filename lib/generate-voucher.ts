@@ -51,6 +51,12 @@ export interface VoucherServiceBlockData {
   startTime?: string | null
   /** HH:MM the service ends — train arrival, flight arrival, hotel check-out. */
   endTime?: string | null
+  /** Train-only: suppliers.check_in_offset_minutes for the leg's operator -- how long before
+   *  `startTime` the quote itinerary states check-in ("Check in at 10h00" / "Departure time:
+   *  12h00"). 0 means the operator publishes no check-in time at all, so the quote falls back to
+   *  a single "Departs at …" line. Absent on blocks built before the column existed, treated the
+   *  same as the historic two-hour assumption. */
+  checkInOffsetMinutes?: number | null
   suiteType?: string | null
   /** What the quote PDF/email itinerary sentence should call the suite -- the full phrase, or the
    *  suite type alone ("Deluxe Suite") when the supplier's quote_suite_detail is 'type_only'.

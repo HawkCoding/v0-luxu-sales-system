@@ -10,6 +10,7 @@ const DEFAULTS: EmailSignatureSettings = {
   signature_divisions_line: "Global divisions",
   signature_confidentiality: "Global confidentiality",
   signature_office_address: "Global address",
+  signature_sender_layout: "",
 }
 
 const BASE_ROW: SignatureBrandRow = {
@@ -28,6 +29,7 @@ const BASE_ROW: SignatureBrandRow = {
   divisions_line: null,
   confidentiality: null,
   office_address: null,
+  sender_layout: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 }
@@ -85,9 +87,39 @@ describe("toSignatureBrand", () => {
     expect(brand.companyLine).toBe("Global company line")
   })
 
+  it("inherits the global default when the brand's override is a blank rich-text paragraph", () => {
+    // An emptied HtmlBodyEditor field can still serialize to "<p></p>" — no
+    // visible text, but not the empty string a plain trim() would catch.
+    const brand = toSignatureBrand({ ...BASE_ROW, company_line: "<p></p>" }, DEFAULTS)
+    expect(brand.companyLine).toBe("Global company line")
+  })
+
   it("uses the brand's own override when set", () => {
     const brand = toSignatureBrand({ ...BASE_ROW, company_line: "Arnelia House copy" }, DEFAULTS)
     expect(brand.companyLine).toBe("Arnelia House copy")
+  })
+
+  it("keeps formatted markup in the brand's own override", () => {
+    const brand = toSignatureBrand({ ...BASE_ROW, company_line: "<p><strong>Arnelia House</strong> copy</p>" }, DEFAULTS)
+    expect(brand.companyLine).toBe("<p><strong>Arnelia House</strong> copy</p>")
+  })
+
+  it("defaults senderLayout to empty string (falls through to the built-in layout) when unset", () => {
+    const brand = toSignatureBrand(BASE_ROW, DEFAULTS)
+    expect(brand.senderLayout).toBe("")
+  })
+
+  it("prefers the brand's own sender layout over the shared default", () => {
+    const brand = toSignatureBrand(
+      { ...BASE_ROW, sender_layout: "<p>{{fullName}}</p>" },
+      { ...DEFAULTS, signature_sender_layout: "<p>Shared layout</p>" },
+    )
+    expect(brand.senderLayout).toBe("<p>{{fullName}}</p>")
+  })
+
+  it("falls back to the shared sender layout default when the brand has none", () => {
+    const brand = toSignatureBrand(BASE_ROW, { ...DEFAULTS, signature_sender_layout: "<p>Shared layout</p>" })
+    expect(brand.senderLayout).toBe("<p>Shared layout</p>")
   })
 
   it("blanks an SVG banner", () => {

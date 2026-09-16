@@ -153,6 +153,30 @@ describe("composeFromTemplate", () => {
     expect(composed.bodyHtml).toContain("font-size: 18px")
   })
 
+  it("does not set font-size on span/a in the head rule, so a per-section sized span isn't overridden", async () => {
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    const rules = composed.bodyHtml.split("</style>")[0]
+    const spanFontSizeRule = /\.content[^{]*\bspan\b[^{]*\{[^}]*font-size/.test(rules)
+    const aFontSizeRule = /\.content[^{]*\ba\b[^{]*\{[^}]*font-size/.test(rules)
+    expect(spanFontSizeRule).toBe(false)
+    expect(aFontSizeRule).toBe(false)
+  })
+
+  it("passes a colored/highlighted/sized span through unchanged", async () => {
+    const styledSpan = '<span style="font-size: 24px; color: rgb(180, 35, 24); background-color: rgb(255, 243, 163);">Important</span>'
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: `<p>${styledSpan}</p>` },
+      { tokens: {} },
+    )
+
+    expect(composed.bodyContentHtml).toBe(`<p>${styledSpan}</p>`)
+    expect(composed.bodyHtml).toContain(styledSpan)
+  })
+
   it("keeps the font rule when edited content is spliced back into the slot", async () => {
     settingsMocks.getEmailBrandingSettings.mockResolvedValue({
       ...DEFAULT_BRANDING,
@@ -212,6 +236,7 @@ describe("composeFromTemplate", () => {
         divisionsLine: "DIVISIONS OF LUXUS TRAVEL & TOURS",
         confidentiality: "CONFIDENTIALITY CAUTION: ...",
         officeAddress: null,
+        senderLayout: "",
       },
     })
 

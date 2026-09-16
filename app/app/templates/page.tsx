@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useActiveSuppliers, useTemplates, useVoucherTemplate } from "@/lib/use-data"
+import { useActiveSuppliers, useEmailAppearanceSettings, useTemplates, useVoucherTemplate } from "@/lib/use-data"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -211,6 +211,7 @@ export default function TemplatesPage() {
   const { data: templates, isLoading, mutate } = useTemplates()
   const { data: voucherTemplate, isLoading: voucherLoading } = useVoucherTemplate()
   const { data: suppliers } = useActiveSuppliers()
+  const { data: emailAppearance } = useEmailAppearanceSettings()
   const { can } = useRole()
   const [editing, setEditing] = useState<Template | null>(null)
   const [editSubject, setEditSubject] = useState("")
@@ -781,7 +782,7 @@ export default function TemplatesPage() {
         open={!!editing}
         onOpenChange={(open) => (open ? undefined : editCloseGuard.handleOpenChange(false))}
       >
-        <DialogContent className="max-w-2xl" {...editCloseGuard.contentProps}>
+        <DialogContent className="sm:max-w-6xl" {...editCloseGuard.contentProps}>
           <DiscardChangesDialog
             open={editCloseGuard.confirming}
             onKeepEditing={editCloseGuard.cancelDiscard}
@@ -803,6 +804,7 @@ export default function TemplatesPage() {
                   value={editBody}
                   onChange={setEditBody}
                   blockTokens={editing ? blockTokensFor(editing.key) : ALL_BLOCK_TOKENS}
+                  baseFontSize={emailAppearance?.email_font_size}
                 />
               </div>
             </div>
@@ -929,7 +931,7 @@ export default function TemplatesPage() {
         open={creating}
         onOpenChange={(open) => (open ? undefined : createCloseGuard.handleOpenChange(false))}
       >
-        <DialogContent className="max-w-2xl" {...createCloseGuard.contentProps}>
+        <DialogContent className="sm:max-w-6xl" {...createCloseGuard.contentProps}>
           <DiscardChangesDialog
             open={createCloseGuard.confirming}
             onKeepEditing={createCloseGuard.cancelDiscard}
@@ -956,7 +958,12 @@ export default function TemplatesPage() {
             <div>
               <label className="text-xs font-medium text-muted-foreground">Body</label>
               <div className="mt-1">
-                <HtmlBodyEditor value={createBody} onChange={setCreateBody} blockTokens={ALL_BLOCK_TOKENS} />
+                <HtmlBodyEditor
+                  value={createBody}
+                  onChange={setCreateBody}
+                  blockTokens={ALL_BLOCK_TOKENS}
+                  baseFontSize={emailAppearance?.email_font_size}
+                />
               </div>
             </div>
             <div className="flex justify-end gap-2">
@@ -995,7 +1002,7 @@ export default function TemplatesPage() {
 
       {/* Preview Email Template Dialog */}
       <Dialog open={!!preview} onOpenChange={(open) => !open && closePreview()}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Template Preview</DialogTitle>
             <DialogDescription>{preview?.subject}</DialogDescription>
@@ -1058,7 +1065,7 @@ export default function TemplatesPage() {
                 title="Template preview"
                 sandbox=""
                 srcDoc={previewHtml ?? preview?.bodyHtml ?? ""}
-                className="w-full h-96 border-0 bg-white"
+                className="w-full h-[65vh] border-0 bg-white"
               />
             )}
           </div>

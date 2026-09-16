@@ -1,8 +1,11 @@
-/** A generic validation error ("Invalid request payload") is useless on its own — the server
- *  attaches which field failed as `details` (Zod's flattened fieldErrors, see
- *  lib/api/responses.ts jsonZodError). Append the field names so the message actually points at
- *  something the user can fix, instead of a client silently dropping `details` on the floor. */
+/** The server's routes now build a plain-English message naming the failed field (or quote/
+ *  booking line) themselves -- see lib/api/describe-zod-issue.ts -- so most 400s no longer need
+ *  this. It's kept only for the couple of routes that still return a bare, generic message (e.g.
+ *  jsonZodError's own default), where appending the raw field names is still better than nothing. */
+const GENERIC_MESSAGES = new Set(["Invalid request payload", "Invalid request body"])
+
 export function appendFieldDetails(message: string, payload: unknown): string {
+  if (!GENERIC_MESSAGES.has(message)) return message
   if (!payload || typeof payload !== "object" || !("details" in payload)) return message
   const details = (payload as { details?: unknown }).details
   if (!details || typeof details !== "object") return message

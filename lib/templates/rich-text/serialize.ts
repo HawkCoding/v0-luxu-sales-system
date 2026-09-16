@@ -15,6 +15,12 @@
 // the browser and the jsdom test environment).
 
 import { PRESERVED_BLOCK_TAG } from "@/lib/templates/rich-text/preserved-block-shared"
+import {
+  isEmailInlineFontSize,
+  isEmailTextColor,
+  isEmailHighlightColor,
+  isEmailInlineFontFamily,
+} from "@/lib/email/appearance"
 
 // Tags the editor schema represents faithfully. An element is left as-is only
 // when it (and all its descendants) are in this set and carry no style/class.
@@ -72,10 +78,56 @@ function describeElement(el: Element): string {
   return TAG_FALLBACK_LABELS[el.tagName] ?? humanizeToken(el.tagName.toLowerCase())
 }
 
+// Per-declaration validators for the styled-span allowlist below. Each
+// property may appear at most once; every declaration present must pass its
+// validator for the span to stay rich.
+const STYLED_SPAN_VALIDATORS: Record<string, (value: string) => boolean> = {
+  "font-size": isEmailInlineFontSize,
+  "color": isEmailTextColor,
+  "background-color": isEmailHighlightColor,
+  "font-family": isEmailInlineFontFamily,
+}
+
+/**
+ * True for a <span> whose only attribute is a `style` holding some subset of
+ * `font-size` / `color` / `background-color` / `font-family` (each at most
+ * once), every value allowlisted — the styled shapes the editor schema
+ * (TextStyle + FontSize/Color/BackgroundColor/FontFamily) represents
+ * faithfully, including any combination of the four on the same run. Anything else (an unrecognised
+ * property, a duplicate, an off-list value, a class) is left opaque so it
+ * can't be silently dropped or mixed up with an unrelated style.
+ */
+function isAllowedStyledSpan(el: Element): boolean {
+  if (el.tagName !== "SPAN") return false
+  const attrNames = el.getAttributeNames()
+  if (attrNames.length !== 1 || attrNames[0] !== "style") return false
+  const declarations = (el.getAttribute("style") ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (declarations.length === 0) return false
+  const seen = new Set<string>()
+  for (const declaration of declarations) {
+    const match = declaration.match(/^([a-z-]+):\s*(.+)$/i)
+    if (!match) return false
+    const property = match[1].trim().toLowerCase()
+    const value = match[2].trim()
+    if (seen.has(property)) return false
+    seen.add(property)
+    const validate = STYLED_SPAN_VALIDATORS[property]
+    if (!validate || !validate(value)) return false
+  }
+  return true
+}
+
 /** True when an element and every descendant are representable rich tags with no style/class. */
 function isPlainRich(el: Element): boolean {
   if (!RICH_TAGS.has(el.tagName)) return false
-  if (el.hasAttribute("style") || el.hasAttribute("class")) return false
+  if (el.tagName === "SPAN" && el.hasAttribute("style")) {
+    if (!isAllowedStyledSpan(el)) return false
+  } else if (el.hasAttribute("style") || el.hasAttribute("class")) {
+    return false
+  }
   for (const child of Array.from(el.children)) {
     if (!isPlainRich(child)) return false
   }

@@ -7,7 +7,6 @@ import {
   getDocumentBrandSettings,
   getDocumentTextSettings,
   resolveDocumentBrand,
-  resolveProductCopy,
 } from "@/lib/settings-access"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
@@ -95,10 +94,7 @@ export async function GET(
         brandLogo,
       })
     } else if (type === "quote") {
-      const [documentText, productCopy] = await Promise.all([
-        getDocumentTextSettings(supabase, kind),
-        resolveProductCopy(supabase, kind),
-      ])
+      const documentText = await getDocumentTextSettings(supabase, kind)
       buffer = await renderQuotePdf({
         ...sampleQuotePdfData(),
         title: documentText.quote_doc_title,
@@ -106,8 +102,6 @@ export async function GET(
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,
-        primarySupplierKind: kind,
-        productBookingNoun: productCopy.bookingNoun,
         brand,
         brandPosition: position.quote,
         brandLogo,
