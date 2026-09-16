@@ -51,7 +51,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, status, subtotal, total, agent_commission, updated_at")
+    .select("id, status, subtotal, total, agent_commission, discount_amount, updated_at")
     .eq("id", id)
     .single()
 
@@ -72,10 +72,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const agentCommission = parsed.agentCommission
   const subtotal = Number(quote.subtotal)
+  const discountAmount = Number(quote.discount_amount ?? 0)
 
-  if (agentCommission > subtotal) {
+  if (agentCommission + discountAmount > subtotal) {
     return NextResponse.json(
-      { error: "Agent Commission cannot exceed the quote subtotal" },
+      { error: "Agent Commission and Discount together cannot exceed the quote subtotal" },
       { status: 400 },
     )
   }
@@ -86,6 +87,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     // than reloading quote_line_items just to sum them back to the same number.
     [{ description: "", supplierDescription: null, qty: 1, unitPrice: subtotal, total: subtotal }],
     agentCommission,
+    discountAmount,
   )
 
   const { error: updateError } = await supabase

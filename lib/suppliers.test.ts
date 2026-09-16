@@ -52,6 +52,7 @@ const supplierRow: SupplierRow = {
   long_journey_min_days: null,
   train_only_note: null,
   quote_suite_detail: "type_only",
+  check_in_offset_minutes: 120,
   suite_phrase_pattern: null,
   sells_standalone: true,
   email_match_phrases: null,

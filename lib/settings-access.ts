@@ -11,6 +11,7 @@ import {
   FOOTER_BRAND_PRODUCT_LINE,
   getFooterBrandLogoUrl,
 } from "@/lib/assets/footer-brand"
+import { isBlankSignatureHtml } from "@/lib/email/signature-html"
 import {
   parseInvoiceStatusOptions,
   type InvoiceStatusOption,
@@ -536,6 +537,7 @@ export const EMAIL_SIGNATURE_SETTING_KEYS = [
   "signature_divisions_line",
   "signature_confidentiality",
   "signature_office_address",
+  "signature_sender_layout",
 ] as const
 
 export type EmailSignatureSettings = Record<(typeof EMAIL_SIGNATURE_SETTING_KEYS)[number], string>
@@ -550,12 +552,16 @@ const EMAIL_SIGNATURE_DEFAULTS: EmailSignatureSettings = {
   signature_confidentiality:
     "CONFIDENTIALITY CAUTION: This message is intended for the use of the addressed party only. If the reader is not the intended recipient, please notify us immediately and destroy this message.",
   signature_office_address: "",
+  signature_sender_layout: "",
 }
 
 /**
  * Company-wide signature chrome, resolved with the service client because
  * composing runs from workers and cron with no user session. Never throws —
- * a settings lookup must not block a send.
+ * a settings lookup must not block a send. Every field but `signature_enabled`
+ * holds sanitized inline HTML (see lib/email/signature-html.ts) — blank is
+ * checked with isBlankSignatureHtml rather than a plain trim, since an
+ * emptied rich-text field can still serialize to a non-empty `<p></p>`.
  */
 export async function getEmailSignatureSettings(): Promise<EmailSignatureSettings> {
   try {
@@ -570,7 +576,11 @@ export async function getEmailSignatureSettings(): Promise<EmailSignatureSetting
     return Object.fromEntries(
       EMAIL_SIGNATURE_SETTING_KEYS.map((key) => [
         key,
-        map[key]?.trim() || EMAIL_SIGNATURE_DEFAULTS[key],
+        key === "signature_enabled"
+          ? map[key]?.trim() || EMAIL_SIGNATURE_DEFAULTS[key]
+          : isBlankSignatureHtml(map[key])
+            ? EMAIL_SIGNATURE_DEFAULTS[key]
+            : map[key],
       ]),
     ) as EmailSignatureSettings
   } catch {

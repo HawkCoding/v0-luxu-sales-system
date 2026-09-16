@@ -1,6 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
-import { primaryProductOf } from "@/lib/enquiry/primary-product"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
@@ -14,19 +13,28 @@ import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
   derivePerPersonRate,
+  DISCOUNT_COLOR,
+  DISCOUNT_LABEL,
   formatAgentCommission,
+  formatDiscount,
   formatFlightCapLine,
   formatJourneyRange,
   formatPaxLabel,
+  formatPreparedForContact,
   formatTotalLabel,
+  TRAVEL_DATES_LABEL,
   VAT_INCLUSIVE_SUFFIX,
+  WARNING_TEXT_COLOR,
 } from "@/lib/quotes/quote-presentation"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
-import type { SupplierKind } from "@/lib/types"
 
 export interface QuotePdfData {
   quoteNumber: string
   customerName: string
+  /** Printed under the name in "Prepared for"; blank omits the line. */
+  customerPhone?: string | null
+  /** Printed under the phone in "Prepared for"; blank omits the line. */
+  customerEmail?: string | null
   quoteDate: string
   validUntil: string | null
   journeyStart: string | null
@@ -41,15 +49,14 @@ export interface QuotePdfData {
   /** Flat discount given to a booking agency (quotes.agent_commission). Zero/absent renders the
    *  pricing box exactly as it did before this field existed. */
   agentCommission?: number
+  /** Client-facing Discount (quotes.discount_amount). Only rendered when discountVisible is true. */
+  discount?: number
+  /** quotes.discount_visible — the total is net of the discount either way; this only controls
+   *  whether the red line prints. Defaults to true so a caller that never sets it (there are none
+   *  left after this field's introduction) still shows a nonzero discount. */
+  discountVisible?: boolean
   /** Package itinerary; empty array omits the section entirely. */
   itineraryBlocks: VoucherServiceBlock[]
-  /** Kind of the booking's primary supplier, which names the trip on the meta line ("Journey",
-   *  "Stay", "Tour"). Omit to keep the historic "Journey" label. */
-  primarySupplierKind?: SupplierKind | null
-  /** Settings-resolved override for that noun (see resolveProductCopy in settings-access.ts) --
-   *  wins over primarySupplierKind's own code-vocabulary noun when supplied. Omit to keep the
-   *  vocabulary noun. */
-  productBookingNoun?: string | null
   currency?: string
   title?: string
   footerText?: string
@@ -136,6 +143,11 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
     color: "#312b24",
   },
+  metaContact: {
+    fontSize: 9,
+    color: "#554c42",
+    marginTop: 1,
+  },
   pricingBox: {
     backgroundColor: "#f4efe6",
     borderWidth: 1,
@@ -157,6 +169,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Helvetica-Bold",
     color: AGENT_COMMISSION_COLOR,
+    marginBottom: 4,
+  },
+  discountLine: {
+    fontSize: 11,
+    fontFamily: "Helvetica-Bold",
+    color: DISCOUNT_COLOR,
     marginBottom: 4,
   },
   pricingDivider: {
@@ -186,19 +204,20 @@ const styles = StyleSheet.create({
   itineraryItem: {
     marginBottom: 6,
   },
+  // The itinerary reads a size smaller than the 10pt body, its bullets smaller again.
   itineraryDate: {
-    fontSize: 10,
+    fontSize: 9,
     fontFamily: "Helvetica-Bold",
     color: "#172018",
   },
   itineraryText: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#312b24",
     marginTop: 1,
     lineHeight: 1.4,
   },
   itineraryDetail: {
-    fontSize: 9,
+    fontSize: 8,
     color: "#554c42",
     marginTop: 2,
     paddingLeft: 10,
@@ -206,11 +225,28 @@ const styles = StyleSheet.create({
   // A subheading inside the bullet list: bold and undashed, with extra air above it so it reads
   // as a section break rather than another inclusion.
   itineraryDetailHeading: {
-    fontSize: 9,
+    fontSize: 8,
     fontFamily: "Helvetica-Bold",
     color: "#312b24",
     marginTop: 6,
     paddingLeft: 10,
+  },
+  // A caveat the client must not miss ("Train arrival times cannot be guaranteed").
+  itineraryDetailWarning: {
+    fontSize: 8,
+    color: WARNING_TEXT_COLOR,
+    marginTop: 2,
+    paddingLeft: 10,
+  },
+  // A hotel's own description, in place of its facility bullets. Helvetica-Oblique is a base-14
+  // face, so it needs no font registration.
+  itineraryDescription: {
+    fontSize: 8,
+    fontFamily: "Helvetica-Oblique",
+    color: "#554c42",
+    marginTop: 2,
+    paddingLeft: 10,
+    lineHeight: 1.4,
   },
   excludesSection: {
     marginTop: 14,
@@ -248,6 +284,8 @@ function resolveFooterText(template: string, validUntil: string | null, currency
 export function QuoteDocument({
   quoteNumber,
   customerName,
+  customerPhone,
+  customerEmail,
   quoteDate,
   validUntil,
   journeyStart,
@@ -257,9 +295,9 @@ export function QuoteDocument({
   total,
   subtotal,
   agentCommission = 0,
+  discount = 0,
+  discountVisible = true,
   itineraryBlocks,
-  primarySupplierKind,
-  productBookingNoun,
   currency = "ZAR",
   title = "QUOTATION",
   footerText = DEFAULT_FOOTER_TEXT,
@@ -282,13 +320,13 @@ export function QuoteDocument({
   const pax = { adults, children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
-  // What the client is being sold, in a word -- mirrors the quote email summary block
-  // (lib/quotes/quote-summary-block.ts), so the PDF stapled to that email never disagrees with it.
-  const journeyLabel = productBookingNoun ?? primaryProductOf(primarySupplierKind).bookingNoun
+  const contactLines = formatPreparedForContact({ phone: customerPhone, email: customerEmail })
   const hasAgentCommission = agentCommission > 0
+  const hasVisibleDiscount = discountVisible && discount > 0
+  const showSubtotal = hasAgentCommission || hasVisibleDiscount
   // Per-person rate is always the gross rate — the discount is the agency's cut, not the
   // traveller's. Falls back to `total` when no subtotal is supplied (pre-existing callers).
-  const perPersonRate = derivePerPersonRate(hasAgentCommission ? (subtotal ?? total) : total, pax)
+  const perPersonRate = derivePerPersonRate(showSubtotal ? (subtotal ?? total) : total, pax)
   const sortedBlocks = sortItineraryBlocksChronologically(itineraryBlocks)
   const flightCapBullet =
     flightCapPerPerson != null
@@ -334,9 +372,14 @@ export function QuoteDocument({
           <View>
             <Text style={styles.metaLabel}>Prepared for</Text>
             <Text style={styles.metaValue}>{customerName || "Valued Guest"}</Text>
+            {contactLines.map((contactLine) => (
+              <Text key={contactLine} style={styles.metaContact}>
+                {contactLine}
+              </Text>
+            ))}
           </View>
           <View>
-            <Text style={styles.metaLabel}>{journeyLabel}</Text>
+            <Text style={styles.metaLabel}>{TRAVEL_DATES_LABEL}</Text>
             <Text style={styles.metaValue}>{journeyRange ?? "To be confirmed"}</Text>
           </View>
           {paxLabel ? (
@@ -370,11 +413,18 @@ export function QuoteDocument({
                     : "Date to be confirmed"}
                 </Text>
                 <Text style={styles.itineraryText}>{line.text}</Text>
+                {line.description ? (
+                  <Text style={styles.itineraryDescription}>{line.description}</Text>
+                ) : null}
                 {line.bullets.map((bullet, bulletIndex) => (
                   <Text
                     key={bulletIndex}
                     style={
-                      bullet.kind === "heading" ? styles.itineraryDetailHeading : styles.itineraryDetail
+                      bullet.kind === "heading"
+                        ? styles.itineraryDetailHeading
+                        : bullet.kind === "warning"
+                          ? styles.itineraryDetailWarning
+                          : styles.itineraryDetail
                     }
                   >
                     {bullet.kind === "heading" ? bullet.text : `- ${bullet.text}`}
@@ -403,12 +453,19 @@ export function QuoteDocument({
               {paxLabel} x {formatMoney(perPersonRate, currency)} per person
             </Text>
           ) : null}
-          {hasAgentCommission ? (
+          {showSubtotal ? (
             <>
               <Text style={styles.subtotalLine}>Subtotal: {formatMoney(subtotal ?? total, currency)}</Text>
-              <Text style={styles.agentCommissionLine}>
-                {AGENT_COMMISSION_LABEL}: {formatAgentCommission(agentCommission, (v) => formatMoney(v, currency))}
-              </Text>
+              {hasAgentCommission ? (
+                <Text style={styles.agentCommissionLine}>
+                  {AGENT_COMMISSION_LABEL}: {formatAgentCommission(agentCommission, (v) => formatMoney(v, currency))}
+                </Text>
+              ) : null}
+              {hasVisibleDiscount ? (
+                <Text style={styles.discountLine}>
+                  {DISCOUNT_LABEL}: {formatDiscount(discount, (v) => formatMoney(v, currency))}
+                </Text>
+              ) : null}
               <View style={styles.pricingDivider} />
             </>
           ) : null}

@@ -3106,5 +3106,61 @@ describe("buildPackageQuoteLineItems", () => {
 
       expect(lineItems.find((li) => li.description === "Commission")?.total).toBe(500)
     })
+
+    describe("defaultCommission fallback", () => {
+      // Build Booking no longer collects a commission override -- every leg omits
+      // commissionOverride now, so this is what actually prices the Commission line unattended.
+      it("uses the house default when no leg carries its own override", async () => {
+        const { lineItems } = await buildPackageQuoteLineItems({
+          supabase: buildSupabase({ booking: soloAdultBooking }),
+          packageDetail: twoLegDetail(),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [trainSelection, hotelSelection],
+          defaultCommission: { type: "percent", value: 10 },
+        })
+
+        // (10000 + 2000) x 10%
+        expect(lineItems.find((li) => li.description === "Commission")?.total).toBe(1200)
+      })
+
+      it("a leg's own override still wins over the default", async () => {
+        const { lineItems } = await buildPackageQuoteLineItems({
+          supabase: buildSupabase({ booking: soloAdultBooking }),
+          packageDetail: twoLegDetail(),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [trainSelection, { ...hotelSelection, commissionOverride: { type: "fixed", value: 500 } }],
+          defaultCommission: { type: "percent", value: 10 },
+        })
+
+        expect(lineItems.find((li) => li.description === "Commission")?.total).toBe(500)
+      })
+
+      it("a zero-value default skips the Commission line entirely, same as no commission set", async () => {
+        const { lineItems } = await buildPackageQuoteLineItems({
+          supabase: buildSupabase({ booking: soloAdultBooking }),
+          packageDetail: twoLegDetail(),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [trainSelection, hotelSelection],
+          defaultCommission: { type: "percent", value: 0 },
+        })
+
+        expect(lineItems.find((li) => li.description === "Commission")).toBeUndefined()
+      })
+
+      it("omitting defaultCommission entirely keeps the pre-existing behaviour of no commission line", async () => {
+        const { lineItems } = await buildPackageQuoteLineItems({
+          supabase: buildSupabase({ booking: soloAdultBooking }),
+          packageDetail: twoLegDetail(),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [trainSelection, hotelSelection],
+        })
+
+        expect(lineItems.find((li) => li.description === "Commission")).toBeUndefined()
+      })
+    })
   })
 })

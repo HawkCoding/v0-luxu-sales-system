@@ -410,6 +410,7 @@ export interface EmailSignatureSettings {
   signature_divisions_line: string
   signature_confidentiality: string
   signature_office_address: string
+  signature_sender_layout: string
 }
 
 export function useEmailSignatureSettings() {

@@ -1,8 +1,11 @@
 // Builds the {{guestInfo}} block token for the deposit_request template:
 // lets the customer confirm who the booking is for, and that each guest's
-// ID/passport number on file is correct, before final documents go out.
-// ID numbers are sensitive — this block only ever goes out at the customer's
-// own request to verify the data, never proactively.
+// DOB, country of residence and passport/ID number on file are correct,
+// before final documents go out.
+// DOB and passport/ID numbers are sensitive — this block only ever goes out
+// at the customer's own request to verify the data, never proactively.
+
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 
 function escapeHtml(value: string): string {
   return value
@@ -13,16 +16,29 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;")
 }
 
+/** "DD/MM/YYYY" from a stored "YYYY-MM-DD" date-only string — a birth date is a calendar date, not
+ * an instant, so this never goes through timezone conversion (see lib/date-format.ts). */
+function formatDobSlashes(value: string | null): string | null {
+  if (!value) return null
+  const match = DATE_ONLY_PATTERN.exec(value)
+  if (!match) return null
+  const [, year, month, day] = match
+  return `${day}/${month}/${year}`
+}
+
 export interface GuestInfoGuest {
   /** Formatted "Prefix First Last". */
   name: string
+  dateOfBirth: string | null
+  /** Country code as shown to the guest, e.g. "ZA", "UK". */
+  countryCode: string | null
   idNumber: string | null
 }
 
 export interface GuestInfoInput {
   customerName: string
   customerEmail: string | null
-  /** Named travellers with their ID/passport numbers. Empty when not yet captured. */
+  /** Named travellers with their DOB/country/ID details. Empty when not yet captured. */
   guests: GuestInfoGuest[]
   adults: number
   children: number
@@ -35,6 +51,15 @@ function formatPaxCount(adults: number, children: number): string {
   return parts.join(", ")
 }
 
+function formatGuestLine(guest: GuestInfoGuest): string {
+  const dob = formatDobSlashes(guest.dateOfBirth)
+  const parts = [escapeHtml(guest.name)]
+  if (dob) parts.push(`DOB: ${dob}`)
+  if (guest.countryCode) parts.push(escapeHtml(guest.countryCode))
+  parts.push(guest.idNumber ? escapeHtml(guest.idNumber) : "Passport/ID not yet on file")
+  return parts.join(" ")
+}
+
 export function buildGuestInfoBlock(input: GuestInfoInput): string {
   const lineStyle = "margin:0 0 6px;color:#312b24;font-size:13px;line-height:19px;"
   const rowStyle = "margin:0 0 4px;color:#312b24;font-size:13px;line-height:19px;"
@@ -43,8 +68,7 @@ export function buildGuestInfoBlock(input: GuestInfoInput): string {
 
   if (input.guests.length > 0) {
     for (const guest of input.guests) {
-      const idText = guest.idNumber ? `ID: ${escapeHtml(guest.idNumber)}` : "ID not yet on file"
-      lines.push(`<p style="${rowStyle}">${escapeHtml(guest.name)} ${idText}</p>`)
+      lines.push(`<p style="${rowStyle}">${formatGuestLine(guest)}</p>`)
     }
   } else {
     const paxCount = formatPaxCount(input.adults, input.children)

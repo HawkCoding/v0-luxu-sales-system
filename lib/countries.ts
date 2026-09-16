@@ -9,6 +9,10 @@ export type CountryAliasMap = Map<string, string>
 let cachedCountryAliasMap: CountryAliasMap | null = null
 let countryAliasCacheExpiresAt = 0
 
+export type CountryCodeMap = Map<string, string>
+let cachedCountryCodeMap: CountryCodeMap | null = null
+let countryCodeCacheExpiresAt = 0
+
 export function normalizeAliasKey(value: string): string {
   return value
     .normalize("NFKD")
@@ -124,6 +128,47 @@ export async function loadCountryAliasMap(
   cachedCountryAliasMap = aliasMap
   countryAliasCacheExpiresAt = now + COUNTRY_ALIAS_CACHE_TTL_MS
   return aliasMap
+}
+
+/** Canonical country name -> ISO alpha-2 code, shown as "UK" for the United Kingdom (GB) rather
+ * than the strict ISO code, matching house style on client-facing documents. */
+export async function loadCountryCodeMap(
+  supabase: SupabaseClient<Database>,
+): Promise<CountryCodeMap> {
+  const now = Date.now()
+  if (cachedCountryCodeMap && countryCodeCacheExpiresAt > now) return cachedCountryCodeMap
+
+  const { data: countries, error } = await supabase.from("countries").select("name, iso_alpha2")
+  if (error) throw new Error("Failed to load countries")
+
+  const codeMap: CountryCodeMap = new Map()
+  for (const country of countries ?? []) {
+    if (!country.iso_alpha2) continue
+    codeMap.set(country.name, country.iso_alpha2 === "GB" ? "UK" : country.iso_alpha2)
+  }
+
+  cachedCountryCodeMap = codeMap
+  countryCodeCacheExpiresAt = now + COUNTRY_ALIAS_CACHE_TTL_MS
+  return codeMap
+}
+
+/** The country code shown on a guest line, e.g. "United Kingdom" / "England" / "GB" -> "UK". Free
+ * text that can't be resolved against the alias map (a typo, "Other") is dropped rather than shown
+ * verbatim -- a long unresolved string reads worse on the guest line than no code at all. */
+export function resolveCountryCode(
+  value: string | null | undefined,
+  aliasMap: CountryAliasMap,
+  codeMap: CountryCodeMap,
+): string | null {
+  const canonicalName = normalizeCountry(value, aliasMap)
+  if (!canonicalName) return null
+
+  const code = codeMap.get(canonicalName)
+  if (code) return code
+
+  // normalizeCountry() returns the trimmed input unchanged when it can't match an alias -- treat
+  // that as resolved only if it already looks like a short code (e.g. "ZA" typed directly).
+  return canonicalName.length <= 3 ? canonicalName.toUpperCase() : null
 }
 
 export function normalizeCountry(

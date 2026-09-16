@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import type { Quote } from "@/lib/types"
 import {
@@ -29,9 +28,8 @@ import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
 import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
-import { CommissionBonusField } from "@/components/quotes/commission-bonus-field"
-import { AgentCommissionField } from "@/components/quotes/agent-commission-field"
-import { getCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
+import { QuoteAdjustmentsLedger } from "@/components/quotes/quote-adjustments-ledger"
+import { findCommissionLineIndex } from "@/lib/quotes/apply-commission-bonus"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
 import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
 
@@ -304,23 +302,17 @@ export function JobQuotesTab({
                   </thead>
                   <tbody>
                     {q.lineItems.map((li, i) => {
+                      // The Commission line is edited and shown in the pricing ledger below, not
+                      // in this table — see components/quotes/quote-adjustments-ledger.tsx.
+                      if (i === findCommissionLineIndex(q.lineItems)) return null
                       const isExtra = li.pricingSnapshot?.isExtra === true
                       const isComplimentary = isComplimentaryRoom(li) || isComplimentaryTransport(li)
-                      const lineBonus = getCommissionBonus(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
                         <td className="py-2 text-xs text-foreground break-words">
                           {li.description}
                           {isExtra ? (
                             <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">Extra</Badge>
-                          ) : null}
-                          {lineBonus > 0 ? (
-                            // Internal-only split. The stored description stays plain "Commission"
-                            // so the client-facing invoice line doesn't expose the top-up.
-                            <div className="text-[10px] text-muted-foreground">
-                              {formatMoney(li.total - lineBonus, q.currency)} calculated +{" "}
-                              {formatMoney(lineBonus, q.currency)} added
-                            </div>
                           ) : null}
                           {/* Internal only — the client's PDF and email show the converted
                               figure alone. See components/quotes/fx-provenance-note.tsx. */}
@@ -385,36 +377,8 @@ export function JobQuotesTab({
                   </tbody>
                 </table>
               </div>
-              {(canEditLines || (q.commissionBonus ?? 0) > 0) && (
-                <div className="mt-3">
-                  <CommissionBonusField quote={q} editable={canEditLines} onSaved={mutate} />
-                </div>
-              )}
-              {(canEditLines || (q.agentCommission ?? 0) > 0) && (
-                <div className="mt-3 border-y border-destructive/30 py-3">
-                  <AgentCommissionField quote={q} editable={canEditLines} onSaved={mutate} />
-                </div>
-              )}
-              <Separator className="my-3" />
-              <div className="space-y-1 text-right">
-                <div className="flex justify-end gap-8 text-xs">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span className="text-foreground font-medium w-28">
-                    {formatMoney(q.subtotal, q.currency)}
-                  </span>
-                </div>
-                {(q.agentCommission ?? 0) > 0 && (
-                  <div className="flex justify-end gap-8 text-xs">
-                    <span className="text-destructive">Agent Commission</span>
-                    <span className="text-destructive font-medium w-28">
-                      -{formatMoney(q.agentCommission ?? 0, q.currency)}
-                    </span>
-                  </div>
-                )}
-                <div className="flex justify-end gap-8 text-sm font-semibold">
-                  <span className="text-foreground">Total</span>
-                  <span className="text-foreground w-28">{formatMoney(q.total, q.currency)}</span>
-                </div>
+              <div className="mt-3">
+                <QuoteAdjustmentsLedger quote={q} editable={canEditLines} onSaved={mutate} />
               </div>
               {q.overrideReason && (
                 <div className="mt-3 p-2 bg-payment-yellow/10 rounded-md">

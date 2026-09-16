@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { WARNING_TEXT_COLOR } from "@/lib/quotes/quote-presentation"
 import { QuoteDocument } from "./quote-document"
 import { sampleQuotePdfData } from "./sample-data"
 import type { QuotePdfData } from "./quote-document"
@@ -30,6 +31,22 @@ function renderedText(node: unknown, out: string[] = []): string[] {
   return out
 }
 
+/** The props of the first element whose own rendered text is exactly `text`. */
+function findTextElement(node: unknown, text: string): { style?: unknown } | null {
+  if (node == null || typeof node !== "object") return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findTextElement(child, text)
+      if (found) return found
+    }
+    return null
+  }
+  const element = node as { props?: { children?: unknown; style?: unknown } }
+  if (!element.props) return null
+  if (renderedText(element.props.children).join("") === text) return element.props
+  return findTextElement(element.props.children, text)
+}
+
 describe("QuoteDocument", () => {
   it("omits the quote number and quote date while the reference is hidden", () => {
     const text = renderedText(buildDocument()).join(" | ")
@@ -42,38 +59,111 @@ describe("QuoteDocument", () => {
     const text = renderedText(buildDocument()).join(" | ")
 
     expect(text).toContain("Prepared for")
-    expect(text).toContain("Journey")
+    expect(text).toContain("Travel Dates")
   })
 
-  describe("primary product label", () => {
-    // No primarySupplierKind supplied (existing callers, e.g. pdf-preview's sample data): the meta
-    // line keeps saying "Journey", matching primaryProductOf's null fallback.
-    it("labels the meta line Journey when no primary supplier kind is known", () => {
-      const doc = QuoteDocument({
-        ...sampleQuotePdfData(),
-        quoteNumber: QUOTE_NUMBER,
-        quoteDate: "2026-07-16",
-        primarySupplierKind: null,
-      }) as React.ReactElement
-      const text = renderedText(doc).join(" | ")
+  describe("travel dates label", () => {
+    // Mirrors the quote email summary block: every product reads "Travel Dates", never the
+    // per-product noun ("Journey"/"Stay"/"Tour").
+    it("labels the date line Travel Dates", () => {
+      const text = renderedText(buildDocument())
 
-      expect(text).toContain("Journey")
+      expect(text).toContain("Travel Dates")
+      expect(text).not.toContain("Journey")
+      expect(text).not.toContain("Stay")
+    })
+  })
+
+  describe("prepared for", () => {
+    it("prints the client's phone and email under their name", () => {
+      const text = renderedText(buildDocument())
+
+      expect(text).toContain("+27 82 555 0100")
+      expect(text).toContain("sample.guest@example.com")
     })
 
-    // Mirrors the quote email summary block (lib/quotes/quote-summary-block.test.ts): a
-    // hotel-primary booking is a Stay, so the PDF stapled to that email must read the same.
-    it("labels the meta line Stay for a hotel-primary booking", () => {
+    it("omits the contact lines cleanly when neither is known", () => {
       const doc = QuoteDocument({
         ...sampleQuotePdfData(),
         quoteNumber: QUOTE_NUMBER,
         quoteDate: "2026-07-16",
-        primarySupplierKind: "hotel_property",
+        customerPhone: null,
+        customerEmail: "  ",
       }) as React.ReactElement
-      const text = renderedText(doc).join(" | ")
+      const text = renderedText(doc)
 
-      // Not a negative "Journey" assertion: the default footer/masthead copy
-      // ("Luxury Rail Journeys") still says it regardless of the meta label.
-      expect(text).toContain("Stay")
+      expect(text).not.toContain("+27 82 555 0100")
+      expect(text).not.toContain("  ")
+    })
+  })
+
+  describe("itinerary", () => {
+    const blocks: QuotePdfData["itineraryBlocks"] = [
+      {
+        serviceType: "hotel",
+        title: "Ivory Manor",
+        contactDetails: { name: "Ivory Manor Boutique Hotel", description: "A boutique manor in Pretoria." },
+        serviceData: {
+          departureDate: "2027-03-15",
+          arrivalDate: "2027-03-16",
+          startTime: "14:00",
+          nights: 1,
+          isComplimentary: true,
+          inclusions: ["24-hour front desk"],
+        },
+        displayOrder: 1,
+      },
+      {
+        serviceType: "train",
+        title: "Rovos Rail",
+        contactDetails: { name: "Rovos Rail" },
+        serviceData: {
+          departureDate: "2027-03-16",
+          arrivalDate: "2027-03-25",
+          startTime: "12:00",
+          endTime: "10:00",
+          arrivalStation: "Pretoria",
+          durationDays: 10,
+          checkInOffsetMinutes: 120,
+          notes: "Gluten Free Meals Mrs Adams",
+        },
+        displayOrder: 2,
+      },
+    ]
+    const doc = () =>
+      QuoteDocument({
+        ...sampleQuotePdfData(),
+        quoteNumber: QUOTE_NUMBER,
+        quoteDate: "2026-07-16",
+        itineraryBlocks: blocks,
+      }) as React.ReactElement
+
+    it("prints no COMPLIMENTARY label and no guest notes", () => {
+      const text = renderedText(doc()).join(" | ")
+
+      expect(text).not.toMatch(/COMPLIMENTARY/)
+      expect(text).not.toContain("Gluten Free Meals Mrs Adams")
+    })
+
+    it("prints the train check-in and departure bullets", () => {
+      const text = renderedText(doc()).join(" | ")
+
+      expect(text).toContain("- Check in at 10h00")
+      expect(text).toContain("- Departure time: 12h00")
+      expect(text).not.toContain("Departs at")
+    })
+
+    it("prints the hotel description in italics instead of its facilities", () => {
+      const description = findTextElement(doc(), "A boutique manor in Pretoria.")
+
+      expect(description?.style).toMatchObject({ fontFamily: "Helvetica-Oblique", fontSize: 8 })
+      expect(renderedText(doc()).join(" | ")).not.toContain("24-hour front desk")
+    })
+
+    it("prints the train arrival caveat in red", () => {
+      const caveat = findTextElement(doc(), "- Train arrival times cannot be guaranteed")
+
+      expect(caveat?.style).toMatchObject({ color: WARNING_TEXT_COLOR })
     })
   })
 
@@ -88,28 +178,48 @@ describe("QuoteDocument", () => {
   })
 
   describe("agent commission", () => {
-    // sampleQuotePdfData ships subtotal: 91300, agentCommission: 5000, total: 86300 specifically
-    // to exercise this row.
+    // sampleQuotePdfData ships subtotal: 91300, agentCommission: 5000, discount: 1300,
+    // total: 85000 specifically to exercise these rows.
     it("shows the subtotal and the discount above the net total", () => {
       const text = renderedText(buildDocument()).join(" | ")
 
       expect(text).toContain("Subtotal")
       expect(text).toContain("Agent Commission")
+      expect(text).toContain("Discount")
     })
 
-    it("renders nothing extra when there is no commission", () => {
+    it("renders nothing extra when there is no commission or discount", () => {
       const doc = QuoteDocument({
         ...sampleQuotePdfData(),
         quoteNumber: QUOTE_NUMBER,
         quoteDate: "2026-07-16",
         subtotal: undefined,
         agentCommission: 0,
-        total: 86300,
+        discount: 0,
+        total: 85000,
       }) as React.ReactElement
       const text = renderedText(doc).join(" | ")
 
       expect(text).not.toContain("Subtotal")
       expect(text).not.toContain("Agent Commission")
+      expect(text).not.toContain("Discount")
+    })
+  })
+
+  describe("discount", () => {
+    // The PDF only ever renders the `total` it's given — netting the discount out of it is the
+    // caller's job (see calculateQuoteTotals). This only checks the row itself stays hidden.
+    it("hides the Discount row when discountVisible is false", () => {
+      const doc = QuoteDocument({
+        ...sampleQuotePdfData(),
+        quoteNumber: QUOTE_NUMBER,
+        quoteDate: "2026-07-16",
+        agentCommission: 0,
+        discountVisible: false,
+      }) as React.ReactElement
+      const text = renderedText(doc).join(" | ")
+
+      expect(text).not.toContain("Discount")
     })
   })
 })

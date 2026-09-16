@@ -17,7 +17,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
-import { EMAIL_ATTACHMENT_KINDS } from "@/lib/attachments/email-attachment-library"
+import {
+  EMAIL_ATTACHMENT_KINDS,
+  EMAIL_ATTACHMENT_KIND_VALUES,
+  type EmailAttachmentKind,
+} from "@/lib/attachments/email-attachment-library"
 import { displayRouteName } from "@/lib/routes/route-name"
 import { SUPPLIER_KIND_LABELS, type Supplier } from "@/lib/types"
 
@@ -297,9 +301,13 @@ export function EmailAttachmentLibraryEditor({ canEdit }: EmailAttachmentLibrary
   }
 
   function toggleKind(entry: LibraryEntry, kind: string, checked: boolean) {
+    // Drop retired kinds (e.g. "itinerary") so the API's enum check accepts the patch.
+    const current = entry.emailKinds.filter((value) =>
+      EMAIL_ATTACHMENT_KIND_VALUES.includes(value as EmailAttachmentKind),
+    )
     const emailKinds = checked
-      ? [...entry.emailKinds, kind]
-      : entry.emailKinds.filter((value) => value !== kind)
+      ? [...current, kind]
+      : current.filter((value) => value !== kind)
     void patchEntry(entry.id, { emailKinds })
   }
 

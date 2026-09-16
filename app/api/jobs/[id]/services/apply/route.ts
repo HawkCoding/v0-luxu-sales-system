@@ -5,9 +5,11 @@ import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import { loadRoomOverrideProvenance, loadTourOverrideProvenance } from "@/lib/quotes/room-override-provenance"
+import { describeValidationIssue } from "@/lib/api/describe-zod-issue"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { getCachedRates } from "@/lib/fx/rates"
-import { BASE_CURRENCY, isSupportedCurrency, normaliseCurrency } from "@/lib/money"
+import { getDefaultCommission } from "@/lib/pricing/default-commission"
+import { BASE_CURRENCY, formatMoney, isSupportedCurrency, normaliseCurrency } from "@/lib/money"
 import { MissingFxRateError, roundFxRate } from "@/lib/pricing/convert-currency"
 
 /**
@@ -116,7 +118,9 @@ export async function POST(req: Request, { params }: RouteParams) {
   const rawBody: unknown = await req.json().catch(() => null)
   const parseResult = applyServicesSchema.safeParse(rawBody)
   if (!parseResult.success) {
-    return jsonZodError(parseResult.error, "Invalid request payload", "jobs:services-apply")
+    const firstIssue = parseResult.error.issues[0]
+    const message = firstIssue ? describeValidationIssue(firstIssue) : "Invalid request payload"
+    return jsonZodError(parseResult.error, message, "jobs:services-apply")
   }
   const parsed = parseResult.data
 
@@ -146,6 +150,22 @@ export async function POST(req: Request, { params }: RouteParams) {
     .maybeSingle()
 
   const quoteCurrency = normaliseCurrency(quoteRow?.currency)
+  const commissionBonus = Number(quoteRow?.commission_bonus ?? 0)
+  // Rounding used to allow a negative amount (a discount, before the dedicated discount feature
+  // existed). Re-pricing folds it back into the Commission line, which then fails PATCH
+  // /api/quotes/[id]'s nonnegative check with an opaque "Invalid request payload (lineItems)" --
+  // caught here instead, with a message that says what to do about it. Existing negative values
+  // are left in place (see PATCH /api/quotes/[id]/commission-bonus, which now only accepts >= 0)
+  // so a quote a client has already seen isn't silently rewritten; clearing it is a deliberate
+  // step on the Quotes tab.
+  if (commissionBonus < 0) {
+    return NextResponse.json(
+      {
+        error: `This quote has a negative Rounding of ${formatMoney(commissionBonus, quoteCurrency)}. Rounding can only add to the total — clear it on the Quotes tab, then build the booking again.`,
+      },
+      { status: 400 },
+    )
+  }
   // Cached only: a slow or unreachable FX provider must not add latency to Build Booking. The
   // dialog refreshes rates explicitly through /api/fx/rates instead.
   const fx = await getCachedRates(supabase)
@@ -195,6 +215,12 @@ export async function POST(req: Request, { params }: RouteParams) {
   }))
 
   try {
+    // Commission is no longer decided in Build Booking -- a leg that carries no override (every
+    // leg, now that the UI never sets one) falls back to the house default from Settings, so
+    // Apply still prices a Commission line unattended. It stays fully editable afterward on the
+    // Job Quotes tab (PATCH /api/quotes/[id]/commission).
+    const defaultCommission = await getDefaultCommission(supabase)
+
     const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
       supabase,
       packageDetail: detail,
@@ -203,7 +229,8 @@ export async function POST(req: Request, { params }: RouteParams) {
       selections,
       fallbackRateTypeId,
       rateTypes,
-      commissionBonus: Number(quoteRow?.commission_bonus ?? 0),
+      commissionBonus,
+      defaultCommission,
       quoteCurrency,
       fxRates: effectiveRates,
       fxRateAsOf: fx.rows[0]?.asOf ?? null,

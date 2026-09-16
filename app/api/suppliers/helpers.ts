@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import type { ZodIssue } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+export { describeValidationIssue } from "@/lib/api/describe-zod-issue"
 import { buildSupplierSlugBase } from "@/lib/suppliers"
 import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
 import { ALL_ROLES } from "@/lib/permissions"
@@ -108,32 +108,6 @@ export function normalizeText(value: string): string | null {
 
 export function normalizeNullableDate(value: string | null): string | null {
   return value && value.trim() ? value : null
-}
-
-/** "inclusionLines" -> "Inclusion Lines", "text" -> "Text". */
-function humanizeKey(key: string): string {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/^./, (char) => char.toUpperCase())
-}
-
-/**
- * Zod's default message ("String must contain at most 300 character(s)") names no field, so a
- * validation failure on a nested array -- inclusion lines, routes, station addresses -- was
- * unattributable: the caller had no way to tell which of dozens of rows was over the limit.
- * Prefixes the human-readable path ("Inclusion Lines #13 Text: ...") for those. Custom messages
- * (`ctx.addIssue` in schemas.ts, e.g. "Each city may only have one station address") are already
- * hand-written as a complete, standalone sentence -- left alone so this doesn't make a fine
- * message worse by dumping a raw path in front of it.
- */
-export function describeValidationIssue(issue: ZodIssue): string {
-  if (issue.code === "custom") return issue.message
-  const location = issue.path
-    .map((segment) =>
-      typeof segment === "number" ? `#${segment + 1}` : humanizeKey(String(segment)),
-    )
-    .join(" ")
-  return location ? `${location}: ${issue.message}` : issue.message
 }
 
 export function buildErrorResponse(message: string, status = 400) {

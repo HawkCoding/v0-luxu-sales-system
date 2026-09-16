@@ -184,7 +184,7 @@ function pageHtml({ doc, brand, body, toc, css, buildDate }) {
 <style>${fontFaceCss()}</style>
 <style>${css}</style>
 </head>
-<body>
+<body class="doc-${doc.slug}">
 ${coverHtml(doc, brand, buildDate)}
 ${toc}
 <main class="content">
@@ -211,9 +211,13 @@ function readChapters(doc) {
   return parts.join("\n\n")
 }
 
-async function renderPdf(browser, html, outPath, brand, docTitle) {
+async function renderPdf(browser, htmlPath, outPath, brand, docTitle) {
   const page = await browser.newPage()
-  await page.setContent(html, { waitUntil: "networkidle" })
+  // Navigated, not setContent: a document created by setContent stays on
+  // about:blank, and Chromium refuses to load file:// subresources into an
+  // opaque origin. Every <img src="file://…"> was silently dropped, so the PDFs
+  // printed captions with no figures above them.
+  await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "networkidle" })
   await page.emulateMedia({ media: "print" })
   const footer = `
     <div style="width:100%;font-family:Arial,sans-serif;font-size:7pt;color:#939ea5;
@@ -255,12 +259,28 @@ async function resolvePageNumbers(buffer, outline) {
     console.warn(`  · page numbers unavailable (${error.message}); TOC will omit them`)
     return undefined
   }
-  const numbers = new Map()
-  for (const entry of outline) {
-    const needle = entry.text.replace(/\s+/g, " ").toLowerCase()
-    const index = pages.findIndex((text) => text.includes(needle))
-    if (index !== -1) numbers.set(entry.id, index + 1)
+  // Kerning splits words across text items ("P aid in Full"), so compare with
+  // whitespace removed rather than normalised.
+  const squashed = pages.map((text) => text.replace(/\s+/g, ""))
+  const needles = outline.map((entry) => entry.text.replace(/\s+/g, "").toLowerCase())
+
+  // The table of contents lists every heading, so a naive search resolves each
+  // one to the contents page. Skip the front matter first: a contents page is a
+  // page that carries most of the outline at once, and only ever appears at the
+  // very start of the document.
+  let firstBody = 0
+  const threshold = Math.max(3, Math.ceil(needles.length * 0.6))
+  for (let i = 0; i < Math.min(squashed.length, 6); i += 1) {
+    const hits = needles.filter((needle) => squashed[i].includes(needle)).length
+    if (hits >= threshold) firstBody = i + 1
   }
+
+  const numbers = new Map()
+  outline.forEach((entry, position) => {
+    const needle = needles[position]
+    const index = squashed.findIndex((text, i) => i >= firstBody && text.includes(needle))
+    if (index !== -1) numbers.set(entry.id, index + 1)
+  })
   return numbers
 }
 
@@ -286,14 +306,14 @@ async function buildDocument(browser, doc, brand, css, buildDate) {
   }
 
   // Pass 1 lays the document out so we can read real page numbers back, pass 2
-  // reprints with the table of contents filled in.
-  const firstPass = await renderPdf(browser, makeHtml(undefined), null, brand, doc.title)
+  // reprints with the table of contents filled in. Both passes render the file
+  // on disk, which is why the first pass writes it before printing.
+  const firstPass = await renderPdf(browser, htmlPath, null, brand, doc.title)
   const pageNumbers = await resolvePageNumbers(firstPass, outline)
-  const finalHtml = makeHtml(pageNumbers)
-  writeFileSync(htmlPath, finalHtml, "utf8")
+  writeFileSync(htmlPath, makeHtml(pageNumbers), "utf8")
 
   const pdfPath = join(DIST, `${doc.slug}.pdf`)
-  await renderPdf(browser, finalHtml, pdfPath, brand, doc.title)
+  await renderPdf(browser, htmlPath, pdfPath, brand, doc.title)
   const resolved = pageNumbers ? [...pageNumbers.values()].length : 0
   console.log(`  · ${relative(ROOT, pdfPath)} — ${outline.length} sections, ${resolved} numbered`)
   return pdfPath

@@ -1,14 +1,17 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { HtmlBodyEditor } from "@/components/ui/html-body-editor"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SignatureBadgeList } from "@/components/signature-badge-list"
-import type { EmailSignatureSettings } from "@/lib/use-data"
+import { useAssignableUsers, type EmailSignatureSettings } from "@/lib/use-data"
 import type { SignatureBadge } from "@/lib/email/signature-brands"
+import { SENDER_LAYOUT_TOKENS } from "@/lib/email/sender-layout"
 
 export interface AdminSignatureBrand {
   id: string
@@ -25,6 +28,7 @@ export interface AdminSignatureBrand {
   divisionsLine: string | null
   confidentiality: string | null
   officeAddress: string | null
+  senderLayout: string | null
 }
 
 interface SignatureBrandEditorProps {
@@ -42,46 +46,64 @@ type TextKey =
   | "confidentiality"
   | "officeAddress"
 
-const TEXT_FIELDS: { key: TextKey; label: string; defaultKey: keyof EmailSignatureSettings; rows?: number }[] = [
-  { key: "companyLine", label: "Company line", defaultKey: "signature_company_line", rows: 2 },
+const TEXT_FIELDS: { key: TextKey; label: string; defaultKey: keyof EmailSignatureSettings }[] = [
+  { key: "companyLine", label: "Company line", defaultKey: "signature_company_line" },
   { key: "registrationLine", label: "Registration line", defaultKey: "signature_registration_line" },
   { key: "tradingHours", label: "Trading hours", defaultKey: "signature_trading_hours" },
   { key: "divisionsLine", label: "Divisions line", defaultKey: "signature_divisions_line" },
-  { key: "confidentiality", label: "Confidentiality notice", defaultKey: "signature_confidentiality", rows: 3 },
-  { key: "officeAddress", label: "Office address", defaultKey: "signature_office_address", rows: 2 },
+  { key: "confidentiality", label: "Confidentiality notice", defaultKey: "signature_confidentiality" },
+  { key: "officeAddress", label: "Office address", defaultKey: "signature_office_address" },
 ]
 
-/** Fixed-slot form for one signature brand — name, banner, badges, and the six optional text overrides (blank inherits the shared default shown as placeholder). */
+const INSERT_TOKENS = SENDER_LAYOUT_TOKENS
+
+// Preview re-renders on every keystroke in a rich-text field; debounce so a
+// fast typist doesn't fire a request per character.
+const PREVIEW_DEBOUNCE_MS = 400
+
+/** Strips tags down to plain text for the "inherits ..." helper line — the placeholder itself is never rendered as HTML. */
+function toPlainText(html: string): string {
+  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
+}
+
+/** Fixed-slot form for one signature brand — name, banner, badges, the sender name/contact layout, and six optional text overrides (blank inherits the shared default). */
 export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: SignatureBrandEditorProps) {
   const [name, setName] = useState(brand.name)
   const [uploadingBanner, setUploadingBanner] = useState(false)
   const [previewHtml, setPreviewHtml] = useState("")
   const [loadingPreview, setLoadingPreview] = useState(false)
+  const [previewProfileId, setPreviewProfileId] = useState<string | undefined>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const { data: assignable } = useAssignableUsers()
+  const users = assignable?.users ?? []
 
   useEffect(() => setName(brand.name), [brand.id, brand.name])
 
   useEffect(() => {
     let cancelled = false
-    setLoadingPreview(true)
-    fetch("/api/email-signature/render", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ brandId: brand.id }),
-    })
-      .then((r) => r.json())
-      .then((d: { html?: string }) => {
-        if (!cancelled) setPreviewHtml(d.html ?? "")
+    const timer = setTimeout(() => {
+      setLoadingPreview(true)
+      fetch("/api/email-signature/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandId: brand.id, profileId: previewProfileId ?? null }),
       })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoadingPreview(false)
-      })
+        .then((r) => r.json())
+        .then((d: { html?: string }) => {
+          if (!cancelled) setPreviewHtml(d.html ?? "")
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoadingPreview(false)
+        })
+      // Re-render whenever any brand field or the previewed salesperson changes, so the preview stays byte-identical to production.
+    }, PREVIEW_DEBOUNCE_MS)
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
-    // Re-render whenever any brand field changes, so the preview stays byte-identical to production.
-  }, [brand])
+  }, [brand, previewProfileId])
 
   async function patch(body: Record<string, unknown>, successLabel?: string) {
     try {
@@ -107,6 +129,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
         divisionsLine: string | null
         confidentiality: string | null
         officeAddress: string | null
+        senderLayout: string | null
       }
       onUpdated({ ...brand, ...updated })
       if (successLabel) toast.success(successLabel)
@@ -212,34 +235,85 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
           />
         </div>
 
-        {TEXT_FIELDS.map(({ key, label, defaultKey, rows }) => (
+        <div className="space-y-1.5 border-t pt-5">
+          <Label htmlFor="brand-sender-layout">Name &amp; contact layout</Label>
+          <p className="text-xs text-muted-foreground">
+            Formats the sender block at the top of the signature — insert a field, then style it. Every
+            salesperson&apos;s own name, title and phone numbers drop in wherever you place them; those are set per
+            person in{" "}
+            <Link href="/app/settings" className="underline">
+              Settings › Email Accounts
+            </Link>
+            .
+          </p>
+          <HtmlBodyEditor
+            id="brand-sender-layout"
+            variant="compact"
+            value={brand.senderLayout ?? ""}
+            insertTokens={INSERT_TOKENS}
+            disabled={!canEdit}
+            onChange={(html) => onUpdated({ ...brand, senderLayout: html })}
+            onBlur={() => patch({ senderLayout: brand.senderLayout ?? "" })}
+          />
+          <p className="text-xs text-muted-foreground">
+            Blank inherits the shared default
+            {defaults?.signature_sender_layout ? `: “${toPlainText(defaults.signature_sender_layout)}”` : "."}
+          </p>
+        </div>
+
+        {TEXT_FIELDS.map(({ key, label, defaultKey }) => (
           <div key={key} className="space-y-1.5">
             <Label htmlFor={`brand-${key}`}>{label}</Label>
-            <Textarea
+            <HtmlBodyEditor
               id={`brand-${key}`}
-              rows={rows ?? 1}
+              variant="compact"
               value={brand[key] ?? ""}
-              placeholder={defaults?.[defaultKey] ?? ""}
               disabled={!canEdit}
-              onChange={(e) => onUpdated({ ...brand, [key]: e.target.value })}
+              onChange={(html) => onUpdated({ ...brand, [key]: html })}
               onBlur={() => patch({ [key]: brand[key] ?? "" })}
             />
-            <p className="text-xs text-muted-foreground">Blank inherits the shared default shown as placeholder.</p>
+            <p className="text-xs text-muted-foreground">
+              Blank inherits the shared default
+              {defaults?.[defaultKey] ? `: “${toPlainText(defaults[defaultKey])}”` : "."}
+            </p>
           </div>
         ))}
       </div>
 
-      <div className="space-y-1.5">
-        <Label>Live preview</Label>
-        <div className="h-[420px] overflow-auto rounded-md border bg-white">
-          {loadingPreview ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Rendering…
-            </div>
-          ) : (
-            <iframe title="Signature preview" className="h-full w-full" sandbox="" srcDoc={previewHtml} />
-          )}
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label>Live preview</Label>
+          <div className="h-[420px] overflow-auto rounded-md border bg-white">
+            {loadingPreview ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Rendering…
+              </div>
+            ) : (
+              <iframe title="Signature preview" className="h-full w-full" sandbox="" srcDoc={previewHtml} />
+            )}
+          </div>
         </div>
+        {users.length > 0 && (
+          <div className="space-y-1.5">
+            <Label htmlFor="preview-salesperson">Preview as</Label>
+            <Select
+              value={previewProfileId ?? "__self__"}
+              onValueChange={(value) => setPreviewProfileId(value === "__self__" ? undefined : value)}
+            >
+              <SelectTrigger id="preview-salesperson" size="sm" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__self__">Me</SelectItem>
+                {users.map((u) => (
+                  <SelectItem key={u.userId} value={u.userId}>
+                    {u.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
     </div>
   )

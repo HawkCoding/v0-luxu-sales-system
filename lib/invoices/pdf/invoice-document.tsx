@@ -12,7 +12,10 @@ import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
   AGENT_COMMISSION_COLOR,
   AGENT_COMMISSION_LABEL,
+  DISCOUNT_COLOR,
+  DISCOUNT_LABEL,
   formatAgentCommission,
+  formatDiscount,
 } from "@/lib/quotes/quote-presentation"
 import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
@@ -74,6 +77,9 @@ export interface InvoiceTotals {
   /** subtotalInclVat − agentCommission. Only rendered as its own row when agentCommission > 0;
    *  the deposit/final/outstanding figures below already derive from this, not from subtotalInclVat. */
   totalInclVat?: number
+  /** Client-facing Discount. Only rendered as its own row when discountVisible and discount > 0. */
+  discount?: number
+  discountVisible?: boolean
   depositPercentage?: number | null
   depositAmount?: number | null
   finalAmount: number
@@ -588,6 +594,10 @@ export function InvoiceDocument({
     registrationLine,
   ].filter(Boolean)
 
+  const hasAgentCommission = Boolean(totals.agentCommission)
+  const hasVisibleDiscount = (totals.discountVisible ?? true) && Boolean(totals.discount)
+  const showTotalInclVatRow = hasAgentCommission || hasVisibleDiscount
+
   return (
     <Document
       author="Luxus Travel & Tours"
@@ -695,29 +705,43 @@ export function InvoiceDocument({
                 {formatMoney(totals.subtotalInclVat, currency)}
               </Text>
             </View>
-            {totals.agentCommission ? (
-              <>
-                <View style={styles.totalsRow}>
-                  <Text
-                    style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
-                  >
-                    {AGENT_COMMISSION_LABEL}
-                  </Text>
-                  <Text
-                    style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
-                  >
-                    {formatAgentCommission(totals.agentCommission, (v) => formatMoney(v, currency))}
-                  </Text>
-                </View>
-                <View style={styles.totalsRow}>
-                  <Text style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700 }]}>
-                    Total incl. VAT
-                  </Text>
-                  <Text style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700 }]}>
-                    {formatMoney(totals.totalInclVat ?? totals.subtotalInclVat, currency)}
-                  </Text>
-                </View>
-              </>
+            {hasAgentCommission ? (
+              <View style={styles.totalsRow}>
+                <Text
+                  style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
+                >
+                  {AGENT_COMMISSION_LABEL}
+                </Text>
+                <Text
+                  style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
+                >
+                  {formatAgentCommission(totals.agentCommission ?? 0, (v) => formatMoney(v, currency))}
+                </Text>
+              </View>
+            ) : null}
+            {hasVisibleDiscount ? (
+              <View style={styles.totalsRow}>
+                <Text
+                  style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700, color: DISCOUNT_COLOR }]}
+                >
+                  {DISCOUNT_LABEL}
+                </Text>
+                <Text
+                  style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700, color: DISCOUNT_COLOR }]}
+                >
+                  {formatDiscount(totals.discount ?? 0, (v) => formatMoney(v, currency))}
+                </Text>
+              </View>
+            ) : null}
+            {showTotalInclVatRow ? (
+              <View style={styles.totalsRow}>
+                <Text style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700 }]}>
+                  Total incl. VAT
+                </Text>
+                <Text style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700 }]}>
+                  {formatMoney(totals.totalInclVat ?? totals.subtotalInclVat, currency)}
+                </Text>
+              </View>
             ) : null}
             <View style={styles.totalsDivider} />
             {totals.depositAmount !== null && totals.depositAmount !== undefined ? (

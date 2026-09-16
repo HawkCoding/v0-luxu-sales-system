@@ -10,8 +10,6 @@ import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import { primaryProductOf } from "@/lib/enquiry/primary-product"
-import type { SupplierKind } from "@/lib/types"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import {
   AGENT_COMMISSION_COLOR,
@@ -19,12 +17,17 @@ import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
   derivePerPersonRate,
+  DISCOUNT_COLOR,
+  DISCOUNT_LABEL,
   formatAgentCommission,
+  formatDiscount,
   formatFlightCapLine,
   formatJourneyRange,
   formatPaxLabel,
   formatTotalLabel,
+  TRAVEL_DATES_LABEL,
   VAT_INCLUSIVE_SUFFIX,
+  WARNING_TEXT_COLOR,
 } from "@/lib/quotes/quote-presentation"
 
 export interface QuoteSummaryInput {
@@ -43,19 +46,15 @@ export interface QuoteSummaryInput {
   /** Flat discount given to a booking agency (quotes.agent_commission). Zero/absent renders the
    *  pricing box exactly as it did before this field existed. */
   agentCommission?: number
+  /** Client-facing Discount (quotes.discount_amount). Only rendered when discountVisible is true. */
+  discount?: number
+  /** quotes.discount_visible — the total is net of the discount either way; this only controls
+   *  whether the red line prints. */
+  discountVisible?: boolean
   /** The quote's currency (quotes.currency). Every amount in the block is in it. */
   currency?: string
   /** Package itinerary; empty array omits the section entirely. */
   itineraryBlocks: VoucherServiceBlock[]
-  /** Kind of the booking's primary supplier, which names the trip on the summary line ("Journey",
-   *  "Stay", "Tour"). Omit when the caller has no booking: the label is then inferred from the
-   *  blocks, as it was before bookings.primary_supplier_id existed. */
-  primarySupplierKind?: SupplierKind | null
-  /** Settings-resolved override for that noun (see resolveProductCopy in settings-access.ts) --
-   *  wins over primarySupplierKind's own code-vocabulary noun when supplied, so a Kruger Shalati
-   *  quote can read "Getaway:" instead of "Stay:" without a code change. Omit to keep the
-   *  vocabulary noun, which is what every caller got before per-kind document copy existed. */
-  productBookingNoun?: string | null
   /** Heading for the itinerary section (document-text setting). */
   packageIncludesHeading?: string
   /** Heading for the exclusions section (document-text setting). */
@@ -87,18 +86,26 @@ const pricingBox =
 const perPersonLine = "margin:0 0 6px;color:#554c42;font-size:13px;line-height:19px;"
 const subtotalLine = "margin:0 0 4px;color:#554c42;font-size:13px;line-height:19px;"
 const agentCommissionLine = `margin:0 0 4px;color:${AGENT_COMMISSION_COLOR};font-size:13px;font-weight:700;line-height:19px;`
+const discountLine = `margin:0 0 4px;color:${DISCOUNT_COLOR};font-size:13px;font-weight:700;line-height:19px;`
 const pricingDivider = "margin:0 0 6px;border-bottom:1px solid #d8cdbc;"
 const totalLine = "margin:0;color:#172018;font-size:16px;font-weight:700;line-height:22px;"
 const sectionHeading =
   "margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid #d8cdbc;color:#172018;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;"
-const itineraryTitle = "margin:0 0 2px;color:#172018;font-size:13px;font-weight:700;line-height:19px;"
-const itineraryText = "margin:0 0 3px;color:#312b24;font-size:13px;line-height:19px;"
+// The itinerary reads a size smaller than the email's 13px body copy, its bullets smaller again --
+// mirrors the PDF's 9pt/8pt itinerary against its 10pt body.
+const itineraryTitle = "margin:0 0 2px;color:#172018;font-size:12px;font-weight:700;line-height:17px;"
+const itineraryText = "margin:0 0 3px;color:#312b24;font-size:12px;line-height:17px;"
 const itineraryDetail =
-  "margin:0 0 2px;padding-left:12px;color:#554c42;font-size:12px;line-height:17px;"
+  "margin:0 0 2px;padding-left:12px;color:#554c42;font-size:11px;line-height:16px;"
 // A subheading inside the bullet list: bold and undashed, with a little air above it so it reads
 // as a section break rather than another inclusion.
 const itineraryDetailHeading =
-  "margin:6px 0 2px;padding-left:12px;color:#312b24;font-size:12px;font-weight:700;line-height:17px;"
+  "margin:6px 0 2px;padding-left:12px;color:#312b24;font-size:11px;font-weight:700;line-height:16px;"
+// A caveat the client must not miss ("Train arrival times cannot be guaranteed").
+const itineraryDetailWarning = `margin:0 0 2px;padding-left:12px;color:${WARNING_TEXT_COLOR};font-size:11px;line-height:16px;`
+// A hotel's own description, in place of its facility bullets.
+const itineraryDescription =
+  "margin:0 0 2px;padding-left:12px;color:#554c42;font-size:11px;font-style:italic;line-height:16px;"
 const excludesItem = "margin:0 0 4px;color:#554c42;font-size:12px;line-height:18px;"
 
 const DEFAULT_INCLUDES_HEADING = "Your Package Includes"
@@ -108,25 +115,14 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const pax = { adults: input.adults, children: input.children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(input.journeyStart, input.journeyEnd)
-  // What the client is being sold, in a word: "Journey", "Stay", "Tour". Taken from the booking's
-  // own primary product when the caller knows it, so a stay with a transfer extra still reads
-  // "Stay" rather than being promoted to a journey by its airport pickup.
-  //
-  // The fallback -- every block is a hotel -- is what callers that hold no booking still use, and
-  // is exactly how this read before a primary product was recorded.
-  const journeyLabel =
-    input.productBookingNoun ??
-    (input.primarySupplierKind
-      ? primaryProductOf(input.primarySupplierKind).bookingNoun
-      : input.itineraryBlocks.length > 0 &&
-          input.itineraryBlocks.every((block) => block.serviceType === "hotel")
-        ? "Stay"
-        : "Journey")
   const agentCommission = input.agentCommission ?? 0
   const hasAgentCommission = agentCommission > 0
+  const discount = input.discount ?? 0
+  const hasVisibleDiscount = (input.discountVisible ?? true) && discount > 0
+  const showSubtotal = hasAgentCommission || hasVisibleDiscount
   // Per-person rate is always the gross rate — the discount is the agency's cut, not the
   // traveller's. Falls back to `total` when no subtotal is supplied (pre-existing callers).
-  const perPersonRate = derivePerPersonRate(hasAgentCommission ? (input.subtotal ?? input.total) : input.total, pax)
+  const perPersonRate = derivePerPersonRate(showSubtotal ? (input.subtotal ?? input.total) : input.total, pax)
 
   const metaLines = [
     ...(QUOTE_REFERENCE_ENABLED
@@ -138,7 +134,7 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     ...(QUOTE_VALIDITY_ENABLED
       ? [`<p style="${summaryLine}"><strong>Valid until:</strong> ${formatQuoteDate(input.validUntil)}</p>`]
       : []),
-    `<p style="${summaryLine}"><strong>${journeyLabel}:</strong> ${escapeHtml(journeyRange ?? "To be confirmed")}</p>`,
+    `<p style="${summaryLine}"><strong>${TRAVEL_DATES_LABEL}:</strong> ${escapeHtml(journeyRange ?? "To be confirmed")}</p>`,
   ]
   if (paxLabel) {
     metaLines.push(`<p style="${summaryLine}"><strong>Guests:</strong> ${escapeHtml(paxLabel)}</p>`)
@@ -154,9 +150,14 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     (perPersonRate !== null
       ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${money(perPersonRate)} per person</p>`
       : "") +
-    (hasAgentCommission
+    (showSubtotal
       ? `<p style="${subtotalLine}">Subtotal: ${money(input.subtotal ?? input.total)}</p>` +
-        `<p style="${agentCommissionLine}">${escapeHtml(AGENT_COMMISSION_LABEL)}: ${escapeHtml(formatAgentCommission(agentCommission, money))}</p>` +
+        (hasAgentCommission
+          ? `<p style="${agentCommissionLine}">${escapeHtml(AGENT_COMMISSION_LABEL)}: ${escapeHtml(formatAgentCommission(agentCommission, money))}</p>`
+          : "") +
+        (hasVisibleDiscount
+          ? `<p style="${discountLine}">${escapeHtml(DISCOUNT_LABEL)}: ${escapeHtml(formatDiscount(discount, money))}</p>`
+          : "") +
         `<div style="${pricingDivider}"></div>`
       : "") +
     `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${money(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>` +
@@ -177,16 +178,24 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
           ? formatDisplayDateLong(line.dateISO) || "Date to be confirmed"
           : "Date to be confirmed"
         const bullets = line.bullets
-          .map((bullet) =>
-            bullet.kind === "heading"
-              ? `<p style="${itineraryDetailHeading}">${escapeHtml(bullet.text)}</p>`
-              : `<p style="${itineraryDetail}">- ${escapeHtml(bullet.text)}</p>`,
-          )
+          .map((bullet) => {
+            if (bullet.kind === "heading") {
+              return `<p style="${itineraryDetailHeading}">${escapeHtml(bullet.text)}</p>`
+            }
+            if (bullet.kind === "warning") {
+              return `<p style="${itineraryDetailWarning}">- ${escapeHtml(bullet.text)}</p>`
+            }
+            return `<p style="${itineraryDetail}">- ${escapeHtml(bullet.text)}</p>`
+          })
           .join("")
+        const description = line.description
+          ? `<p style="${itineraryDescription}">${escapeHtml(line.description)}</p>`
+          : ""
         return (
           `<div style="margin:0 0 10px;">` +
           `<p style="${itineraryTitle}"><strong>${escapeHtml(date)}</strong></p>` +
           `<p style="${itineraryText}">${escapeHtml(line.text)}</p>` +
+          description +
           bullets +
           `</div>`
         )

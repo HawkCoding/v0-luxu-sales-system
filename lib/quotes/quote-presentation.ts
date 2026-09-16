@@ -26,10 +26,18 @@ export interface QuoteItineraryLine {
   text: string
   /**
    * Supplier inclusions rendered beneath the line: `item` bullets get a dash, `heading` bullets
-   * print bold and undashed so a long list can be broken into sections. See
+   * print bold and undashed, `warning` bullets print undashed in house red (e.g. "Train arrival
+   * times cannot be guaranteed") so a long list can be broken into sections or flag a caveat. See
    * @/lib/inclusions/bullet-lines.
    */
   bullets: BulletLine[]
+  /**
+   * A hotel's own client-facing description (suppliers.description), rendered as an italic
+   * paragraph in place of its facility bullets. Only ever set on a hotel's check-in line; null
+   * everywhere else, including when the hotel has no description of its own (bullets fall back to
+   * the facility list unchanged).
+   */
+  description?: string | null
 }
 
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/
@@ -95,6 +103,42 @@ export const AGENT_COMMISSION_COLOR = "#c0392b"
 
 /** "-R5,000.00" — a discount always reads as a subtraction, never as a bare positive figure. */
 export function formatAgentCommission(amount: number, format: (value: number) => string): string {
+  return `-${format(Math.abs(amount))}`
+}
+
+/**
+ * Client-facing label for the Discount (quotes.discount_amount) — typed the same way as
+ * Commission (percent/per_person/fixed) but, like Agent Commission, deducted at the total level
+ * and shown to the client as a red line when quotes.discount_visible is true.
+ */
+export const DISCOUNT_LABEL = "Discount"
+
+/** Distinct from AGENT_COMMISSION_COLOR so the two red lines read as different things. */
+export const DISCOUNT_COLOR = "#d64545"
+
+/** House red for a client-facing caveat bullet (e.g. "Train arrival times cannot be guaranteed").
+ *  Reuses AGENT_COMMISSION_COLOR's shade rather than inventing a third red. */
+export const WARNING_TEXT_COLOR = "#c0392b"
+
+/** "Travel Dates" — replaces the per-product noun ("Journey"/"Stay"/"Tour", or a Settings
+ *  override) on the quote PDF's and quote email's date line. The per-product noun is still used
+ *  elsewhere (e.g. the quote-summary's own product label was never anything but this line, so
+ *  there is nothing left for it to drive). */
+export const TRAVEL_DATES_LABEL = "Travel Dates"
+
+/** "+27 81 580 6471" / "adams@example.com" as separate lines under "Prepared for" — trimmed,
+ *  blank fields dropped, phone before email. `[]` when neither is set. */
+export function formatPreparedForContact(contact: {
+  phone?: string | null
+  email?: string | null
+}): string[] {
+  return [contact.phone, contact.email]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+}
+
+/** "-R500.00" — same subtraction convention as formatAgentCommission. */
+export function formatDiscount(amount: number, format: (value: number) => string): string {
   return `-${format(Math.abs(amount))}`
 }
 
@@ -235,6 +279,56 @@ export function formatTimeOfDay(value: string | null | undefined): string | null
   return `${hours}h${minutes.slice(0, 2)}`
 }
 
+/** "12:00" minus 120 → "10h00". Clamps at 00:00 rather than wrapping into the previous day --
+ *  an offset that would cross midnight is a data problem for Settings to catch, not something
+ *  this document should silently paper over with a wrong-looking time. Returns null for an
+ *  unparseable HH:MM (mirrors formatTimeOfDay). Input is already-formatted "HH:MM", not the
+ *  "14h00" house style -- callers pass the raw serviceData.startTime. */
+function subtractMinutes(value: string | null | undefined, minutes: number): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  const [hoursRaw, minutesRaw] = trimmed.split(":")
+  const hours = Number(hoursRaw)
+  const mins = Number(minutesRaw)
+  if (!Number.isFinite(hours) || !Number.isFinite(mins)) return null
+  const total = Math.max(0, hours * 60 + mins - minutes)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${pad(Math.floor(total / 60))}h${pad(total % 60)}`
+}
+
+/**
+ * A train leg's check-in/departure bullets, e.g. "Check in at 10h00" then "Departure time:
+ * 12h00" -- shown as two leading bullets ahead of the leg's own inclusions instead of the
+ * sentence's old "| Departs at 12h00" suffix (see describeBlock's "train" case).
+ *
+ * `rawStartTime` is the leg's raw HH:MM (`serviceData.startTime`, before `formatTimeOfDay`) --
+ * needed unformatted here because the check-in time is computed by subtracting minutes from it.
+ *
+ * `offsetMinutes` is the supplier's own suppliers.check_in_offset_minutes (Blue Train and Rovos
+ * Rail can differ): 0 means the operator doesn't publish a check-in time at all, so the quote
+ * falls back to today's single "Departs at …" wording instead of inventing a check-in line.
+ * `undefined`/`null` -- a block built before the column existed -- defaults to 120 (two hours),
+ * the historic assumption baked into the reviewer's markup.
+ *
+ * `[]` (no bullets, sentence keeps its suffix) whenever there's no start time, no usable
+ * check-in time, or the offset is explicitly 0.
+ */
+function buildTrainScheduleBullets(
+  rawStartTime: string | null | undefined,
+  offsetMinutes: number | null | undefined,
+): BulletLine[] {
+  const departure = formatTimeOfDay(rawStartTime)
+  if (!departure) return []
+  const effectiveOffset = offsetMinutes ?? 120
+  if (effectiveOffset <= 0) return []
+  const checkIn = subtractMinutes(rawStartTime, effectiveOffset)
+  if (!checkIn) return []
+  return [
+    { kind: "item", text: `Check in at ${checkIn}` },
+    { kind: "item", text: `Departure time: ${departure}` },
+  ]
+}
+
 /** "Pretoria → Cape Town" → "Pretoria to Cape Town" — the flowing prose style used in the
  * itinerary line. The base-14 Helvetica font the PDF renders with has no glyph for the arrow, so
  * it must never reach this sentence as-is. */
@@ -286,17 +380,10 @@ function describeBlock(block: VoucherServiceBlock): string {
         ],
         [
           start ? `Check in from ${start}` : null,
-          // The stay length above is always the full stay; a gifted first night is a callout, not
-          // a shorter itinerary. A fully comped stay keeps the older, blunter wording. A 1-night
-          // stay has no second, charged night to distinguish "first" from, so it collapses to the
-          // same blunter wording rather than saying "FIRST NIGHT" of a stay that has only one.
-          d.isComplimentary
-            ? "COMPLIMENTARY"
-            : d.isFirstNightComplimentary
-              ? d.nights === 1
-                ? "COMPLIMENTARY"
-                : "FIRST NIGHT COMPLIMENTARY"
-              : null,
+          // A comp is still tracked on the block (isComplimentary/isFirstNightComplimentary drive
+          // the voucher's callout and the invoice's "(first night complimentary)" line item) but is
+          // never spelled out to the client on the quote itself -- the price already reads R0/less,
+          // so the word added nothing a client needed and the reviewer struck it from every markup.
         ],
       )
     }
@@ -311,6 +398,11 @@ function describeBlock(block: VoucherServiceBlock): string {
       // withLeadingThe already skips a supplier name that types its own article ("The Blue
       // Train") -- reused here rather than a bare template literal, which produced "the The Blue
       // Train" on every quote (F-P3-8).
+      //
+      // The departure time itself only trails the sentence when there's no separate check-in
+      // bullet ahead of it (checkInOffsetMinutes 0, or no offset known) -- see
+      // buildTrainScheduleBullets, which owns the "Check in at … / Departure time: …" wording.
+      const scheduleBullets = buildTrainScheduleBullets(d.startTime, d.checkInOffsetMinutes)
       return joinSentence(
         [
           `${onBoard} ${supplier ? withLeadingThe(supplier) : "the train"}`,
@@ -318,7 +410,7 @@ function describeBlock(block: VoucherServiceBlock): string {
           "on an all-inclusive basis",
           d.route ? `— ${toProseRoute(d.route)}` : null,
         ],
-        [start ? `Departs at ${start}` : null],
+        [scheduleBullets.length === 0 && start ? `Departs at ${start}` : null],
       )
     }
     case "transfer": {
@@ -329,9 +421,11 @@ function describeBlock(block: VoucherServiceBlock): string {
           : d.route
             ? `— ${d.route}`
             : null
+      // isComplimentary still drives the voucher's callout -- never spelled out on the quote
+      // itself, for the same reason as the hotel case above.
       return joinSentence(
         ["Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
-        [start ? `at ${start}` : null, d.isComplimentary ? "COMPLIMENTARY" : null],
+        [start ? `at ${start}` : null],
         " ",
       )
     }
@@ -400,7 +494,7 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
       text: end
         ? `Arrival${where ? ` at ${where} station` : ""} at ${end}`
         : `Arrival${where ? ` at ${where} station` : ""}`,
-      bullets: [{ kind: "item", text: "Train arrival times cannot be guaranteed" }],
+      bullets: [{ kind: "warning", text: "Train arrival times cannot be guaranteed" }],
     }
   }
   if (block.serviceType === "airline") {
@@ -439,19 +533,35 @@ export function buildQuoteItineraryLines(
 
   blocks.forEach((block) => {
     const d = block.serviceData
-    const bullets = parseBulletLines(d.inclusions)
+    // A hotel's own description (suppliers.description, "External -- visible to clients")
+    // replaces its facility bullets outright when the supplier has one on file; the facility
+    // list is the fallback for a hotel that hasn't written one yet, not a second thing shown
+    // alongside it.
+    const hotelDescription =
+      block.serviceType === "hotel" ? block.contactDetails.description?.trim() || null : null
+    const bullets = hotelDescription ? [] : parseBulletLines(d.inclusions)
     // What the booked itinerary covers, straight off the supplier's itinerary — leads the
     // supplier's standing inclusions because it is specific to this day.
     if (block.serviceType === "tour" && d.itineraryDescription?.trim()) {
       bullets.unshift({ kind: "item", text: d.itineraryDescription.trim() })
     }
-    if (d.notes?.trim()) bullets.push({ kind: "item", text: d.notes.trim() })
+    if (block.serviceType === "train") {
+      bullets.unshift(...buildTrainScheduleBullets(d.startTime, d.checkInOffsetMinutes))
+    }
+    // Special requests / allergies (booking_services.notes) are for the operator, not the
+    // client -- they belong on the confirmation/voucher (which reads serviceData.notes
+    // separately) and never on a document the client themselves reads.
     if (flightCapBullet && !flightCapAttached && block.serviceType === "airline") {
       bullets.push({ kind: "item", text: flightCapBullet })
       flightCapAttached = true
     }
 
-    lines.push({ dateISO: d.departureDate ?? null, text: describeBlock(block), bullets })
+    lines.push({
+      dateISO: d.departureDate ?? null,
+      text: describeBlock(block),
+      bullets,
+      ...(hotelDescription ? { description: hotelDescription } : {}),
+    })
 
     const endLine = describeEndLine(block)
     if (endLine) lines.push(endLine)
@@ -473,7 +583,7 @@ export function buildQuoteItineraryLines(
   // correctly; collapsing them here is a backstop against ever printing the same dated line twice.
   const seen = new Set<string>()
   return sorted.filter((line) => {
-    const key = `${line.dateISO ?? ""} ${line.text} ${line.bullets.map((b) => `${b.kind}:${b.text}`).join("")}`
+    const key = `${line.dateISO ?? ""} ${line.text} ${line.description ?? ""} ${line.bullets.map((b) => `${b.kind}:${b.text}`).join("")}`
     if (seen.has(key)) return false
     seen.add(key)
     return true

@@ -2,6 +2,7 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { signatureBrandTextFieldsSchema } from "@/lib/email/signature-brands"
+import { sanitizeSignatureHtml } from "@/lib/email/signature-html"
 import { SIGNATURE_BRAND_COLUMNS } from "@/lib/supabase/columns"
 
 const ADMIN_ROLES = ["admin", "manager"]
@@ -38,15 +39,29 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   if (!existing) return jsonError("Signature brand not found", 404)
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  const { name, companyLine, registrationLine, tradingHours, divisionsLine, confidentiality, officeAddress, enabled, sortOrder } =
-    parsed.data
+  const {
+    name,
+    companyLine,
+    registrationLine,
+    tradingHours,
+    divisionsLine,
+    confidentiality,
+    officeAddress,
+    senderLayout,
+    enabled,
+    sortOrder,
+  } = parsed.data
+  // Rich-text overrides are sanitized before storage; null explicitly clears an override back to "inherit".
+  const sanitizeOrNull = (value: string | null | undefined) =>
+    value === null ? null : value !== undefined ? sanitizeSignatureHtml(value) : undefined
   if (name !== undefined) updates.name = name
-  if (companyLine !== undefined) updates.company_line = companyLine
-  if (registrationLine !== undefined) updates.registration_line = registrationLine
-  if (tradingHours !== undefined) updates.trading_hours = tradingHours
-  if (divisionsLine !== undefined) updates.divisions_line = divisionsLine
-  if (confidentiality !== undefined) updates.confidentiality = confidentiality
-  if (officeAddress !== undefined) updates.office_address = officeAddress
+  if (companyLine !== undefined) updates.company_line = sanitizeOrNull(companyLine)
+  if (registrationLine !== undefined) updates.registration_line = sanitizeOrNull(registrationLine)
+  if (tradingHours !== undefined) updates.trading_hours = sanitizeOrNull(tradingHours)
+  if (divisionsLine !== undefined) updates.divisions_line = sanitizeOrNull(divisionsLine)
+  if (confidentiality !== undefined) updates.confidentiality = sanitizeOrNull(confidentiality)
+  if (officeAddress !== undefined) updates.office_address = sanitizeOrNull(officeAddress)
+  if (senderLayout !== undefined) updates.sender_layout = sanitizeOrNull(senderLayout)
   if (enabled !== undefined) updates.enabled = enabled
   if (sortOrder !== undefined) updates.sort_order = sortOrder
 
@@ -86,6 +101,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     divisionsLine: data.divisions_line,
     confidentiality: data.confidentiality,
     officeAddress: data.office_address,
+    senderLayout: data.sender_layout,
   })
 }
 

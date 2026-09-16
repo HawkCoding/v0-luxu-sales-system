@@ -7,14 +7,17 @@ export function roundMoney(value: number): number {
 /**
  * `agentCommission` is the positive magnitude of a discount given to a booking agency
  * (quotes.agent_commission) — unlike commission_bonus/Rounding, it is a total-level
- * adjustment shown to the client, not folded into a line item. Defaults to 0 so every
- * pre-existing call site keeps total === subtotal.
+ * adjustment shown to the client, not folded into a line item. `discountAmount`
+ * (quotes.discount_amount) is a second, independent total-level deduction — a
+ * client-facing Discount, subtracted at the same step rather than affecting what
+ * Commission was calculated on. Both default to 0 so every pre-existing call site keeps
+ * total === subtotal.
  */
-export function calculateQuoteTotals(lineItems: QuoteLineItem[], agentCommission = 0) {
+export function calculateQuoteTotals(lineItems: QuoteLineItem[], agentCommission = 0, discountAmount = 0) {
   const subtotal = roundMoney(lineItems.reduce((sum, item) => sum + item.total, 0))
-  // Never let the discount drive the total negative — the API clamps the input too, this is
+  // Never let the deductions drive the total negative — the API clamps the input too, this is
   // just the backstop.
-  const total = roundMoney(Math.max(0, subtotal - Math.max(0, agentCommission)))
+  const total = roundMoney(Math.max(0, subtotal - Math.max(0, agentCommission) - Math.max(0, discountAmount)))
 
   return { subtotal, total }
 }

@@ -256,6 +256,9 @@ export interface SupplierFormState {
   trainOnlyNote: string
   /** Train operators only: how much suite detail the quote itinerary sentence states. */
   quoteSuiteDetail: "type_only" | "full"
+  /** Train operators only: minutes before departure the quote itinerary states check-in. 0 means
+   * the operator publishes no check-in time. */
+  checkInOffsetMinutes: number
   /** Optional per-supplier word order for the full suite/room phrase -- see
    * lib/templates/suite-phrase-pattern.ts. Empty string = default grammar. */
   suitePhrasePattern: string
@@ -501,6 +504,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     longJourneyMinDays: supplier.longJourneyMinDays ?? null,
     trainOnlyNote: supplier.trainOnlyNote ?? "",
     quoteSuiteDetail: supplier.quoteSuiteDetail ?? "type_only",
+    checkInOffsetMinutes: supplier.checkInOffsetMinutes ?? 120,
     suitePhrasePattern: supplier.suitePhrasePattern ?? "",
     sellsStandalone: supplier.sellsStandalone ?? false,
     emailMatchPhrases: supplier.emailMatchPhrases ?? "",
@@ -4305,6 +4309,7 @@ export function SupplierDetailView({
           longJourneyMinDays: form.kind === "train_operator" ? form.longJourneyMinDays : null,
           trainOnlyNote: form.kind === "train_operator" ? form.trainOnlyNote.trim() || null : null,
           quoteSuiteDetail: form.kind === "train_operator" ? form.quoteSuiteDetail : "type_only",
+          checkInOffsetMinutes: form.kind === "train_operator" ? form.checkInOffsetMinutes : 120,
           suitePhrasePattern: form.suitePhrasePattern.trim() || null,
           sellsStandalone: form.sellsStandalone,
           emailMatchPhrases: form.emailMatchPhrases.trim() || null,
@@ -5554,6 +5559,49 @@ export function SupplierDetailView({
                       </div>
                       <Badge variant="outline">
                         {supplier.quoteSuiteDetail === "full" ? "Full configuration" : "Suite type only"}
+                      </Badge>
+                    </div>
+                  )
+                ) : null}
+
+                {(isEditing ? form.kind : supplier.kind) === "train_operator" ? (
+                  isEditing ? (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-check-in-offset">Check-in before departure (minutes)</Label>
+                        <NumericInput
+                          id="supplier-check-in-offset"
+                          min="0"
+                          max="720"
+                          step="1"
+                          integer
+                          value={form.checkInOffsetMinutes}
+                          onValueChange={(value) =>
+                            updateField("checkInOffsetMinutes", Math.max(0, Math.min(720, value ?? 0)))
+                          }
+                        />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        How long before departure the quote itinerary states check-in, e.g.
+                        &quot;Check in at 10h00&quot; then &quot;Departure time: 12h00&quot; for a
+                        120-minute offset. 0 hides the check-in line and prints only the departure
+                        time.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          Check-in before departure
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Shown on the quote itinerary ahead of the departure time.
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {supplier.checkInOffsetMinutes > 0
+                          ? `${supplier.checkInOffsetMinutes} min`
+                          : "Not shown"}
                       </Badge>
                     </div>
                   )

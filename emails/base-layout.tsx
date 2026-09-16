@@ -47,13 +47,21 @@ export function BaseLayout({
   // <Body> alone never reaches the template content's <p> tags. The head rule
   // below targets those elements directly; both values come from an allowlist
   // (lib/email/appearance.ts) and are safe to interpolate here.
+  //
+  // font-size is deliberately scoped to block/inline-block containers only —
+  // not span/a — so a per-section size the salesperson sets on a <span> (see
+  // the template editor's font-size toolbar control) isn't immediately
+  // overridden by this rule; span/a inherit the container's size instead.
   const contentFontCss = `
 .${CONTENT_CLASS_NAME}, .${CONTENT_CLASS_NAME} p, .${CONTENT_CLASS_NAME} li,
 .${CONTENT_CLASS_NAME} td, .${CONTENT_CLASS_NAME} a, .${CONTENT_CLASS_NAME} span,
 .${CONTENT_CLASS_NAME} div {
   font-family: ${fontFamily};
-  font-size: ${fontSize};
   line-height: 1.4;
+}
+.${CONTENT_CLASS_NAME}, .${CONTENT_CLASS_NAME} p, .${CONTENT_CLASS_NAME} li,
+.${CONTENT_CLASS_NAME} td, .${CONTENT_CLASS_NAME} div {
+  font-size: ${fontSize};
 }
 .${CONTENT_CLASS_NAME} p {
   margin: 0 0 8px;

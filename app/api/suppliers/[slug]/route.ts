@@ -997,6 +997,8 @@ export async function PATCH(
     long_journey_min_days: parsed.kind === "train_operator" ? parsed.longJourneyMinDays ?? null : null,
     train_only_note: parsed.kind === "train_operator" ? normalizeOptionalText(parsed.trainOnlyNote) : null,
     quote_suite_detail: parsed.kind === "train_operator" ? parsed.quoteSuiteDetail ?? "type_only" : "type_only",
+    check_in_offset_minutes:
+      parsed.kind === "train_operator" ? parsed.checkInOffsetMinutes ?? 120 : 120,
     // Every kind may word its full suite/room phrase, not just trains -- see
     // lib/templates/suite-phrase-pattern.ts.
     suite_phrase_pattern: normalizeOptionalText(parsed.suitePhrasePattern),

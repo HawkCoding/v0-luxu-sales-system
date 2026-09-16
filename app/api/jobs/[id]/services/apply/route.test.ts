@@ -146,7 +146,7 @@ function withUnconfiguredHotelLeg(detail: PackageDetail): PackageDetail {
   }
 }
 
-function createSupabaseMock(bookingExists = true) {
+function createSupabaseMock(bookingExists = true, commissionBonus = 0) {
   return {
     from: vi.fn((table: string) => {
       if (table === "bookings") {
@@ -206,7 +206,7 @@ function createSupabaseMock(bookingExists = true) {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { commission_bonus: 0, currency: "ZAR" },
+                data: { commission_bonus: commissionBonus, currency: "ZAR" },
                 error: null,
               })),
             })),
@@ -256,6 +256,38 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     })
     const response = await postApply({})
     expect(response.status).toBe(401)
+  })
+
+  // LTT-2026-0017: Rounding used to allow a negative amount, which re-pricing folds into the
+  // Commission line -- then rejected by PATCH /api/quotes/[id]'s nonnegative check with an
+  // opaque "Invalid request payload (lineItems)". Caught here instead, before pricing even runs.
+  it("blocks re-pricing when the quote carries a legacy negative Rounding", async () => {
+    helperMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase: createSupabaseMock(true, -46320),
+        user: { id: "abababab-abab-4aba-8aba-abababababab", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane Doe", name: "Jane", surname: "Doe", email: "u@example.com" },
+      },
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_SERVICE_ID,
+          selected: true,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toContain("negative Rounding")
+    expect(payload.error).toContain("Quotes tab")
   })
 
   it("returns 404 when the booking does not exist", async () => {
@@ -375,7 +407,7 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(400)
-    expect(payload.error).toBe("Invalid request payload")
+    expect(payload.error).toContain("Travel Date")
     expect(payload.details).toBeDefined()
   })
 

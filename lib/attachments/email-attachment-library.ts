@@ -15,7 +15,6 @@ export const EMAIL_ATTACHMENT_KINDS = [
   { value: "payment_received", label: "Payment confirmation" },
   { value: "payment_reminder", label: "Payment reminder" },
   { value: "voucher", label: "Voucher / final documents" },
-  { value: "itinerary", label: "Itinerary" },
 ] as const
 
 export type EmailAttachmentKind = (typeof EMAIL_ATTACHMENT_KINDS)[number]["value"]

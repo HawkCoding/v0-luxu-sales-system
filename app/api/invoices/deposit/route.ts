@@ -14,6 +14,7 @@ import { getPaymentMethod } from "@/lib/payment-methods"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
+import { loadCountryAliasMap, loadCountryCodeMap, resolveCountryCode } from "@/lib/countries"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getInvoiceStatusOptions } from "@/lib/settings-access"
 
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
 
   const { data: travellers } = await supabase
     .from("travellers")
-    .select("prefix, first_name, last_name, id_passport")
+    .select("prefix, first_name, last_name, id_passport, date_of_birth, residence")
     .eq("booking_id", parsed.data.jobId)
     .order("sort_order")
 
@@ -275,9 +276,15 @@ export async function POST(req: Request) {
   }
 
   const banking = method.banking
+  const [countryAliasMap, countryCodeMap] = await Promise.all([
+    loadCountryAliasMap(supabase).catch(() => new Map<string, string>()),
+    loadCountryCodeMap(supabase).catch(() => new Map<string, string>()),
+  ])
   const guests = (travellers ?? [])
     .map((traveller) => ({
       name: [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim(),
+      dateOfBirth: traveller.date_of_birth,
+      countryCode: resolveCountryCode(traveller.residence, countryAliasMap, countryCodeMap),
       idNumber: traveller.id_passport,
     }))
     .filter((guest) => guest.name)

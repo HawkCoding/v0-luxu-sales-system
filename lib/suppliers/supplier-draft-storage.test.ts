@@ -34,6 +34,7 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     longJourneyMinDays: null,
     trainOnlyNote: "",
     quoteSuiteDetail: "type_only",
+    checkInOffsetMinutes: 120,
     suitePhrasePattern: "",
     sellsStandalone: true,
     emailMatchPhrases: "",
@@ -94,6 +95,7 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "stationAddresses",
         "streetAddress",
         "sellsStandalone",
+        "checkInOffsetMinutes",
         "emailMatchPhrases",
         "suitePhrasePattern",
         "suiteTypes",
@@ -102,7 +104,7 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(9)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(10)
   })
 })
 

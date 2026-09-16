@@ -61,7 +61,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, total, agent_commission, currency, created_at, journey_class, rate_audience, show_train_only_note, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, journey_class, rate_audience, show_train_only_note, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -192,9 +192,10 @@ export async function POST(req: Request, { params }: RouteParams) {
     total: quote.total,
     subtotal: quote.subtotal,
     agentCommission: Number(quote.agent_commission ?? 0),
+    discount: Number(quote.discount_amount ?? 0),
+    discountVisible: quote.discount_visible ?? true,
     currency: quote.currency,
     itineraryBlocks,
-    primarySupplierKind,
     packageIncludesHeading: documentText.quote_doc_includes_heading,
     packageExcludesHeading: documentText.quote_doc_excludes_heading,
     packageExcludesDefault: documentText.quote_doc_excludes_default,

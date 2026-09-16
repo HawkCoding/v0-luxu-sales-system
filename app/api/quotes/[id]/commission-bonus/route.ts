@@ -14,8 +14,12 @@ const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
 const MAX_COMMISSION_BONUS = 1_000_000
 
+// Rounding used to allow a negative amount (a discount, before the dedicated discount feature
+// existed). Re-pricing folds it into the Commission line, and PATCH /api/quotes/[id] rejects any
+// negative line -- so a negative bonus silently broke Build Booking's Replace & apply. New saves
+// are positive-only; 0 is still allowed so an existing negative value can be cleared.
 const patchSchema = z.object({
-  bonus: z.number().min(-MAX_COMMISSION_BONUS).max(MAX_COMMISSION_BONUS),
+  bonus: z.number().min(0, "Rounding can't be negative — use a discount instead.").max(MAX_COMMISSION_BONUS),
   ...versionTokenShape,
 })
 
@@ -45,7 +49,12 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   }
 
   const result = patchSchema.safeParse(raw)
-  if (!result.success) return jsonZodError(result.error)
+  if (!result.success) {
+    // `bonus`'s schema carries its own hand-written message (see patchSchema above) -- surface it
+    // directly instead of the generic "Invalid request body" the caller could do nothing with.
+    const message = result.error.issues[0]?.message ?? "Invalid request payload"
+    return jsonZodError(result.error, message)
+  }
   const parsed = result.data
 
   // The bonus is re-folded into a rebuilt line-item set, so the same stale-write hazard as
@@ -55,7 +64,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, booking_id, status, subtotal, total, commission_bonus, agent_commission, updated_at")
+    .select(
+      "id, booking_id, status, subtotal, total, commission_bonus, agent_commission, discount_amount, updated_at",
+    )
     .eq("id", id)
     .single()
 
@@ -95,9 +106,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const bonus = parsed.bonus
   const nextLineItems = applyCommissionBonus(currentLineItems, bonus)
-  // Rounding is folded into the line items; Agent Commission is a separate total-level
-  // adjustment that must survive untouched across this save.
-  const { subtotal, total } = calculateQuoteTotals(nextLineItems, Number(quote.agent_commission ?? 0))
+  // Rounding is folded into the line items; Agent Commission and Discount are separate
+  // total-level adjustments that must survive untouched across this save.
+  const { subtotal, total } = calculateQuoteTotals(
+    nextLineItems,
+    Number(quote.agent_commission ?? 0),
+    Number(quote.discount_amount ?? 0),
+  )
 
   const rows = nextLineItems.map((li, idx) => ({
     description: li.description,

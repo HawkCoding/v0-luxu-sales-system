@@ -90,4 +90,34 @@ describe("calculateInvoiceBalance", () => {
     )
     expect(withoutCommission.agentCommission).toBe(0)
   })
+
+  it("carries the discount through, defaulting to zero/visible when unset", async () => {
+    const withDiscount = await calculateInvoiceBalance(
+      createSupabaseMock(
+        {
+          id: "quote-1",
+          subtotal: 1400,
+          total: 1200,
+          discount_amount: 200,
+          discount_visible: false,
+          status: "accepted",
+          created_at: "2026-05-01T00:00:00.000Z",
+        },
+        [],
+      ) as never,
+      "booking-1",
+    )
+    expect(withDiscount.discount).toBe(200)
+    expect(withDiscount.discountVisible).toBe(false)
+
+    const withoutDiscount = await calculateInvoiceBalance(
+      createSupabaseMock(
+        { id: "quote-1", subtotal: 1200, total: 1200, status: "accepted", created_at: "2026-05-01T00:00:00.000Z" },
+        [],
+      ) as never,
+      "booking-1",
+    )
+    expect(withoutDiscount.discount).toBe(0)
+    expect(withoutDiscount.discountVisible).toBe(true)
+  })
 })

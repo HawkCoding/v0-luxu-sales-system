@@ -1066,7 +1066,6 @@ export default function JobDetailPage() {
             bookingId={id}
             reservationFormReceivedAt={job.reservationFormReceivedAt ?? null}
             mutateJob={mutate}
-            additionalServicesDetails={enquiry?.additionalServicesDetails}
             customer={customer ?? null}
             stage={currentStage}
           />

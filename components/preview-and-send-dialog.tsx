@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
+import { useEmailAppearanceSettings } from "@/lib/use-data"
 import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
 import { SignaturePicker } from "@/components/signature-picker"
 import { PaymentMethodPicker } from "@/components/payment-method-picker"
@@ -112,6 +113,7 @@ export function PreviewAndSendDialog({
   const [sending, setSending] = useState(false)
   const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const optimisticSend = useOptimisticSend()
+  const { data: emailAppearance } = useEmailAppearanceSettings()
 
   const canEditBody = initialContent !== null
   const isDirty =
@@ -305,6 +307,7 @@ export function PreviewAndSendDialog({
                     value={content ?? ""}
                     onChange={setContent}
                     disabled={sending}
+                    baseFontSize={emailAppearance?.email_font_size}
                   />
                   <p className="text-xs text-muted-foreground">
                     Edits apply to this email only. Change the default wording on the Templates page.

@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { isRasterAssetUrl } from "@/lib/assets/raster-url"
+import { isBlankSignatureHtml } from "@/lib/email/signature-html"
 import type { EmailSignatureSettings } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
 
@@ -29,6 +30,8 @@ export interface SignatureBrand {
   divisionsLine: string | null
   confidentiality: string | null
   officeAddress: string | null
+  /** Sanitized inline HTML for the sender name/contact block; never null — falls back through the shared default to the built-in layout (see lib/email/sender-layout.ts). */
+  senderLayout: string
 }
 
 export const signatureBadgeSchema = z.object({
@@ -41,12 +44,13 @@ export const signatureBadgeSchema = z.object({
 
 export const signatureBrandTextFieldsSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
-  companyLine: z.string().trim().max(500).nullable().optional(),
-  registrationLine: z.string().trim().max(200).nullable().optional(),
-  tradingHours: z.string().trim().max(200).nullable().optional(),
-  divisionsLine: z.string().trim().max(200).nullable().optional(),
-  confidentiality: z.string().trim().max(1000).nullable().optional(),
-  officeAddress: z.string().trim().max(300).nullable().optional(),
+  companyLine: z.string().trim().max(2000).nullable().optional(),
+  registrationLine: z.string().trim().max(800).nullable().optional(),
+  tradingHours: z.string().trim().max(800).nullable().optional(),
+  divisionsLine: z.string().trim().max(800).nullable().optional(),
+  confidentiality: z.string().trim().max(4000).nullable().optional(),
+  officeAddress: z.string().trim().max(1200).nullable().optional(),
+  senderLayout: z.string().trim().max(2000).nullable().optional(),
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
 })
@@ -76,6 +80,16 @@ function parseBadges(raw: unknown): SignatureBadge[] {
  * banner and drops unsafe badges so the react-email component never has to
  * guess about asset safety.
  */
+/**
+ * Row -> inherited-or-overridden field. Every text override is sanitized
+ * inline HTML (see lib/email/signature-html.ts), so "blank" is checked with
+ * isBlankSignatureHtml rather than a plain trim — a rich-text field cleared
+ * in the editor can still serialize to a non-empty `<p></p>`.
+ */
+function overrideOrDefault(override: string | null, fallback: string): string | null {
+  return !isBlankSignatureHtml(override) ? (override as string) : fallback || null
+}
+
 export function toSignatureBrand(row: SignatureBrandRow, defaults: EmailSignatureSettings): SignatureBrand {
   return {
     id: row.id,
@@ -85,12 +99,13 @@ export function toSignatureBrand(row: SignatureBrandRow, defaults: EmailSignatur
     bannerWidth: row.banner_width,
     bannerHeight: row.banner_height,
     badges: parseBadges(row.badges),
-    companyLine: row.company_line?.trim() || defaults.signature_company_line || null,
-    registrationLine: row.registration_line?.trim() || defaults.signature_registration_line || null,
-    tradingHours: row.trading_hours?.trim() || defaults.signature_trading_hours || null,
-    divisionsLine: row.divisions_line?.trim() || defaults.signature_divisions_line || null,
-    confidentiality: row.confidentiality?.trim() || defaults.signature_confidentiality || null,
-    officeAddress: row.office_address?.trim() || defaults.signature_office_address || null,
+    companyLine: overrideOrDefault(row.company_line, defaults.signature_company_line),
+    registrationLine: overrideOrDefault(row.registration_line, defaults.signature_registration_line),
+    tradingHours: overrideOrDefault(row.trading_hours, defaults.signature_trading_hours),
+    divisionsLine: overrideOrDefault(row.divisions_line, defaults.signature_divisions_line),
+    confidentiality: overrideOrDefault(row.confidentiality, defaults.signature_confidentiality),
+    officeAddress: overrideOrDefault(row.office_address, defaults.signature_office_address),
+    senderLayout: overrideOrDefault(row.sender_layout, defaults.signature_sender_layout) ?? "",
   }
 }
 

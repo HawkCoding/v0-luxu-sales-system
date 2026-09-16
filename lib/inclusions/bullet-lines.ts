@@ -8,7 +8,7 @@
 /** A leading run of `#` plus the spaces after it — the subheading marker. */
 const HEADING_MARKER = /^#+\s*/
 
-export type BulletLineKind = "heading" | "item"
+export type BulletLineKind = "heading" | "item" | "warning"
 
 export interface BulletLine {
   kind: BulletLineKind

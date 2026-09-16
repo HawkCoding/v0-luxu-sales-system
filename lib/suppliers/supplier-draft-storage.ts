@@ -13,7 +13,7 @@ import type {
  * the supplier page to the root error boundary in production. The version stamp drops those drafts
  * instead of restoring them; the normalizer below is the second line of defence.
  */
-export const SUPPLIER_DRAFT_SCHEMA_VERSION = 9
+export const SUPPLIER_DRAFT_SCHEMA_VERSION = 10
 
 export interface SupplierDraftEnvelope {
   version: number
@@ -81,6 +81,10 @@ export function normalizeSupplierDraft(
     defaultTimeEnd: toText(draft.defaultTimeEnd, fallback.defaultTimeEnd),
     inclusions: toText(draft.inclusions, fallback.inclusions),
     exclusions: toText(draft.exclusions, fallback.exclusions),
+    checkInOffsetMinutes:
+      typeof draft.checkInOffsetMinutes === "number" && Number.isFinite(draft.checkInOffsetMinutes)
+        ? draft.checkInOffsetMinutes
+        : fallback.checkInOffsetMinutes,
   }
 }
 

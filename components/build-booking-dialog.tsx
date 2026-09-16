@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Boxes, Check, ChevronDown, ChevronUp, Percent, TriangleAlert } from "lucide-react"
+import { Boxes, Check, ChevronDown, ChevronUp, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
-import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
+import type { BookingTransportRequest, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
@@ -34,7 +34,6 @@ import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { appendFieldDetails } from "@/lib/format-error-details"
-import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
 import { CommissionBadge } from "@/components/quotes/commission-badge"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
@@ -67,7 +66,6 @@ import {
   toTransferAnchorContext,
   toTransportRequestsPut,
   validateConfigureState,
-  type ApplyCommissionOverride,
   type ApplyLegState,
   type HotelAnchorContext,
   type SavedPackageState,
@@ -297,8 +295,6 @@ interface BuildBookingResponse {
 
 type Step = "services" | "configure" | "confirm"
 
-const EMPTY_COMMISSION: CommissionControlValue = { type: null, value: null }
-
 /**
  * The slice of this dialog's state that is worth recovering after a refresh, crash, or accidental
  * dismissal. Everything else (`packageDetail`, `previewLineItems`, `incompleteLegs`, totals) is
@@ -311,11 +307,14 @@ interface QuoteBuilderDraft {
   step: Step
   services: ServiceRow[]
   legStates: ApplyLegState[]
-  commission: CommissionControlValue
   travellerDraft: TravellerCounts | null
 }
 
-const QUOTE_DRAFT_SCHEMA_VERSION = 1
+// Bumped from 1: the draft no longer carries a commission field — Commission is now edited
+// post-hoc on the Job Quotes tab instead of decided once in Build Booking (see PATCH
+// /api/quotes/[id]/commission). An old draft under the previous shape is dropped rather than
+// restored with a stale commission field.
+const QUOTE_DRAFT_SCHEMA_VERSION = 2
 
 // Stable module-level reference -- an inline object literal here would get a new identity every
 // render and restart the autosave hook's debounce on every unrelated re-render.
@@ -323,16 +322,7 @@ const EMPTY_QUOTE_DRAFT: QuoteBuilderDraft = {
   step: "services",
   services: [],
   legStates: [],
-  commission: EMPTY_COMMISSION,
   travellerDraft: null,
-}
-
-/** The booking's commission is a required step — one value applied to every service line.
- * Returns null while it is still unset, which is what blocks the configure step's Next. */
-function resolveCommissionValue(value: CommissionControlValue): ApplyCommissionOverride | null {
-  const { type, value: amount } = value
-  if (type === null || amount === null || !Number.isFinite(amount) || amount < 0) return null
-  return { type, value: amount }
 }
 
 export function BuildBookingDialog({
@@ -376,7 +366,6 @@ export function BuildBookingDialog({
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
   const [bucketsBySupplierId, setBucketsBySupplierId] = useState<Record<string, AgeBuckets>>({})
   const [bookingCounts, setBookingCounts] = useState<TravellerCounts | null>(null)
-  const [commission, setCommission] = useState<CommissionControlValue>(EMPTY_COMMISSION)
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const { rates: fxRates, asOf: fxAsOf, stale: fxStale, refresh: refreshFxRates, setRate: setFxRate } =
     useFxRates(open)
@@ -404,7 +393,7 @@ export function BuildBookingDialog({
   // Draft autosave: mirrors the persistable slice of this dialog's state to localStorage so a
   // refresh, crash, or accidental dismissal doesn't throw away typing that hasn't reached the
   // configure step's "Next" (the first point any of this is saved server-side).
-  const currentQuoteDraftData: QuoteBuilderDraft = { step, services, legStates, commission, travellerDraft }
+  const currentQuoteDraftData: QuoteBuilderDraft = { step, services, legStates, travellerDraft }
   const {
     pendingDraft: pendingQuoteDraft,
     pendingDraftRecordUpdatedAt: pendingQuoteDraftRecordUpdatedAt,
@@ -437,7 +426,7 @@ export function BuildBookingDialog({
   /** Applies a restored draft's leg configuration only if its leg ids still exist on the currently
    *  loaded package -- a leg the draft points at that no longer exists (booking rebuilt differently
    *  since the draft was taken) would otherwise silently render nothing. Returns whether the leg
-   *  configuration itself was restorable; `services`/`commission`/`travellerDraft` restore either way. */
+   *  configuration itself was restorable; `services`/`travellerDraft` restore either way. */
   function applyQuoteDraftToState(draft: QuoteBuilderDraft): boolean {
     const draftLegIds = draft.legStates.map((state) => state.legId)
     const availableLegIds = new Set((packageDetail?.legs ?? []).map((leg) => leg.id))
@@ -448,7 +437,6 @@ export function BuildBookingDialog({
     if (draft.services.length > 0) {
       setServices(reconcileDraftServiceRows(draft.services, packageDetail?.legs ?? []))
     }
-    if (draft.commission.type !== null) setCommission(draft.commission)
     if (draft.travellerDraft) setTravellerDraft(draft.travellerDraft)
 
     if (legStatesRestorable && draft.legStates.length > 0) {
@@ -531,44 +519,6 @@ export function BuildBookingDialog({
         : prev,
     )
   }, [step, rateTypes])
-
-  // Re-opening the dialog on a priced quote pre-fills the commission from what the existing
-  // lines were built with, so the salesperson doesn't have to remember and retype it.
-  useEffect(() => {
-    if (!open) return
-    const saved = existingLineItems.find((li) => li.pricingSnapshot?.commission)?.pricingSnapshot
-      ?.commission
-    if (!saved || saved.type === null) return
-    setCommission((prev) => (prev.type === null && prev.value === null ? { type: saved.type, value: saved.value } : prev))
-  }, [open, existingLineItems])
-
-  // On a quote with nothing to read a commission back off, start from the house default set in
-  // Settings. It stays fully editable -- this only stops an unset required field from blocking
-  // the configure step on every new booking.
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch("/api/settings/commission")
-        if (!res.ok || cancelled) return
-        const { defaultCommission } = (await res.json()) as {
-          defaultCommission: { type: CommissionKind; value: number } | null
-        }
-        if (!defaultCommission || cancelled) return
-        setCommission((prev) =>
-          prev.type === null && prev.value === null
-            ? { type: defaultCommission.type, value: defaultCommission.value }
-            : prev,
-        )
-      } catch {
-        // A missing default is not an error -- the field simply stays empty as before.
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [open])
 
   // Load the booking's saved services when the dialog opens, so re-opening pre-fills everything
   // the last build persisted.
@@ -703,7 +653,6 @@ export function BuildBookingDialog({
     setTotalsBySupplierId({})
     setBucketsBySupplierId({})
     setBookingCounts(null)
-    setCommission(EMPTY_COMMISSION)
     setPreviewLineItems([])
     setIncompleteLegs([])
     setBuildError(null)
@@ -723,7 +672,6 @@ export function BuildBookingDialog({
     if (primaryServiceKind) setPickerKind(primaryServiceKind)
   }, [primaryServiceKind])
 
-  const resolvedCommission = resolveCommissionValue(commission)
   // Manual/extra lines added previously survive a rebuild.
   const preservedExtras = existingLineItems.filter((li) => li.pricingSnapshot?.isExtra === true)
   const lineItemsToSave = [...previewLineItems, ...preservedExtras]
@@ -998,9 +946,6 @@ export function BuildBookingDialog({
     if (problems.length === 0 && !derivedRange.start) {
       problems.push("Add a date to at least one service — trip dates are worked out from them")
     }
-    if (!resolvedCommission) {
-      problems.push("Set the commission for this booking — enter 0 if no commission applies")
-    }
     setValidationErrors(problems)
     if (problems.length > 0) return
 
@@ -1063,13 +1008,9 @@ export function BuildBookingDialog({
         | null
       if (savedTransportRows) setExistingTransportRequests(savedTransportRows)
 
-      // 3. Price the quote from the persisted configuration. The booking's single commission
-      // is sent per leg — the pricing engine applies commission at line level.
-      const commissionOverrides: Record<string, ApplyCommissionOverride | null> = {}
-      for (const state of legStates) {
-        commissionOverrides[state.legId] = resolvedCommission
-      }
-
+      // 3. Price the quote from the persisted configuration. Commission is no longer decided
+      // here — the server prices the Commission line off the house default (see
+      // buildPackageQuoteLineItems), editable afterward on the Job Quotes tab.
       const res = await fetch(`/api/jobs/${jobId}/services/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1077,7 +1018,7 @@ export function BuildBookingDialog({
           jobId,
           quoteId,
           travelDate: derivedRange.start,
-          selections: toApplySelections(legStates, commissionOverrides),
+          selections: toApplySelections(legStates),
           // Send the rates that were on screen so a hand-nudged rate prices the quote, rather
           // than the server silently re-deriving a different one from its cache.
           fxRates,
@@ -1375,26 +1316,6 @@ export function BuildBookingDialog({
               onRateChange={setFxRate}
             />
 
-            <div
-              className={`rounded-lg border-2 p-4 ${
-                resolvedCommission ? "border-primary/40 bg-primary/5" : "border-destructive/50 bg-destructive/5"
-              }`}
-            >
-              <div className="mb-2 flex items-center gap-2">
-                <Percent className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-semibold">Commission</h3>
-                <Badge variant={resolvedCommission ? "secondary" : "destructive"} className="text-[10px]">
-                  {resolvedCommission ? "Set" : "Required"}
-                </Badge>
-              </div>
-              <CommissionControl
-                value={commission}
-                onChange={setCommission}
-                isEditing
-                description="Applied once to the booking's total. Enter 0 if no commission applies."
-              />
-            </div>
-
             {validationErrors.length > 0 && (
               <ul className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {validationErrors.map((error) => (
@@ -1494,7 +1415,7 @@ export function BuildBookingDialog({
               <Button variant="outline" onClick={() => { setStep("services"); setBuildError(null); setValidationErrors([]) }}>
                 Back
               </Button>
-              <Button onClick={validateAndPreview} disabled={validating || !resolvedCommission}>
+              <Button onClick={validateAndPreview} disabled={validating}>
                 {validating ? "Saving & pricing…" : "Next"}
               </Button>
             </DialogFooter>

@@ -386,6 +386,14 @@ body {
   counter-reset: figure-counter;
 }
 
+/* The Quick Start Guide is one figure per step and nothing else, so a full-width
+ * figure would push it past twenty pages. Printed narrower it still reads at
+ * roughly 280 dpi, and two steps fit on a page. Scoped by the body class the
+ * build stamps from the document slug, so no other document is affected. */
+.doc-quick-start-guide figure img {
+  width: 70%;
+}
+
 /* ------------------------------------------------------------- utilities --- */
 
 .kbd {

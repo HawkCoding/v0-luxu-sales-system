@@ -30,6 +30,8 @@ export function buildUnifiedTotals(input: {
     return {
       subtotalInclVat: balance.quoteSubtotal,
       agentCommission: balance.agentCommission,
+      discount: balance.discount,
+      discountVisible: balance.discountVisible,
       totalInclVat: balance.quoteTotal,
       depositPercentage: null,
       depositAmount: null,
@@ -46,6 +48,8 @@ export function buildUnifiedTotals(input: {
   return {
     subtotalInclVat: balance.quoteSubtotal,
     agentCommission: balance.agentCommission,
+    discount: balance.discount,
+    discountVisible: balance.discountVisible,
     totalInclVat: balance.quoteTotal,
     depositPercentage: input.depositPercentage,
     depositAmount,

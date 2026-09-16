@@ -39,7 +39,6 @@ interface JobReservationTabProps {
   bookingId: string
   reservationFormReceivedAt: string | null
   mutateJob: () => void | Promise<unknown>
-  additionalServicesDetails?: string
   customer: Customer | null
   stage: PipelineStage
 }
@@ -226,7 +225,6 @@ export function JobReservationTab({
   bookingId,
   reservationFormReceivedAt,
   mutateJob,
-  additionalServicesDetails,
   customer,
   stage,
 }: JobReservationTabProps) {
@@ -1047,11 +1045,6 @@ export function JobReservationTab({
           <SaveStatus saving={savingDetails} dirty={detailsDirty} />
         </CardHeader>
         <CardContent className="space-y-3">
-          {additionalServicesDetails ? (
-            <p className="text-xs text-muted-foreground rounded-md border bg-muted/40 p-2">
-              From enquiry: {additionalServicesDetails}
-            </p>
-          ) : null}
           {detailsLoading ? (
             <div className="space-y-2" aria-busy="true">
               <Skeleton className="h-9 w-full" />

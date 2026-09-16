@@ -1204,6 +1204,11 @@ export interface Supplier {
    * "in a Double bedded Deluxe Suite with a shower, Lengthways". The voucher's Suite Type row,
    * invoice view and worksheet always state the full configuration regardless of this setting. */
   quoteSuiteDetail: "type_only" | "full"
+  /** Train operators only: minutes before departure the quote itinerary states check-in ("Check in
+   * at 10h00" / "Departure time: 12h00"). 0 means the operator publishes no check-in time, so the
+   * quote falls back to a single "Departs at …" line. Defaults to 120 (two hours). See
+   * buildTrainScheduleBullets in lib/quotes/quote-presentation.ts. */
+  checkInOffsetMinutes: number
   /** Optional per-supplier word order for the full suite phrase (voucher Suite Type row,
    * invoice departure block, {{suiteDescription}}/{{suiteType}} email tokens), e.g.
    * "[{bedroom}] [{layout}] {type}" -> "Double Crosswise Deluxe Suite" for a supplier that
@@ -1515,6 +1520,13 @@ export interface Quote {
   /** Positive magnitude of the agency discount. subtotal − agentCommission = total. Shown to the
    *  client on the quote and invoice, unlike commissionBonus which is invisible. */
   agentCommission?: number
+  /** percent | per_person | fixed, or null when no discount is set. Mirrors CommissionKind. */
+  discountType?: CommissionKind | null
+  discountValue?: number
+  /** The computed deduction — subtotal − agentCommission − discountAmount = total. Client-visible
+   *  (red line on quote/invoice) only when discountVisible is true; still deducted either way. */
+  discountAmount?: number
+  discountVisible?: boolean
   lastSentAt?: string
   lastSentAtDisplay?: string
   overridePin?: string

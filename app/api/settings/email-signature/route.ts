@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
+import { sanitizeSignatureHtml } from "@/lib/email/signature-html"
 import { getEmailSignatureSettings, requireSettingsWrite } from "@/lib/settings-access"
 
 export async function GET() {
@@ -15,18 +16,30 @@ export async function GET() {
 const patchSchema = z
   .object({
     signature_enabled: z.enum(["true", "false"]).optional(),
-    signature_company_line: z.string().trim().max(500).optional(),
-    signature_registration_line: z.string().trim().max(200).optional(),
-    signature_trading_hours: z.string().trim().max(200).optional(),
-    signature_divisions_line: z.string().trim().max(200).optional(),
-    signature_confidentiality: z.string().trim().max(1000).optional(),
-    signature_office_address: z.string().trim().max(300).optional(),
+    signature_company_line: z.string().trim().max(2000).optional(),
+    signature_registration_line: z.string().trim().max(800).optional(),
+    signature_trading_hours: z.string().trim().max(800).optional(),
+    signature_divisions_line: z.string().trim().max(800).optional(),
+    signature_confidentiality: z.string().trim().max(4000).optional(),
+    signature_office_address: z.string().trim().max(1200).optional(),
+    signature_sender_layout: z.string().trim().max(2000).optional(),
   })
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: "At least one field required",
   })
 
 type SignaturePatchKey = keyof z.infer<typeof patchSchema>
+
+// Rich-text fields carry sanitized inline HTML; signature_enabled is a plain "true"/"false" flag.
+const RICH_TEXT_KEYS = new Set<SignaturePatchKey>([
+  "signature_company_line",
+  "signature_registration_line",
+  "signature_trading_hours",
+  "signature_divisions_line",
+  "signature_confidentiality",
+  "signature_office_address",
+  "signature_sender_layout",
+])
 
 export async function PATCH(req: Request) {
   const auth = await requireSettingsWrite()
@@ -42,10 +55,12 @@ export async function PATCH(req: Request) {
   const parsed = patchSchema.safeParse(raw)
   if (!parsed.success) return jsonZodError(parsed.error, "Invalid input")
 
-  const updates = Object.entries(parsed.data).filter(([, value]) => value !== undefined) as [
-    SignaturePatchKey,
-    string,
-  ][]
+  const updates = Object.entries(parsed.data)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => [
+      key,
+      RICH_TEXT_KEYS.has(key as SignaturePatchKey) ? sanitizeSignatureHtml(value as string) : value,
+    ]) as [SignaturePatchKey, string][]
 
   const { supabase } = auth.value
 

@@ -10,16 +10,21 @@ export function sampleQuotePdfData(): Omit<
   return {
     quoteNumber: "BT-2026-0001_Q1",
     customerName: "Mr & Mrs Sample Guest",
+    customerPhone: "+27 82 555 0100",
+    customerEmail: "sample.guest@example.com",
     quoteDate: new Date().toISOString().slice(0, 10),
     validUntil,
     journeyStart: "2026-07-18",
     journeyEnd: "2026-07-22",
     adults: 2,
     children: 0,
-    // Exercises the Agent Commission row: subtotal 91300, a R5000 discount, net total 86300.
+    // Exercises the Agent Commission and Discount rows: subtotal 91300, a R5000 agency discount
+    // and a R1300 client discount, net total 85000.
     subtotal: 91300,
     agentCommission: 5000,
-    total: 86300,
+    discount: 1300,
+    discountVisible: true,
+    total: 85000,
     itineraryBlocks: [
       {
         // Same-day flight: the arrival folds into the departure sentence as "departing at 10h00

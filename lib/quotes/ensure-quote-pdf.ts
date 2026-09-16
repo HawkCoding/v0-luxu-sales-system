@@ -15,7 +15,6 @@ import {
   getDocumentBrandSettings,
   getDocumentTextSettings,
   resolveDocumentBrand,
-  resolveProductCopy,
 } from "@/lib/settings-access"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { logError } from "@/lib/error-log"
@@ -79,7 +78,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, primary_supplier_id, customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, primary_supplier_id, customer:customers(title, first_name, last_name, email, phone))",
     )
     .eq("id", quoteId)
     .single()
@@ -162,7 +161,6 @@ export async function ensureQuotePdf(
     await getDocumentBrandSettings(supabase, primarySupplierKind),
   )
   const brandLogo = await loadBrandLogo(brand.logoUrl)
-  const productCopy = await resolveProductCopy(supabase, primarySupplierKind)
 
   // Itinerary degrades to an empty section rather than blocking the PDF —
   // correspondence relies on a quote email never going out without its PDF.
@@ -205,17 +203,19 @@ export async function ensureQuotePdf(
       packageExcludesDefault: documentText.quote_doc_excludes_default,
       quoteNumber: quote.quote_number ?? quoteId,
       customerName,
+      customerPhone: customer?.phone ?? null,
+      customerEmail: customer?.email ?? null,
       quoteDate: quote.created_at.slice(0, 10),
       validUntil: quote.validity_until,
       journeyStart: journey.start,
       journeyEnd: journey.end,
-      primarySupplierKind,
-      productBookingNoun: productCopy.bookingNoun,
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,
       total: quote.total,
       subtotal: quote.subtotal,
       agentCommission: Number(quote.agent_commission ?? 0),
+      discount: Number(quote.discount_amount ?? 0),
+      discountVisible: quote.discount_visible ?? true,
       // The PDF has always accepted a currency and defaulted it to ZAR; nothing ever passed one,
       // so a foreign-currency quote printed rand symbols over foreign amounts. This also feeds
       // the footer's {{currency}} merge field.

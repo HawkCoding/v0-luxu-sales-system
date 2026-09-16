@@ -54,6 +54,7 @@ export async function GET() {
             divisionsLine: row.divisions_line,
             confidentiality: row.confidentiality,
             officeAddress: row.office_address,
+            senderLayout: row.sender_layout,
           }
         : {
             id: row.id,

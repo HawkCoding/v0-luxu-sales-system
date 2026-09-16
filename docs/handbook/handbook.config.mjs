@@ -25,6 +25,13 @@ export const documents = [
     files: ["technical-handover.md"],
   },
   {
+    slug: "quick-start-guide",
+    title: "Quick Start Guide",
+    subtitle: "Enquiry to closed, step by step",
+    audience: "Sales consultants",
+    files: ["quickstart/01-quick-start.md"],
+  },
+  {
     slug: "consultant-handbook",
     title: "Consultant Handbook",
     subtitle: "Running a booking from enquiry to closed",

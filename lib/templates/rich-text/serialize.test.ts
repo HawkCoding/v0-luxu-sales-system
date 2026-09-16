@@ -38,6 +38,100 @@ describe("toEditorHtml", () => {
     expect(html).not.toContain("data-token")
   })
 
+  it("leaves an allowlisted inline font-size span as rich content", () => {
+    const src = '<p>Hi <span style="font-size: 24px">big</span> text</p>'
+    const { html, warnings } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+    expect(warnings).toEqual([])
+  })
+
+  it("lifts an off-allowlist font-size span into an opaque placeholder", () => {
+    const src = '<p>Hi <span style="font-size: 72px">huge</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a span combining an allowlisted size with an off-allowlist color into an opaque placeholder", () => {
+    // "red" isn't one of the text-colour swatches — each declaration must pass
+    // its own validator independently, so one bad value still opaques the span.
+    const src = '<p>Hi <span style="font-size: 14px; color: red">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a font-size span that also carries a class into an opaque placeholder", () => {
+    const src = '<p>Hi <span class="foo" style="font-size: 14px">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("leaves an allowlisted text color span as rich content", () => {
+    const src = '<p>Hi <span style="color: #b42318">red</span> text</p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+  })
+
+  it("leaves an allowlisted highlight color span as rich content", () => {
+    const src = '<p>Hi <span style="background-color: #fff3a3">marked</span> text</p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+  })
+
+  it("leaves a color span in its rgb() form as rich content — the DOM canonicalizes hex to rgb() on save", () => {
+    const src = '<p>Hi <span style="color: rgb(180, 35, 24)">red</span> text</p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+  })
+
+  it("leaves a highlight span in its rgb() form as rich content", () => {
+    const src = '<p>Hi <span style="background-color: rgb(255, 243, 163)">marked</span> text</p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+  })
+
+  it("leaves a span combining allowlisted size, color, and highlight as rich content", () => {
+    const src =
+      '<p>Hi <span style="font-size: 24px; color: #b42318; background-color: #fff3a3">combo</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+  })
+
+  it("leaves a custom (non-swatch) hex text color span as rich content", () => {
+    const src = '<p>Hi <span style="color: #123456">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+  })
+
+  it("leaves a custom (non-swatch) hex highlight span as rich content", () => {
+    const src = '<p>Hi <span style="background-color: #123456">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+  })
+
+  it("lifts a non-hex, non-rgb() text color span into an opaque placeholder", () => {
+    const src = '<p>Hi <span style="color: red">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a color value shaped for CSS injection into an opaque placeholder", () => {
+    const src = '<p>Hi <span style="color: #123456; background: url(evil)">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a span with an unrecognised style property into an opaque placeholder", () => {
+    const src = '<p>Hi <span style="font-weight: bold">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a span with a duplicate style property into an opaque placeholder", () => {
+    const src = '<p>Hi <span style="color: #b42318; color: #067647">x</span></p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
   it("does not treat a non-block token as a block", () => {
     const src = "<p>Hello {{customerName}}</p>"
     const { html } = toEditorHtml(src, BLOCK_TOKENS)

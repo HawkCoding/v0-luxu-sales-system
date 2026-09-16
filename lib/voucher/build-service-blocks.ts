@@ -16,6 +16,7 @@ import { resolveRouteSchedule, toHoursMinutes } from "@/lib/routes/route-schedul
 import { formatSuitePhrase, type SuiteSelection } from "@/lib/templates/suite-description"
 import { firstRecord } from "@/lib/utils"
 import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
+import type { BulletLine } from "@/lib/inclusions/bullet-lines"
 import type { JourneyClass, RateAudience } from "@/lib/quotes/quote-config"
 import { fetchDefaultAgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
@@ -124,6 +125,10 @@ interface SupplierJoin {
    * lib/templates/suite-description.ts and lib/templates/suite-phrase-pattern.ts. Never applied
    * to typeOnlyNames, only to the full-configuration branch of resolveLegSuiteNames. */
   suite_phrase_pattern?: string | null
+  /** Train-only: minutes before departure the quote itinerary states check-in. 0 means the
+   * operator publishes no check-in time. See buildTrainScheduleBullets in
+   * lib/quotes/quote-presentation.ts. */
+  check_in_offset_minutes?: number | null
 }
 
 /** Mirrors `supplierLocationName` in lib/suppliers.ts against this join's shape -- trains print
@@ -346,7 +351,7 @@ interface FetchedInclusionLine extends SupplierInclusionLine {
   list: "inclusions" | "exclusions"
 }
 
-function bulletLinesToRawList(lines: readonly { kind: "heading" | "item"; text: string }[]): string[] {
+function bulletLinesToRawList(lines: readonly BulletLine[]): string[] {
   return lines.map((line) => (line.kind === "heading" ? `# ${line.text}` : line.text))
 }
 
@@ -735,7 +740,7 @@ export async function buildVoucherServiceBlocks(
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, luggage_storage_available,
-       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, check_in_offset_minutes, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
@@ -969,6 +974,7 @@ export async function buildVoucherServiceBlocks(
       arrivalDate,
       startTime,
       endTime,
+      checkInOffsetMinutes: isTrain ? supplier?.check_in_offset_minutes ?? null : null,
       nights,
       durationDays,
       notes: row.notes ?? null,

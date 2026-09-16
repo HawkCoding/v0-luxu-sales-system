@@ -16,6 +16,9 @@ interface QuoteFixture {
   currency?: string
   commission_bonus?: number
   agent_commission?: number
+  discount_type?: string | null
+  discount_value?: number
+  discount_amount?: number
 }
 
 interface Captured {
@@ -83,6 +86,9 @@ function buildSupabase(quote: QuoteFixture, captured: Captured) {
                   total: 2500,
                   commission_bonus: quote.commission_bonus ?? 0,
                   agent_commission: quote.agent_commission ?? 0,
+                  discount_type: quote.discount_type ?? null,
+                  discount_value: quote.discount_value ?? 0,
+                  discount_amount: quote.discount_amount ?? 0,
                 },
                 error: null,
               }),
@@ -183,6 +189,29 @@ describe("POST /api/quotes/[id]/currency", () => {
     expect(captured.quoteUpdate?.agent_commission).toBe(200)
     // Lines convert to a subtotal of 5000 (2000x2 + 1000); a converted commission of 200 nets to 4800.
     expect(payload.total).toBe(4800)
+  })
+
+  it("converts a fixed discount alongside the lines and nets it off the new total", async () => {
+    const captured: Captured = {}
+    authorise({ status: "draft", discount_type: "fixed", discount_value: 100, discount_amount: 100 }, captured)
+
+    const response = await post({ currency: "USD", rate: 2 })
+    const payload = await response.json()
+
+    expect(captured.quoteUpdate?.discount_value).toBe(200)
+    expect(captured.quoteUpdate?.discount_amount).toBe(200)
+    // Lines convert to a subtotal of 5000 (2000x2 + 1000); a converted discount of 200 nets to 4800.
+    expect(payload.total).toBe(4800)
+  })
+
+  it("leaves a percent discount's value untouched — it is currency-neutral", async () => {
+    const captured: Captured = {}
+    authorise({ status: "draft", discount_type: "percent", discount_value: 10, discount_amount: 250 }, captured)
+
+    await post({ currency: "USD", rate: 2 })
+
+    expect(captured.quoteUpdate?.discount_value).toBe(10)
+    expect(captured.quoteUpdate?.discount_amount).toBe(250)
   })
 
   it("also converts a quote that is still pricing_incomplete", async () => {

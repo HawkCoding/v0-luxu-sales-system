@@ -3,7 +3,15 @@ import type { Database } from "@/lib/supabase/types"
 
 type QuoteBalanceRow = Pick<
   Database["public"]["Tables"]["quotes"]["Row"],
-  "id" | "subtotal" | "total" | "currency" | "status" | "created_at" | "agent_commission"
+  | "id"
+  | "subtotal"
+  | "total"
+  | "currency"
+  | "status"
+  | "created_at"
+  | "agent_commission"
+  | "discount_amount"
+  | "discount_visible"
 >
 
 export interface InvoiceBalance {
@@ -14,6 +22,10 @@ export interface InvoiceBalance {
   /** Positive magnitude of the agency discount (quotes.agent_commission). Already reflected in
    *  quoteTotal — carried here only so the invoice can print it as its own line. */
   agentCommission: number
+  /** Client-facing Discount (quotes.discount_amount). Already reflected in quoteTotal — carried
+   *  here only so the invoice can print it as its own line, when discountVisible. */
+  discount: number
+  discountVisible: boolean
   /** The accepted quote's currency — an invoice is always raised in it, so the client is billed
    *  in the same currency they accepted. */
   currency: string
@@ -31,7 +43,7 @@ export async function calculateInvoiceBalance(
     await Promise.all([
       supabase
         .from("quotes")
-        .select("id, subtotal, total, currency, status, created_at, agent_commission")
+        .select("id, subtotal, total, currency, status, created_at, agent_commission, discount_amount, discount_visible")
         .eq("booking_id", bookingId)
         .eq("status", "accepted")
         .order("created_at", { ascending: false })
@@ -59,6 +71,8 @@ export async function calculateInvoiceBalance(
     quoteTotal: Number(quote.total),
     quoteSubtotal: Number(quote.subtotal),
     agentCommission: Number(quote.agent_commission ?? 0),
+    discount: Number(quote.discount_amount ?? 0),
+    discountVisible: quote.discount_visible ?? true,
     currency: quote.currency,
     totalPaid,
     lastPaymentAt,

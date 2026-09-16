@@ -156,6 +156,11 @@ interface BuildPackageQuoteLineItemsInput {
   /** Flat manual top-up (quotes.commission_bonus) re-folded into the rebuilt Commission line,
    * so re-pricing an existing quote doesn't silently drop it. */
   commissionBonus?: number
+  /** The house default commission (Settings → Default Commission), used when no leg carries its
+   * own commissionOverride — Build Booking no longer collects one, so this is what prices the
+   * Commission line unattended. A zero value skips the line entirely, same "zero means no
+   * commission" convention as lib/pricing/default-commission.ts. */
+  defaultCommission?: { type: CommissionKind; value: number } | null
   /** The single currency this quote is denominated in. Supplier rates in anything else are
    * converted into it here, and the rate used is stamped onto each line's pricing snapshot. */
   quoteCurrency?: string
@@ -197,6 +202,7 @@ export async function buildPackageQuoteLineItems({
   fallbackRateTypeId = null,
   rateTypes = [],
   commissionBonus = 0,
+  defaultCommission = null,
   quoteCurrency = BASE_CURRENCY,
   fxRates = { [BASE_CURRENCY]: 1 },
   fxRateAsOf = null,
@@ -1659,7 +1665,11 @@ export async function buildPackageQuoteLineItems({
       "Selections disagree on the commission override — commission is applied once to the whole booking, not per leg.",
     )
   }
-  const commissionOverride = distinctOverrides[0] ?? null
+  // No leg carries its own override (Build Booking no longer collects one) -- fall back to the
+  // house default so Apply still prices a Commission line unattended. A zero-value default is
+  // the "no commission configured yet" state and deliberately skips the line, same as before.
+  const commissionOverride =
+    distinctOverrides[0] ?? (defaultCommission && defaultCommission.value > 0 ? defaultCommission : null)
   const resolvedCommission = resolveCommission({ lineOverride: commissionOverride })
   if (resolvedCommission.type !== null) {
     const preCommissionSubtotal = Math.round(

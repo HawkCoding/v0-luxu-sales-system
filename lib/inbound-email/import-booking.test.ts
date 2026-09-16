@@ -477,6 +477,34 @@ describe("createEmailBookingFromParsedDraft customer matching", () => {
     )
   })
 
+  // The enquiry's "Briefly explain additional services" free text is stored only on the booking
+  // (additional_services_details), never on booking_reservation_details -- that table holds only
+  // the hand-typed voucher_special_requests value a salesperson later types on Build Booking. The
+  // mock supabase.from() above throws on any unlisted table, so touching it here would fail loudly.
+  it("stores the enquiry's additional-services text on the booking only, never on reservation details", async () => {
+    const state = createState()
+
+    importBookingMocks.createServiceClient.mockReturnValue(createSupabase(state))
+    const draft = parsedFixture("services@example.com")
+    const withServices = {
+      ...draft,
+      additionalServices: { requested: true, details: "Airport transfer needed" },
+    }
+    await createEmailBookingFromParsedDraft(withServices, {
+      emailAccountId: "account-1",
+      mailboxEmail: "bookings@example.com",
+      subject: "Blue Train enquiry",
+      receivedAt: "2026-05-17T10:00:00.000Z",
+      rawText: draft.rawText,
+      missingFields: [],
+      warnings: [],
+    })
+
+    expect(state.bookingInsertRows[0]).toEqual(
+      expect.objectContaining({ additional_services_details: "Airport transfer needed" }),
+    )
+  })
+
   it("creates a new customer for a new email", async () => {
     const state = createState()
 

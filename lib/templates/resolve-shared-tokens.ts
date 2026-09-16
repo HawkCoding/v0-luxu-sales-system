@@ -19,6 +19,7 @@ import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { buildBankingDetailsBlock, buildPaymentReference } from "@/lib/invoices/banking-details-block"
 import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
+import { loadCountryAliasMap, loadCountryCodeMap, resolveCountryCode } from "@/lib/countries"
 import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
 import { buildRoomTokens, buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
@@ -189,6 +190,8 @@ interface TravellerRow {
   first_name: string
   last_name: string
   id_passport: string | null
+  date_of_birth: string | null
+  residence: string | null
   is_child: boolean
   sort_order: number | null
 }
@@ -207,6 +210,7 @@ export async function resolveSharedEmailTokens(
     travellers,
     suiteSelections,
     paymentMethod,
+    countryLookup,
   ] = await Promise.all([
       safeQuery<BookingRow>(() =>
         supabase
@@ -239,13 +243,23 @@ export async function resolveSharedEmailTokens(
       safeQuery<TravellerRow[]>(() =>
         supabase
           .from("travellers")
-          .select("prefix, first_name, last_name, id_passport, is_child, sort_order")
+          .select("prefix, first_name, last_name, id_passport, date_of_birth, residence, is_child, sort_order")
           .eq("booking_id", bookingId),
       ),
       safely(() => loadSuiteSelections(supabase, bookingId), []),
       safely(
         () => getPaymentMethod(supabase, null),
         { id: "", name: "", enabled: true, isDefault: false, sortOrder: 0, banking: {} as Awaited<ReturnType<typeof getPaymentMethod>>["banking"] },
+      ),
+      safely(
+        async () => {
+          const [aliasMap, codeMap] = await Promise.all([
+            loadCountryAliasMap(supabase),
+            loadCountryCodeMap(supabase),
+          ])
+          return { aliasMap, codeMap }
+        },
+        { aliasMap: new Map<string, string>(), codeMap: new Map<string, string>() },
       ),
     ])
 
@@ -273,6 +287,8 @@ export async function resolveSharedEmailTokens(
     .filter((t) => !t.is_child)
     .map((t) => ({
       name: [t.prefix, t.first_name, t.last_name].filter(Boolean).join(" "),
+      dateOfBirth: t.date_of_birth,
+      countryCode: resolveCountryCode(t.residence, countryLookup.aliasMap, countryLookup.codeMap),
       idNumber: t.id_passport,
     }))
     .filter((guest) => guest.name.length > 0)
@@ -380,7 +396,6 @@ export async function resolveSharedEmailTokens(
         total: latestQuote.total ?? 0,
         currency: quoteCurrency,
         itineraryBlocks,
-        primarySupplierKind,
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,

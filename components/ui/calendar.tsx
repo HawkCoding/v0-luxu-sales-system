@@ -12,8 +12,12 @@ import { DayButton, DayPicker, getDefaultClassNames } from 'react-day-picker'
 import { cn } from '@/lib/utils'
 import { Button, buttonVariants } from '@/components/ui/button'
 
-/** Years before/after the current calendar year that the picker may navigate. */
-export const CALENDAR_YEAR_SPAN = 50
+/** Default years before/after the current calendar year that a picker may navigate. */
+export const CALENDAR_PAST_YEARS = 1
+export const CALENDAR_FUTURE_YEARS = 3
+
+/** Wide span (years before/after current year) for historical lookback filters. */
+export const CALENDAR_WIDE_YEAR_SPAN = 10
 
 /** Earliest year selectable for supplier rate-card validity dates: last year, dynamically. */
 export function getMinSelectableRateYear(): number {
@@ -24,8 +28,18 @@ export function getCalendarNavMonthBounds(
   referenceYear = new Date().getFullYear(),
 ): { startMonth: Date; endMonth: Date } {
   return {
-    startMonth: new Date(referenceYear - CALENDAR_YEAR_SPAN, 0, 1),
-    endMonth: new Date(referenceYear + CALENDAR_YEAR_SPAN, 11, 31),
+    startMonth: new Date(referenceYear - CALENDAR_PAST_YEARS, 0, 1),
+    endMonth: new Date(referenceYear + CALENDAR_FUTURE_YEARS, 11, 31),
+  }
+}
+
+/** Wide fromYear/toYear bounds for filters that need to reach far past/future dates. */
+export function getWideCalendarYearBounds(
+  referenceYear = new Date().getFullYear(),
+): { fromYear: number; toYear: number } {
+  return {
+    fromYear: referenceYear - CALENDAR_WIDE_YEAR_SPAN,
+    toYear: referenceYear + CALENDAR_WIDE_YEAR_SPAN,
   }
 }
 
