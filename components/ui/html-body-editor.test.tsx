@@ -58,6 +58,16 @@ describe("HtmlBodyEditor", () => {
     expect(editorEl.style.fontSize).toBe("18px")
   })
 
+  it("labels the font size default option with the real base size, not the word 'Default'", () => {
+    render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} baseFontSize="14px" />)
+    expect(screen.getByLabelText("Font size")).toHaveTextContent("14px")
+  })
+
+  it("labels the font family default option with the real base family, not the word 'Default'", () => {
+    render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} baseFontFamily="Arial, sans-serif" />)
+    expect(screen.getByLabelText("Font family")).toHaveTextContent("Arial")
+  })
+
   it("renders text color and highlight controls, each opening a swatch grid with a Default option", () => {
     render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
 

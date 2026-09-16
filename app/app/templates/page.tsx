@@ -805,6 +805,7 @@ export default function TemplatesPage() {
                   onChange={setEditBody}
                   blockTokens={editing ? blockTokensFor(editing.key) : ALL_BLOCK_TOKENS}
                   baseFontSize={emailAppearance?.email_font_size}
+                  baseFontFamily={emailAppearance?.email_font_family}
                 />
               </div>
             </div>
@@ -963,6 +964,7 @@ export default function TemplatesPage() {
                   onChange={setCreateBody}
                   blockTokens={ALL_BLOCK_TOKENS}
                   baseFontSize={emailAppearance?.email_font_size}
+                  baseFontFamily={emailAppearance?.email_font_family}
                 />
               </div>
             </div>

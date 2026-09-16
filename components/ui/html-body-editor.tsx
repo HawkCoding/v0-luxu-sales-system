@@ -35,6 +35,7 @@ import {
   EMAIL_FONT_FAMILY_OPTIONS,
   EMAIL_FONT_FAMILY_LABELS,
   toEmailInlineFontFamily,
+  toEmailFontFamily,
   EMAIL_TEXT_COLOR_OPTIONS,
   EMAIL_TEXT_COLOR_LABELS,
   toEmailTextColor,
@@ -58,9 +59,13 @@ export interface HtmlBodyEditorProps {
   disabled?: boolean
   minHeight?: string
   id?: string
-  /** The email's actual base size (Settings → Email Appearance), so text left at
-   *  "Default" previews at its real size rather than the browser's own default. */
+  /** The email's actual base size (Settings → Email Appearance). Sets the editable
+   *  area's preview size, and labels the size dropdown's unset option (e.g. "16px")
+   *  instead of the word "Default". */
   baseFontSize?: string
+  /** The email's actual base font family (Settings → Email Appearance), used to
+   *  label the family dropdown's unset option (e.g. "Arial") instead of "Default". */
+  baseFontFamily?: string
   /** "compact" drops the list buttons and shrinks minHeight — for short single-line/paragraph fields (e.g. a signature line) rather than a full email body. */
   variant?: "full" | "compact"
   /** Fires when the editable area loses focus — save-on-blur callers don't need to debounce onChange. */
@@ -81,6 +86,7 @@ export function HtmlBodyEditor({
   minHeight,
   id,
   baseFontSize,
+  baseFontFamily,
   variant = "full",
   onBlur,
   insertTokens,
@@ -176,6 +182,7 @@ export function HtmlBodyEditor({
             editor={editor}
             disabled={disabled}
             baseFontSize={baseFontSize}
+            baseFontFamily={baseFontFamily}
             variant={variant}
             insertTokens={insertTokens}
           />
@@ -232,13 +239,27 @@ interface RichToolbarProps {
   /** The email's actual base size, shown as the "unset" option's label so it
    *  reads as a real number instead of the word "Default". */
   baseFontSize?: string
+  /** The email's actual base font family, shown (as its short label, e.g. "Arial")
+   *  as the family dropdown's "unset" option instead of the word "Default". */
+  baseFontFamily?: string
   variant?: "full" | "compact"
   insertTokens?: HtmlBodyEditorInsertToken[]
 }
 
 const DEFAULT_FONT_SIZE_VALUE = "default"
 
-function RichToolbar({ editor, disabled, baseFontSize, variant = "full", insertTokens }: RichToolbarProps) {
+function RichToolbar({
+  editor,
+  disabled,
+  baseFontSize,
+  baseFontFamily,
+  variant = "full",
+  insertTokens,
+}: RichToolbarProps) {
+  const defaultFontFamilyLabel = baseFontFamily
+    ? EMAIL_FONT_FAMILY_LABELS[toEmailFontFamily(baseFontFamily)]
+    : "Default"
+  const defaultFontSizeLabel = baseFontSize ?? "Default"
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkUrl, setLinkUrl] = useState("")
 
@@ -350,7 +371,7 @@ function RichToolbar({ editor, disabled, baseFontSize, variant = "full", insertT
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={DEFAULT_FONT_SIZE_VALUE}>Default</SelectItem>
+          <SelectItem value={DEFAULT_FONT_SIZE_VALUE}>{defaultFontFamilyLabel}</SelectItem>
           {EMAIL_FONT_FAMILY_OPTIONS.map((family) => (
             <SelectItem key={family} value={family}>
               {EMAIL_FONT_FAMILY_LABELS[family]}
@@ -364,7 +385,7 @@ function RichToolbar({ editor, disabled, baseFontSize, variant = "full", insertT
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={DEFAULT_FONT_SIZE_VALUE}>Default</SelectItem>
+          <SelectItem value={DEFAULT_FONT_SIZE_VALUE}>{defaultFontSizeLabel}</SelectItem>
           {EMAIL_INLINE_FONT_SIZE_OPTIONS.map((size) => (
             <SelectItem key={size} value={size}>
               {size}
