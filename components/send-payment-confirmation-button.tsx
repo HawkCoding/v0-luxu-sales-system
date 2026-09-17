@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Loader2, MailCheck } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -58,6 +58,14 @@ export function SendPaymentConfirmationButton({
   const [internalPreviewOpen, setInternalPreviewOpen] = useState(false)
   const previewOpen = open ?? internalPreviewOpen
   const setPreviewOpen = onOpenChange ?? setInternalPreviewOpen
+  // Controlled mode opens before the prepare lands; hold the dialog shut until
+  // this open's email arrives so the previous one never shows.
+  const [preparedForOpen, setPreparedForOpen] = useState(false)
+  const [lastOpen, setLastOpen] = useState(open)
+  if (open !== lastOpen) {
+    setLastOpen(open)
+    if (open) setPreparedForOpen(false)
+  }
 
   const handlePrepare = async () => {
     setPreparing(true)
@@ -66,6 +74,7 @@ export function SendPaymentConfirmationButton({
       const body = (await res.json().catch(() => ({}))) as PreparedEmail & { error?: string }
       if (!res.ok || !body.email) throw new Error(body.error)
       setPrepared(body)
+      setPreparedForOpen(true)
       setPreviewOpen(true)
     } catch (error) {
       // This runs unattended in controlled mode (the stage-transition "Next"
@@ -85,10 +94,15 @@ export function SendPaymentConfirmationButton({
     }
   }
 
-  // Controlled mode (trigger=false): prepare the email as soon as the caller
-  // opens the dialog, since there's no internal button to click.
+  // Controlled mode (trigger=false): prepare the email every time the caller
+  // opens the dialog, since there's no internal button to click. Never reuse an
+  // earlier prepare — payments may have been recorded since, and the figures
+  // and amended invoice would be stale.
+  const wasOpen = useRef(false)
   useEffect(() => {
-    if (!trigger && open && !prepared && !preparing) {
+    const opened = Boolean(open) && !wasOpen.current
+    wasOpen.current = Boolean(open)
+    if (!trigger && opened && !preparing) {
       void handlePrepare()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -110,7 +124,7 @@ export function SendPaymentConfirmationButton({
       ) : null}
       {prepared ? (
         <PreviewAndSendDialog
-          open={previewOpen}
+          open={previewOpen && (trigger || preparedForOpen)}
           onOpenChange={setPreviewOpen}
           title="Payment received"
           description="Confirms the payment and attaches the amended confirmation invoice. Review and edit before sending."

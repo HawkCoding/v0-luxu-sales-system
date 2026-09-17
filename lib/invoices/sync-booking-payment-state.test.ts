@@ -410,4 +410,86 @@ describe("syncBookingPaymentState", () => {
     const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
     expect(updateCall.stage).toBeUndefined()
   })
+
+  it("reverts final_paid back to deposit_paid when an edited/deleted payment drops the balance back above zero", async () => {
+    const { supabase, bookingUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 4000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "paid" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false, stage: "final_paid", overpaid_amount: 0 },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(bookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "deposit_paid", final_paid_at: null }),
+    )
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "booking_final_paid_reverted", entity_id: BOOKING_ID }),
+    )
+  })
+
+  it("never reverts a stage past final_paid — voucher_sent stays put even if the balance reopens", async () => {
+    const { supabase, bookingUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 4000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "paid" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false, stage: "voucher_sent", overpaid_amount: 0 },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
+    expect(updateCall.stage).toBeUndefined()
+    expect(auditInsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "booking_final_paid_reverted" }),
+    )
+  })
+
+  it("reverts a paid deposit invoice back to sent when payments drop below threshold", async () => {
+    const { supabase, invoiceUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 1000 }],
+      depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "paid" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false, stage: "deposit_paid", overpaid_amount: 0 },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(invoiceUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }))
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "deposit_marked_unpaid", entity_id: BOOKING_ID }),
+    )
+  })
+
+  it("keeps a paid deposit invoice paid when the confirmation is manual and sticky", async () => {
+    const { supabase, invoiceUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 1000 }],
+      depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "paid" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: true, stage: "deposit_paid", overpaid_amount: 0 },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(invoiceUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }))
+    expect(auditInsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "deposit_marked_unpaid" }),
+    )
+  })
+
+  it("reverts a paid final invoice back to sent when the balance reopens", async () => {
+    const { supabase, invoiceUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 4000 }],
+      depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "paid" },
+      finalInvoice: { id: FINAL_INVOICE_ID, status: "paid" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false, stage: "final_paid", overpaid_amount: 0 },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(invoiceUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }))
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "invoice_marked_unpaid", entity_id: BOOKING_ID }),
+    )
+  })
+
+  it("reverts a paid full-payment invoice back to sent when the balance reopens", async () => {
+    const { supabase, invoiceUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 4000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "paid" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false, stage: "final_paid", overpaid_amount: 0 },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(invoiceUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }))
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "invoice_marked_unpaid", entity_id: BOOKING_ID }),
+    )
+  })
 })

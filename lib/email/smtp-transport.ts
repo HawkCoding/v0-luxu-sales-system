@@ -5,6 +5,8 @@ import { createServiceClient } from "@/lib/supabase/server"
 
 export interface SmtpSendParams {
   credentialId: string
+  /** Display name to render on the From header, e.g. "Carmen De Jongh - SA Rail". */
+  fromName?: string | null
   to: string[]
   cc?: string[]
   subject: string
@@ -65,7 +67,7 @@ async function sendViaMailpit(
   const transporter = nodemailer.createTransport({ host, port, secure: false })
 
   const info = await transporter.sendMail({
-    from: fromAddress,
+    from: params.fromName ? { name: params.fromName, address: fromAddress } : fromAddress,
     to: params.to,
     cc: params.cc,
     subject: params.subject,
@@ -113,7 +115,9 @@ async function sendViaCpanelSmtp(
   let rawMessage: Buffer = Buffer.from("")
 
   const mailOptions: nodemailer.SendMailOptions = {
-    from: credential.email_address,
+    from: params.fromName
+      ? { name: params.fromName, address: credential.email_address }
+      : credential.email_address,
     to: params.to,
     cc: params.cc,
     subject: params.subject,

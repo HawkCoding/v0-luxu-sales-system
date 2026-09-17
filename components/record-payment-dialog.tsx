@@ -27,7 +27,26 @@ interface PaymentFormState {
   paymentDate: string
 }
 
-function initialFormState(defaultAmount?: number | null): PaymentFormState {
+/** A previously recorded payment, passed in to switch the dialog into edit mode. */
+export interface EditablePayment {
+  id: string
+  amount: number
+  method: string
+  reference: string | null
+  notes: string | null
+  receivedAt: string
+}
+
+function initialFormState(defaultAmount?: number | null, existingPayment?: EditablePayment | null): PaymentFormState {
+  if (existingPayment) {
+    return {
+      amount: String(existingPayment.amount),
+      method: existingPayment.method,
+      reference: existingPayment.reference ?? "",
+      notes: existingPayment.notes ?? "",
+      paymentDate: existingPayment.receivedAt.slice(0, 10),
+    }
+  }
   return {
     amount: defaultAmount != null && defaultAmount > 0 ? String(defaultAmount) : "",
     method: "EFT",
@@ -48,6 +67,8 @@ interface RecordPaymentDialogProps {
   /** Pre-fills the amount field. Used by the paid-in-full gate to seed the real outstanding
    *  balance rather than leaving the field blank for the consultant to look up and retype. */
   defaultAmount?: number | null
+  /** When set, the dialog edits this payment (PATCH) instead of recording a new one (POST). */
+  existingPayment?: EditablePayment | null
 }
 
 export function RecordPaymentDialog({
@@ -57,17 +78,19 @@ export function RecordPaymentDialog({
   mutate,
   currency = BASE_CURRENCY,
   defaultAmount,
+  existingPayment,
 }: RecordPaymentDialogProps) {
-  const [form, setForm] = useState<PaymentFormState>(() => initialFormState(defaultAmount))
+  const isEditing = Boolean(existingPayment)
+  const [form, setForm] = useState<PaymentFormState>(() => initialFormState(defaultAmount, existingPayment))
   const [saving, setSaving] = useState(false)
 
   // Reseed the form to the current default (and today's date) each time the dialog opens, rather
   // than once on mount — the modal that owns this dialog stays mounted between opens.
   useEffect(() => {
-    if (open) setForm(initialFormState(defaultAmount))
-  }, [open, defaultAmount])
+    if (open) setForm(initialFormState(defaultAmount, existingPayment))
+  }, [open, defaultAmount, existingPayment])
 
-  const baseline = initialFormState(defaultAmount)
+  const baseline = initialFormState(defaultAmount, existingPayment)
   const isFormDirty =
     form.amount !== baseline.amount ||
     form.method !== baseline.method ||
@@ -89,29 +112,41 @@ export function RecordPaymentDialog({
         ? new Date(`${form.paymentDate}T12:00:00Z`).toISOString()
         : new Date().toISOString()
 
-      const response = await fetch("/api/payments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobId,
-          amount: Number(form.amount),
-          method: form.method,
-          reference: form.reference || null,
-          notes: form.notes || null,
-          paymentDate,
-        }),
-      })
+      const response = isEditing
+        ? await fetch(`/api/payments/${existingPayment!.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              amount: Number(form.amount),
+              method: form.method,
+              reference: form.reference || null,
+              notes: form.notes || null,
+              receivedAt: paymentDate,
+            }),
+          })
+        : await fetch("/api/payments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jobId,
+              amount: Number(form.amount),
+              method: form.method,
+              reference: form.reference || null,
+              notes: form.notes || null,
+              paymentDate,
+            }),
+          })
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string; details?: Record<string, unknown> }
-        throw new Error(payload.error ?? "Failed to record payment")
+        throw new Error(payload.error ?? (isEditing ? "Failed to update payment" : "Failed to record payment"))
       }
 
       mutate()
       onOpenChange(false)
-      toast.success("Payment recorded")
+      toast.success(isEditing ? "Payment updated" : "Payment recorded")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to record payment")
+      toast.error(err instanceof Error ? err.message : (isEditing ? "Failed to update payment" : "Failed to record payment"))
     } finally {
       setSaving(false)
     }
@@ -126,8 +161,10 @@ export function RecordPaymentDialog({
           onDiscard={closeGuard.confirmDiscard}
         />
         <DialogHeader>
-          <DialogTitle>Record Payment</DialogTitle>
-          <DialogDescription>Enter the payment details for this job.</DialogDescription>
+          <DialogTitle>{isEditing ? "Edit Payment" : "Record Payment"}</DialogTitle>
+          <DialogDescription>
+            {isEditing ? "Update the details for this payment." : "Enter the payment details for this job."}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div>
@@ -160,7 +197,7 @@ export function RecordPaymentDialog({
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" size="sm" onClick={() => closeGuard.handleOpenChange(false)}>Cancel</Button>
             <Button size="sm" onClick={handleSubmit} disabled={saving || !form.amount}>
-              {saving ? "Saving..." : "Record"}
+              {saving ? "Saving..." : isEditing ? "Save" : "Record"}
             </Button>
           </div>
         </div>
