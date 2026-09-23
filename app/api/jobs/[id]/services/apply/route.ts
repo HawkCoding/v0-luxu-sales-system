@@ -11,6 +11,7 @@ import { getCachedRates } from "@/lib/fx/rates"
 import { getDefaultCommission } from "@/lib/pricing/default-commission"
 import { BASE_CURRENCY, formatMoney, isSupportedCurrency, normaliseCurrency } from "@/lib/money"
 import { MissingFxRateError, roundFxRate } from "@/lib/pricing/convert-currency"
+import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
 
 /**
  * Build Booking's equivalent of POST /api/packages/[slug]/apply: prices booking_services instead
@@ -34,6 +35,13 @@ const extraSchema = z.object({
   quantity: z.number().int().positive().optional(),
   rateTypeId: z.string().uuid().optional(),
   commissionOverride: commissionOverrideSchema,
+  /** How many people this extra is for, per passenger type. Omitted falls back to the booking's
+   * own headcount (the old behaviour) -- set it to sell an extra ticket for more or fewer people
+   * than the booking holds. Only per-person extras read it; a per-room/per-vehicle/per-day extra
+   * prices the same whoever it is for. */
+  adultCount: z.number().int().nonnegative().optional(),
+  childCount: z.number().int().nonnegative().optional(),
+  infantCount: z.number().int().nonnegative().optional(),
 })
 
 const unitSelectionSchema = z.object({
@@ -57,7 +65,8 @@ const unitSelectionSchema = z.object({
   complimentaryFirstNight: z.boolean().optional(),
   /** Tour legs only: the typed flat price that replaces this unit's rate-card-computed total. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
-  /** Tour legs only: this unit's own rate type, overriding the leg-level rateTypeId below. */
+  /** Train, hotel, cruise and tour legs (supportsUnitRateType): this unit's own rate type,
+   * overriding the leg-level rateTypeId below. The pricing engine ignores it on any other kind. */
   rateTypeId: z.string().uuid().nullable().optional(),
 })
 
@@ -181,6 +190,18 @@ export async function POST(req: Request, { params }: RouteParams) {
   // gets saved. The base currency is pinned to 1 regardless of what the client sent.
   const effectiveRates = { ...fx.rates, ...clientRates, [BASE_CURRENCY]: 1 }
 
+  // Building the quote is the moment the legs are put in date order: every service is dated and
+  // saved by now (the dialog's PATCH /services and PUT /transport-requests land first), and the
+  // package detail loaded below walks the legs by sort_order -- so the quote lines, and the invoice
+  // built from them, follow the itinerary. A moved leg's updated_at changes, so the response says
+  // so and the dialog re-reads the versions before its next save.
+  const reorder = await persistServiceDateOrder(supabase, id)
+  if (reorder.error) {
+    // Ordering is presentation, not pricing: a failure here must not cost the salesperson the quote.
+    console.error("services-apply:date-order", reorder.error)
+  }
+  const legOrderChanged = reorder.changedServiceIds.length > 0
+
   const { detail } = await loadBookingServicesPackageDetail(
     supabase,
     id,
@@ -259,27 +280,29 @@ export async function POST(req: Request, { params }: RouteParams) {
     const pricedALeg = lineItems.some((item) => item.pricingSnapshot?.legId)
     if (incompleteLegs.length > 0 && !pricedALeg) {
       return NextResponse.json(
-        { error: incompleteLegs[0].message, incompleteLegs },
+        { error: incompleteLegs[0].message, incompleteLegs, legOrderChanged },
         { status: 400 },
       )
     }
 
     return NextResponse.json({
+      // Built legs first, in date order; extras always follow them.
       lineItems: [...lineItems, ...extraLineItems],
       incompleteLegs,
       currency: quoteCurrency,
       // Let the dialog render its mixed-currency banner without a second round trip.
       fx: { rates: effectiveRates, asOf: fx.rows[0]?.asOf ?? null, stale: fx.stale },
+      legOrderChanged,
     })
   } catch (error) {
     // A missing rate is the salesperson's problem to fix (refresh or type one), not a server
     // fault -- surface it the same way an unpriced rate card is surfaced.
     if (error instanceof MissingFxRateError) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      return NextResponse.json({ error: error.message, legOrderChanged }, { status: 400 })
     }
     const message = error instanceof Error ? error.message : "Failed to build service line items"
     const status = message === "Job not found" ? 404 : 400
 
-    return NextResponse.json({ error: message }, { status })
+    return NextResponse.json({ error: message, legOrderChanged }, { status })
   }
 }

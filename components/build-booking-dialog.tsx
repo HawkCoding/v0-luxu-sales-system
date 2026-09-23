@@ -66,6 +66,7 @@ import {
   toTransferAnchorContext,
   toTransportRequestsPut,
   validateConfigureState,
+  collectHeadcountWarnings,
   type ApplyLegState,
   type HotelAnchorContext,
   type SavedPackageState,
@@ -642,6 +643,14 @@ export function BuildBookingDialog({
     })
   }, [sortedLegs, legStates, totalsBySupplierId])
 
+  // Airline, hotel and cruise legs whose units hold more or fewer people than the booking. Never
+  // blocks Next -- an extra ticket is a legitimate sale -- but the confirm step lists them so the
+  // difference is signed off rather than missed.
+  const headcountWarnings = useMemo(
+    () => (packageDetail ? collectHeadcountWarnings(packageDetail, legStates, totalsBySupplierId) : []),
+    [packageDetail, legStates, totalsBySupplierId],
+  )
+
   function reset() {
     setStep("services")
     setServices([])
@@ -813,7 +822,9 @@ export function BuildBookingDialog({
 
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
 
-  /** Re-reads booking_services.updated_at for every leg after a write this dialog made itself. */
+  /** Re-reads booking_services.updated_at for every leg after a write this dialog made itself --
+   *  and the legs' sort_order with it, so a server-side date re-sort (POST /services/apply puts the
+   *  legs in date order when the quote is priced) shows up in the step 1 and step 2 lists. */
   async function refreshLegVersions() {
     const res = await fetch(`/api/jobs/${jobId}/services`)
     if (!res.ok) return
@@ -826,6 +837,40 @@ export function BuildBookingDialog({
           ? { ...state, updatedAt: versionByLegId.get(state.legId) ?? null }
           : state,
       ),
+    )
+
+    const sortOrderByLegId = new Map(
+      saved.selections.flatMap((row) =>
+        typeof row.sort_order === "number" ? [[row.package_leg_id, row.sort_order] as const] : [],
+      ),
+    )
+    if (sortOrderByLegId.size === 0) return
+    setPackageDetail((prev) => {
+      if (!prev) return prev
+      const moved = prev.legs.some(
+        (leg) => sortOrderByLegId.has(leg.id) && sortOrderByLegId.get(leg.id) !== leg.sortOrder,
+      )
+      if (!moved) return prev
+      return {
+        ...prev,
+        legs: prev.legs.map((leg) =>
+          sortOrderByLegId.has(leg.id) ? { ...leg, sortOrder: sortOrderByLegId.get(leg.id) ?? leg.sortOrder } : leg,
+        ),
+      }
+    })
+    // Step 1's list follows the same order. Rows not yet built (no legId) keep their place at the end.
+    setServices((prev) =>
+      prev
+        .map((row, index) => ({ row, index }))
+        .sort((a, b) => {
+          const orderA = a.row.legId !== undefined ? sortOrderByLegId.get(a.row.legId) : undefined
+          const orderB = b.row.legId !== undefined ? sortOrderByLegId.get(b.row.legId) : undefined
+          if (orderA === undefined || orderB === undefined) {
+            return orderA === undefined && orderB === undefined ? a.index - b.index : orderA === undefined ? 1 : -1
+          }
+          return orderA - orderB || a.index - b.index
+        })
+        .map(({ row }) => row),
     )
   }
 
@@ -1025,6 +1070,10 @@ export function BuildBookingDialog({
         }),
       })
       const payload = await res.json()
+      // Pricing puts the legs in date order and persists it. A moved leg's updated_at changed, so
+      // adopt the fresh versions (or the next save 409s against this very request) and let both
+      // step lists follow the new order. Reported on a failed price too -- the sort ran first.
+      if (payload?.legOrderChanged === true) await refreshLegVersions()
       if (!res.ok) {
         const baseMessage = typeof payload?.error === "string" ? payload.error : "Validation failed"
         setBuildError(appendFieldDetails(baseMessage, payload))
@@ -1458,6 +1507,27 @@ export function BuildBookingDialog({
                   Go back and finish configuring{" "}
                   {incompleteLegs.length === 1 ? "it" : "them"} — the quote cannot be saved while a
                   service is missing from it.
+                </p>
+              </div>
+            )}
+
+            {headcountWarnings.length > 0 && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                <p className="flex items-center gap-1.5 font-medium">
+                  <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-500" aria-hidden="true" />
+                  {headcountWarnings.length === 1
+                    ? "One service is priced for a different number of people than the booking"
+                    : `${headcountWarnings.length} services are priced for a different number of people than the booking`}
+                </p>
+                <ul className="mt-1 list-disc pl-6 text-xs text-muted-foreground">
+                  {headcountWarnings.map((warning) => (
+                    <li key={warning.legId}>
+                      <span className="font-medium text-foreground">{warning.legLabel}:</span> {warning.message}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Fine for extra tickets. If it isn&apos;t intended, go back and adjust who is booked on it.
                 </p>
               </div>
             )}

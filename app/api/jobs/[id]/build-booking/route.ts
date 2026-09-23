@@ -7,6 +7,7 @@ import { isAtOrPastStage, isTerminalPipelineStage } from "@/lib/pipeline/validat
 import { isCoreBookingLeg, type PipelineStage, type SupplierKind } from "@/lib/types"
 import type { Database } from "@/lib/supabase/types"
 import { seedUnitsForServices } from "@/lib/packages/seed-service-units"
+import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
 
 export const runtime = "nodejs"
 
@@ -255,6 +256,14 @@ export async function POST(req: Request, { params }: RouteParams) {
     )
     if (seedResult.error) return safeSupabaseError("build-booking:seed-units", seedResult.error)
   }
+
+  // Re-sort the already-dated legs (a rebuild that inserts or removes one mid-itinerary can leave
+  // the survivors out of date order) so step 1 and step 2 read as an itinerary from the moment this
+  // build lands, not only after the configure step's own Next. A brand-new leg has no service_date
+  // yet and sorts last, in the order just written above, until it is dated. Best-effort: ordering
+  // is presentation, and it is re-run (authoritatively) once the quote is priced.
+  const dateReorder = await persistServiceDateOrder(supabase, id)
+  if (dateReorder.error) console.error("build-booking:date-order", dateReorder.error)
 
   await writeAuditLog(supabase, {
     actor: profile.actorName,
