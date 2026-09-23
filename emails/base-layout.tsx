@@ -12,6 +12,7 @@ import {
   type EmailFontFamily,
   type EmailFontSize,
 } from "@/lib/email/appearance"
+import { buildChromeFontCss, CHROME_CLASS_NAME, EMAIL_COLORS } from "@/lib/email/email-chrome"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 import { CONTENT_CLASS_NAME } from "@/lib/templates/content-slot"
 import { SIGNATURE_SLOT_END, SIGNATURE_SLOT_START } from "@/lib/templates/signature-slot"
@@ -77,27 +78,37 @@ export function BaseLayout({
   margin: 0 0 2px;
 }`.trim()
 
+  // The signature and brand strips sit outside .luxus-content (the sender's
+  // font size scales their message, not the chrome), so they get their own
+  // family-only rule — without it Outlook drops them back to Times New Roman.
+  // The inline fontFamily on each wrapper covers clients that strip <style>.
+  const headCss = `${contentFontCss}\n${buildChromeFontCss(fontFamily)}`
+
   return (
     <Html>
       <Head>
-        <style dangerouslySetInnerHTML={{ __html: contentFontCss }} />
+        <style dangerouslySetInnerHTML={{ __html: headCss }} />
       </Head>
       <Preview>{preview}</Preview>
       <Body style={{ ...body, fontFamily, fontSize }}>
         <Container style={container}>
           {brandPosition === "top" && (
-            <Section style={topBrand}>
+            <Section className={CHROME_CLASS_NAME} style={{ ...topBrand, fontFamily }}>
               <FooterBrandBlock brand={brand} />
             </Section>
           )}
           <Section style={content}>{children}</Section>
+          {/* The wrapper (class + inline font) stays put when the send dialog
+              swaps a different brand's fragment in between the markers. */}
           <div
+            className={CHROME_CLASS_NAME}
+            style={{ fontFamily }}
             dangerouslySetInnerHTML={{
               __html: `${SIGNATURE_SLOT_START}${signatureHtml ?? ""}${SIGNATURE_SLOT_END}`,
             }}
           />
           {brandPosition === "bottom" && (
-            <Section style={footer}>
+            <Section className={CHROME_CLASS_NAME} style={{ ...footer, fontFamily }}>
               <FooterBrandBlock brand={brand} />
             </Section>
           )}
@@ -108,16 +119,18 @@ export function BaseLayout({
 }
 
 // fontFamily/fontSize are applied per-render from the app settings.
+// Swirl page behind an Angora message; the brand strips drop back to Swirl so
+// they frame the message rather than sit on it.
 const body = {
   margin: "0",
-  backgroundColor: "#f6f2ea",
+  backgroundColor: EMAIL_COLORS.canvas,
 }
 
 const container = {
   width: "100%",
   maxWidth: "640px",
   margin: "0 auto",
-  backgroundColor: "#ffffff",
+  backgroundColor: EMAIL_COLORS.surface,
 }
 
 const content = {
@@ -126,8 +139,8 @@ const content = {
 
 const footer = {
   padding: "18px 24px",
-  borderTop: "1px solid #e8dfd2",
-  backgroundColor: "#fbf8f3",
+  borderTop: `1px solid ${EMAIL_COLORS.divider}`,
+  backgroundColor: EMAIL_COLORS.panel,
   textAlign: "center" as const,
 }
 
@@ -135,7 +148,7 @@ const footer = {
 // content the way the footer's top border does.
 const topBrand = {
   padding: "18px 24px",
-  borderBottom: "1px solid #e8dfd2",
-  backgroundColor: "#fbf8f3",
+  borderBottom: `1px solid ${EMAIL_COLORS.divider}`,
+  backgroundColor: EMAIL_COLORS.panel,
   textAlign: "center" as const,
 }

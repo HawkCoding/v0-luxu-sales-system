@@ -7,6 +7,7 @@
 // editor can show a readable name on its locked placeholder card.
 
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
+import { EMAIL_COLORS } from "@/lib/email/email-chrome"
 import { formatMoney } from "@/lib/money"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
@@ -78,19 +79,19 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;")
 }
 
-const summaryBox =
-  "margin:18px 0;padding:14px 16px;background-color:#fbf8f3;border:1px solid #e8dfd2;"
+// Panels are a Swirl fill on the Angora message with a warm divider border, so
+// they still read as boxes now that the container itself is tinted.
+const panel = `margin:18px 0;padding:14px 16px;background-color:${EMAIL_COLORS.panel};border:1px solid ${EMAIL_COLORS.divider};`
+const summaryBox = panel
 const summaryLine = "margin:0 0 6px;color:#312b24;font-size:13px;line-height:19px;"
-const pricingBox =
-  "margin:18px 0;padding:14px 16px;background-color:#f4efe6;border:1px solid #d8cdbc;"
+const pricingBox = panel
 const perPersonLine = "margin:0 0 6px;color:#554c42;font-size:13px;line-height:19px;"
 const subtotalLine = "margin:0 0 4px;color:#554c42;font-size:13px;line-height:19px;"
 const agentCommissionLine = `margin:0 0 4px;color:${AGENT_COMMISSION_COLOR};font-size:13px;font-weight:700;line-height:19px;`
 const discountLine = `margin:0 0 4px;color:${DISCOUNT_COLOR};font-size:13px;font-weight:700;line-height:19px;`
-const pricingDivider = "margin:0 0 6px;border-bottom:1px solid #d8cdbc;"
+const pricingDivider = `margin:0 0 6px;border-bottom:1px solid ${EMAIL_COLORS.divider};`
 const totalLine = "margin:0;color:#172018;font-size:16px;font-weight:700;line-height:22px;"
-const sectionHeading =
-  "margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid #d8cdbc;color:#172018;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;"
+const sectionHeading = `margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid ${EMAIL_COLORS.divider};color:#172018;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;`
 // The itinerary reads a size smaller than the email's 13px body copy, its bullets smaller again --
 // mirrors the PDF's 9pt/8pt itinerary against its 10pt body.
 const itineraryTitle = "margin:0 0 2px;color:#172018;font-size:12px;font-weight:700;line-height:17px;"
@@ -225,6 +226,6 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     itinerary +
     excludes +
     pricing +
-    `<hr style="margin:24px 0 18px;border:none;border-top:1px solid #e8dfd2;" data-label="Divider line"/>`
+    `<hr style="margin:24px 0 18px;border:none;border-top:1px solid ${EMAIL_COLORS.divider};" data-label="Divider line"/>`
   )
 }

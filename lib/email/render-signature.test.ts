@@ -135,6 +135,45 @@ describe("renderSignatureFragment", () => {
     expect(html).toMatch(/<a[^>]*href="https:\/\/iata\.org"[^>]*>\s*<img/)
   })
 
+  it("sizes the banner at half the email width via attributes, scaled proportionally", async () => {
+    const html = await renderSignatureFragment(BASE) // 480x120 upload
+    const banner = html.match(/<img[^>]*banner\.png[^>]*>/)?.[0] ?? ""
+    expect(banner).toMatch(/width="320"/)
+    expect(banner).toMatch(/height="80"/)
+    expect(banner).toMatch(/max-width:320px/)
+    expect(banner).toMatch(/width:100%/)
+    expect(banner).toMatch(/height:auto/)
+    expect(banner).not.toMatch(/max-height|object-fit|max-width:400px/)
+  })
+
+  it("never upscales a banner narrower than 320px", async () => {
+    const html = await renderSignatureFragment({
+      ...BASE,
+      brand: { ...BASE.brand, bannerWidth: 200, bannerHeight: 50 },
+    })
+    const banner = html.match(/<img[^>]*banner\.png[^>]*>/)?.[0] ?? ""
+    expect(banner).toMatch(/width="200"/)
+    expect(banner).toMatch(/height="50"/)
+  })
+
+  it("falls back to a 320px width attribute (no height) when the upload's dimensions are unknown", async () => {
+    const html = await renderSignatureFragment({
+      ...BASE,
+      brand: { ...BASE.brand, bannerWidth: null, bannerHeight: null },
+    })
+    const banner = html.match(/<img[^>]*banner\.png[^>]*>/)?.[0] ?? ""
+    expect(banner).toMatch(/width="320"/)
+    expect(banner).not.toMatch(/height="/)
+  })
+
+  it("renders small print and the divider in the AA-safe warm tones", async () => {
+    const html = await renderSignatureFragment(BASE)
+    expect(html).toContain("color:#6b6258")
+    expect(html).toContain("#cfc7ba")
+    expect(html).not.toContain("#8a7f74")
+    expect(html).not.toContain("#e8dfd2")
+  })
+
   it("never leaves the react-email default 24px line-height on the sender lines", async () => {
     const html = await renderSignatureFragment(BASE)
     expect(html).not.toContain("line-height:24px")

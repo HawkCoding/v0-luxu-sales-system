@@ -4,6 +4,7 @@ import {
   FOOTER_BRAND_DIVISION_LINE,
   FOOTER_BRAND_PRODUCT_LINE,
 } from "@/lib/assets/footer-brand"
+import { EMAIL_COLORS } from "@/lib/email/email-chrome"
 import type { DocumentBrand } from "@/lib/settings-access"
 
 interface FooterBrandBlockProps {
@@ -73,7 +74,7 @@ const divisionLine = {
 
 const productLine = {
   margin: "4px 0 0",
-  color: "#8a7f74",
+  color: EMAIL_COLORS.mutedText,
   fontSize: "11px",
   lineHeight: "15px",
   letterSpacing: "1px",

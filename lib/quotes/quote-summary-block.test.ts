@@ -44,6 +44,16 @@ const base: QuoteSummaryInput = {
 }
 
 describe("buildQuoteSummaryBlock", () => {
+  it("fills both panels with Swirl and a divider border that reads on the Angora container", () => {
+    const html = buildQuoteSummaryBlock(base)
+    const panelStyle = "background-color:#f4f1ee;border:1px solid #cfc7ba;"
+    expect(html).toMatch(new RegExp(`<div style="[^"]*${panelStyle}" data-label="Quote details">`))
+    expect(html).toMatch(new RegExp(`<div style="[^"]*${panelStyle}" data-label="Total price">`))
+    for (const legacy of ["#fbf8f3", "#f4efe6", "#e8dfd2", "#d8cdbc"]) {
+      expect(html).not.toContain(legacy)
+    }
+  })
+
   it("renders quote meta with travel dates and guests", () => {
     const html = buildQuoteSummaryBlock(base)
     expect(html).toContain("Travel Dates:</strong> 18 – 22 July 2026")
