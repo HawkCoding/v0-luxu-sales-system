@@ -2546,6 +2546,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          can_view_reporting: boolean
           clearance_level: Database["public"]["Enums"]["user_role"]
           created_at: string
           email: string
@@ -2556,6 +2557,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          can_view_reporting?: boolean
           clearance_level?: Database["public"]["Enums"]["user_role"]
           created_at?: string
           email: string
@@ -2566,6 +2568,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          can_view_reporting?: boolean
           clearance_level?: Database["public"]["Enums"]["user_role"]
           created_at?: string
           email?: string

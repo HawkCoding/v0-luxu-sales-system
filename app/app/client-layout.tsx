@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { RoleProvider, useRole } from "@/lib/role-context"
+import { RoleProvider, useRole, type UserGrants } from "@/lib/role-context"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -447,13 +447,15 @@ function AppShell({ children }: { children: ReactNode }) {
 export default function AppClientLayout({
   children,
   initialUser,
+  grants,
 }: {
   children: ReactNode
   initialUser: User | null
+  grants?: UserGrants
 }) {
   return (
     <AuthProvider initialUser={initialUser}>
-      <RoleProvider initialRole={initialUser?.role}>
+      <RoleProvider initialRole={initialUser?.role} grants={grants}>
         <AuthHashErrorNotice />
         <div className="flex flex-col h-svh overflow-hidden">
           <EmailTestModeBanner />
