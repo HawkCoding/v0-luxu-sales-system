@@ -24,6 +24,10 @@ interface RouteParams {
  * re-rendered with the updated status block and money ladder ("amended
  * confirmation invoice") and attached. The client shows an editable preview and
  * sends via /api/correspondence (kind: payment_received).
+ *
+ * Once the balance reaches zero the email uses the `full_payment_received`
+ * template; the correspondence kind stays `payment_received` either way, since
+ * the pipeline gates and attachment library key off it.
  */
 export async function POST(_req: Request, { params }: RouteParams) {
   const auth = await requireRole(["admin", "manager", "consultant"])
@@ -83,12 +87,21 @@ export async function POST(_req: Request, { params }: RouteParams) {
     .limit(1)
     .maybeSingle()
 
+  // A pay-in-full booking has no deposit split: its amended invoice keeps the
+  // single full-amount due line it was issued with (same as invoices/deposit).
+  const isFullPaymentInvoice = invoice.kind === "full"
   const totals = buildUnifiedTotals({
     balance,
     departureDate: booking.departure_date,
-    depositPercentage: depositInvoice?.deposit_percentage ?? null,
-    depositAmount: depositInvoice?.amount ?? null,
+    depositPercentage: isFullPaymentInvoice ? null : depositInvoice?.deposit_percentage ?? null,
+    depositAmount: isFullPaymentInvoice ? null : depositInvoice?.amount ?? null,
+    mode: isFullPaymentInvoice ? "full" : "deposit",
+    fullDueDate: isFullPaymentInvoice ? invoice.due_date : undefined,
   })
+  // Nothing left to pay — the final payment after a deposit, or a pay-in-full
+  // invoice settled — gets the "paid in full" wording instead of a schedule
+  // with a final-due line. Deposit-only payments keep payment_received.
+  const paidInFull = balance.balance <= 0
   const statusLabel = resolveInvoiceStatusLabel(
     await getInvoiceStatusOptions(supabase),
     {
@@ -136,7 +149,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const method = await getPaymentMethod(supabase, invoice.payment_method_id)
   const banking = method.banking
   const shared = await resolveSharedEmailTokens(supabase, booking.id)
-  const composed = await composeEmail(supabase, "payment_received", {
+  const composed = await composeEmail(supabase, paidInFull ? "full_payment_received" : "payment_received", {
     tokens: {
       ...shared.tokens,
       customerName: customerName || "Valued Guest",
@@ -158,6 +171,9 @@ export async function POST(_req: Request, { params }: RouteParams) {
   if (!composed) return jsonError("Payment-received template could not be resolved", 500)
 
   return Response.json({
+    // Lets the preview dialog title itself from the server's reading of the
+    // balance, not the page's possibly-stale copy.
+    paidInFull,
     email: {
       to: customer?.email ?? "",
       subject: composed.subject,

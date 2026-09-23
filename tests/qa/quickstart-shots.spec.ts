@@ -808,14 +808,13 @@ test.describe("quickstart vouchers", () => {
       const context = await browser.newContext({ storageState: HANDBOOK_USERS.consultant.storageState })
       const page = await context.newPage()
       await page.goto(`/app/bookings/${QS_PAID_BOOKING}?tab=documents`)
-      await page.getByRole("button", { name: /^generate voucher$/i }).click({ timeout: 60_000 })
+      await page.getByRole("button", { name: /preview & send voucher/i }).click({ timeout: 60_000 })
 
-      const dialog = page.getByRole("dialog")
-      await expect(dialog.getByText("Generate travel voucher")).toBeVisible({ timeout: 30_000 })
-      // Captured before Generate PDF is pressed: the rendered preview is a PDF
-      // viewer embed, which screenshots as a blank rectangle and would print as
-      // half a page of white.
-      await expect(dialog.getByRole("button", { name: /^generate pdf$/i })).toBeVisible()
+      const dialog = page.getByRole("dialog").filter({ hasText: "Send travel voucher" })
+      // Captured while the voucher PDF and email are still being prepared — the
+      // dialog goes straight from this state into the nested send-preview dialog,
+      // so this is the only moment this outer dialog is on screen by itself.
+      await expect(dialog.getByText(/preparing voucher/i)).toBeVisible({ timeout: 30_000 })
       await shot(page, "qs-generate-voucher")
 
       await page.keyboard.press("Escape")
@@ -837,16 +836,10 @@ test.describe("quickstart vouchers", () => {
       const context = await browser.newContext({ storageState: HANDBOOK_USERS.consultant.storageState })
       const page = await context.newPage()
       await page.goto(`/app/bookings/${QS_PAID_BOOKING}?tab=documents`)
-      await page.getByRole("button", { name: /^generate voucher$/i }).click({ timeout: 60_000 })
+      // A single click rebuilds the voucher PDF from the latest booking details,
+      // prepares the email, then opens the send-preview dialog automatically.
+      await page.getByRole("button", { name: /preview & send voucher/i }).click({ timeout: 60_000 })
 
-      const generateDialog = page.getByRole("dialog")
-      await expect(generateDialog.getByText("Generate travel voucher")).toBeVisible({ timeout: 30_000 })
-      await generateDialog.getByRole("button", { name: /^generate pdf$/i }).click()
-      await expect(generateDialog.getByRole("button", { name: /^regenerate pdf$/i })).toBeVisible({
-        timeout: 60_000,
-      })
-
-      await generateDialog.getByRole("button", { name: /preview & send voucher/i }).click()
       const previewDialog = page.getByRole("dialog").filter({ hasText: "Send travel voucher" })
       await expect(previewDialog).toBeVisible({ timeout: 60_000 })
       await expect(previewDialog.getByRole("button", { name: /send with attachment/i })).toBeVisible()

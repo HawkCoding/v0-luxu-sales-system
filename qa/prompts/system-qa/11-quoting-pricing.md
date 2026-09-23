@@ -18,7 +18,7 @@ Run as consultant (leonie).
 
 - [app/api/jobs/[id]/start-quote/route.ts](../../../app/api/jobs/[id]/start-quote/route.ts), [app/api/quotes/route.ts](../../../app/api/quotes/route.ts), [app/api/quotes/[id]/route.ts](../../../app/api/quotes/[id]/route.ts) *(UTF-16 on disk — use Read, not Grep)*
 - `app/api/quotes/[id]/{pdf,email-preview,revise,cancel,commission-bonus}/route.ts`
-- [components/job-quotes-tab.tsx](../../../components/job-quotes-tab.tsx), [components/create-quote-dialog.tsx](../../../components/create-quote-dialog.tsx), [components/quote-revision-banner.tsx](../../../components/quote-revision-banner.tsx), [components/quote-preview-send-dialog.tsx](../../../components/quote-preview-send-dialog.tsx)
+- [components/job-quotes-tab.tsx](../../../components/job-quotes-tab.tsx), [components/create-quote-dialog.tsx](../../../components/create-quote-dialog.tsx), [components/revise-quote-dialog.tsx](../../../components/revise-quote-dialog.tsx), [components/quote-preview-send-dialog.tsx](../../../components/quote-preview-send-dialog.tsx)
 - [lib/quotes/pricing-engine.ts](../../../lib/quotes/pricing-engine.ts) — `calculateQuoteTotals`, `isMissingPricing`, `isFixedPackageInclusion`
 - [lib/quotes/quote-number.ts](../../../lib/quotes/quote-number.ts), [lib/quotes/quote-validity.ts](../../../lib/quotes/quote-validity.ts), [lib/quotes/revision-reset.ts](../../../lib/quotes/revision-reset.ts), [lib/quotes/apply-commission-bonus.ts](../../../lib/quotes/apply-commission-bonus.ts), [lib/quotes/accepted-quote-scope.ts](../../../lib/quotes/accepted-quote-scope.ts)
 - [lib/quotes/adapters/from-booking-services.ts](../../../lib/quotes/adapters/from-booking-services.ts), [lib/quotes/price-extra-line.ts](../../../lib/quotes/price-extra-line.ts)
@@ -103,8 +103,10 @@ you did.
     confirm the block.
 22. Change pax on Q2 (2 adults → 3) and re-price. Confirm the total changes and
     Q1 is untouched.
-23. `components/quote-revision-banner.tsx` warns the user that a newer revision
-    exists when viewing Q1.
+23. After the revision, the booking header shows no post-revise checklist
+    banner (removed 2026-09). Once the booking is back at Quote Accepted, the
+    deposit/full invoice strip reappears in amending mode so the amended
+    invoice can be issued.
 24. Accept Q2. Confirm `lib/quotes/accepted-quote-scope.ts` now scopes downstream
     documents to Q2, not Q1 — this is what the voucher in QA 14 will render.
 
