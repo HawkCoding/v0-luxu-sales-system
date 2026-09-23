@@ -3,9 +3,9 @@ import { Font } from "@react-pdf/renderer"
 
 // Server-only module: font files are read from disk at render time.
 // TTFs must be static instances — react-pdf/fontkit does not support variable fonts.
-// Shared by every @react-pdf/renderer document (voucher, itinerary, invoice) so none
-// of them fall back to the base-14 Helvetica font, whose WinAnsi encoding has no slot
-// for → / ↔ and mangles them into stray punctuation.
+// Shared by every @react-pdf/renderer document (quote, invoice, worksheet, voucher,
+// itinerary) so none of them fall back to the base-14 Helvetica font, whose WinAnsi
+// encoding has no slot for → / ↔ and mangles them into stray punctuation.
 
 let registered = false
 
@@ -14,6 +14,15 @@ export interface DocumentFontPairing {
   sans: string
   body: string
 }
+
+/**
+ * The house typeface for every client and internal PDF: Calibri. Microsoft's licence forbids
+ * embedding the real Calibri files, so documents embed Carlito — the metric-compatible,
+ * OFL-licensed clone — which sets line breaks and column widths exactly as Calibri would.
+ * Registered as regular, italic and bold (700) only: there is no bold-italic file, so never
+ * combine `fontWeight: 700` with `fontStyle: "italic"` — react-pdf throws "Could not resolve font".
+ */
+export const DOCUMENT_FONT_FAMILY = "Carlito"
 
 const DISPLAY_FAMILY = "Playfair Display"
 const SANS_FAMILY = "Montserrat"
@@ -26,13 +35,15 @@ const SANS_FAMILY = "Montserrat"
 const VOUCHER_FONT_FAMILIES: Record<string, string> = {
   "Arial, sans-serif": "Arimo",
   "Helvetica, Arial, sans-serif": "Arimo",
-  "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif": "Carlito",
+  "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif": DOCUMENT_FONT_FAMILY,
   "Georgia, serif": "Gelasio",
   "'Times New Roman', Times, serif": "Tinos",
   "Verdana, Geneva, sans-serif": "DejaVu Sans",
 }
 
-const VOUCHER_FONT_DEFAULT = "Arimo"
+// An unknown/blank voucher_template.font_family falls back to the house Calibri clone,
+// matching production's saved Calibri selection.
+const VOUCHER_FONT_DEFAULT = DOCUMENT_FONT_FAMILY
 
 function fontPath(file: string): string {
   return path.join(process.cwd(), "assets", "fonts", file)
@@ -65,7 +76,7 @@ export function registerDocumentFonts(): void {
     ],
   })
   Font.register({
-    family: "Carlito",
+    family: DOCUMENT_FONT_FAMILY,
     fonts: [
       { src: fontPath("Carlito-Regular.ttf") },
       { src: fontPath("Carlito-Italic.ttf"), fontStyle: "italic" },
