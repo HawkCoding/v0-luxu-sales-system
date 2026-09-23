@@ -20,11 +20,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   let displayName: string
   let email: string
   let role: Role
+  let canViewReporting: boolean
 
   if (jwtRole) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("name, surname, email, is_active")
+      .select("name, surname, email, is_active, can_view_reporting")
       .eq("user_id", user.id)
       .single()
 
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
 
     role = jwtRole
+    canViewReporting = profile.can_view_reporting === true
     displayName = profile
       ? [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
       : (user.email ?? "").split("@")[0].replace(/^./, (char) => char.toUpperCase())
@@ -44,7 +46,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   } else {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("name, surname, clearance_level, email, is_active")
+      .select("name, surname, clearance_level, email, is_active, can_view_reporting")
       .eq("user_id", user.id)
       .single()
 
@@ -57,6 +59,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
 
     role = profile.clearance_level
+    canViewReporting = profile.can_view_reporting === true
     displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
     email = profile.email || user.email || ""
   }
@@ -64,7 +67,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const initialUser = { id: user.id, name: displayName, email, role }
 
   return (
-    <AppClientLayout initialUser={initialUser}>
+    <AppClientLayout initialUser={initialUser} grants={{ viewReporting: canViewReporting }}>
       {children}
     </AppClientLayout>
   )

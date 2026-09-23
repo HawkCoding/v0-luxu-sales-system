@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
-import { isRole } from "@/lib/role-utils"
+import { canUserViewReporting } from "@/lib/reports/access"
 import { salesPerSalesperson } from "@/lib/reports/sales-per-salesperson"
 import { conversionRate } from "@/lib/reports/conversion-rate"
 import { revenuePerProduct } from "@/lib/reports/revenue-per-product"
@@ -44,13 +44,8 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("clearance_level")
-    .eq("user_id", user.id)
-    .single()
-
-  if (profileError || !profile || !isRole(profile.clearance_level)) {
+  // Reporting is a per-user grant set by an admin, not a role permission.
+  if (!(await canUserViewReporting(supabase, user.id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

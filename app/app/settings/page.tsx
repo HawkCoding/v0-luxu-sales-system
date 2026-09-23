@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { mutate } from "swr"
 import { toast } from "sonner"
@@ -58,7 +59,9 @@ import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { AlertTriangle, ArrowRight, Clock, FlaskConical, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, SlidersHorizontal, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { ReportingAccessSwitch } from "@/components/settings/reporting-access-switch"
+import { cn } from "@/lib/utils"
+import { AlertTriangle, ArrowRight, BarChart3, Clock, FlaskConical, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, SlidersHorizontal, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -67,6 +70,7 @@ interface AppUser {
   lastName: string
   clearanceLevel: Role
   isActive: boolean
+  canViewReporting: boolean
   isCurrentUser: boolean
 }
 
@@ -88,6 +92,7 @@ interface CreateUserForm {
   surname: string
   email: string
   clearanceLevel: Role
+  canViewReporting: boolean
   password: string
   confirmPassword: string
 }
@@ -99,6 +104,7 @@ const EMPTY_CREATE_FORM: CreateUserForm = {
   surname: "",
   email: "",
   clearanceLevel: "consultant",
+  canViewReporting: false,
   password: "",
   confirmPassword: "",
 }
@@ -134,6 +140,49 @@ function UserManagementCard() {
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null)
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("")
   const [actionUserId, setActionUserId] = useState<string | null>(null)
+  const [savingReportingIds, setSavingReportingIds] = useState<ReadonlySet<string>>(() => new Set())
+  const router = useRouter()
+
+  const handleToggleReporting = async (target: AppUser, next: boolean) => {
+    const name = userDisplayName(target)
+    const applyFlag = (value: boolean) =>
+      setUsers((prev) =>
+        prev.map((u) => (u.userId === target.userId ? { ...u, canViewReporting: value } : u)),
+      )
+    const setSaving = (saving: boolean) =>
+      setSavingReportingIds((prev) => {
+        const nextIds = new Set(prev)
+        if (saving) nextIds.add(target.userId)
+        else nextIds.delete(target.userId)
+        return nextIds
+      })
+
+    // Optimistic: flip the row now, revert if the save fails.
+    applyFlag(next)
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/users/${target.userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ canViewReporting: next }),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        applyFlag(!next)
+        toast.error(data.error || `Could not update reporting access for ${name}`)
+        return
+      }
+      toast.success(next ? `Reporting switched on for ${name}` : `Reporting switched off for ${name}`)
+      // The sidebar reads the grant from the server layout; refresh it when an
+      // admin changes their own access so the Reporting link appears/disappears.
+      if (target.isCurrentUser) router.refresh()
+    } catch {
+      applyFlag(!next)
+      toast.error(`Could not update reporting access for ${name}`)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -222,6 +271,7 @@ function UserManagementCard() {
           surname: createForm.surname.trim() || undefined,
           email: createForm.email.trim(),
           clearanceLevel: createForm.clearanceLevel,
+          canViewReporting: createForm.canViewReporting,
           password: createForm.password,
         }),
       })
@@ -370,6 +420,10 @@ function UserManagementCard() {
               <CardDescription className="text-xs mt-1">
                 Add users, manage roles, reset passwords, deactivate accounts, or permanently delete users.
               </CardDescription>
+              <p className="mt-1.5 flex items-start gap-1.5 text-xs text-muted-foreground">
+                <BarChart3 className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Reporting is hidden for everyone until switched on here.</span>
+              </p>
             </div>
             <Button
               size="sm"
@@ -395,18 +449,26 @@ function UserManagementCard() {
             <ul className="space-y-2">
               {users.map((u) => {
                 const isBusy = actionUserId === u.userId
+                const isSavingReporting = savingReportingIds.has(u.userId)
+                const displayName = userDisplayName(u)
                 return (
                   <li
                     key={u.userId}
-                    className={`flex items-center justify-between gap-4 rounded-md border px-3 py-2 ${u.isActive ? "" : "opacity-60"}`}
+                    className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                   >
-                    <div>
-                      <p className="text-sm font-medium">{userDisplayName(u)}</p>
-                      <p className="text-xs text-muted-foreground">{u.email}</p>
-                      <div className="mt-1 flex items-center gap-1.5">
+                    <div className={cn("min-w-0", !u.isActive && "opacity-60")}>
+                      <p className="truncate text-sm font-medium">{displayName}</p>
+                      <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <Badge variant="secondary" className="text-xs capitalize">
                           {u.clearanceLevel}
                         </Badge>
+                        {u.canViewReporting && (
+                          <Badge variant="outline" className="gap-1 text-xs">
+                            <BarChart3 className="h-3 w-3" aria-hidden="true" />
+                            Reporting
+                          </Badge>
+                        )}
                         {!u.isActive && (
                           <Badge variant="destructive" className="text-xs">
                             Inactive
@@ -420,77 +482,87 @@ function UserManagementCard() {
                       </div>
                     </div>
 
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" aria-label="User actions">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setSetPasswordFor(u)
-                            setNewPassword("")
-                            setConfirmPassword("")
-                            setSubmitError("")
-                          }}
-                          disabled={isBusy}
-                        >
-                          <KeyRound className="h-4 w-4" />
-                          Set password
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => setStatusTarget(u)}
-                          disabled={u.isCurrentUser || isBusy}
-                        >
-                          {u.isActive ? (
-                            <>
-                              <UserX className="h-4 w-4" />
-                              Deactivate
-                            </>
-                          ) : (
-                            <>
-                              <UserCheck className="h-4 w-4" />
-                              Reactivate
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setRoleTarget(u)
-                            setSelectedRole(u.clearanceLevel)
-                            setRoleError("")
-                          }}
-                          disabled={u.isCurrentUser || isBusy}
-                        >
-                          <ShieldCheck className="h-4 w-4" />
-                          Change role
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setEditTarget(u)
-                            setEditForm({ name: u.firstName, surname: u.lastName, email: u.email })
-                            setEditError("")
-                          }}
-                          disabled={isBusy}
-                        >
-                          <Pencil className="h-4 w-4" />
-                          Edit details
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={() => {
-                            setDeleteTarget(u)
-                            setDeleteConfirmationText("")
-                          }}
-                          disabled={u.isCurrentUser || isBusy}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete permanently
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <div className="flex shrink-0 items-center justify-between gap-3 border-t pt-2 sm:justify-end sm:border-t-0 sm:pt-0">
+                      <ReportingAccessSwitch
+                        id={`reporting-access-${u.userId}`}
+                        userName={displayName}
+                        checked={u.canViewReporting}
+                        saving={isSavingReporting}
+                        disabled={isBusy}
+                        onCheckedChange={(next) => void handleToggleReporting(u, next)}
+                      />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" aria-label={`Actions for ${displayName}`}>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSetPasswordFor(u)
+                              setNewPassword("")
+                              setConfirmPassword("")
+                              setSubmitError("")
+                            }}
+                            disabled={isBusy}
+                          >
+                            <KeyRound className="h-4 w-4" />
+                            Set password
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setStatusTarget(u)}
+                            disabled={u.isCurrentUser || isBusy}
+                          >
+                            {u.isActive ? (
+                              <>
+                                <UserX className="h-4 w-4" />
+                                Deactivate
+                              </>
+                            ) : (
+                              <>
+                                <UserCheck className="h-4 w-4" />
+                                Reactivate
+                              </>
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setRoleTarget(u)
+                              setSelectedRole(u.clearanceLevel)
+                              setRoleError("")
+                            }}
+                            disabled={u.isCurrentUser || isBusy}
+                          >
+                            <ShieldCheck className="h-4 w-4" />
+                            Change role
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditTarget(u)
+                              setEditForm({ name: u.firstName, surname: u.lastName, email: u.email })
+                              setEditError("")
+                            }}
+                            disabled={isBusy}
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Edit details
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => {
+                              setDeleteTarget(u)
+                              setDeleteConfirmationText("")
+                            }}
+                            disabled={u.isCurrentUser || isBusy}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete permanently
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </li>
                 )
               })}
@@ -561,6 +633,28 @@ function UserManagementCard() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="flex items-start justify-between gap-4 rounded-md border px-3 py-2.5">
+              <div className="space-y-0.5">
+                <Label htmlFor="new-user-reporting" className="cursor-pointer">
+                  Can view reporting
+                </Label>
+                <p id="new-user-reporting-help" className="text-xs text-muted-foreground">
+                  Shows the Reporting page and report exports. Off by default; you can change it
+                  later from the user list.
+                </p>
+              </div>
+              <Switch
+                id="new-user-reporting"
+                className="mt-0.5"
+                checked={createForm.canViewReporting}
+                onCheckedChange={(checked) =>
+                  setCreateForm((prev) => ({ ...prev, canViewReporting: checked }))
+                }
+                disabled={creatingUser}
+                aria-describedby="new-user-reporting-help"
+              />
             </div>
 
             <div className="space-y-2">

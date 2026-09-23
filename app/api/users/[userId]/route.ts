@@ -3,7 +3,8 @@
  * DELETE /api/users/[userId]
  *
  * Admin-only:
- * - PATCH: deactivate/reactivate user.
+ * - PATCH: deactivate/reactivate user, change role, edit details, or switch
+ *   reporting access (the only field an admin may also change on themselves).
  * - DELETE: permanently delete user.
  */
 
@@ -25,11 +26,13 @@ const patchSchema = z
     name: z.string().trim().min(1).max(120).optional(),
     surname: z.string().trim().max(120).optional(),
     email: z.string().trim().toLowerCase().email().optional(),
+    canViewReporting: z.boolean().optional(),
   })
   .refine(
     (data) =>
       data.isActive !== undefined ||
       data.clearanceLevel !== undefined ||
+      data.canViewReporting !== undefined ||
       data.name !== undefined ||
       data.surname !== undefined ||
       data.email !== undefined,
@@ -61,6 +64,9 @@ export async function PATCH(
   if (!result.success) return jsonZodError(result.error)
   const payload = result.data
 
+  // canViewReporting is deliberately NOT blocked for self: reporting is off for
+  // admins too until switched on, so an admin must be able to grant it to
+  // themselves.
   if (userId === auth.value.adminUserId) {
     if (payload.clearanceLevel !== undefined) {
       return NextResponse.json({ error: "You cannot change your own role" }, { status: 400 })
@@ -73,7 +79,7 @@ export async function PATCH(
   const service = createServiceClient()
   const { data: targetProfile, error: profileError } = await service
     .from("profiles")
-    .select("user_id, email, name, surname, is_active, clearance_level")
+    .select("user_id, email, name, surname, is_active, clearance_level, can_view_reporting")
     .eq("user_id", userId)
     .maybeSingle()
 
@@ -115,9 +121,13 @@ export async function PATCH(
     name?: string
     surname?: string | null
     email?: string
+    can_view_reporting?: boolean
   } = {}
   if (payload.isActive !== undefined) {
     profileUpdates.is_active = payload.isActive
+  }
+  if (payload.canViewReporting !== undefined) {
+    profileUpdates.can_view_reporting = payload.canViewReporting
   }
   if (payload.clearanceLevel !== undefined) {
     profileUpdates.clearance_level = payload.clearanceLevel
@@ -176,6 +186,28 @@ export async function PATCH(
     }
   }
 
+  if (
+    payload.canViewReporting !== undefined &&
+    payload.canViewReporting !== (targetProfile.can_view_reporting === true)
+  ) {
+    try {
+      await service.from("audit_logs").insert({
+        action: "reporting_access_changed",
+        actor: auth.value.adminName,
+        actor_user_id: auth.value.adminUserId,
+        entity_type: "user",
+        entity_id: userId,
+        meta_json: {
+          target_email: targetProfile.email,
+          previous_can_view_reporting: targetProfile.can_view_reporting === true,
+          next_can_view_reporting: payload.canViewReporting,
+        },
+      })
+    } catch {
+      // non-fatal
+    }
+  }
+
   if (payload.name !== undefined || payload.surname !== undefined || payload.email !== undefined) {
     try {
       await service.from("audit_logs").insert({
@@ -206,6 +238,7 @@ export async function PATCH(
     ok: true,
     isActive: payload.isActive ?? (targetProfile.is_active ?? true),
     clearanceLevel: payload.clearanceLevel ?? targetProfile.clearance_level,
+    canViewReporting: payload.canViewReporting ?? (targetProfile.can_view_reporting === true),
     name: payload.name ?? targetProfile.name,
     surname: payload.surname ?? targetProfile.surname,
     email: payload.email ?? targetProfile.email,
