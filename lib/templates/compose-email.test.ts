@@ -6,6 +6,8 @@ import {
   extractContentSlot,
   replaceContentSlot,
 } from "./content-slot"
+import { replaceSignatureSlot, SIGNATURE_SLOT_START } from "./signature-slot"
+import { CHROME_CLASS_NAME } from "@/lib/email/email-chrome"
 
 const settingsMocks = vi.hoisted(() => ({
   getEmailBrandingSettings: vi.fn(),
@@ -207,8 +209,67 @@ describe("composeFromTemplate", () => {
       { tokens: {} },
     )
 
-    expect(composed.bodyHtml).toContain("font-family: Arial, sans-serif")
+    expect(composed.bodyHtml).toContain(
+      "font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif",
+    )
     expect(composed.bodyHtml).toContain("font-size: 16px")
+  })
+
+  it("renders the Swirl page, Angora container and Swirl brand strip", async () => {
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    const html = composed.bodyHtml
+    expect(html).toMatch(/<body[^>]*background-color:#f4f1ee/)
+    expect(html).toContain("background-color:#e8e5df")
+    // Brand strip (bottom position in the default mock): Swirl fill, warm divider border.
+    expect(html).toMatch(/border-top:1px solid #cfc7ba;background-color:#f4f1ee/)
+    for (const legacy of ["#f6f2ea", "#fbf8f3", "#e8dfd2", "#8a7f74"]) {
+      expect(html).not.toContain(legacy)
+    }
+  })
+
+  it("applies a family-only head rule to the signature slot and brand strip", async () => {
+    settingsMocks.getEmailBrandingSettings.mockResolvedValue({
+      ...DEFAULT_BRANDING,
+      email_font_family: "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif",
+      email_font_size: "18px",
+    })
+
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    const head = composed.bodyHtml.split("</style>")[0]
+    const chromeRule = head.match(new RegExp(`\\.${CHROME_CLASS_NAME}[^{]*\\{([^}]*)\\}`))
+    expect(chromeRule).not.toBeNull()
+    expect(chromeRule?.[0]).toContain(`.${CHROME_CLASS_NAME} p`)
+    expect(chromeRule?.[0]).toContain(`.${CHROME_CLASS_NAME} td`)
+    expect(chromeRule?.[1]).toContain("font-family: Calibri, Candara")
+    // The signature and strip keep their own sizes — the chrome rule must not set one.
+    expect(chromeRule?.[1]).not.toContain("font-size")
+
+    // Signature slot wrapper and brand strip both carry the class + inline family.
+    const chromeWrappers = composed.bodyHtml.match(
+      new RegExp(`class="${CHROME_CLASS_NAME}"[^>]*style="[^"]*font-family:Calibri`, "g"),
+    )
+    expect(chromeWrappers?.length).toBe(2)
+  })
+
+  it("keeps the chrome wrapper around the signature when a different brand is swapped in", async () => {
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+    const swapped = replaceSignatureSlot(composed.bodyHtml, "<p>Other brand</p>")
+
+    expect(swapped).not.toBeNull()
+    const wrapperStart = swapped?.lastIndexOf(`class="${CHROME_CLASS_NAME}"`, swapped.indexOf(SIGNATURE_SLOT_START)) ?? -1
+    expect(wrapperStart).toBeGreaterThan(-1)
+    expect(swapped?.indexOf("<p>Other brand</p>")).toBeGreaterThan(wrapperStart)
   })
 
   it("renders the sender's signature outside the content slot when senderProfileId is given", async () => {

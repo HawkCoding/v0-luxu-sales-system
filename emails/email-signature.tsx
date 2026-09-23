@@ -1,5 +1,6 @@
 import { Hr, Img, Link, Section, Text } from "@react-email/components"
 import type { CSSProperties } from "react"
+import { EMAIL_COLORS, SIGNATURE_BANNER_MAX_WIDTH, signatureBannerSize } from "@/lib/email/email-chrome"
 import { renderSenderLayout } from "@/lib/email/sender-layout"
 import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
@@ -29,19 +30,14 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
 
   const senderHtml = renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website })
   const smallPrintLine = joinParts([brand.registrationLine, brand.tradingHours])
+  const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
 
   return (
     <Section style={block}>
       <Text style={senderLines} dangerouslySetInnerHTML={{ __html: senderHtml }} />
 
       {brand.bannerUrl ? (
-        <Img
-          alt={brand.name}
-          src={brand.bannerUrl}
-          width={brand.bannerWidth ?? undefined}
-          height={brand.bannerHeight ?? undefined}
-          style={banner}
-        />
+        <Img alt={brand.name} src={brand.bannerUrl} {...bannerSize} style={banner} />
       ) : null}
 
       {brand.officeAddress ? (
@@ -112,17 +108,18 @@ const senderLines = {
   color: "#3d3831",
 } as CSSProperties
 
+// Fluid-hybrid image: the width/height attributes (signatureBannerSize) size
+// it in Outlook; everywhere else width:100% + max-width lets it shrink with a
+// narrow phone column while never exceeding the same 320px.
 const banner = {
   display: "block",
-  maxWidth: "400px",
-  maxHeight: "120px",
-  width: "auto",
+  width: "100%",
+  maxWidth: `${SIGNATURE_BANNER_MAX_WIDTH}px`,
   height: "auto",
   margin: "12px 0",
   border: "0",
   outline: "none",
   textDecoration: "none",
-  objectFit: "contain" as const,
 }
 
 const badgeTable = {
@@ -151,21 +148,23 @@ const badgeLink = {
   border: "0",
 }
 
+// borderTop, not just borderColor: react-email's <Hr> ships a #eaeaea top
+// border, and a lone border-color override is easy for clients to drop.
 const hr = {
   margin: "12px 0",
-  borderColor: "#e8dfd2",
+  borderTop: `1px solid ${EMAIL_COLORS.divider}`,
 }
 
 const smallPrint = {
   margin: "0 0 4px",
-  color: "#8a7f74",
+  color: EMAIL_COLORS.mutedText,
   fontSize: "10px",
   lineHeight: "14px",
 }
 
 const confidentiality = {
   margin: "8px 0 0",
-  color: "#8a7f74",
+  color: EMAIL_COLORS.mutedText,
   fontSize: "10px",
   lineHeight: "14px",
   fontStyle: "italic" as const,

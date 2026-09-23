@@ -1,3 +1,4 @@
+import { EMAIL_COLORS } from "@/lib/email/email-chrome"
 import type { BankingSettings } from "@/lib/settings-access"
 
 // Builds the {{bankingDetails}} block token for invoice/reminder email
@@ -42,7 +43,7 @@ export function buildBankingDetailsBlock(settings: BankingSettings, invoiceNumbe
   // data-payment-block marks it so PaymentMethodPicker can find and replace
   // it in-place when the salesperson switches payment methods on a send.
   return (
-    `<div style="margin:18px 0;padding:14px 16px;background-color:#fbf8f3;border:1px solid #e8dfd2;` +
+    `<div style="margin:18px 0;padding:14px 16px;background-color:${EMAIL_COLORS.panel};border:1px solid ${EMAIL_COLORS.divider};` +
     `color:#312b24;font-size:13px;line-height:20px;" data-label="Banking details" data-payment-block="1">` +
     `<p style="margin:0 0 6px;"><strong>Banking details</strong></p>` +
     `<p style="margin:0;">${lines}</p>` +
