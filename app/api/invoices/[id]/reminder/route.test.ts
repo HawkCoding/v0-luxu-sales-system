@@ -8,8 +8,8 @@ const authMocks = vi.hoisted(() => ({
 const pdfMocks = vi.hoisted(() => ({
   ensureInvoicePdf: vi.fn(async () => ({
     documentId: "doc-1",
-    storagePath: "invoices/INV-CUSTOM-99/invoice-INV-CUSTOM-99.pdf",
-    filename: "invoice-INV-CUSTOM-99.pdf",
+    storagePath: "invoices/INV-CUSTOM-99/Invoice-INV-CUSTOM-99.pdf",
+    filename: "Invoice-INV-CUSTOM-99.pdf",
     contentBase64: Buffer.from("pdf").toString("base64"),
   })),
 }))
@@ -151,7 +151,7 @@ describe("POST /api/invoices/[id]/reminder", () => {
     expect(body.email.to).toBe("ada@example.test")
     // Filename, email, and response all use the customer-facing (salesperson-
     // entered) invoice number, not the internal invoices.invoice_number.
-    expect(body.attachment.filename).toBe("invoice-INV-CUSTOM-99.pdf")
+    expect(body.attachment.filename).toBe("Invoice-INV-CUSTOM-99.pdf")
     expect(body.invoice.invoiceNumber).toBe("INV-CUSTOM-99")
     expect(body.invoice.daysOverdue).toBe(3)
     expect(composeMocks.composeEmail).toHaveBeenCalledWith(

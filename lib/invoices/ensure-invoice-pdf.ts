@@ -12,6 +12,8 @@ import {
 } from "@/lib/settings-access"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { logError } from "@/lib/error-log"
+import { documentFileName } from "@/lib/documents/file-names"
+import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 
 export const INVOICE_BUCKET = "invoices"
 
@@ -131,8 +133,10 @@ export async function ensureInvoicePdf(
   }
 
   const safeNumber = sanitizePath(displayInvoiceNumber)
-  const filename = `invoice-${safeNumber}.pdf`
+  const filename = documentFileName("Invoice", displayInvoiceNumber)
   const objectPath = `${safeNumber}/${filename}`
+  // Pre-rename key; a documents row still on it is re-pointed, not duplicated.
+  const legacyObjectPath = `${safeNumber}/invoice-${safeNumber}.pdf`
 
   const { error: uploadError } = await supabase.storage
     .from(INVOICE_BUCKET)
@@ -147,37 +151,21 @@ export async function ensureInvoicePdf(
 
   const documentPath = `${INVOICE_BUCKET}/${objectPath}`
 
-  const { data: existingDocument } = await supabase
-    .from("documents")
-    .select("id")
-    .eq("booking_id", invoice.booking_id)
-    .eq("kind", "invoice_pdf")
-    .eq("storage_path", documentPath)
-    .maybeSingle()
+  const document = await upsertGeneratedDocument(supabase, {
+    bookingId: invoice.booking_id,
+    kind: "invoice_pdf",
+    storagePath: documentPath,
+    legacyStoragePaths: [`${INVOICE_BUCKET}/${legacyObjectPath}`],
+    fileName: filename,
+  })
 
-  const documentPayload = {
-    booking_id: invoice.booking_id,
-    kind: "invoice_pdf" as const,
-    status: "generated" as const,
-    storage_path: documentPath,
-  }
-
-  const documentWrite = existingDocument
-    ? await supabase
-        .from("documents")
-        .update(documentPayload)
-        .eq("id", existingDocument.id)
-        .select("id")
-        .single()
-    : await supabase.from("documents").insert(documentPayload).select("id").single()
-
-  if (documentWrite.error || !documentWrite.data) {
+  if (!document) {
     throw new Error("Invoice PDF document record could not be written")
   }
 
   const { error: linkError } = await supabase
     .from("invoices")
-    .update({ pdf_document_id: documentWrite.data.id })
+    .update({ pdf_document_id: document.id })
     .eq("id", invoice.id)
 
   if (linkError) {
@@ -185,7 +173,7 @@ export async function ensureInvoicePdf(
   }
 
   return {
-    documentId: documentWrite.data.id,
+    documentId: document.id,
     storagePath: documentPath,
     filename,
     contentBase64: pdfBuffer.toString("base64"),

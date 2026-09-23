@@ -19,8 +19,18 @@ function getNumberYear(createdAt: Date = new Date()): number {
   return Number.isFinite(createdAt.getTime()) ? createdAt.getUTCFullYear() : new Date().getUTCFullYear()
 }
 
+/**
+ * Formats a booking number as `LTT-YY-NNNN` (e.g. `LTT-26-0039`).
+ *
+ * `year` is the full calendar year — the allocator sequence
+ * (`booking_number_sequences`) stays keyed on it, so the counter simply carries
+ * on — only the printed number uses the 2-digit form. Bookings created before
+ * the switch keep their legacy `LTT-YYYY-NNNN` numbers; anything that parses a
+ * booking number must accept both shapes.
+ */
 export function formatBookingNumber(prefix: JobNumberPrefix, year: number, sequenceNumber: number): string {
-  return `${prefix}-${year}-${String(sequenceNumber).padStart(4, "0")}`
+  const shortYear = String(year % 100).padStart(2, "0")
+  return `${prefix}-${shortYear}-${String(sequenceNumber).padStart(4, "0")}`
 }
 
 export async function allocateJobNumber(

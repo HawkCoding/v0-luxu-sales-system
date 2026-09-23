@@ -35,7 +35,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const { data: signedUrlData, error: signedUrlError } = await supabase.storage
     .from(WORKSHEET_BUCKET)
-    .createSignedUrl(objectPath, 3600)
+    .createSignedUrl(objectPath, 3600, { download: ensured.filename })
 
   if (signedUrlError) {
     return safeSupabaseError("worksheet-pdf:signed-url", signedUrlError)

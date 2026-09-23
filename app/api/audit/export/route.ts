@@ -49,7 +49,7 @@ export async function GET(req: Request) {
   }
 
   const csv = exportAuditToCsv(logs.slice(0, MAX_EXPORT_ROWS))
-  const filenameScope = parsed.data.scope === "archive" ? "audit-archive" : "audit-active"
+  const filenameScope = parsed.data.scope === "archive" ? "Audit-archive" : "Audit-active"
 
   return new NextResponse(csv, {
     headers: {

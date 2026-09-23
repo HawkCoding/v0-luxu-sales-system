@@ -192,7 +192,7 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
     expect(body.email.subject).toContain("Travel Voucher")
     expect(body.email.to).toBe("guest@example.test")
     expect(body.attachments).toHaveLength(1)
-    expect(body.attachments[0].filename).toBe("voucher-INV-2026-0042.pdf")
+    expect(body.attachments[0].filename).toBe("Voucher-INV-2026-0042.pdf")
     expect(download).toHaveBeenCalledTimes(1)
     expect(itineraryMocks.ensureItineraryPdf).not.toHaveBeenCalled()
     expect(composeMocks.composeEmail).toHaveBeenCalledWith(

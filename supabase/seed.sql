@@ -1685,6 +1685,8 @@ insert into public.report_snapshots (id,period_start,period_end,metrics,created_
 ('00000000-0000-0000-0000-00000000ee01','2025-08-01','2026-04-30','{"bookings":37,"closed":5,"lost":2,"voucher_sent":3,"final_paid":4,"deposit_paid":4,"deposit_requested":4,"accepted":5,"quote_sent":5,"enquiry":5,"totalRevenue":1427230,"pipelineValue":510020,"outstandingBalance":824550,"conversionRate":15.6}'::jsonb,'2026-05-01T06:00:00Z');
 
 -- SECTION 21: BOOKING NUMBER SEQUENCES
+-- Accepts both the current LTT-YY-NNNN format and legacy LTT-YYYY-NNNN numbers;
+-- a 2-digit year maps to 20YY because the sequence is keyed on the full year.
 insert into public.booking_number_sequences (product_code, year, last_number)
 select
   parsed.product_code,
@@ -1692,11 +1694,20 @@ select
   max(parsed.sequence_number)
 from (
   select
-    substring(booking_number from '^([A-Z]+)-') as product_code,
-    substring(booking_number from '^[A-Z]+-([0-9]{4})-')::integer as year,
-    substring(booking_number from '^[A-Z]+-[0-9]{4}-([0-9]+)$')::integer as sequence_number
-  from public.bookings
-  where booking_number ~ '^LTT-[0-9]{4}-[0-9]{4}$'
+    raw.product_code,
+    case
+      when length(raw.year_text) = 2 then 2000 + raw.year_text::integer
+      else raw.year_text::integer
+    end as year,
+    raw.sequence_number
+  from (
+    select
+      substring(booking_number from '^([A-Z]+)-') as product_code,
+      substring(booking_number from '^[A-Z]+-([0-9]+)-') as year_text,
+      substring(booking_number from '^[A-Z]+-[0-9]+-([0-9]+)$')::integer as sequence_number
+    from public.bookings
+    where booking_number ~ '^LTT-([0-9]{2}|[0-9]{4})-[0-9]{4}$'
+  ) raw
 ) parsed
 group by parsed.product_code, parsed.year
 on conflict (product_code, year)

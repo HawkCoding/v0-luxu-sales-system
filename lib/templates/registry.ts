@@ -308,7 +308,7 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   // time so a customised template containing either token keeps working.
   ...(QUOTE_REFERENCE_ENABLED
     ? [
-        { name: "quoteNumber", description: "Quote number (e.g. LTT-2026-0001-Q1)", kind: "scalar", sample: "LTT-2026-0001-Q1" } satisfies TemplateTokenSpec,
+        { name: "quoteNumber", description: "Quote number (e.g. LTT-26-0001-Q1)", kind: "scalar", sample: "LTT-26-0001-Q1" } satisfies TemplateTokenSpec,
         { name: "quoteDate", description: "Date the quote was issued", kind: "scalar", sample: "12 July 2026" } satisfies TemplateTokenSpec,
       ]
     : []),

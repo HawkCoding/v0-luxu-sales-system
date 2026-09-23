@@ -18,7 +18,8 @@ import {
 } from "@/lib/settings-access"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { logError } from "@/lib/error-log"
-import { QUOTE_REFERENCE_ENABLED } from "@/lib/feature-flags"
+import { documentFileName, shortBookingRef, stripQuoteVersion } from "@/lib/documents/file-names"
+import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 import type { PricingSnapshot } from "@/lib/types"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
@@ -30,14 +31,20 @@ function sanitizePath(value: string): string {
 }
 
 /**
- * Customer-visible name for the emailed PDF. While the quote reference is
- * hidden, the attachment is named after the booking so the quote number does
- * not leak through the filename; it falls back to the quote number when the
- * booking number is unavailable.
+ * Name of the quote PDF — both the emailed attachment and the stored file:
+ * `Quote-26-0039.pdf`. Named after the short booking reference, never the
+ * versioned quote number, so no `-Q1` reaches the customer; it falls back to
+ * the quote number (version stripped) when the booking number is unavailable.
  */
 export function buildAttachmentFilename(quoteNumber: string, bookingNumber: string | null | undefined): string {
-  const reference = QUOTE_REFERENCE_ENABLED ? quoteNumber : bookingNumber || quoteNumber
-  return `quote-${sanitizePath(reference)}.pdf`
+  const reference = bookingNumber || stripQuoteVersion(quoteNumber)
+  return documentFileName("Quote", shortBookingRef(reference))
+}
+
+/** The pre-rename stored name (`quotes/<quoteNo>/quote-<quoteNo>.pdf`), still on older quotes. */
+export function legacyQuoteObjectPath(quoteNumber: string): string {
+  const safeQuoteNumber = sanitizePath(quoteNumber)
+  return `${safeQuoteNumber}/quote-${safeQuoteNumber}.pdf`
 }
 
 export interface EnsureQuotePdfOptions {
@@ -50,13 +57,16 @@ export interface EnsureQuotePdfOptions {
 export interface EnsuredQuotePdf {
   documentId: string
   bookingId: string
-  /** documents.storage_path, prefixed with the bucket (e.g. "quotes/LTT-1_Q1/quote-LTT-1_Q1.pdf"). */
+  /**
+   * documents.storage_path, prefixed with the bucket (e.g.
+   * "quotes/LTT-26-0039-Q1/Quote-26-0039.pdf"). Older quotes keep their
+   * lowercase "quote-<quoteNo>.pdf" name until they are next re-rendered.
+   */
   storagePath: string
   /**
-   * Name to attach the PDF under when emailing it. Deliberately decoupled from
-   * the storage path: storage stays keyed on the quote number so quote versions
-   * cannot overwrite each other, while the customer-visible filename follows
-   * QUOTE_REFERENCE_ENABLED and falls back to the booking number.
+   * Name to attach the PDF under when emailing it (`Quote-26-0039.pdf`). The
+   * storage directory stays keyed on the versioned quote number so quote
+   * versions cannot overwrite each other; the file name itself carries no version.
    */
   attachmentFilename: string
   status: string
@@ -241,9 +251,10 @@ export async function ensureQuotePdf(
     throw new Error("Quote PDF could not be rendered")
   }
 
-  const safeQuoteNumber = sanitizePath(quote.quote_number ?? quoteId)
-  const filename = `quote-${safeQuoteNumber}.pdf`
-  const objectPath = `${safeQuoteNumber}/${filename}`
+  // Directory stays keyed on the versioned quote number so versions never
+  // overwrite each other; the file itself is named like the attachment.
+  const quoteNumber = quote.quote_number ?? quoteId
+  const objectPath = `${sanitizePath(quoteNumber)}/${attachmentFilename}`
 
   const { error: uploadError } = await supabase.storage
     .from(QUOTE_BUCKET)
@@ -258,42 +269,22 @@ export async function ensureQuotePdf(
 
   const documentPath = `${QUOTE_BUCKET}/${objectPath}`
 
-  const { data: existingDocument } = await supabase
-    .from("documents")
-    .select("id")
-    .eq("booking_id", quote.booking_id)
-    .eq("kind", "quote_pdf")
-    .eq("storage_path", documentPath)
-    .maybeSingle()
+  const document = await upsertGeneratedDocument(supabase, {
+    bookingId: quote.booking_id,
+    kind: "quote_pdf",
+    storagePath: documentPath,
+    legacyStoragePaths: [`${QUOTE_BUCKET}/${legacyQuoteObjectPath(quoteNumber)}`],
+    fileName: attachmentFilename,
+  })
 
-  const documentPayload = {
-    booking_id: quote.booking_id,
-    kind: "quote_pdf" as const,
-    status: "generated" as const,
-    storage_path: documentPath,
-  }
-
-  const documentWrite = existingDocument
-    ? await supabase
-        .from("documents")
-        .update(documentPayload)
-        .eq("id", existingDocument.id)
-        .select("id, booking_id, kind, status, storage_path, created_at")
-        .single()
-    : await supabase
-        .from("documents")
-        .insert(documentPayload)
-        .select("id, booking_id, kind, status, storage_path, created_at")
-        .single()
-
-  if (documentWrite.error || !documentWrite.data) {
+  if (!document) {
     throw new Error("Quote PDF document record could not be written")
   }
 
   // Link the generated document back so correspondence can auto-attach it.
   await supabase
     .from("quotes")
-    .update({ pdf_document_id: documentWrite.data.id })
+    .update({ pdf_document_id: document.id })
     .eq("id", quoteId)
 
   await supabase.from("audit_logs").insert({
@@ -303,18 +294,18 @@ export async function ensureQuotePdf(
     entity_id: quoteId,
     action: "quote_pdf_generated",
     meta_json: {
-      document_id: documentWrite.data.id,
+      document_id: document.id,
       storage_path: documentPath,
     },
   })
 
   return {
     attachmentFilename,
-    documentId: documentWrite.data.id,
-    bookingId: documentWrite.data.booking_id,
+    documentId: document.id,
+    bookingId: document.booking_id,
     storagePath: documentPath,
-    status: documentWrite.data.status,
-    createdAt: documentWrite.data.created_at,
+    status: document.status,
+    createdAt: document.created_at,
     regenerated: true,
   }
 }

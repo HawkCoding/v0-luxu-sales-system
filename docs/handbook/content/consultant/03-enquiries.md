@@ -65,10 +65,11 @@ go straight to the new booking's Quotes tab with Build Booking open.
 
 ## The booking number
 
-Every booking gets a number in the form `LTT-YYYY-NNNN` — the year it was created and a
-sequential number within that year. It is assigned the moment the booking is created and
-never changes for the life of the booking, even if the year rolls over or the trip itself
-moves to a different year.
+Every booking gets a number in the form `LTT-YY-NNNN` — the last two digits of the year it
+was created and a sequential number within that year. It is assigned the moment the booking
+is created and never changes for the life of the booking, even if the year rolls over or the
+trip itself moves to a different year. Bookings created before this format switch keep their
+older `LTT-YYYY-NNNN` number.
 
 ## Email-imported enquiries
 

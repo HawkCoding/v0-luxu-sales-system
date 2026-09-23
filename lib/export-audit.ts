@@ -76,7 +76,7 @@ export function downloadAuditLog(auditLogs: AuditLog[], jobNumber: string) {
   
   const a = document.createElement('a')
   a.href = url
-  a.download = `audit-${jobNumber}-${Date.now()}.txt`
+  a.download = `Audit-${jobNumber}-${Date.now()}.txt`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -130,7 +130,7 @@ export function downloadAuditLogCsv(auditLogs: AuditLog[]) {
 
   const a = document.createElement('a')
   a.href = url
-  a.download = `audit-export-${Date.now()}.csv`
+  a.download = `Audit-export-${Date.now()}.csv`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
