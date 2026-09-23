@@ -9,7 +9,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
   <style>
     @page { size: A4; margin: 14mm; }
     body {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 9pt;
       line-height: 1.4;
       color: #2B2B2B;
@@ -28,7 +28,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     .header-text-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid #919fa6; }
 
     .product-line {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 8.5pt;
       font-weight: 700;
       color: #0B2A3A;
@@ -37,7 +37,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       margin-top: 8pt;
     }
     .header-subtitle {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 9pt;
       color: #6B6B6B;
       font-style: italic;
@@ -52,7 +52,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       margin: 10pt 0 6pt;
     }
     h1 {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 16pt;
       font-weight: 700;
       letter-spacing: 2pt;
@@ -67,7 +67,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       text-align: center;
     }
     .voucher-stub-label {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 7.5pt;
       font-weight: 700;
       letter-spacing: 1.5pt;
@@ -75,7 +75,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       color: #6B6B6B;
     }
     .voucher-stub-number {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 11pt;
       font-weight: 700;
       color: #0B2A3A;
@@ -83,7 +83,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     }
 
     .guidance {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 7.5pt;
       font-style: italic;
       line-height: 1.3;
@@ -94,7 +94,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
 
     .section { margin-bottom: 10pt; }
     .section-title {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 7.5pt;
       font-weight: 700;
       letter-spacing: 1.2pt;
@@ -114,7 +114,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     .info-row-dotted { border-bottom: 0.5pt dotted #bac4c9; padding-bottom: 2.5pt; }
     .info-row-shaded { background: #F4F4F4; margin: 0 -5pt; padding: 1.5pt 5pt; }
     .info-label {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 7.5pt;
       font-weight: 700;
       letter-spacing: 0.4pt;
@@ -131,7 +131,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     .cell-group { display: flex; flex: 1; }
     .cell { box-sizing: border-box; padding-right: 16pt; }
     .cell-label {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 6.5pt;
       font-weight: 700;
       letter-spacing: 1pt;
@@ -146,7 +146,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       padding: 7pt 9pt;
     }
     .provider-name {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 11pt;
       font-weight: 700;
       color: #0B2A3A;
@@ -154,21 +154,21 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       text-align: center;
     }
     .provider-contact {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 7pt;
       color: #6B6B6B;
       margin-bottom: 5pt;
       text-align: center;
     }
     .provider-description {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 9.5pt;
       color: #6B6B6B;
       font-style: italic;
       margin-bottom: 12pt;
     }
     .provider-footnote {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 7.5pt;
       color: #6B6B6B;
       font-style: italic;
@@ -176,7 +176,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     }
 
     .end-of-services {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 8pt;
       letter-spacing: 1.5pt;
       text-transform: uppercase;
@@ -187,14 +187,14 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
 
     .footer-section { margin-top: 6pt; text-align: center; }
     .footer-contact {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       font-size: 7.5pt;
       color: #6B6B6B;
       margin-top: 4pt;
     }
 
     .page-number {
-      font-family: Arial, sans-serif;
+      font-family: Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif;
       text-align: center;
       font-size: 7.5pt;
       color: #9A9A9A;

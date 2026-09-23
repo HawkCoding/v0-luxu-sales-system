@@ -807,7 +807,7 @@ describe("buildQuoteItineraryLines — flights", () => {
     )
   })
 
-  it("renders a round-trip route arrow as prose, since Helvetica has no glyph for it", () => {
+  it("renders a round-trip route arrow as prose in the flowing itinerary sentence", () => {
     const [line] = buildQuoteItineraryLines([
       { ...sameDayFlight, serviceData: { ...sameDayFlight.serviceData, route: "Johannesburg ↔ Cape Town" } },
     ])

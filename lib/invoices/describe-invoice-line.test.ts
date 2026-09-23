@@ -61,7 +61,7 @@ describe("describeInvoiceLine", () => {
     )
   })
 
-  it("keeps the one-way route arrow (invoice PDF now embeds Montserrat, which has the glyph)", () => {
+  it("keeps the one-way route arrow (invoice PDF embeds Carlito, which has the glyph)", () => {
     const snapshot = makeSnapshot({ routeName: "Pretoria → Cape Town" })
     expect(describeInvoiceLine("Rovos Rail - Deluxe Suite - Pretoria → Cape Town - Adult", snapshot)).toBe(
       "Rovos Rail — Pretoria → Cape Town",

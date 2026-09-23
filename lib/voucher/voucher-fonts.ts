@@ -16,4 +16,5 @@ export const VOUCHER_FONT_OPTIONS = EMAIL_FONT_FAMILY_OPTIONS
 
 export type VoucherFontFamily = (typeof VOUCHER_FONT_OPTIONS)[number]["value"]
 
-export const VOUCHER_FONT_DEFAULT: VoucherFontFamily = "Arial, sans-serif"
+export const VOUCHER_FONT_DEFAULT: VoucherFontFamily =
+  "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif"

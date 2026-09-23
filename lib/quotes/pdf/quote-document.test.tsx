@@ -156,7 +156,9 @@ describe("QuoteDocument", () => {
     it("prints the hotel description in italics instead of its facilities", () => {
       const description = findTextElement(doc(), "A boutique manor in Pretoria.")
 
-      expect(description?.style).toMatchObject({ fontFamily: "Helvetica-Oblique", fontSize: 8 })
+      expect(description?.style).toMatchObject({ fontFamily: "Carlito", fontStyle: "italic", fontSize: 8.5 })
+      // Carlito ships no bold-italic face, so the italic description must stay regular weight.
+      expect(description?.style).not.toHaveProperty("fontWeight")
       expect(renderedText(doc()).join(" | ")).not.toContain("24-hour front desk")
     })
 
