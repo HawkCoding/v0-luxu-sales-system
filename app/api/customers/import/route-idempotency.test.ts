@@ -218,7 +218,7 @@ describe("POST /api/customers/import idempotency", () => {
     // this same request cannot already carry a historical import.
     expect(state.precheckCustomerIdBatches).toEqual([["cust-existing"]])
     expect(state.bookingInsertRows).toHaveLength(1)
-    expect(state.bookingInsertRows[0]?.booking_number).toMatch(/^LTT-\d{4}-0001$/)
+    expect(state.bookingInsertRows[0]?.booking_number).toMatch(/^LTT-\d{2}-0001$/)
     // One allocation call for the whole file, not one per row.
     expect(supabase.rpc).toHaveBeenCalledTimes(1)
     expect(state.bookingInsertRows[0]?.hotel_supplier_id).toBe(SUPPLIER_ID)

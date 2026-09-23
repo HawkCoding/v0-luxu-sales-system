@@ -129,6 +129,48 @@ describe("GET /api/documents/[id]", () => {
     expect(body.signedUrl).toMatch(/signed/)
     expect(body.fileName).toBe("doc.pdf")
   })
+
+  it("opens an uploaded attachment inline, without forcing a download name", async () => {
+    const { storageSign } = makeUserAuth({
+      id: DOC_ID,
+      booking_id: BOOKING_ID,
+      kind: "other",
+      storage_path: STORAGE_PATH,
+      file_name: "doc.pdf",
+    })
+    await GET(new Request("http://localhost"), { params })
+    expect(storageSign).toHaveBeenCalledWith(STORAGE_PATH, 3600)
+  })
+
+  it("downloads a pre-rename generated quote under its capitalised short-reference name", async () => {
+    const { storageSign } = makeUserAuth({
+      id: DOC_ID,
+      booking_id: BOOKING_ID,
+      kind: "quote_pdf",
+      storage_path: "quotes/LTT-2026-0038-Q1/quote-LTT-2026-0038-Q1.pdf",
+      file_name: null,
+    })
+    const res = await GET(new Request("http://localhost"), { params })
+    expect(res.status).toBe(200)
+    // The legacy object is still read from its stored path — only the download name changes.
+    expect(storageSign).toHaveBeenCalledWith("LTT-2026-0038-Q1/quote-LTT-2026-0038-Q1.pdf", 3600, {
+      download: "Quote-26-0038.pdf",
+    })
+  })
+
+  it("downloads a current generated invoice under its stored name", async () => {
+    const { storageSign } = makeUserAuth({
+      id: DOC_ID,
+      booking_id: BOOKING_ID,
+      kind: "invoice_pdf",
+      storage_path: "invoices/244453/Invoice-244453.pdf",
+      file_name: "Invoice-244453.pdf",
+    })
+    await GET(new Request("http://localhost"), { params })
+    expect(storageSign).toHaveBeenCalledWith("244453/Invoice-244453.pdf", 3600, {
+      download: "Invoice-244453.pdf",
+    })
+  })
 })
 
 describe("DELETE /api/documents/[id]", () => {

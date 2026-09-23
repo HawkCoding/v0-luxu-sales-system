@@ -25,6 +25,7 @@ import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
+import { documentFileName, shortBookingRef } from "@/lib/documents/file-names"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
 import { loadQuoteConfigForBooking } from "@/lib/quotes/load-quote-config"
@@ -384,10 +385,12 @@ export async function POST(req: Request) {
 
   // Storage keys stay pinned to the immutable booking_number so regenerating after the invoice
   // number is edited overwrites the same object instead of orphaning the old one; only the
-  // customer-facing download name below carries the reference.
-  const storageFilename = `voucher-${sanitizePathPart(booking.booking_number)}.pdf`
+  // customer-facing download name below carries the reference. The stored file is named after
+  // the short booking reference (`Voucher-26-0039.pdf`); the documents row is matched by kind,
+  // so one still pointing at a pre-rename lowercase file is re-pointed here.
+  const storageFilename = documentFileName("Voucher", shortBookingRef(booking.booking_number))
   const storagePath = `${sanitizePathPart(booking.booking_number)}/${storageFilename}`
-  const filename = `voucher-${sanitizePathPart(voucherReference)}.pdf`
+  const filename = documentFileName("Voucher", voucherReference)
   const { error: uploadError } = await supabase.storage
     .from(VOUCHER_BUCKET)
     .upload(storagePath, pdfBuffer, {
@@ -417,6 +420,7 @@ export async function POST(req: Request) {
     kind: "voucher_pdf" as const,
     status: existingDocument?.status === "sent" ? ("sent" as const) : ("generated" as const),
     storage_path: `${VOUCHER_BUCKET}/${storagePath}`,
+    file_name: storageFilename,
   }
 
   const documentWrite = existingDocument

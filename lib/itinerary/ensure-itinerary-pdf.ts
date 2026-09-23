@@ -12,6 +12,7 @@ import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import { firstRecord } from "@/lib/utils"
+import { documentFileName, shortBookingRef } from "@/lib/documents/file-names"
 
 export const ITINERARY_BUCKET = "vouchers"
 
@@ -199,7 +200,11 @@ export async function ensureItineraryPdf(
     throw new Error("Itinerary PDF could not be rendered")
   }
 
-  const filename = `itinerary-${sanitizePathPart(booking.booking_number)}.pdf`
+  // Directory stays keyed on the full booking number; the file is named after the short
+  // reference (`Itinerary-26-0039.pdf`). The documents row below is matched by kind, not
+  // by path, so a booking whose latest row still points at the pre-rename lowercase file
+  // is simply re-pointed at this one.
+  const filename = documentFileName("Itinerary", shortBookingRef(booking.booking_number))
   const objectPath = `${sanitizePathPart(booking.booking_number)}/${filename}`
 
   const { error: uploadError } = await supabase.storage
@@ -244,6 +249,7 @@ export async function ensureItineraryPdf(
     kind: "itinerary_pdf" as const,
     status: "generated" as const,
     storage_path: documentPath,
+    file_name: filename,
   }
 
   const documentWrite = existingDocumentRow

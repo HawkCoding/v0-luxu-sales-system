@@ -411,7 +411,7 @@ describe("POST /api/correspondence", () => {
       // Storage stays keyed on the quote number so quote versions cannot
       // overwrite each other; the customer-visible attachment name does not.
       storagePath: "quotes/LTT-2026-0001-Q1/quote-LTT-2026-0001-Q1.pdf",
-      attachmentFilename: "quote-LTT-2026-0001.pdf",
+      attachmentFilename: "Quote-26-0001.pdf",
       status: "generated",
       createdAt: "2026-05-01T00:00:00.000Z",
       regenerated: false,
@@ -851,7 +851,7 @@ describe("POST /api/correspondence", () => {
     expect(emailMocks.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         attachments: expect.arrayContaining([
-          expect.objectContaining({ filename: "quote-LTT-2026-0001.pdf", contentType: "application/pdf" }),
+          expect.objectContaining({ filename: "Quote-26-0001.pdf", contentType: "application/pdf" }),
         ]),
       }),
     )

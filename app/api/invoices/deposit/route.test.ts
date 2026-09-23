@@ -12,8 +12,8 @@ vi.mock("@/lib/api/auth", () => ({
 const pdfMocks = vi.hoisted(() => ({
   ensureInvoicePdf: vi.fn(async () => ({
     documentId: "doc-1",
-    storagePath: "invoices/244453/invoice-244453.pdf",
-    filename: "invoice-244453.pdf",
+    storagePath: "invoices/244453/Invoice-244453.pdf",
+    filename: "Invoice-244453.pdf",
     contentBase64: Buffer.from("pdf").toString("base64"),
   })),
 }))
@@ -173,7 +173,7 @@ describe("POST /api/invoices/deposit", () => {
       expect.anything(),
       expect.objectContaining({ bookingNumber: "BT-2026-0001" }),
     )
-    expect(body.attachment.filename).toBe("invoice-244453.pdf")
+    expect(body.attachment.filename).toBe("Invoice-244453.pdf")
   })
 
   it("returns 400 when no invoice number has been entered on the job", async () => {

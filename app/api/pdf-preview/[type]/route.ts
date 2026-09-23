@@ -135,7 +135,7 @@ export async function GET(
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="preview-${type}.pdf"`,
+      "Content-Disposition": `inline; filename="Preview-${type}.pdf"`,
       "Cache-Control": "no-store",
     },
   })

@@ -17,7 +17,7 @@ booking's **Quotes** tab.
 ## Quote versions and statuses
 
 A booking can carry several quotes. Each is numbered off the booking number with a version
-suffix — `LTT-2026-0001-Q1`, then `-Q2` and so on — but the cards on screen are titled
+suffix — `LTT-26-0001-Q1`, then `-Q2` and so on — but the cards on screen are titled
 **Quote 1**, **Quote 2**, in the order they were raised. Hover the title to see the full
 number.
 
