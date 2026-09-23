@@ -51,7 +51,6 @@ import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { RecordPaymentDialog } from "@/components/record-payment-dialog"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
-import { QuoteRevisionBanner } from "@/components/quote-revision-banner"
 import { SendPaymentConfirmationButton } from "@/components/send-payment-confirmation-button"
 import { SendPaymentReminderButton } from "@/components/send-payment-reminder-button"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
@@ -195,7 +194,6 @@ export default function JobDetailPage() {
   const [balancePaymentDefaultAmount, setBalancePaymentDefaultAmount] = useState<number | null>(null)
   const [depositPaymentConfirmationOpen, setDepositPaymentConfirmationOpen] = useState(false)
   const [voucherOpen, setVoucherOpen] = useState(false)
-  const [voucherAutoPreview, setVoucherAutoPreview] = useState(false)
   const [pendingStage, setPendingStage] = useState<PipelineStage | null>(null)
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
@@ -281,7 +279,6 @@ export default function JobDetailPage() {
     } else if (send === "payment_confirmation") {
       setPaymentConfirmationOpen(true)
     } else if (send === "voucher") {
-      setVoucherAutoPreview(true)
       setVoucherOpen(true)
     }
     // Only re-run when the URL actually changes; router/id are stable.
@@ -355,6 +352,10 @@ export default function JobDetailPage() {
   const forwardTargetStage = currentStageIdx >= 0 ? PIPELINE_STAGES[currentStageIdx + 1]?.key ?? null : null
   const forwardTargetIsDepositPaid = forwardTargetStage === "deposit_paid"
   const hasAnyPayment = payments.length > 0
+  // Drives the "full payment confirmation" label only; the payment-received
+  // endpoint re-reads the balance itself when it picks the template.
+  const jobInvoiceBalance = (job as { invoiceBalance?: number | null }).invoiceBalance ?? null
+  const bookingPaidInFull = hasAnyPayment && jobInvoiceBalance !== null && jobInvoiceBalance <= 0
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   // Any source: drives the banner, the badge and whether "Resolve review" renders — a consultant
   // should see and be able to clear this regardless of how the enquiry was captured.
@@ -408,28 +409,6 @@ export default function JobDetailPage() {
       invoice.status !== "void" &&
       quoteRows.find((quote) => quote.id === invoice.quoteId)?.status === "superseded",
   )
-  // A revision rewinds the booking, so the invoice actions drop away until the
-  // journey is re-walked. Clears itself once the amended invoice is issued.
-  const revisionInProgress =
-    quoteRows.some((quote) => quote.status === "superseded") &&
-    (currentStageIdx < PIPELINE_STAGES.findIndex((s) => s.key === "deposit_requested") ||
-      invoiceNeedsAmendment)
-  const revisedQuoteSent = quoteRows.some(
-    (quote) => quote.parentQuoteId && (quote.status === "sent" || quote.status === "accepted"),
-  )
-  const revisionSteps = [
-    { label: "Send the revised quote to the customer", done: revisedQuoteSent,
-      action: { label: "Go to Quotes", onClick: () => setActiveTab("quotes") } },
-    { label: "Move the booking to Quote Accepted", done: depositInvoiceStageReached,
-      action: {
-        label: "Move to Quote Accepted",
-        onClick: () => { void moveStageTo("accepted") },
-        disabled: transitionSubmitting,
-      } },
-    { label: "Issue the amended invoice (deposit or full payment)",
-      done: hasSentDepositInvoice && !invoiceNeedsAmendment,
-      action: { label: "Generate invoice", onClick: () => setDepositInvoiceOpen(true) } },
-  ]
 
   const canEditInvoiceNumber = can("edit:jobs")
   const currentInvoiceNumber = (job as { customerInvoiceNumber?: string | null } | undefined)?.customerInvoiceNumber ?? ""
@@ -518,7 +497,6 @@ export default function JobDetailPage() {
     setTransitionFailures([])
     setTransitionCanOverride(false)
     setPendingStage(null)
-    setVoucherAutoPreview(false)
   }
 
   const moveStageTo = async (
@@ -594,7 +572,6 @@ export default function JobDetailPage() {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
           setTransitionCanOverride(stageGatePayload.canOverride)
-          setVoucherAutoPreview(true)
           setVoucherOpen(true)
           return
         }
@@ -962,8 +939,6 @@ export default function JobDetailPage() {
       {/* Stage Progress */}
       <BookingStageStepper currentStage={job.stage as PipelineStage} />
 
-      {revisionInProgress && can("edit:pipeline") && <QuoteRevisionBanner steps={revisionSteps} />}
-
       {/* Customer Info */}
       <Card>
         <CardContent className="p-4">
@@ -1081,6 +1056,7 @@ export default function JobDetailPage() {
             <SendPaymentConfirmationButton
               jobId={id}
               hasPayments={payments.length > 0}
+              paidInFull={bookingPaidInFull}
               customerSurname={customer?.lastName ?? ""}
               mutate={async () => {
                 if (currentStage === "deposit_requested") {
@@ -1294,6 +1270,7 @@ export default function JobDetailPage() {
         trigger={false}
         jobId={id}
         hasPayments={payments.length > 0}
+        paidInFull={bookingPaidInFull}
         customerSurname={customer?.lastName ?? ""}
         onError={() => {
           setPaymentConfirmationOpen(false)
@@ -1316,6 +1293,7 @@ export default function JobDetailPage() {
         trigger={false}
         jobId={id}
         hasPayments={payments.length > 0}
+        paidInFull={bookingPaidInFull}
         customerSurname={customer?.lastName ?? ""}
         onError={() => {
           setDepositPaymentConfirmationOpen(false)
@@ -1329,21 +1307,15 @@ export default function JobDetailPage() {
 
       <GenerateVoucherDialog
         open={voucherOpen}
-        onOpenChange={(next) => {
-          setVoucherOpen(next)
-          if (!next) setVoucherAutoPreview(false)
-        }}
-        trigger={false}
+        onOpenChange={setVoucherOpen}
         jobId={id}
         bookingNumber={job.jobNumber}
         invoiceNumber={currentInvoiceNumber || undefined}
-        autoPreview={voucherAutoPreview}
         onGenerated={async () => {
           await mutate()
         }}
         onSent={async () => {
           setVoucherOpen(false)
-          setVoucherAutoPreview(false)
           await mutate()
           resetPendingTransition()
         }}

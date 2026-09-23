@@ -70,6 +70,11 @@ export const SYSTEM_TEMPLATE_KEYS = [
   "deposit_request",
   "full_payment_request",
   "payment_received",
+  // "Full payment received": the payment confirmation sent once the booking balance reaches
+  // zero (the final payment after a deposit, or a pay-in-full invoice settled). Same token set as
+  // every other key; its wording leaves out the final-due / outstanding lines, since nothing is
+  // owed. Deposit-only payments keep using payment_received.
+  "full_payment_received",
   "final_invoice",
   "payment_reminder",
   "voucher_email",

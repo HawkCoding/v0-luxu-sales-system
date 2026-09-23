@@ -552,23 +552,15 @@ for (const product of TRAINING_PRODUCTS) {
         await expect(page.getByText("All legs have reference numbers")).toBeVisible({ timeout: 60_000 })
         await caption(page, "A leg with no reference number blocks the voucher outright", 3000)
 
-        await caption(page, "Step 4 — Documents tab, then Generate Voucher")
+        await caption(page, "Step 4 — Documents tab, then Preview & Send Voucher")
         await page.goto(`/app/bookings/${bookingId}?tab=documents`)
-        await highlightClick(page, page.getByRole("button", { name: /^generate voucher$/i }))
+        await highlightClick(page, page.getByRole("button", { name: /preview & send voucher/i }))
 
-        const voucher = page.getByRole("dialog").filter({ hasText: "Generate travel voucher" })
-        await expect(voucher).toBeVisible({ timeout: 60_000 })
-        await highlightClick(page, voucher.getByRole("button", { name: /^generate pdf$/i }))
-        await expect(voucher.getByRole("button", { name: /^regenerate pdf$/i })).toBeVisible({
-          timeout: 180_000,
-        })
-        await caption(page, "Read any amber warnings — they do not stop you sending", 2600)
-
-        await caption(page, "Step 5 — Preview & Send Voucher")
-        await highlightClick(page, voucher.getByRole("button", { name: /preview & send voucher/i }))
-
+        // One click rebuilds the voucher PDF from the latest booking details,
+        // prepares the email, and opens the send-preview dialog automatically.
         const sendVoucher = page.getByRole("dialog").filter({ hasText: "Send travel voucher" })
-        await expect(sendVoucher).toBeVisible({ timeout: 120_000 })
+        await expect(sendVoucher).toBeVisible({ timeout: 180_000 })
+        await caption(page, "Read any amber warnings above the preview — they do not stop you sending", 2600)
         await caption(page, "The client gets the voucher and a client itinerary in one email")
         await highlightClick(page, sendVoucher.getByRole("button", { name: /send with attachment/i }))
         await waitForStage(supabase, bookingId, "voucher_sent")

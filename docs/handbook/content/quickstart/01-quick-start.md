@@ -235,15 +235,16 @@ against what was quoted, so you can see at a glance where a booking stands.
 > Enter a reference number for every leg on this tab. The voucher generates once each leg
 > has one.
 
-[[shot:qs-generate-voucher|The Generate travel voucher dialog]]
+[[shot:qs-generate-voucher|The voucher being prepared before the send preview opens]]
 
-4. Go to the **Documents** tab and click **Generate Voucher**.
-5. Click **Generate PDF** and read any amber warnings above the preview — they name detail
-   worth filling in, and you can still send.
+4. Go to the **Documents** tab and click **Preview & Send Voucher**. One click rebuilds the
+   voucher PDF from the booking's current details, prepares the email, and opens the send
+   preview — there is no separate generate step.
 
 [[shot:qs-send-voucher|Send travel voucher, with the voucher attached]]
 
-6. Click **Preview & Send Voucher**, check the email, and click **Send with attachment**.
+5. Read any amber warnings at the top of the preview — they name detail worth filling in,
+   and you can still send. Check the email, then click **Send with attachment**.
 
 The client receives the travel voucher as the attachment on that email.
 

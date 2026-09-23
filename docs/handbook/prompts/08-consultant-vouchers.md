@@ -14,8 +14,9 @@ internal worksheet, and closing the booking.
 ## Source of truth — read these
 
 - `components/job-references-tab.tsx` — per-leg supplier references, the blocking rule
-- `components/generate-voucher-dialog.tsx` — readiness warnings, generate and regenerate
-- `components/send-voucher-button.tsx`
+- `components/generate-voucher-dialog.tsx` — one "Preview & Send Voucher" button rebuilds
+  the PDF, prepares the email, and opens the send preview; readiness warnings show inside
+  that preview
 - `components/job-documents-tab.tsx` — the worksheet, the voucher card and its stage gate
 - `components/job-attachments-tab.tsx`
 - `app/app/documents/page.tsx` — the global document library
@@ -29,12 +30,15 @@ internal worksheet, and closing the booking.
    the voucher. Lead the chapter with this — it is the prerequisite everyone hits.
 2. **When the voucher becomes available** — the card only appears once the booking is at
    Paid in Full or later. Explain why in one line rather than making it feel arbitrary.
-3. **Generating the voucher** — the readiness warnings and what each one means,
-   **Generate PDF** and **Regenerate PDF**.
+3. **Preparing and sending the voucher** — one button, **Preview & Send Voucher**: it
+   rebuilds the PDF from the booking's current details, prepares the email, and opens the
+   send preview, every time — there is no separate generate/regenerate step, so a fix made
+   just before sending is always included.
 4. **The itinerary** — generated automatically if it does not exist, and sent with the
    voucher. The client receives both.
-5. **Sending the voucher** — the editable preview, both attachments, and that sending moves
-   the booking to Voucher Sent **and sets the outcome to Won**.
+5. **The send preview** — the readiness warnings (amber panel at the top), the editable
+   preview, both attachments, and that sending moves the booking to Voucher Sent **and
+   sets the outcome to Won**.
 6. **The worksheet** — what it is for, that it is internal, and that it never goes to a
    client. STOP callout.
 7. **The Documents tab and the Documents library** — finding and downloading any generated
@@ -43,22 +47,18 @@ internal worksheet, and closing the booking.
    differ from generated documents.
 9. **Closing the booking** — what Closed means and what stops changing after it.
 
-> [!WARNING]
-> If travel times changed after the voucher was generated, regenerate it before sending.
-> Cross-reference Chapter 5.
-
 ## Screenshots to capture
 
 | Slug | Shows |
 |---|---|
 | `07-voucher-details` | The Voucher Details tab with references filled in |
 | `07-missing-reference` | Voucher generation blocked by a missing reference |
-| `07-generate-voucher` | The Generate voucher dialog with the PDF preview |
+| `07-generate-voucher` | The voucher being prepared before the send preview opens |
 | `07-send-voucher` | Preview and send with voucher plus itinerary attached |
 | `07-documents-tab` | The Documents tab listing generated PDFs |
 | `07-documents-library` | The global Documents page with the type filter |
 
 ## Done when
 
-- A reader knows exactly what to do when **Generate Travel Voucher** is not there.
+- A reader knows exactly what to do when **Preview & Send Voucher** is not there.
 - The chapter never suggests emailing the worksheet to a client.

@@ -20,9 +20,14 @@ interface SendPaymentConfirmationButtonProps {
   /** Called when the email could not be prepared, so a caller driving this
    *  dialog from a stage move can abandon that move instead of hanging. */
   onError?: (message: string) => void
+  /** Nothing left to pay on the booking — labels the trigger as a full payment
+   *  confirmation. The dialog title follows the server's answer once prepared. */
+  paidInFull?: boolean
 }
 
 interface PreparedEmail {
+  /** The server's reading of the balance: true when it picked the full-payment template. */
+  paidInFull?: boolean
   email: {
     to: string
     subject: string
@@ -41,7 +46,8 @@ interface PreparedEmail {
 
 /**
  * After recording a payment: sends the "payment received" confirmation with the
- * amended confirmation invoice (updated status + money ladder) attached.
+ * amended confirmation invoice (updated status + money ladder) attached. Once the
+ * balance is zero the server composes the "full payment received" wording instead.
  */
 export function SendPaymentConfirmationButton({
   jobId,
@@ -52,6 +58,7 @@ export function SendPaymentConfirmationButton({
   trigger = true,
   onError,
   customerSurname,
+  paidInFull = false,
 }: SendPaymentConfirmationButtonProps) {
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<PreparedEmail | null>(null)
@@ -110,6 +117,8 @@ export function SendPaymentConfirmationButton({
 
   if (!hasPayments) return null
 
+  const preparedPaidInFull = prepared?.paidInFull ?? paidInFull
+
   return (
     <>
       {trigger ? (
@@ -119,15 +128,19 @@ export function SendPaymentConfirmationButton({
           ) : (
             <MailCheck className="mr-1 h-3.5 w-3.5" />
           )}
-          Send payment confirmation
+          {paidInFull ? "Send full payment confirmation" : "Send payment confirmation"}
         </Button>
       ) : null}
       {prepared ? (
         <PreviewAndSendDialog
           open={previewOpen && (trigger || preparedForOpen)}
           onOpenChange={setPreviewOpen}
-          title="Payment received"
-          description="Confirms the payment and attaches the amended confirmation invoice. Review and edit before sending."
+          title={preparedPaidInFull ? "Full payment received" : "Payment received"}
+          description={
+            preparedPaidInFull
+              ? "Confirms the booking is paid in full and attaches the amended confirmation invoice. Review and edit before sending."
+              : "Confirms the payment and attaches the amended confirmation invoice. Review and edit before sending."
+          }
           bookingId={jobId}
           initialSubject={prepared.email.subject}
           bodyHtml={prepared.email.bodyHtml}

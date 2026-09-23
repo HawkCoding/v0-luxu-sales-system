@@ -75,6 +75,11 @@ interface PreviewAndSendDialogProps {
    * e.g. "Change amount" on a generated-but-unsent invoice.
    */
   secondaryAction?: ReactNode
+  /**
+   * Rendered above the subject line — for anything the salesperson must see
+   * before sending, e.g. a voucher's missing-detail warnings.
+   */
+  notice?: ReactNode
   onSent: () => Promise<void> | void
 }
 
@@ -100,6 +105,7 @@ export function PreviewAndSendDialog({
   customerSurname,
   attachments,
   secondaryAction,
+  notice,
   onSent,
 }: PreviewAndSendDialogProps) {
   const [subject, setSubject] = useState(initialSubject)
@@ -253,6 +259,7 @@ export function PreviewAndSendDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
+          {notice}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
               <Label htmlFor="preview-send-subject">Subject</Label>

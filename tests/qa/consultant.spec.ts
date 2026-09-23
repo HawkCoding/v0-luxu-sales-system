@@ -538,9 +538,9 @@ test("C10 — generate voucher when gates pass", async ({ page }) => {
     expect(target, "a voucher-ready booking (final_paid, balance 0, departure + email)").toBeTruthy()
 
     await gotoJobTab(page, target!.id, "documents")
-    await page.getByRole("button", { name: /Generate Voucher/i }).click()
+    // A single click rebuilds the voucher PDF and prepares the email; no separate Generate step.
     const respP = page.waitForResponse((r) => r.url().includes("/api/voucher/generate") && r.request().method() === "POST")
-    await page.getByRole("button", { name: /Generate PDF/i }).click()
+    await page.getByRole("button", { name: /Preview & Send Voucher/i }).click()
     const resp = await respP
     await report.shot(page, N, "after-voucher")
     expect(resp.ok(), "voucher generate ok").toBeTruthy()

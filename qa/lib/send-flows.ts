@@ -216,20 +216,21 @@ export async function trySendPaymentConfirmation(page: Page): Promise<SendFlowRe
 }
 
 // ---------------------------------------------------------------------------
-// Voucher — Generate + Preview & Send
+// Voucher — Preview & Send (one click rebuilds the PDF, prepares the email,
+// and opens the send-preview dialog — there is no separate Generate step)
 // ---------------------------------------------------------------------------
 //
 // The voucher dialog is mounted state-controlled on the booking page; the
 // natural entry path is to click Next towards `voucher_sent` and let the page
 // auto-open it on the `create_voucher_pdf` autofix failure. For the QA suite
-// it's simpler to use the Generate Voucher trigger if present, otherwise rely
-// on the auto-open behaviour from the stage gate.
+// it's simpler to use the "Preview & Send Voucher" trigger if present,
+// otherwise rely on the auto-open behaviour from the stage gate.
 
 export async function tryGenerateAndSendVoucher(page: Page): Promise<SendFlowResult> {
-  // The voucher dialog is open once the GenerateVoucherDialog renders its
-  // "Generate PDF" button.
-  const generateBtn = page.getByRole("button", { name: /Generate PDF/i }).first()
-  const visible = await generateBtn.isVisible({ timeout: 5_000 }).catch(() => false)
+  // The voucher dialog is open once GenerateVoucherDialog renders its
+  // "Preview & Send Voucher" button.
+  const previewSendBtn = page.getByRole("button", { name: /Preview & Send Voucher/i }).first()
+  const visible = await previewSendBtn.isVisible({ timeout: 5_000 }).catch(() => false)
   if (!visible) {
     return {
       outcome: "skipped",
@@ -237,8 +238,16 @@ export async function tryGenerateAndSendVoucher(page: Page): Promise<SendFlowRes
     }
   }
 
+  // A single click fires /api/voucher/generate (rebuilds the PDF from the
+  // latest booking details), then /prepare-send (builds the itinerary PDF and
+  // composes the email) before the send-preview dialog opens. 422s on either
+  // call when the booking has no itinerary yet, or references are missing.
+  // Both waiters are set up before the click — the second request can fire
+  // within the same tick the first one resolves, so registering it afterwards
+  // risks missing it.
   const generatePromise = waitForApiResponse(page, "/api/voucher/generate", "POST", 60_000)
-  await generateBtn.click().catch(() => undefined)
+  const preparePromise = waitForApiResponse(page, "/prepare-send", "POST", 60_000)
+  await previewSendBtn.click().catch(() => undefined)
   const generateResponse = await generatePromise
 
   if (!generateResponse || !generateResponse.ok()) {
@@ -249,14 +258,6 @@ export async function tryGenerateAndSendVoucher(page: Page): Promise<SendFlowRes
     }
   }
 
-  // After Generate completes, click Preview & Send Voucher. That prepares the
-  // email server-side (voucher PDF + itinerary PDF) before the preview opens,
-  // and 422s when the booking has no itinerary yet.
-  const previewSendBtn = page.getByRole("button", { name: /Preview & Send Voucher/i }).last()
-  await previewSendBtn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined)
-
-  const preparePromise = waitForApiResponse(page, "/prepare-send", "POST", 60_000)
-  await previewSendBtn.click().catch(() => undefined)
   const prepareResponse = await preparePromise
 
   if (!prepareResponse || !prepareResponse.ok()) {

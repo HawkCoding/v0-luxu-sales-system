@@ -1260,16 +1260,13 @@ test.describe("ch07 vouchers", () => {
       const context = await browser.newContext({ storageState: HANDBOOK_USERS.consultant.storageState })
       const page = await context.newPage()
       await page.goto(`/app/bookings/${CH07_ELIGIBLE_BOOKING}?tab=documents`)
-      await page.getByRole("button", { name: /^generate voucher$/i }).click({ timeout: 60_000 })
+      await page.getByRole("button", { name: /preview & send voucher/i }).click({ timeout: 60_000 })
 
-      const dialog = page.getByRole("dialog")
-      await expect(dialog.getByText("Generate travel voucher")).toBeVisible({ timeout: 30_000 })
-      await dialog.getByRole("button", { name: /^generate pdf$/i }).click()
-
-      // Rendered server-side before the preview iframe appears.
-      await expect(dialog.getByRole("button", { name: /^regenerate pdf$/i })).toBeVisible({
-        timeout: 60_000,
-      })
+      const dialog = page.getByRole("dialog").filter({ hasText: "Send travel voucher" })
+      // Captured while the voucher PDF and email are still being prepared — the
+      // dialog goes straight from this state into the send-preview dialog, so
+      // this is the only moment this outer dialog is on screen by itself.
+      await expect(dialog.getByText(/preparing voucher/i)).toBeVisible({ timeout: 30_000 })
       await shot(page, "07-generate-voucher")
 
       await page.keyboard.press("Escape")
@@ -1293,17 +1290,11 @@ test.describe("ch07 vouchers", () => {
       const context = await browser.newContext({ storageState: HANDBOOK_USERS.consultant.storageState })
       const page = await context.newPage()
       await page.goto(`/app/bookings/${CH07_ELIGIBLE_BOOKING}?tab=documents`)
-      await page.getByRole("button", { name: /^generate voucher$/i }).click({ timeout: 60_000 })
+      // A single click rebuilds the voucher PDF from the latest booking details,
+      // builds the itinerary silently, prepares both attachments, then opens
+      // the send-preview dialog automatically.
+      await page.getByRole("button", { name: /preview & send voucher/i }).click({ timeout: 60_000 })
 
-      const generateDialog = page.getByRole("dialog")
-      await expect(generateDialog.getByText("Generate travel voucher")).toBeVisible({ timeout: 30_000 })
-      await generateDialog.getByRole("button", { name: /^generate pdf$/i }).click()
-      await expect(generateDialog.getByRole("button", { name: /^regenerate pdf$/i })).toBeVisible({
-        timeout: 60_000,
-      })
-
-      // Builds the itinerary silently and prepares both attachments before opening.
-      await generateDialog.getByRole("button", { name: /preview & send voucher/i }).click()
       const previewDialog = page.getByRole("dialog").filter({ hasText: "Send travel voucher" })
       await expect(previewDialog).toBeVisible({ timeout: 60_000 })
       await expect(previewDialog.getByRole("button", { name: /send with attachment/i })).toBeVisible()

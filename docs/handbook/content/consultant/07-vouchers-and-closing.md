@@ -30,31 +30,32 @@ legs have one.
 > [!STOP]
 > A leg with no reference number blocks voucher generation outright: *"Supplier reference
 > numbers are missing for: &lt;leg names&gt;."* There is no way around this tab — fill in
-> every leg before trying **Generate Voucher**.
+> every leg before trying **Preview & Send Voucher**.
 
 ## When the voucher becomes available
 
-The **Generate Travel Voucher** card, on the **Documents** tab, only appears once the
-booking reaches **Paid in Full**. A voucher is the client's proof of a paid, confirmed
-booking — the system will not let you create one for a trip that is still owed money.
+The **Travel Voucher** card, on the **Documents** tab, only appears once the booking
+reaches **Paid in Full**. A voucher is the client's proof of a paid, confirmed booking —
+the system will not let you create one for a trip that is still owed money.
 
 If the card is not there, check the booking's stage before checking anything else.
 
-## Generating the voucher
+## Preparing and sending the voucher
 
-Click **Generate Voucher** to open the dialog.
+Click **Preview & Send Voucher**.
 
-[[shot:07-generate-voucher|The Generate voucher dialog with the PDF preview]]
+[[shot:07-generate-voucher|The voucher being prepared before the send preview opens]]
 
-1. Click **Generate PDF**. The dialog renders a preview of the voucher inline.
-2. Read any amber readiness warnings above the preview — see below.
-3. If you correct something on the booking (a leg's contact name, a missing time, a
-   supplier's address), reopen the dialog and click **Regenerate PDF** to rebuild the
-   preview with the fix.
+There is one button, and it does the whole job: it rebuilds the voucher PDF from the
+booking's current details, prepares the email, and opens the **Send travel voucher**
+preview — all before anything is sent. There is no separate Generate step to remember,
+so if you correct something on the booking (a leg's contact name, a missing time, a
+supplier's address) right before sending, the fix is always in the PDF that goes out —
+clicking the button again always rebuilds it from scratch.
 
-Readiness warnings do not block generation — they call out details that are missing but
-not mandatory, so nothing here stops you from sending. Each one names the affected
-leg(s) and where to fix it:
+Any readiness warnings appear in an amber panel at the top of the preview. They do not
+block sending — they call out details that are missing but not mandatory. Each one names
+the affected leg(s) and where to fix it:
 
 | Warning | Meaning |
 |---|---|
@@ -75,25 +76,19 @@ trip details change enough to require a fresh one.
 
 The client receives both in the one email.
 
-## Sending the voucher
-
-Click **Preview & Send Voucher**, in the same dialog. If the PDF hasn't been generated
-yet this click generates it first, then opens the preview.
+## The send preview
 
 [[shot:07-send-voucher|Preview and send with voucher plus itinerary attached]]
 
 The **Send travel voucher** preview works the same as every other send dialog in the
 system — editable subject and body, a **Preview** and **Edit** tab, a signature choice —
-with both the voucher PDF and the itinerary PDF attached.
+with both the voucher PDF and the itinerary PDF attached, and any readiness warnings
+in the amber panel at the top.
 
 > [!WARNING]
 > Sending the voucher moves the booking to **Voucher Sent** and sets its outcome to
 > **Won**. This is the point the system considers the sale closed, not just paid — there
 > is no separate "mark as won" step.
-
-> [!WARNING]
-> If travel times changed after the voucher was generated, regenerate it before sending.
-> Cross-reference Chapter 5.
 
 ## The worksheet
 

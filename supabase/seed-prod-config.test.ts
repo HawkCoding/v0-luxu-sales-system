@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { findMojibake } from "../lib/mojibake"
+import { SYSTEM_TEMPLATE_KEYS } from "../lib/templates/registry"
 
 const overlaySql = readFileSync(join(process.cwd(), "supabase", "seed-prod-config.sql"), "utf8")
 
@@ -41,6 +42,18 @@ describe("production config overlay (seed-prod-config.sql)", () => {
 
   it("nulls suite_vocab_aliases.created_by (production auth.users id doesn't exist locally)", () => {
     expect(overlaySql).toContain("created_by nulled")
+  })
+
+  it("seeds a shared row for every system template key, in both seed files", () => {
+    const seedSql = readFileSync(join(process.cwd(), "supabase", "seed.sql"), "utf8")
+    // full_payment_request is seeded only by its own migration (see the seed.sql comment).
+    const migrationSeeded = new Set(["full_payment_request"])
+    for (const key of SYSTEM_TEMPLATE_KEYS) {
+      expect(overlaySql, `seed-prod-config.sql is missing ${key}`).toContain(`"key":"${key}"`)
+      if (!migrationSeeded.has(key)) {
+        expect(seedSql, `seed.sql is missing ${key}`).toContain(`'${key}'`)
+      }
+    }
   })
 
   it("contains no double-encoded (mojibake) text", () => {
