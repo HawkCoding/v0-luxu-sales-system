@@ -232,4 +232,47 @@ describe("priceExtraLineItems", () => {
       expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
     })
   })
+
+  // An extra ticket may be for more (or fewer) people than the booking holds -- Build Booking's
+  // headcount inputs on an extra line, prefilled with the booking's own totals (see item 2).
+  describe("passenger count overrides", () => {
+    function priceWithOverride(overrides: { adultCount?: number; childCount?: number; infantCount?: number }) {
+      return priceExtraLineItems({
+        supabase: buildSupabase([SADC_2026, BTLD_OPEN]),
+        jobId: JOB_ID,
+        travelDate: "2026-08-25",
+        supplierId: SUPPLIER_ID,
+        routeId: ROUTE_ID,
+        suiteTypeId: SUITE_ID,
+        rateTypeId: SADC,
+        fallbackRateTypeId: BTLD,
+        ...overrides,
+      })
+    }
+
+    it("prices off the booking's own totals when nothing is overridden (today's behaviour)", async () => {
+      // The mock booking is 2 adults, 1 child.
+      const { lineItems } = await priceWithOverride({})
+      const adult = lineItems.find((li) => li.description.endsWith("Adult"))
+      const child = lineItems.find((li) => li.description.endsWith("Child"))
+      expect(adult?.qty).toBe(2)
+      expect(child?.qty).toBe(1)
+    })
+
+    it("uses a stated adult count instead of the booking's, leaving child/infant on the booking's own", async () => {
+      const { lineItems } = await priceWithOverride({ adultCount: 4 })
+      const adult = lineItems.find((li) => li.description.endsWith("Adult"))
+      const child = lineItems.find((li) => li.description.endsWith("Child"))
+      expect(adult?.qty).toBe(4)
+      expect(child?.qty).toBe(1) // unstated -- still the booking's own child
+    })
+
+    it("prices for fewer people than the booking when a lower count is stated", async () => {
+      const { lineItems } = await priceWithOverride({ adultCount: 1, childCount: 0 })
+      const adult = lineItems.find((li) => li.description.endsWith("Adult"))
+      const child = lineItems.find((li) => li.description.endsWith("Child"))
+      expect(adult?.qty).toBe(1)
+      expect(child).toBeUndefined() // 0 children -> no child line
+    })
+  })
 })

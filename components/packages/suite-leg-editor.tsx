@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useState } from "react"
-import { ArrowLeftRight, ChevronDown, Gift, Info, Plus, Trash2 } from "lucide-react"
+import { ArrowLeftRight, ChevronDown, Gift, Info, Plus, Trash2, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -42,16 +42,25 @@ import { AnchorDateSection } from "@/components/packages/anchor-date-section"
 // import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import {
   createDraftUnit,
+  formatHeadcountDifference,
+  headcountLegNoun,
   isRouteReversible,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   PASSENGER_SUM_SUPPLIER_KINDS,
+  PASSENGER_WARN_SUPPLIER_KINDS,
   type HotelAnchorContext,
   type SuiteLegState,
   type SuiteUnitState,
   type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
+import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
 import { resolveDirectedEndpointCodes, resolveDirectedRouteName } from "@/lib/routes/route-name"
-import { findRateCardCandidates, hasAnyRateCardFor, selectRateCard } from "@/lib/rate-cards/resolve"
+import {
+  findRateCardCandidates,
+  hasAnyRateCardFor,
+  hasAnyRateCardForRateType,
+  selectRateCard,
+} from "@/lib/rate-cards/resolve"
 import { RateTypeSelect } from "@/components/rate-type-select"
 import { CurrencySelect } from "@/components/currency-select"
 import { formatMoney, BASE_CURRENCY } from "@/lib/money"
@@ -658,9 +667,19 @@ export function SuiteLegEditor({
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)
   // Tours show the same per-unit Adults/Children/Infants inputs but each unit prices off its own
   // headcount independently -- there's nothing to reconcile against the booking total, so the
-  // running "X/Y adults" tally and its "Spread evenly" fixup only make sense for sleeping/seating
-  // suppliers where every traveller must land in exactly one unit.
+  // running "X/Y adults" tally only shows for the kinds that compare against it: a train, which
+  // must match exactly (a mismatch blocks Next), and an airline, hotel or cruise, which may carry
+  // more or fewer people on purpose (a mismatch is an amber note, never a block).
   const showPassengerSumCheck = PASSENGER_SUM_SUPPLIER_KINDS.has(leg.supplierKind)
+  const showPassengerWarnCheck = PASSENGER_WARN_SUPPLIER_KINDS.has(leg.supplierKind)
+  // Train suites and hotel rooms pick their own rate beside their type. Tours and cruises already
+  // did (their leg shows no rate field at all -- see legFields). A manual-pricing leg has no card
+  // to pick a rate for.
+  const showUnitRateType =
+    supportsUnitRateType(leg.supplierKind) && (isTypePricedSupplier(leg.supplierKind) || leg.pricingMode !== "manual")
+  const legRateTypeName = value.rateTypeId
+    ? rateTypes.find((rt) => rt.id === value.rateTypeId)?.name ?? "custom"
+    : leg.inheritedRateTypeName
 
   // How this stay prices. Occupancy stays required in both bases (the voucher and worksheet read
   // who is in which room off it); under per_room it simply stops deciding the price.
@@ -806,6 +825,13 @@ export function SuiteLegEditor({
     (splitSummed.adultCount === expectedTotals.adultCount &&
       splitSummed.childCount === expectedTotals.childCount &&
       splitSummed.infantCount === expectedTotals.infantCount)
+  // "3 on this flight · booking has 2 (1 extra)" -- a deliberate extra ticket is allowed, so it is
+  // said out loud rather than blocked.
+  const headcountNote =
+    showPassengerWarnCheck && expectedTotals
+      ? formatHeadcountDifference(splitSummed, expectedTotals, headcountLegNoun(leg.supplierKind))
+      : null
+  const showHeadcountTally = (showPassengerSumCheck || showPassengerWarnCheck) && Boolean(expectedTotals)
 
   const nights = Math.max(1, value.nights ?? 1)
   const anchored = value.dateAnchor === "pre" || value.dateAnchor === "post"
@@ -894,7 +920,7 @@ export function SuiteLegEditor({
     )
     const selected = selectRateCard(
       candidates,
-      // Tours resolve their rate type per unit; every other kind uses the leg's own value.
+      // Hotel rooms and tours can resolve their own rate type; unset falls back to the leg's.
       unitRateTypeId ?? value.rateTypeId,
       leg.quoteRateTypeId,
       leg.baseRateTypeId,
@@ -1520,14 +1546,20 @@ export function SuiteLegEditor({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">
               {vocab.unitNounPlural.charAt(0).toUpperCase() + vocab.unitNounPlural.slice(1)}
-              {showPassengerSumCheck && expectedTotals ? (
-                <span className={splitMatches ? "ml-2 font-normal" : "ml-2 font-normal text-destructive"}>
+              {showHeadcountTally && expectedTotals ? (
+                <span
+                  className={cn(
+                    "ml-2 font-normal",
+                    !splitMatches &&
+                      (showPassengerSumCheck ? "text-destructive" : "text-amber-600 dark:text-amber-500"),
+                  )}
+                >
                   {splitSummed.adultCount}/{expectedTotals.adultCount} adults,{" "}
                   {splitSummed.childCount}/{expectedTotals.childCount} children,{" "}
                   {splitSummed.infantCount}/{expectedTotals.infantCount} infants
                 </span>
               ) : null}
-              {showPassengerSumCheck && expectedTotals && !splitMatches ? (
+              {showHeadcountTally && expectedTotals && !splitMatches ? (
                 <Button
                   type="button"
                   size="sm"
@@ -1536,7 +1568,9 @@ export function SuiteLegEditor({
                   onClick={spreadEvenly}
                   title={`Re-split the booking's traveller totals evenly across these ${vocab.unitNounPlural.toLowerCase()}`}
                 >
-                  Spread evenly
+                  {/* A train must match, so this is the fix. Elsewhere the difference may be on
+                      purpose, so it is offered as a reset rather than a correction. */}
+                  {showPassengerSumCheck ? "Spread evenly" : "Match booking"}
                 </Button>
               ) : null}
             </span>
@@ -1557,6 +1591,16 @@ export function SuiteLegEditor({
               Add {vocab.unitNoun}
             </Button>
           </div>
+
+          {headcountNote ? (
+            <p className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+              <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                <span className="font-medium">{headcountNote}.</span> Priced for the people entered —
+                this won&apos;t block the quote.
+              </span>
+            </p>
+          ) : null}
 
           {value.units.map((unit, index) => {
             const selectedSuiteType = leg.suiteTypes.find((suiteType) => suiteType.id === unit.suiteTypeId)
@@ -1612,24 +1656,44 @@ export function SuiteLegEditor({
                   ) : null}
                 </div>
 
-                {/* Tours price independently unit by unit (see PASSENGER_SUM_SUPPLIER_KINDS), so
-                    unlike every other kind's one leg-level rate type, each tour card gets its own —
-                    changing it here must not silently reprice every other tour on this supplier. */}
-                {pricesByTypeOnly ? (
-                  <RateTypeSelect
-                    rateTypes={rateTypes}
-                    allowedRateTypeIds={leg.applicableRateTypeIds}
-                    value={unit.rateTypeId}
-                    onChange={(rateTypeId) => updateUnit(unit.id, { rateTypeId })}
-                    id={`rate-type-${leg.id}-${unit.id}`}
-                    inheritLabel={
-                      value.rateTypeId
-                        ? `Leg default (${rateTypes.find((rt) => rt.id === value.rateTypeId)?.name ?? "custom"})`
-                        : leg.inheritedRateTypeName
-                          ? `Supplier default (${leg.inheritedRateTypeName})`
-                          : "Supplier default"
-                    }
-                  />
+                {/* Each suite, room, cabin or tour can be sold at its own rate level (two suites of
+                    one type, one at Rack and one at STO) -- changing it here must not silently
+                    reprice every other unit on this leg. Unset inherits the leg's rate, and the
+                    inherit option names it so it's obvious this is optional. */}
+                {showUnitRateType ? (
+                  <div className="space-y-1.5">
+                    <RateTypeSelect
+                      rateTypes={rateTypes}
+                      allowedRateTypeIds={leg.applicableRateTypeIds}
+                      value={unit.rateTypeId}
+                      onChange={(rateTypeId) => updateUnit(unit.id, { rateTypeId })}
+                      id={`rate-type-${leg.id}-${unit.id}`}
+                      // Tours and cruises show no leg-level rate field, so "the leg" would mean
+                      // nothing there -- they keep naming the default they actually fall back to.
+                      label={pricesByTypeOnly ? "Rate type" : "Rate"}
+                      inheritLabel={
+                        pricesByTypeOnly
+                          ? value.rateTypeId
+                            ? `Leg default (${legRateTypeName})`
+                            : leg.inheritedRateTypeName
+                              ? `Supplier default (${leg.inheritedRateTypeName})`
+                              : "Supplier default"
+                          : legRateTypeName
+                            ? `Same as leg (${legRateTypeName})`
+                            : "Same as leg"
+                      }
+                    />
+                    {unit.rateTypeId &&
+                    unit.suiteTypeId &&
+                    leg.pricingMode !== "manual" &&
+                    (pricesByTypeOnly || value.routeId) &&
+                    !hasAnyRateCardForRateType(leg.rateCards, value.routeId ?? "", unit.suiteTypeId, unit.rateTypeId) ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        No {rateTypes.find((rt) => rt.id === unit.rateTypeId)?.name ?? "such"} rate card for this{" "}
+                        {vocab.suiteType.toLowerCase()} — pick another rate or add one in Suppliers.
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
 
                 {/* Fare currency stays a leg-level fact even for tours -- a manual fare is typed
@@ -1758,7 +1822,7 @@ export function SuiteLegEditor({
                     index={index}
                     nights={nights}
                     basis={value.accommodationPricingBasis}
-                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId)}
+                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)}
                     fallbackCurrency={value.priceCurrency}
                     quoteCurrency={quoteCurrency}
                     formatInQuoteCurrency={formatInQuoteCurrency}

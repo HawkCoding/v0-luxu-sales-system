@@ -191,6 +191,12 @@ function createSupabaseMock(bookingExists = true, commissionBonus = 0) {
       if (table === "app_settings" || table === "suppliers" || table === "routes") {
         return { select: vi.fn(() => ({ in: vi.fn(async () => ({ data: [], error: null })) })) }
       }
+      // POST /services/apply re-sorts the legs into date order before pricing (persistServiceDateOrder).
+      // None of these fixtures carry a service_date, so the resort is a no-op -- an empty read is
+      // exactly right.
+      if (table === "booking_services") {
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
+      }
       if (table === "rate_types") {
         return {
           select: vi.fn(() => ({
