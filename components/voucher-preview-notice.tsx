@@ -44,14 +44,14 @@ export function VoucherPreviewNotice({ warnings, pdf }: VoucherPreviewNoticeProp
   return (
     <div className="flex flex-col gap-3">
       {warnings.length > 0 ? (
-        <Alert className="border-amber-200 bg-amber-50 text-amber-900 [&>svg]:text-amber-600">
+        <Alert className="border-amber-200 bg-amber-50 text-amber-900 [&>svg]:text-amber-600 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-400 dark:[&>svg]:text-amber-500">
           <TriangleAlert className="size-4" aria-hidden />
           <AlertTitle>This voucher is missing some details</AlertTitle>
-          <AlertDescription className="text-amber-800">
+          <AlertDescription className="text-amber-800 dark:text-amber-400">
             <ul className="list-disc space-y-1 pl-4">
               {warnings.map((warning) => (
                 <li key={warning.code}>
-                  {warning.message} <span className="text-amber-700/80">{warning.fixHint}</span>
+                  {warning.message} <span className="text-amber-700/80 dark:text-amber-400/80">{warning.fixHint}</span>
                 </li>
               ))}
             </ul>
