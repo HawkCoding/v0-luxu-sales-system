@@ -18,10 +18,10 @@ export interface PersistServiceDateOrderResult {
  * engine and therefore the quote and invoice lines, Build Booking's step 1 and 2 lists, the voucher
  * -- follows the itinerary.
  *
- * Only rows whose position actually changes are written, and nothing is written at all when the
- * relative order is already right: sort_order updates bump booking_services.updated_at, the
- * optimistic-lock token the services PATCH checks, so a no-op rewrite would 409 the salesperson's
- * very next save. Callers that write here must hand the fresh versions back to the client.
+ * Only rows whose position actually changes are written, nothing at all when the relative order is
+ * already right, and all of them in one transaction (set_booking_service_sort_orders). A
+ * sort_order-only update does not bump booking_services.updated_at -- the optimistic-lock token the
+ * services PATCH checks -- so reordering never 409s anyone editing a leg that didn't move.
  */
 export async function persistServiceDateOrder(
   supabase: SupabaseClient<Database>,
@@ -68,17 +68,12 @@ export async function persistServiceDateOrder(
     .map((leg, index) => ({ leg, index }))
     .filter(({ leg, index }) => leg.sortOrder !== index)
 
-  const results = await Promise.all(
-    changed.map(({ leg, index }) =>
-      supabase
-        .from("booking_services")
-        .update({ sort_order: index })
-        .eq("booking_id", bookingId)
-        .eq("id", leg.id),
-    ),
-  )
-  const firstError = results.find((result) => result.error)?.error
-  if (firstError) return { error: firstError.message, changedServiceIds: [] }
+  // One statement, so a failure leaves the old order whole rather than half rewritten.
+  const { error: reorderError } = await supabase.rpc("set_booking_service_sort_orders", {
+    p_booking_id: bookingId,
+    p_orders: changed.map(({ leg, index }) => ({ id: leg.id, sort_order: index })),
+  })
+  if (reorderError) return { error: reorderError.message, changedServiceIds: [] }
 
   return { error: null, changedServiceIds: changed.map(({ leg }) => leg.id) }
 }
