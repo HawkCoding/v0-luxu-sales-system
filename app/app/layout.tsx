@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { redirect } from "next/navigation"
 import AppClientLayout from "./client-layout"
+import { canUserViewReporting } from "@/lib/reports/access"
 import { extractRoleFromJwt, isRole } from "@/lib/role-utils"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { Role } from "@/lib/types"
@@ -20,12 +21,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   let displayName: string
   let email: string
   let role: Role
-  let canViewReporting: boolean
 
   if (jwtRole) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("name, surname, email, is_active, can_view_reporting")
+      .select("name, surname, email, is_active")
       .eq("user_id", user.id)
       .single()
 
@@ -38,7 +38,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
 
     role = jwtRole
-    canViewReporting = profile.can_view_reporting === true
     displayName = profile
       ? [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
       : (user.email ?? "").split("@")[0].replace(/^./, (char) => char.toUpperCase())
@@ -46,7 +45,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   } else {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("name, surname, clearance_level, email, is_active, can_view_reporting")
+      .select("name, surname, clearance_level, email, is_active")
       .eq("user_id", user.id)
       .single()
 
@@ -59,10 +58,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
 
     role = profile.clearance_level
-    canViewReporting = profile.can_view_reporting === true
     displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
     email = profile.email || user.email || ""
   }
+
+  // Read on its own rather than folded into the profile select above: if the reporting column is
+  // missing (code deployed before its migration) the grant fails closed to "hidden" instead of the
+  // profile lookup failing and signing every user out.
+  const canViewReporting = await canUserViewReporting(supabase, user.id)
 
   const initialUser = { id: user.id, name: displayName, email, role }
 
