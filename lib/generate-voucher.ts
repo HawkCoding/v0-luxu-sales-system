@@ -131,6 +131,10 @@ export interface VoucherServiceBlock {
   contactDetails: VoucherServiceBlockContact
   serviceData: VoucherServiceBlockData
   displayOrder: number
+  /** HH:MM of a real clock event -- a flight's departure, a transfer's pickup -- else null/absent.
+   *  Same-day blocks with one are put in clock order (sortItineraryBlocksChronologically). Unlike
+   *  `serviceData.startTime`, never a supplier or app default such as a hotel's check-in time. */
+  clockTime?: string | null
 }
 
 export interface VoucherData {

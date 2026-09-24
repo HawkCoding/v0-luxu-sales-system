@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import { sortLegsByDate } from "@/lib/packages/sort-legs-by-date"
 
 function block(
   overrides: Partial<VoucherServiceBlock> & { displayOrder: number },
@@ -87,6 +88,42 @@ describe("sortItineraryBlocksChronologically", () => {
 
     const sorted = sortItineraryBlocksChronologically([hotel, transfer])
     expect(sorted.map((b) => b.title)).toEqual(["Station Transfer", "TAJ Hotel"])
+  })
+
+  it("puts same-day blocks with a real clock time in clock order, like the saved leg order", () => {
+    // A 14:00 flight saved before a 09:00 transfer pickup: sortLegsByDate saves the transfer first,
+    // so the itinerary must print it first too. The hotel between them has no clock event and keeps
+    // its slot.
+    const flight = block({
+      serviceType: "airline",
+      title: "Flight",
+      displayOrder: 0,
+      clockTime: "14:00",
+      serviceData: { departureDate: "2026-11-25", startTime: "14:00" },
+    })
+    const hotel = block({
+      serviceType: "hotel",
+      title: "Hotel",
+      displayOrder: 1,
+      serviceData: { departureDate: "2026-11-25", startTime: "15:00" },
+    })
+    const transfer = block({
+      serviceType: "transfer",
+      title: "Transfer",
+      displayOrder: 2,
+      clockTime: "09:00",
+      serviceData: { departureDate: "2026-11-25", startTime: "09:00" },
+    })
+
+    const sorted = sortItineraryBlocksChronologically([flight, hotel, transfer])
+    expect(sorted.map((b) => b.title)).toEqual(["Transfer", "Hotel", "Flight"])
+
+    const legs = sortLegsByDate([
+      { id: "Flight", date: "2026-11-25", time: "14:00", sortOrder: 0 },
+      { id: "Hotel", date: "2026-11-25", time: null, sortOrder: 1 },
+      { id: "Transfer", date: "2026-11-25", time: "09:00", sortOrder: 2 },
+    ])
+    expect(legs.map((leg) => leg.id)).toEqual(sorted.map((b) => b.title))
   })
 
   it("places undated blocks after dated ones", () => {
