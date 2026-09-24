@@ -30,7 +30,14 @@ import {
   PREFILL_FIELDS,
   type PrefillField,
 } from "@/lib/traveller-prefill"
-import { useJobReservationDetails, useJobTravellers, type JobTraveller } from "@/lib/use-data"
+import { useClubNames, useJobReservationDetails, useJobTravellers, type JobTraveller } from "@/lib/use-data"
+import {
+  cleanClubMemberships,
+  clubMembershipsEqual,
+  hasIncompleteClubMembership,
+  type ClubMembership,
+} from "@/lib/club-memberships"
+import { ClubMemberNumbersEditor } from "@/components/club-member-numbers-editor"
 import type { Customer, PipelineStage } from "@/lib/types"
 import { useSaveOnExit } from "@/hooks/use-save-on-exit"
 import { useUnloadGuard } from "@/hooks/use-unload-guard"
@@ -56,6 +63,7 @@ interface TravellerDraft {
   roomType: string
   isChild: boolean
   isPrimary: boolean
+  clubMemberships: ClubMembership[]
 }
 
 let draftKeySeq = 0
@@ -78,6 +86,7 @@ function toDraft(t: JobTraveller): TravellerDraft {
     roomType: t.roomType,
     isChild: t.isChild,
     isPrimary: t.isPrimary,
+    clubMemberships: t.clubMemberships ?? [],
   }
 }
 
@@ -94,6 +103,7 @@ function emptyDraft(isChild: boolean): TravellerDraft {
     roomType: "",
     isChild,
     isPrimary: false,
+    clubMemberships: [],
   }
 }
 
@@ -110,11 +120,16 @@ function travellerFromCustomer(customer: Customer): TravellerDraft {
     roomType: "",
     isChild: false,
     isPrimary: true,
+    clubMemberships: (customer.clubMemberships ?? []).map((row) => ({ ...row })),
   }
 }
 
 function travellersValid(rows: TravellerDraft[]): boolean {
   return rows.every((t) => t.firstName.trim() && t.lastName.trim() && t.idPassport.trim())
+}
+
+function travellersClubsComplete(rows: TravellerDraft[]): boolean {
+  return rows.every((t) => !hasIncompleteClubMembership(t.clubMemberships))
 }
 
 /** Snapshot used to detect edits against the last-hydrated/last-saved baseline. */
@@ -132,6 +147,7 @@ function travellersSnapshot(rows: TravellerDraft[]): string {
       roomType: t.roomType,
       isChild: t.isChild,
       isPrimary: t.isPrimary,
+      clubMemberships: cleanClubMemberships(t.clubMemberships),
     })),
   )
 }
@@ -146,7 +162,8 @@ function travellerRowDiffers(a: TravellerDraft, b: TravellerDraft): boolean {
     a.residence !== b.residence ||
     a.roomWith !== b.roomWith ||
     a.roomType !== b.roomType ||
-    a.isChild !== b.isChild
+    a.isChild !== b.isChild ||
+    !clubMembershipsEqual(cleanClubMemberships(a.clubMemberships), cleanClubMemberships(b.clubMemberships))
   )
 }
 
@@ -241,6 +258,7 @@ export function JobReservationTab({
     mutate: mutateDetails,
   } = useJobReservationDetails(bookingId)
 
+  const { data: clubNamesData } = useClubNames()
   const [travellers, setTravellers] = useState<TravellerDraft[]>([])
   const [travellerSeeds, setTravellerSeeds] = useState<Map<string, TravellerDraft>>(new Map())
   const [prefilledFields, setPrefilledFields] = useState<Map<string, Set<PrefillField>>>(new Map())
@@ -495,6 +513,10 @@ export function JobReservationTab({
       if (!opts?.silent) toast.error("Each guest needs a first name, surname, and ID/passport number")
       return
     }
+    if (!travellersClubsComplete(travellers)) {
+      if (!opts?.silent) toast.error("Each club member number needs both the club and the number")
+      return
+    }
     const snapshot = travellersSnapshot(travellers)
     setSavingTravellers(true)
     try {
@@ -514,6 +536,7 @@ export function JobReservationTab({
             roomType: t.roomType || null,
             isChild: t.isChild,
             isPrimary: t.isPrimary,
+            clubMemberships: cleanClubMemberships(t.clubMemberships),
           })),
         }),
       })
@@ -634,7 +657,7 @@ export function JobReservationTab({
   const flushTravellers = (): Promise<void> => {
     if (savingTravellers || !computeTravellersDirty()) return Promise.resolve()
     if (travellers.length === 0 && savedTravellerCount > 0) return Promise.resolve()
-    if (!travellersValid(travellers)) return Promise.resolve()
+    if (!travellersValid(travellers) || !travellersClubsComplete(travellers)) return Promise.resolve()
     return saveTravellers({ silent: true })
   }
 
@@ -905,6 +928,13 @@ export function JobReservationTab({
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
+                  <ClubMemberNumbersEditor
+                    idPrefix={`guest-${traveller.key}`}
+                    value={traveller.clubMemberships}
+                    onChange={(clubMemberships) => updateTraveller(traveller.key, { clubMemberships })}
+                    suggestions={clubNamesData?.names}
+                    heading="Club member numbers"
+                  />
                   {unreadableDob ? (
                     <p id={`dob-hint-${traveller.key}`} className="text-xs text-amber-600 dark:text-amber-500">
                       Date of birth isn&apos;t in a format we can read — use 12/05/1980 or 1980-05-12. It will be

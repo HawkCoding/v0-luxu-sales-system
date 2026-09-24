@@ -55,6 +55,7 @@ import { SendPaymentConfirmationButton } from "@/components/send-payment-confirm
 import { SendPaymentReminderButton } from "@/components/send-payment-reminder-button"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { PresenceAvatars } from "@/components/presence-avatars"
+import { ClubMemberBadge } from "@/components/club-member-badge"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { useBookingNotes } from "@/lib/use-data"
@@ -773,9 +774,12 @@ export default function JobDetailPage() {
               {needsEmailReview && <Badge variant="destructive" className="text-xs">Needs Review</Badge>}
               <PresenceAvatars users={others} className="ml-1" />
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {customer?.firstName} {customer?.lastName} &middot; {customer?.email}
-            </p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <p>
+                {customer?.firstName} {customer?.lastName} &middot; {customer?.email}
+              </p>
+              <ClubMemberBadge memberships={customer?.clubMemberships} />
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">Salesperson</span>
               <span>{assignedSalespersonName}</span>

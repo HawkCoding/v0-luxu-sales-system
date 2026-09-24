@@ -88,7 +88,7 @@ export function fieldConflictResponse(
   )
 }
 
-/** null/""/undefined are treated as equal for nullable text columns; numeric-vs-string compares by value. */
+/** null/""/undefined are treated as equal for nullable text columns; numeric-vs-string compares by value; jsonb compares by content. */
 export function valuesEqual(a: unknown, b: unknown): boolean {
   const norm = (v: unknown) => (v === null || v === undefined || v === "" ? null : v)
   const na = norm(a)
@@ -97,6 +97,9 @@ export function valuesEqual(a: unknown, b: unknown): boolean {
   if (na === null || nb === null) return false
   if (typeof na === "number" || typeof nb === "number") {
     return Number(na) === Number(nb)
+  }
+  if (typeof na === "object" && typeof nb === "object") {
+    return JSON.stringify(na) === JSON.stringify(nb)
   }
   return false
 }

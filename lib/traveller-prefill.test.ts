@@ -28,6 +28,7 @@ function row(overrides: Partial<PrefillableTraveller> = {}): PrefillableTravelle
     residence: "",
     isChild: false,
     isPrimary: false,
+    clubMemberships: [],
     ...overrides,
   }
 }
@@ -151,6 +152,47 @@ describe("fillBlanksFromCustomer", () => {
     expect(result.rows).toHaveLength(1)
     expect(result.prefilled.size).toBe(0)
   })
+
+  describe("club member numbers", () => {
+    const CLUBS = [
+      { club: "Rovos Rail", number: "RR-123" },
+      { club: "SAA Voyager", number: "998877" },
+    ]
+    const withClubs: PrefillSourceCustomer = { ...CUSTOMER, clubMemberships: CLUBS }
+
+    it("copies the customer's numbers onto a guest who has none", () => {
+      const result = fillBlanksFromCustomer([row({ isPrimary: true })], withClubs, createRow)
+      expect(result.rows[0].clubMemberships).toEqual(CLUBS)
+      expect(result.rows[0].clubMemberships).not.toBe(CLUBS)
+      expect(result.prefilled.get("row-1")?.has("clubMemberships")).toBe(true)
+    })
+
+    it("leaves a guest's own numbers untouched", () => {
+      const own = [{ club: "Blue Train", number: "BT-1" }]
+      const result = fillBlanksFromCustomer([row({ isPrimary: true, clubMemberships: own })], withClubs, createRow)
+      expect(result.rows[0].clubMemberships).toBe(own)
+      expect(result.prefilled.get("row-1")?.has("clubMemberships") ?? false).toBe(false)
+    })
+
+    it("treats a guest holding only blank rows as having none", () => {
+      const blank = [{ club: " ", number: "" }]
+      const result = fillBlanksFromCustomer([row({ isPrimary: true, clubMemberships: blank })], withClubs, createRow)
+      expect(result.rows[0].clubMemberships).toEqual(CLUBS)
+    })
+
+    it("never gives the customer's numbers to someone else's guest row", () => {
+      const rows = [row({ firstName: "Sam", lastName: "Smith" })]
+      const result = fillBlanksFromCustomer(rows, withClubs, createRow)
+      expect(result.rows[0].clubMemberships).toEqual([])
+    })
+
+    it("marks club numbers as prefilled on a freshly seeded row", () => {
+      const seededRow = (customer: PrefillSourceCustomer) =>
+        ({ ...createRow(customer), clubMemberships: customer.clubMemberships ?? [] })
+      const result = fillBlanksFromCustomer([], withClubs, seededRow)
+      expect(result.prefilled.get("seeded")?.has("clubMemberships")).toBe(true)
+    })
+  })
 })
 
 describe("describePrefilled", () => {
@@ -162,5 +204,9 @@ describe("describePrefilled", () => {
 
   it("renders a single field on its own", () => {
     expect(describePrefilled(new Set(["idPassport"]))).toBe("ID/passport")
+  })
+
+  it("names club member numbers last", () => {
+    expect(describePrefilled(new Set(["clubMemberships", "prefix"]))).toBe("title, club member numbers")
   })
 })

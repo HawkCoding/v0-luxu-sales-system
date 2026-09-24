@@ -1,6 +1,7 @@
 "use client"
 
 import useSWR from "swr"
+import type { ClubMembership } from "@/lib/club-memberships"
 import type {
   AuditLog,
   Booking,
@@ -179,6 +180,11 @@ export interface JobTraveller {
   isChild: boolean
   isPrimary: boolean
   sortOrder: number
+  clubMemberships: ClubMembership[]
+}
+
+export function useClubNames() {
+  return useSWR<{ names: string[] }>("/api/club-memberships/names", fetcher, swrOptions)
 }
 
 /** Booking pax vs. the captured roster — see lib/packages/roster-pax.ts. Null while the booking

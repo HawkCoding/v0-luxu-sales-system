@@ -18,6 +18,7 @@ import {
   TRAVELLER_COLUMNS,
 } from "@/lib/supabase/columns"
 import type { Json } from "@/lib/supabase/types"
+import { parseClubMemberships } from "@/lib/club-memberships"
 import { requireUser } from "@/lib/api/auth"
 import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
 import { mapPostgrestError } from "@/lib/api/responses"
@@ -289,6 +290,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       province: customer.province,
       postalCode: customer.postal_code,
       vatNumber: customer.vat_number,
+      dateOfBirth: customer.date_of_birth,
+      idPassport: customer.id_passport,
+      clubMemberships: parseClubMemberships(customer.club_memberships),
       isRepeatClient: customer.is_repeat_client,
       createdAt: customer.created_at,
         createdAtDisplay: formatDisplayDateTime(customer.created_at),

@@ -41,7 +41,12 @@ function buildSupabase(
   opts: {
     bookingExists?: boolean
     customerId?: string | null
-    customer?: { id: string; date_of_birth: string | null; id_passport: string | null } | null
+    customer?: {
+      id: string
+      date_of_birth: string | null
+      id_passport: string | null
+      club_memberships?: unknown
+    } | null
   } = {},
 ) {
   const insertCalls: unknown[] = []
@@ -59,6 +64,7 @@ function buildSupabase(
     residence: "South Africa",
     is_child: false,
     sort_order: 0,
+    club_memberships: [{ club: "Rovos Rail", number: "RR-1" }],
   }
 
   const customerId = opts.customerId === undefined ? CUSTOMER_ID : opts.customerId
@@ -175,6 +181,7 @@ describe("GET /api/jobs/[id]/travellers", () => {
         roomType: "",
         isChild: false,
         sortOrder: 0,
+        clubMemberships: [{ club: "Rovos Rail", number: "RR-1" }],
       },
     ])
   })
@@ -401,6 +408,105 @@ describe("PUT /api/jobs/[id]/travellers", () => {
       isPrimary: true,
     })
     expect(res.status).toBe(200)
+    expect(supabase.customerUpdates).toEqual([])
+  })
+
+  it("stores each guest's club member numbers, trimmed", async () => {
+    const supabase = buildSupabase()
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      clubMemberships: [{ club: " Blue Train ", number: " BT-9 " }],
+    })
+    expect(res.status).toBe(200)
+    expect(supabase.insertCalls[0]).toEqual([
+      expect.objectContaining({ club_memberships: [{ club: "Blue Train", number: "BT-9" }] }),
+    ])
+  })
+
+  it("defaults a guest without club numbers to an empty list", async () => {
+    const supabase = buildSupabase()
+    await putPrimary(supabase, { firstName: "Jane", lastName: "Doe", idPassport: "B7654321" })
+    expect(supabase.insertCalls[0]).toEqual([expect.objectContaining({ club_memberships: [] })])
+  })
+
+  it("returns 400 for a club entry missing its number", async () => {
+    const supabase = buildSupabase()
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      clubMemberships: [{ club: "Rovos Rail", number: "" }],
+    })
+    expect(res.status).toBe(400)
+    expect(supabase.insertCalls).toHaveLength(0)
+  })
+
+  it("merges the primary guest's club numbers onto the customer without dropping existing ones", async () => {
+    const supabase = buildSupabase({
+      customer: {
+        id: CUSTOMER_ID,
+        date_of_birth: "1990-05-05",
+        id_passport: "B7654321",
+        club_memberships: [
+          { club: "Rovos Rail", number: "OLD" },
+          { club: "SAA Voyager", number: "998877" },
+        ],
+      },
+    })
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "1990-05-05",
+      isPrimary: true,
+      clubMemberships: [
+        { club: "rovos rail", number: "NEW" },
+        { club: "Blue Train", number: "BT-1" },
+      ],
+    })
+    expect(res.status).toBe(200)
+    expect(supabase.customerUpdates).toEqual([
+      {
+        club_memberships: [
+          { club: "Rovos Rail", number: "NEW" },
+          { club: "SAA Voyager", number: "998877" },
+          { club: "Blue Train", number: "BT-1" },
+        ],
+      },
+    ])
+  })
+
+  it("never clears the customer's club numbers when the primary guest has none", async () => {
+    const supabase = buildSupabase({
+      customer: {
+        id: CUSTOMER_ID,
+        date_of_birth: "1990-05-05",
+        id_passport: "B7654321",
+        club_memberships: [{ club: "Rovos Rail", number: "RR-1" }],
+      },
+    })
+    await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "1990-05-05",
+      isPrimary: true,
+      clubMemberships: [],
+    })
+    expect(supabase.customerUpdates).toEqual([])
+  })
+
+  it("does not copy a non-primary guest's club numbers to the customer", async () => {
+    const supabase = buildSupabase()
+    await putPrimary(supabase, {
+      firstName: "Sam",
+      lastName: "Doe",
+      idPassport: "C1",
+      isPrimary: false,
+      clubMemberships: [{ club: "Rovos Rail", number: "RR-2" }],
+    })
     expect(supabase.customerUpdates).toEqual([])
   })
 

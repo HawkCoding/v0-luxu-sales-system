@@ -3,6 +3,13 @@ import { z } from "zod"
 import type { PostgrestError } from "@supabase/supabase-js"
 import { createSessionClient } from "@/lib/supabase/server"
 import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
+import type { Json } from "@/lib/supabase/types"
+import {
+  cleanClubMemberships,
+  clubMembershipsSchema,
+  clubMembershipsToJson,
+  parseClubMemberships,
+} from "@/lib/club-memberships"
 import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
 import { jsonError, jsonZodError, mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
@@ -43,6 +50,7 @@ const patchCustomerSchema = z.object({
   vip_status: z.boolean().optional(),
   preferences: z.string().trim().max(2000).nullable().optional(),
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
+  club_memberships: clubMembershipsSchema.optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
   // Values the client loaded for the fields it's changing, so the server can
   // tell an unrelated sibling write from a real edit conflict.
@@ -50,7 +58,7 @@ const patchCustomerSchema = z.object({
 })
 
 const CUSTOMER_PATCH_SELECT =
-  "id, notes, email, phone, fax, country, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, updated_at, first_name, last_name, title"
+  "id, notes, email, phone, fax, country, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, club_memberships, first_travel_date, last_travel_date, updated_at, first_name, last_name, title"
 
 interface CustomerPatchRow {
   id: string
@@ -74,6 +82,7 @@ interface CustomerPatchRow {
   vip_status: boolean
   preferences: string | null
   communication_preferences: string | null
+  club_memberships: Json
   first_travel_date: string | null
   last_travel_date: string | null
   updated_at: string
@@ -225,6 +234,7 @@ export async function GET(
       vipStatus: customer.vip_status,
       preferences: customer.preferences,
       communicationPreferences: customer.communication_preferences,
+      clubMemberships: parseClubMemberships(customer.club_memberships),
       firstTravelDate: customer.first_travel_date,
       firstTravelDateDisplay: formatDisplayDate(customer.first_travel_date),
       lastTravelDate: customer.last_travel_date,
@@ -383,6 +393,7 @@ export async function PATCH(
     city?: string | null
     postal_code?: string | null
     vat_number?: string | null
+    club_memberships?: Json
   } = {
     notes: normalizedNotes ? normalizedNotes : null,
     email: normalizedEmail,
@@ -419,6 +430,9 @@ export async function PATCH(
     ...(parsed.city !== undefined ? { city: blankToNull(parsed.city) } : {}),
     ...(parsed.postal_code !== undefined ? { postal_code: blankToNull(parsed.postal_code) } : {}),
     ...(parsed.vat_number !== undefined ? { vat_number: blankToNull(parsed.vat_number) } : {}),
+    ...(parsed.club_memberships !== undefined
+      ? { club_memberships: clubMembershipsToJson(cleanClubMemberships(parsed.club_memberships)) }
+      : {}),
   }
 
   const hasVersionCheck = Boolean(parsed.expectedUpdatedAt) || Boolean(parsed.baseline)
@@ -526,6 +540,7 @@ export async function PATCH(
     vipStatus: updated.vip_status,
     preferences: updated.preferences,
     communicationPreferences: updated.communication_preferences,
+    clubMemberships: parseClubMemberships(updated.club_memberships),
     firstTravelDate: updated.first_travel_date,
     firstTravelDateDisplay: formatDisplayDate(updated.first_travel_date),
     lastTravelDate: updated.last_travel_date,

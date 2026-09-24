@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { JobReservationTab } from "./job-reservation-tab"
-import type { JobReservationDetails } from "@/lib/use-data"
+import type { JobReservationDetails, JobTraveller } from "@/lib/use-data"
 
 // This card used to also render a "From enquiry: …" hint sourced from the enquiry's
 // "Briefly explain additional services" free text, which made the Special requests card look
@@ -23,6 +23,7 @@ vi.mock("@/lib/use-data", async (importOriginal) => {
     ...actual,
     useJobTravellers: useDataMocks.useJobTravellers,
     useJobReservationDetails: useDataMocks.useJobReservationDetails,
+    useClubNames: () => ({ data: { names: [] } }),
   }
 })
 
@@ -49,9 +50,9 @@ function reservationDetails(overrides: Partial<JobReservationDetails> = {}): Job
   }
 }
 
-function setup(details: JobReservationDetails) {
+function setup(details: JobReservationDetails, travellers: JobTraveller[] = []) {
   useDataMocks.useJobTravellers.mockReturnValue({
-    data: { travellers: [], paxComparison: null },
+    data: { travellers, paxComparison: null },
     isLoading: false,
     error: undefined,
     mutate: vi.fn(),
@@ -94,5 +95,42 @@ describe("JobReservationTab — Special requests card", () => {
     ) as HTMLTextAreaElement
     expect(textarea.value).toBe("Anniversary celebration")
     expect(screen.queryByText(/From enquiry/i)).not.toBeInTheDocument()
+  })
+})
+
+describe("JobReservationTab — club member numbers", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function guest(overrides: Partial<JobTraveller>): JobTraveller {
+    return {
+      id: "t1",
+      prefix: "",
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B1",
+      dateOfBirth: "",
+      residence: "",
+      roomWith: "",
+      roomType: "",
+      isChild: false,
+      isPrimary: true,
+      sortOrder: 0,
+      clubMemberships: [],
+      ...overrides,
+    }
+  }
+
+  it("shows each guest's own saved numbers and a compact add link for guests without any", () => {
+    setup(reservationDetails(), [
+      guest({ clubMemberships: [{ club: "Rovos Rail", number: "RR-1" }] }),
+      guest({ id: "t2", firstName: "John", isPrimary: false, sortOrder: 1 }),
+    ])
+
+    expect(screen.getByDisplayValue("Rovos Rail")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("RR-1")).toBeInTheDocument()
+    expect(screen.getAllByPlaceholderText("Club / programme")).toHaveLength(1)
+    expect(screen.getByRole("button", { name: /^club member number$/i })).toBeInTheDocument()
   })
 })
