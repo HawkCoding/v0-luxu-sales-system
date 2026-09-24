@@ -1,6 +1,6 @@
 import { Image, StyleSheet, Text, View } from "@react-pdf/renderer"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
-import { DOCUMENT_FONT_FAMILY } from "@/lib/pdf/document-fonts"
+import { BOLD_TEXT, DOCUMENT_FONT_FAMILY } from "@/lib/pdf/document-fonts"
 import type { DocumentBrand } from "@/lib/settings-access"
 
 export type BrandBlockPlacement = "top" | "bottom"
@@ -61,8 +61,7 @@ const topStyles = StyleSheet.create({
   // gains a point and a little tracking to keep its presence across the page.
   heading: {
     fontSize: 14,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     letterSpacing: 0.4,
     color: "#172018",
   },

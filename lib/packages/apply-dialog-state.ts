@@ -805,26 +805,7 @@ export function applyAnchoredAirlineDates(
   detail: PackageDetail,
   states: ApplyLegState[],
 ): ApplyLegState[] {
-  const airlineLegIds = detail.legs
-    .filter((leg) => leg.supplierKind === "airline")
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((leg) => leg.id)
-
-  let working = states
-  for (const legId of airlineLegIds) {
-    const state = working.find((candidate) => candidate.legId === legId)
-    if (state?.kind !== "suite" || state.dateAnchor !== "pre" && state.dateAnchor !== "post") continue
-
-    const context = getFlightAnchorContext(detail, working, legId)
-    const targetDate =
-      state.dateAnchor === "pre" ? context?.span?.start ?? null : context?.span?.end ?? null
-    if (!targetDate || targetDate === state.serviceDate) continue
-
-    working = working.map((candidate) =>
-      candidate.legId === legId ? { ...candidate, serviceDate: targetDate } : candidate,
-    )
-  }
-  return working
+  return applyNeighbourAnchoredDates(detail, states, "airline")
 }
 
 /** Recomputes the service date of every pre/post-anchored tour leg from the leg it hangs off — see
@@ -832,13 +813,23 @@ export function applyAnchoredAirlineDates(
  * flight does. Resolved in `sortOrder` order for the same chaining reason
  * {@link applyAnchoredAirlineDates} is. */
 export function applyAnchoredTourDates(detail: PackageDetail, states: ApplyLegState[]): ApplyLegState[] {
-  const tourLegIds = detail.legs
-    .filter((leg) => leg.supplierKind === "tour_operator")
+  return applyNeighbourAnchoredDates(detail, states, "tour_operator")
+}
+
+/** The shared body of the airline and tour recomputes: both kinds anchor to their neighbouring leg
+ * the same way, and differ only in which legs they walk. */
+function applyNeighbourAnchoredDates(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  supplierKind: "airline" | "tour_operator",
+): ApplyLegState[] {
+  const legIds = detail.legs
+    .filter((leg) => leg.supplierKind === supplierKind)
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((leg) => leg.id)
 
   let working = states
-  for (const legId of tourLegIds) {
+  for (const legId of legIds) {
     const state = working.find((candidate) => candidate.legId === legId)
     if (state?.kind !== "suite" || (state.dateAnchor !== "pre" && state.dateAnchor !== "post")) continue
 

@@ -8,7 +8,7 @@ import type { InvoiceDepartureRow } from "@/lib/invoices/departure-rows"
 import { formatMoney } from "@/lib/money"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
-import { DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import { BOLD_TEXT, DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
   AGENT_COMMISSION_COLOR,
   AGENT_COMMISSION_LABEL,
@@ -129,7 +129,7 @@ function orDash(value: string | null | undefined): string {
   return value?.trim() || EMPTY
 }
 
-/** One label/value pair in the header's meta strip, e.g. "Invoice No.  LTT-2026-0001-INV". */
+/** One label/value pair in the header's meta strip, e.g. "Invoice No.  LTT-26-0001-INV". */
 function MetaField({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.headerMetaField}>
@@ -185,8 +185,7 @@ const styles = StyleSheet.create({
   },
   headerMetaLabel: {
     fontSize: 8.5,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#6f675d",
     marginRight: 6,
   },
@@ -209,8 +208,7 @@ const styles = StyleSheet.create({
   },
   guestLabel: {
     fontSize: 10,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
     width: 62,
   },
@@ -267,8 +265,7 @@ const styles = StyleSheet.create({
   // it blank otherwise.
   sectionHeading: {
     fontSize: 10.5,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
     textTransform: "uppercase",
     letterSpacing: 0.5,
@@ -281,8 +278,7 @@ const styles = StyleSheet.create({
   },
   departureLabel: {
     fontSize: 9,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#6f675d",
     width: 88,
     textAlign: "right",
@@ -314,8 +310,7 @@ const styles = StyleSheet.create({
   colDesc: { flex: 1, fontSize: 9, paddingRight: 8 },
   headText: {
     fontSize: 9,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
   },
 
@@ -333,8 +328,7 @@ const styles = StyleSheet.create({
   },
   bankingTitle: {
     fontSize: 9,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
     textTransform: "uppercase",
     letterSpacing: 0.4,
@@ -356,8 +350,7 @@ const styles = StyleSheet.create({
   },
   referenceLine: {
     fontSize: 9,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
     textAlign: "left",
     marginTop: 8,
@@ -399,8 +392,7 @@ const styles = StyleSheet.create({
   },
   outstandingLabel: {
     fontSize: 9,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#f6f2ea",
     textTransform: "uppercase",
     letterSpacing: 0.4,
@@ -410,8 +402,7 @@ const styles = StyleSheet.create({
   },
   outstandingValue: {
     fontSize: 11,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#ffffff",
     width: 84,
     textAlign: "right",
@@ -427,8 +418,7 @@ const styles = StyleSheet.create({
   paymentNote: {
     marginTop: 16,
     fontSize: 9,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
     textAlign: "center",
     lineHeight: 1.4,
@@ -700,22 +690,22 @@ export function InvoiceDocument({
           <View style={styles.totalsBox}>
             {/* VAT-inclusive amounts only — the sales team's invoices never break out VAT. */}
             <View style={styles.totalsRow}>
-              <Text style={[styles.totalsLabel, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700 }]}>
+              <Text style={[styles.totalsLabel, { ...BOLD_TEXT }]}>
                 Subtotal incl. VAT
               </Text>
-              <Text style={[styles.totalsValue, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700 }]}>
+              <Text style={[styles.totalsValue, { ...BOLD_TEXT }]}>
                 {formatMoney(totals.subtotalInclVat, currency)}
               </Text>
             </View>
             {hasAgentCommission ? (
               <View style={styles.totalsRow}>
                 <Text
-                  style={[styles.totalsLabel, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
+                  style={[styles.totalsLabel, { ...BOLD_TEXT, color: AGENT_COMMISSION_COLOR }]}
                 >
                   {AGENT_COMMISSION_LABEL}
                 </Text>
                 <Text
-                  style={[styles.totalsValue, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700, color: AGENT_COMMISSION_COLOR }]}
+                  style={[styles.totalsValue, { ...BOLD_TEXT, color: AGENT_COMMISSION_COLOR }]}
                 >
                   {formatAgentCommission(totals.agentCommission ?? 0, (v) => formatMoney(v, currency))}
                 </Text>
@@ -724,12 +714,12 @@ export function InvoiceDocument({
             {hasVisibleDiscount ? (
               <View style={styles.totalsRow}>
                 <Text
-                  style={[styles.totalsLabel, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700, color: DISCOUNT_COLOR }]}
+                  style={[styles.totalsLabel, { ...BOLD_TEXT, color: DISCOUNT_COLOR }]}
                 >
                   {DISCOUNT_LABEL}
                 </Text>
                 <Text
-                  style={[styles.totalsValue, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700, color: DISCOUNT_COLOR }]}
+                  style={[styles.totalsValue, { ...BOLD_TEXT, color: DISCOUNT_COLOR }]}
                 >
                   {formatDiscount(totals.discount ?? 0, (v) => formatMoney(v, currency))}
                 </Text>
@@ -737,10 +727,10 @@ export function InvoiceDocument({
             ) : null}
             {showTotalInclVatRow ? (
               <View style={styles.totalsRow}>
-                <Text style={[styles.totalsLabel, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700 }]}>
+                <Text style={[styles.totalsLabel, { ...BOLD_TEXT }]}>
                   Total incl. VAT
                 </Text>
-                <Text style={[styles.totalsValue, { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700 }]}>
+                <Text style={[styles.totalsValue, { ...BOLD_TEXT }]}>
                   {formatMoney(totals.totalInclVat ?? totals.subtotalInclVat, currency)}
                 </Text>
               </View>

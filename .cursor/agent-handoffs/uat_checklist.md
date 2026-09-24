@@ -81,8 +81,8 @@ Login: consultant role (e.g. `consultant@luxus.test`).
 
 ### 1.10 Generate voucher when gates pass (`todo.md` line 1132)
 
-- [ ] **1.10.1** Action: With `invoice_balance = 0` and all required suppliers booked, navigate to the job's Voucher tab and click **Generate Voucher**.
-      Expect: Voucher PDF renders; document row appears; stage advances to `voucher_sent` (or the voucher-ready intermediate state); audit row `voucher_generated` appears.
+- [ ] **1.10.1** Action: With `invoice_balance = 0` and all required suppliers booked, navigate to the job's Voucher tab and click **Preview & Send Voucher**.
+      Expect: Voucher PDF renders (the button builds a fresh PDF on every click) and the send preview opens; document row appears; stage advances to `voucher_sent` (or the voucher-ready intermediate state); audit row `voucher_generated` appears.
 
 ### 1.11 Cannot generate voucher when gates fail (`todo.md` line 1133)
 

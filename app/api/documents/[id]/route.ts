@@ -11,13 +11,17 @@ const SIGNED_URL_EXPIRY_SECONDS = 3600
 // in dedicated buckets; the itinerary PDF shares the vouchers bucket.
 const PREFIXED_BUCKETS = ["quotes", "vouchers", "invoices"] as const
 
+// The kinds the app renders itself (upsertGeneratedDocument's callers). Only these get the
+// generated-file download name; any other file in a prefixed bucket keeps its own.
+const GENERATED_KINDS = new Set(["quote_pdf", "invoice_pdf", "voucher_pdf", "itinerary_pdf", "summary_pdf"])
+
 function resolveStorageLocation(
   path: string,
   kind: string,
 ): { bucket: string; objectPath: string; generated: boolean } {
   for (const bucket of PREFIXED_BUCKETS) {
     if (path.startsWith(`${bucket}/`)) {
-      return { bucket, objectPath: path.slice(bucket.length + 1), generated: true }
+      return { bucket, objectPath: path.slice(bucket.length + 1), generated: GENERATED_KINDS.has(kind) }
     }
   }
   // Legacy payment-proof rows (created before the attachments bucket) live at

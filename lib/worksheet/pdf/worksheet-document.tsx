@@ -1,7 +1,7 @@
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
-import { DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import { BOLD_TEXT, DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 
 /** One row of the pax grid. Room fields are the v2 manual-capture columns - blank until then. */
@@ -194,8 +194,7 @@ const styles = StyleSheet.create({
   },
   headText: {
     fontSize: 8,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     textAlign: "center",
     textTransform: "uppercase",
   },
@@ -204,8 +203,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   bold: {
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
   },
   sectionGap: {
     marginBottom: 6,
