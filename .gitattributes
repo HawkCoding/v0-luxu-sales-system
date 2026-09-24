@@ -1,0 +1,26 @@
+# Store and check out text files with LF line endings on every machine.
+#
+# Without this, Windows checkouts (core.autocrlf=true) held CRLF copies while tools that rewrite
+# files -- vitest snapshots in particular -- wrote LF, so git reported those files as modified
+# after every test run with no real change.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets: never touch their bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.docx binary
+*.xlsx binary
+*.zip binary
