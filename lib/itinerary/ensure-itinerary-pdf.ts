@@ -13,6 +13,7 @@ import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import { firstRecord } from "@/lib/utils"
 import { documentFileName, shortBookingRef } from "@/lib/documents/file-names"
+import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 
 export const ITINERARY_BUCKET = "vouchers"
 
@@ -234,45 +235,24 @@ export async function ensureItineraryPdf(
     throw new Error("Itinerary could not be stored")
   }
 
-  const { data: existingDocumentRow } = await supabase
-    .from("documents")
-    .select("id")
-    .eq("booking_id", bookingId)
-    .eq("kind", "itinerary_pdf")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
+  // A booking holds one itinerary, so its row is matched by kind whatever path it is on.
   const documentPath = `${ITINERARY_BUCKET}/${objectPath}`
-  const documentPayload = {
-    booking_id: bookingId,
-    kind: "itinerary_pdf" as const,
-    status: "generated" as const,
-    storage_path: documentPath,
-    file_name: filename,
-  }
+  const documentRow = await upsertGeneratedDocument(supabase, {
+    bookingId,
+    kind: "itinerary_pdf",
+    storagePath: documentPath,
+    fileName: filename,
+    matchAnyPath: true,
+  })
 
-  const documentWrite = existingDocumentRow
-    ? await supabase
-        .from("documents")
-        .update(documentPayload)
-        .eq("id", existingDocumentRow.id)
-        .select("id, booking_id, storage_path, created_at")
-        .single()
-    : await supabase
-        .from("documents")
-        .insert(documentPayload)
-        .select("id, booking_id, storage_path, created_at")
-        .single()
-
-  if (documentWrite.error || !documentWrite.data) {
+  if (!documentRow) {
     await supabase.storage.from(ITINERARY_BUCKET).remove([objectPath]).catch(() => undefined)
     throw new Error("Itinerary PDF document record could not be written")
   }
 
   return {
-    documentId: documentWrite.data.id,
-    bookingId: documentWrite.data.booking_id,
+    documentId: documentRow.id,
+    bookingId: documentRow.booking_id,
     itineraryId: itineraryWrite.data.id,
     storagePath: documentPath,
     regenerated: true,

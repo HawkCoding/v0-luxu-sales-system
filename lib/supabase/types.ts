@@ -4261,6 +4261,10 @@ export type Database = {
         Returns: undefined
       }
       restore_backup_snapshot: { Args: { snapshot: Json }; Returns: undefined }
+      set_booking_service_sort_orders: {
+        Args: { p_booking_id: string; p_orders: Json }
+        Returns: number
+      }
     }
     Enums: {
       accommodation_pricing_basis: "per_person" | "per_room"

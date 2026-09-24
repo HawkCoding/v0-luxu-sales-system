@@ -65,6 +65,7 @@ function buildSupabase(options: BuildOptions = {}) {
           maybeSingle: vi.fn(async () => ({ data: existingDocument, error: null })),
           update: vi.fn().mockReturnThis(),
           insert: vi.fn().mockReturnThis(),
+          upsert: vi.fn().mockReturnThis(),
           single: vi.fn(async () => ({ data: documentInsertResult, error: null })),
         }
       }

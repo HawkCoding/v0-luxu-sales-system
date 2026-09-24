@@ -28,36 +28,57 @@ export interface DatedLeg {
  * the result is a no-op for a booking that was built chronologically.
  */
 export function sortLegsByDate<T extends DatedLeg>(legs: readonly T[]): T[] {
-  const bySortOrder = legs
-    .map((leg, index) => ({ leg, index }))
-    .sort((a, b) => a.leg.sortOrder - b.leg.sortOrder || a.index - b.index)
-    .map(({ leg }) => leg)
+  return sortByDateAndClock(legs, (leg) => ({ date: leg.date, time: leg.time, order: leg.sortOrder }))
+}
 
-  const dated = bySortOrder.filter((leg) => leg.date !== null)
-  const undated = bySortOrder.filter((leg) => leg.date === null)
+/** What sortByDateAndClock orders an item by. */
+export interface DateClockKey {
+  /** YYYY-MM-DD, or null when undated. */
+  date: string | null
+  /** HH:MM of a real clock event (a flight's departure, a transfer's pickup), else null. */
+  time: string | null
+  /** The salesperson's own order. */
+  order: number
+}
 
-  // Array.prototype.sort is stable, so same-day legs keep their sort_order sequence here.
-  const byDate = dated.slice().sort((a, b) => ((a.date as string) < (b.date as string) ? -1 : a.date === b.date ? 0 : 1))
+/**
+ * The ordering rule behind sortLegsByDate, over any item. The saved leg order and the itinerary
+ * blocks on the voucher, itinerary and quote PDFs (sortItineraryBlocksChronologically) both sort
+ * through here, so the two can never disagree about which of two same-day legs comes first.
+ */
+export function sortByDateAndClock<T>(items: readonly T[], keyOf: (item: T) => DateClockKey): T[] {
+  const keyed = items.map((item, index) => ({ item, key: keyOf(item), index }))
+  const byOrder = keyed.sort((a, b) => a.key.order - b.key.order || a.index - b.index)
+
+  const dated = byOrder.filter((entry) => entry.key.date !== null)
+  const undated = byOrder.filter((entry) => entry.key.date === null)
+
+  // Array.prototype.sort is stable, so same-day items keep their order sequence here.
+  const byDate = dated
+    .slice()
+    .sort((a, b) => ((a.key.date as string) < (b.key.date as string) ? -1 : a.key.date === b.key.date ? 0 : 1))
 
   const result: T[] = []
   let dayStart = 0
   while (dayStart < byDate.length) {
     let dayEnd = dayStart
-    while (dayEnd < byDate.length && byDate[dayEnd].date === byDate[dayStart].date) dayEnd += 1
-    result.push(...resequenceTimedLegs(byDate.slice(dayStart, dayEnd)))
+    while (dayEnd < byDate.length && byDate[dayEnd].key.date === byDate[dayStart].key.date) dayEnd += 1
+    result.push(...resequenceTimed(byDate.slice(dayStart, dayEnd)).map(({ item }) => item))
     dayStart = dayEnd
   }
 
-  return [...result, ...undated]
+  return [...result, ...undated.map(({ item }) => item)]
 }
 
-/** Puts the timed legs of one day in clock order within the slots they already hold. */
-function resequenceTimedLegs<T extends DatedLeg>(day: T[]): T[] {
-  const timed = day.filter((leg) => leg.time !== null)
+/** Puts the timed items of one day in clock order within the slots they already hold. */
+function resequenceTimed<E extends { key: DateClockKey }>(day: E[]): E[] {
+  const timed = day.filter((entry) => entry.key.time !== null)
   if (timed.length < 2) return day
-  const inClockOrder = timed.slice().sort((a, b) => ((a.time as string) < (b.time as string) ? -1 : a.time === b.time ? 0 : 1))
+  const inClockOrder = timed
+    .slice()
+    .sort((a, b) => ((a.key.time as string) < (b.key.time as string) ? -1 : a.key.time === b.key.time ? 0 : 1))
   let next = 0
-  return day.map((leg) => (leg.time === null ? leg : inClockOrder[next++]))
+  return day.map((entry) => (entry.key.time === null ? entry : inClockOrder[next++]))
 }
 
 /** True when the two id sequences differ -- i.e. persisting the sorted order would change something. */

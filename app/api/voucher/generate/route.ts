@@ -26,6 +26,7 @@ import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { documentFileName, shortBookingRef } from "@/lib/documents/file-names"
+import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
 import { loadQuoteConfigForBooking } from "@/lib/quotes/load-quote-config"
@@ -400,45 +401,21 @@ export async function POST(req: Request) {
 
   if (uploadError) return safeSupabaseError("voucher:storage-upload", uploadError)
 
-  const { data: existingDocument, error: existingDocumentError } = await supabase
-    .from("documents")
-    .select("id, status")
-    .eq("booking_id", booking.id)
-    .eq("kind", "voucher_pdf")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (existingDocumentError) return safeSupabaseError("voucher:document-existing", existingDocumentError)
-
   // Regenerating must not un-send an already-sent voucher. `sent` is the record that the guest was
   // emailed their travel document -- resetting it to `generated` erased that from the Documents tab
   // while the correspondence row still said an email went out. A later regeneration is a new render
-  // of the same document, not a retraction of the send.
-  const documentPayload = {
-    booking_id: booking.id,
-    kind: "voucher_pdf" as const,
-    status: existingDocument?.status === "sent" ? ("sent" as const) : ("generated" as const),
-    storage_path: `${VOUCHER_BUCKET}/${storagePath}`,
-    file_name: storageFilename,
-  }
+  // of the same document, not a retraction of the send. A booking holds one voucher, so its row is
+  // matched by kind whatever file name an earlier generator gave it.
+  const document = await upsertGeneratedDocument(supabase, {
+    bookingId: booking.id,
+    kind: "voucher_pdf",
+    storagePath: `${VOUCHER_BUCKET}/${storagePath}`,
+    fileName: storageFilename,
+    matchAnyPath: true,
+    keepStatuses: ["sent"],
+  })
 
-  const documentWrite = existingDocument
-    ? await supabase
-        .from("documents")
-        .update(documentPayload)
-        .eq("id", existingDocument.id)
-        .select("id, booking_id, kind, status, storage_path, created_at")
-        .single()
-    : await supabase
-        .from("documents")
-        .insert(documentPayload)
-        .select("id, booking_id, kind, status, storage_path, created_at")
-        .single()
-
-  if (documentWrite.error || !documentWrite.data) {
-    return safeSupabaseError("voucher:document-write", documentWrite.error)
-  }
+  if (!document) return jsonError("Voucher document record could not be saved", 500)
 
   const { data: existingVoucher, error: existingVoucherError } = await supabase
     .from("vouchers")
@@ -452,7 +429,7 @@ export async function POST(req: Request) {
   const voucherPayload: Database["public"]["Tables"]["vouchers"]["Insert"] = {
     booking_id: booking.id,
     voucher_number: voucherReference,
-    pdf_document_id: documentWrite.data.id,
+    pdf_document_id: document.id,
     generated_at: nowIso,
     created_by: user.id,
   }
@@ -461,7 +438,7 @@ export async function POST(req: Request) {
     ? await supabase
         .from("vouchers")
         .update({
-          pdf_document_id: documentWrite.data.id,
+          pdf_document_id: document.id,
           generated_at: nowIso,
           voucher_number: voucherReference,
         })
@@ -517,7 +494,7 @@ export async function POST(req: Request) {
     meta: {
       voucher_id: voucherId,
       voucher_number: voucherReference,
-      document_id: documentWrite.data.id,
+      document_id: document.id,
       service_block_count: serviceBlocks.length,
     },
   })
@@ -544,12 +521,12 @@ export async function POST(req: Request) {
 
   return Response.json({
     document: {
-      id: documentWrite.data.id,
-      jobId: documentWrite.data.booking_id,
-      kind: documentWrite.data.kind,
-      status: documentWrite.data.status,
-      storagePath: documentWrite.data.storage_path,
-      generatedAt: documentWrite.data.created_at,
+      id: document.id,
+      jobId: document.booking_id,
+      kind: document.kind,
+      status: document.status,
+      storagePath: document.storage_path,
+      generatedAt: document.created_at,
     },
     voucherRecord: {
       id: voucherId,

@@ -87,7 +87,7 @@ function buildAuth() {
               })),
             })),
           })),
-          insert: vi.fn((payload: unknown) => {
+          upsert: vi.fn((payload: unknown) => {
             documentUpsertCount += 1
             documentUpsert(payload)
             return {

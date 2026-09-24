@@ -230,22 +230,19 @@ function buildAuth({
       }
 
       if (table === "documents") {
-        const existingDoc = existingDocumentId
-          ? { id: existingDocumentId, status: existingDocumentStatus }
-          : null
+        // upsertGeneratedDocument's voucher lookup: matched by kind alone (matchAnyPath).
+        const existingDocs = existingDocumentId
+          ? [{ id: existingDocumentId, status: existingDocumentStatus, storage_path: "vouchers/old/voucher.pdf" }]
+          : []
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn(() => ({
-                    maybeSingle: vi.fn(async () => ({ data: existingDoc, error: null })),
-                  })),
-                })),
+                order: vi.fn(async () => ({ data: existingDocs, error: null })),
               })),
             })),
           })),
-          insert: vi.fn((payload: Record<string, unknown>) => {
+          upsert: vi.fn((payload: Record<string, unknown>) => {
             documentWrites.push(payload)
             return {
               select: vi.fn(() => ({

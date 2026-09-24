@@ -4,14 +4,25 @@ import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-docume
 interface ExistingRow {
   id: string
   storage_path: string
+  status?: string
+}
+
+type WriteOp = "insert" | "update" | "upsert"
+
+interface RecordedWrite {
+  op: WriteOp
+  payload: Record<string, unknown>
+  id?: string
+  onConflict?: string
 }
 
 function createSupabase(existingRows: ExistingRow[], lookupError: { message: string } | null = null) {
-  const writes: { op: "insert" | "update"; payload: Record<string, unknown>; id?: string }[] = []
+  const writes: RecordedWrite[] = []
   const lookups: { column: string; values: string[] }[] = []
 
   const from = vi.fn(() => {
-    let pending: { op: "insert" | "update"; payload: Record<string, unknown>; id?: string } | null = null
+    let pending: RecordedWrite | null = null
+    let pathFilter: string[] | null = null
     const chain = {
       select: vi.fn(() => chain),
       eq: vi.fn((column: string, value: string) => {
@@ -20,18 +31,25 @@ function createSupabase(existingRows: ExistingRow[], lookupError: { message: str
       }),
       in: vi.fn((column: string, values: string[]) => {
         lookups.push({ column, values })
+        pathFilter = values
         return chain
       }),
       order: vi.fn(async () =>
         lookupError
           ? { data: null, error: lookupError }
           : {
-              data: existingRows.filter((row) => lookups.at(-1)?.values.includes(row.storage_path)),
+              data: existingRows
+                .filter((row) => pathFilter === null || pathFilter.includes(row.storage_path))
+                .map((row) => ({ status: "generated", ...row })),
               error: null,
             },
       ),
       insert: vi.fn((payload: Record<string, unknown>) => {
         pending = { op: "insert", payload }
+        return chain
+      }),
+      upsert: vi.fn((payload: Record<string, unknown>, options?: { onConflict?: string }) => {
+        pending = { op: "upsert", payload, onConflict: options?.onConflict }
         return chain
       }),
       update: vi.fn((payload: Record<string, unknown>) => {
@@ -122,7 +140,8 @@ describe("upsertGeneratedDocument", () => {
 
     expect(writes).toEqual([
       {
-        op: "insert",
+        op: "upsert",
+        onConflict: "booking_id,kind,storage_path",
         payload: {
           booking_id: "booking-1",
           kind: "summary_pdf",
@@ -133,6 +152,70 @@ describe("upsertGeneratedDocument", () => {
       },
     ])
     expect(row?.id).toBe("new-doc")
+  })
+
+  it("keeps a sent status through a regeneration when the caller lists it in keepStatuses", async () => {
+    const { supabase, writes } = createSupabase([
+      { id: "voucher-doc", storage_path: "vouchers/LTT-26-0039/Voucher-26-0039.pdf", status: "sent" },
+    ])
+
+    const row = await upsertGeneratedDocument(supabase, {
+      bookingId: "booking-1",
+      kind: "voucher_pdf",
+      storagePath: "vouchers/LTT-26-0039/Voucher-26-0039.pdf",
+      fileName: "Voucher-26-0039.pdf",
+      keepStatuses: ["sent"],
+    })
+
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toMatchObject({ op: "update", id: "voucher-doc", payload: { status: "sent" } })
+    expect(row?.status).toBe("sent")
+  })
+
+  it("resets a status not listed in keepStatuses to the requested one", async () => {
+    const { supabase, writes } = createSupabase([
+      { id: "voucher-doc", storage_path: "vouchers/LTT-26-0039/Voucher-26-0039.pdf", status: "required" },
+    ])
+
+    await upsertGeneratedDocument(supabase, {
+      bookingId: "booking-1",
+      kind: "voucher_pdf",
+      storagePath: "vouchers/LTT-26-0039/Voucher-26-0039.pdf",
+      fileName: "Voucher-26-0039.pdf",
+      keepStatuses: ["sent"],
+    })
+
+    expect(writes[0]).toMatchObject({ op: "update", payload: { status: "generated" } })
+  })
+
+  it("with matchAnyPath, re-points the booking's row of that kind whatever path it is on", async () => {
+    const { supabase, writes, lookups } = createSupabase([
+      { id: "old-voucher", storage_path: "vouchers/LTT-2026-0038/voucher-ltt-2026-0038.pdf", status: "sent" },
+    ])
+
+    await upsertGeneratedDocument(supabase, {
+      bookingId: "booking-1",
+      kind: "voucher_pdf",
+      storagePath: "vouchers/LTT-2026-0038/Voucher-2026-0038.pdf",
+      fileName: "Voucher-2026-0038.pdf",
+      matchAnyPath: true,
+      keepStatuses: ["sent"],
+    })
+
+    expect(lookups).toEqual([])
+    expect(writes).toEqual([
+      {
+        op: "update",
+        id: "old-voucher",
+        payload: {
+          booking_id: "booking-1",
+          kind: "voucher_pdf",
+          status: "sent",
+          storage_path: "vouchers/LTT-2026-0038/Voucher-2026-0038.pdf",
+          file_name: "Voucher-2026-0038.pdf",
+        },
+      },
+    ])
   })
 
   it("writes nothing when the lookup fails, rather than inserting a duplicate row", async () => {
