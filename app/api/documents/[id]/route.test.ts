@@ -171,6 +171,18 @@ describe("GET /api/documents/[id]", () => {
       download: "Invoice-244453.pdf",
     })
   })
+
+  it("does not rename a non-generated file just because it sits in a generated-PDF bucket", async () => {
+    const { storageSign } = makeUserAuth({
+      id: DOC_ID,
+      booking_id: BOOKING_ID,
+      kind: "other",
+      storage_path: "invoices/244453/invoice-from-supplier.pdf",
+      file_name: "invoice-from-supplier.pdf",
+    })
+    await GET(new Request("http://localhost"), { params })
+    expect(storageSign).toHaveBeenCalledWith("244453/invoice-from-supplier.pdf", 3600)
+  })
 })
 
 describe("DELETE /api/documents/[id]", () => {

@@ -205,7 +205,7 @@ The plan covers ~11 phases; expect Phase 1–5 to consume Day 1, Phase 6–8 the
 - `app/app/layout.tsx` (banner)
 
 **Exit criteria:**
-- "Send Quote", "Send Deposit Invoice", "Send Final Invoice", "Generate Voucher" all complete with `dry_run: true` and no thrown errors.
+- "Send Quote", "Send Deposit Invoice", "Send Final Invoice", "Preview & Send Voucher" all complete with `dry_run: true` and no thrown errors.
 - Voucher and invoice PDFs visibly render and open from the UI.
 
 ---
@@ -291,7 +291,7 @@ The plan covers ~11 phases; expect Phase 1–5 to consume Day 1, Phase 6–8 the
 9. Generate deposit invoice — show the configurable 25% from Settings.
 10. Record deposit payment — watch `deposit_paid` flip + stage advance.
 11. Generate final invoice → record final payment → balance R0.
-12. Generate voucher — open the rendered PDF on screen. *(The visible payoff.)*
+12. Preview & Send Voucher — open the freshly rendered PDF in the send preview. *(The visible payoff.)*
 13. Audit tab — show the full change log.
 14. Close booking.
 
@@ -341,7 +341,7 @@ The plan covers ~11 phases; expect Phase 1–5 to consume Day 1, Phase 6–8 the
 | `dev` CI green | 4 | `mcp__github__pull_request_read` on latest PR into dev | green |
 | Local DB seeds | 6 | `pnpm db:reset` | exits 0; UI populated |
 | Inbound replay creates enquiry | 6 | `curl -X POST :3000/api/dev/replay-inbound-email` | 200 + new job in pipeline |
-| Dry-run sends succeed | 7 | Click "Send Quote", "Generate Deposit Invoice", "Generate Voucher" | All return ok; no thrown errors; PDFs render |
+| Dry-run sends succeed | 7 | Click "Send Quote", "Generate Deposit Invoice", "Preview & Send Voucher" | All return ok; no thrown errors; PDFs render |
 | QA smoke green 3× | 9 | `pnpm qa:smoke` × 3 | All green |
 | `APP_VERSION` bumped | 10 | Dashboard footer | shows `2.59` |
 | Hidden surfaces hidden | 10 | Visual check | Inbound Email tab, Quote PDF, Reporting drill-downs absent or labelled |

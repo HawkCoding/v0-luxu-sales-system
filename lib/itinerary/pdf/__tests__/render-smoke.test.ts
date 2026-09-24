@@ -22,7 +22,8 @@ async function renderAndAssert(name: string, input: RenderItineraryPdfInput): Pr
   return buffer
 }
 
-describe("renderItineraryPdf smoke", () => {
+// A real react-pdf render takes a few seconds and overran the 5 s default under a loaded full run.
+describe("renderItineraryPdf smoke", { timeout: 20_000 }, () => {
   it("renders with the default template", async () => {
     await renderAndAssert("default", { data: sampleItineraryData() })
   })

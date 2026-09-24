@@ -12,7 +12,9 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     // qa/ and tests/qa/ are Playwright-driven (pnpm qa / the role QA suites);
     // keep vitest out of them — they import @playwright/test, not vitest.
-    exclude: ["**/node_modules/**", "**/.next/**", "qa/**", "tests/qa/**"],
+    // .claude/ holds agent worktrees (.claude/worktrees/*): stale copies of the repo whose tests
+    // resolve against missing node_modules and fail by the hundred.
+    exclude: ["**/node_modules/**", "**/.next/**", "qa/**", "tests/qa/**", ".claude/**"],
     coverage: {
       provider: "v8",
       thresholds: {

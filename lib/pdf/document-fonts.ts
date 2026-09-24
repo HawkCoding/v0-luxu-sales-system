@@ -24,6 +24,13 @@ export interface DocumentFontPairing {
  */
 export const DOCUMENT_FONT_FAMILY = "Carlito"
 
+/**
+ * Bold house text. Spread it into a style (`{ ...BOLD_TEXT, fontSize: 10 }`) rather than
+ * repeating the pair. Never add `fontStyle: "italic"` to it: Carlito has no bold-italic file, so
+ * react-pdf throws "Could not resolve font" and the whole document fails to render.
+ */
+export const BOLD_TEXT = { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700 } as const
+
 const DISPLAY_FAMILY = "Playfair Display"
 const SANS_FAMILY = "Montserrat"
 
@@ -43,7 +50,8 @@ const VOUCHER_FONT_FAMILIES: Record<string, string> = {
 
 // An unknown/blank voucher_template.font_family falls back to the house Calibri clone,
 // matching production's saved Calibri selection.
-const VOUCHER_FONT_DEFAULT = DOCUMENT_FONT_FAMILY
+// (Not the CSS stack of the same idea in lib/voucher/voucher-fonts.ts, VOUCHER_FONT_DEFAULT.)
+const VOUCHER_PDF_FAMILY_DEFAULT = DOCUMENT_FONT_FAMILY
 
 function fontPath(file: string): string {
   return path.join(process.cwd(), "assets", "fonts", file)
@@ -117,6 +125,6 @@ export function registerDocumentFonts(): void {
  * in a single, honest typeface instead of the old fixed Playfair+Montserrat split.
  */
 export function resolveDocumentFontPairing(fontFamily: string | null | undefined): DocumentFontPairing {
-  const family = VOUCHER_FONT_FAMILIES[fontFamily ?? ""] ?? VOUCHER_FONT_DEFAULT
+  const family = VOUCHER_FONT_FAMILIES[fontFamily ?? ""] ?? VOUCHER_PDF_FAMILY_DEFAULT
   return { display: family, sans: family, body: family }
 }

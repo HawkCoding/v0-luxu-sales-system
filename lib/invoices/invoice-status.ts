@@ -81,7 +81,7 @@ export function isFinalDueNow(
 }
 
 /**
- * The internal invoice number for a booking, e.g. LTT-2026-0001-INV. Stored on
+ * The internal invoice number for a booking, e.g. LTT-26-0001-INV. Stored on
  * `invoices.invoice_number` and used only for backend tracking (storage paths,
  * filenames). It is NOT shown to the customer — see `clientInvoiceNumber`.
  */

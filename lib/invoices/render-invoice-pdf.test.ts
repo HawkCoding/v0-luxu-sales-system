@@ -63,7 +63,8 @@ const items = [
   { pax: 2, description: "Cape Town Journey — Deluxe Suite", unitPrice: 29450, total: 58900 },
 ]
 
-describe("renderInvoicePdf smoke", () => {
+// A real react-pdf render takes a few seconds and overran the 5 s default under a loaded full run.
+describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
   it("renders the confirmation invoice with banking, departure, guests and line items", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "LTT-2026-0001-INV",

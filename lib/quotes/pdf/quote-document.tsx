@@ -6,7 +6,7 @@ import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import { formatMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
-import { DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import { BOLD_TEXT, DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
   AGENT_COMMISSION_COLOR,
   AGENT_COMMISSION_LABEL,
@@ -94,8 +94,7 @@ const styles = StyleSheet.create({
   },
   brand: {
     fontSize: 18,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
     marginBottom: 2,
   },
@@ -114,8 +113,7 @@ const styles = StyleSheet.create({
   },
   docTitle: {
     fontSize: 22,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
   },
   quoteNumberBadge: {
@@ -142,8 +140,7 @@ const styles = StyleSheet.create({
   },
   metaValue: {
     fontSize: 10,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#312b24",
   },
   metaContact: {
@@ -170,15 +167,13 @@ const styles = StyleSheet.create({
   },
   agentCommissionLine: {
     fontSize: 11,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: AGENT_COMMISSION_COLOR,
     marginBottom: 4,
   },
   discountLine: {
     fontSize: 11,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: DISCOUNT_COLOR,
     marginBottom: 4,
   },
@@ -189,14 +184,12 @@ const styles = StyleSheet.create({
   },
   grandTotalLine: {
     fontSize: 13,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
   },
   sectionHeading: {
     fontSize: 11,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
     textTransform: "uppercase",
     letterSpacing: 0.5,
@@ -216,8 +209,7 @@ const styles = StyleSheet.create({
   // leading is why the bullets' marginTop is 1 rather than 2 — together they keep the old rhythm.
   itineraryDate: {
     fontSize: 9,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#172018",
   },
   itineraryText: {
@@ -236,8 +228,7 @@ const styles = StyleSheet.create({
   // as a section break rather than another inclusion.
   itineraryDetailHeading: {
     fontSize: 8.5,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontWeight: 700,
+    ...BOLD_TEXT,
     color: "#312b24",
     marginTop: 6,
     paddingLeft: 10,

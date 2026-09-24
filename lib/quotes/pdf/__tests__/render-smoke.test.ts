@@ -27,7 +27,8 @@ async function renderAndAssert(name: string, data: QuotePdfData): Promise<Buffer
   return buffer
 }
 
-describe("renderQuotePdf smoke", () => {
+// A real react-pdf render takes a few seconds and overran the 5 s default under a loaded full run.
+describe("renderQuotePdf smoke", { timeout: 20_000 }, () => {
   it("renders the sample quote with itinerary blocks", async () => {
     await renderAndAssert("sample", sampleQuotePdfData())
   })
