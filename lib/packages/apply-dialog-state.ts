@@ -1644,7 +1644,7 @@ export function headcountLegNoun(kind: SupplierKind): string {
 
 /**
  * The one-line note shown on a leg whose headcount differs from the booking's, e.g.
- * "3 on this flight · booking has 2 (1 extra)". When only the adult/child/infant mix differs, the
+ * "3 on this flight · booking only has 2". When only the adult/child/infant mix differs, the
  * two mixes are spelled out instead, since "3 · booking has 3" would read as no difference at all.
  */
 export function formatHeadcountDifference(
@@ -1657,10 +1657,9 @@ export function formatHeadcountDifference(
   if (difference.mixOnly) {
     return `${formatPassengerMix(summed)} on this ${legNoun} · booking has ${formatPassengerMix(totals)}`
   }
-  const amount = Math.abs(difference.delta)
-  return `${difference.onLeg} on this ${legNoun} · booking has ${difference.booking} (${amount} ${
-    difference.delta > 0 ? "extra" : "fewer"
-  })`
+  return `${difference.onLeg} on this ${legNoun} · booking ${difference.delta > 0 ? "only has" : "has"} ${
+    difference.booking
+  }`
 }
 
 export interface HeadcountWarning {

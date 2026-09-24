@@ -1837,7 +1837,7 @@ describe("collectHeadcountWarnings", () => {
     const warnings = collectHeadcountWarnings(pkg, states, hotelTotals)
     expect(warnings).toHaveLength(1)
     expect(warnings[0].legId).toBe("leg-hotel")
-    expect(warnings[0].message).toBe("3 on this stay · booking has 2 (1 extra)")
+    expect(warnings[0].message).toBe("3 on this stay · booking only has 2")
   })
 
   it("says how many fewer when a hotel room holds fewer people than the booking", () => {
@@ -1847,7 +1847,7 @@ describe("collectHeadcountWarnings", () => {
     hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 1 }
 
     const warnings = collectHeadcountWarnings(pkg, states, hotelTotals)
-    expect(warnings[0].message).toBe("1 on this stay · booking has 2 (1 fewer)")
+    expect(warnings[0].message).toBe("1 on this stay · booking has 2")
   })
 
   it("spells out both mixes when the count matches but the adult/child/infant split doesn't", () => {

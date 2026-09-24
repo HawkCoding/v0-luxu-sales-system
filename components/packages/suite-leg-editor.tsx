@@ -826,7 +826,7 @@ export function SuiteLegEditor({
     (splitSummed.adultCount === expectedTotals.adultCount &&
       splitSummed.childCount === expectedTotals.childCount &&
       splitSummed.infantCount === expectedTotals.infantCount)
-  // "3 on this flight · booking has 2 (1 extra)" -- a deliberate extra ticket is allowed, so it is
+  // "3 on this flight · booking only has 2" -- a deliberate extra ticket is allowed, so it is
   // said out loud rather than blocked.
   const headcountNote =
     showPassengerWarnCheck && expectedTotals
@@ -1598,11 +1598,7 @@ export function SuiteLegEditor({
           {headcountNote ? (
             <p className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
               <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>
-                <span className="font-medium">{headcountNote}.</span>
-                {/* An empty unit does block (see the card below), so don't promise otherwise. */}
-                {emptyUnitIndexes.size === 0 ? " Priced for the people entered — this won't block the quote." : null}
-              </span>
+              <span className="font-medium">{headcountNote}.</span>
             </p>
           ) : null}
 
@@ -1614,6 +1610,48 @@ export function SuiteLegEditor({
             const bedroomLayoutNames = selectedSuiteType?.bedroomLayouts ?? []
             const bathroomTypeIds = selectedSuiteType?.bathroomTypeIds ?? []
             const bathroomTypeNames = selectedSuiteType?.bathroomTypes ?? []
+
+            // Each suite, room, cabin or tour can be sold at its own rate level (two suites of one
+            // type, one at Rack and one at STO) -- changing it here must not silently reprice every
+            // other unit on this leg. Unset inherits the leg's rate, and the inherit option names it
+            // so it's obvious this is optional. It sits beside the headcount it prices, not among
+            // the fittings, so the card reads "what suite" then "who, at what rate".
+            const unitRateBlock = showUnitRateType ? (
+              <div className="w-full space-y-1.5 sm:w-72">
+                <RateTypeSelect
+                  rateTypes={rateTypes}
+                  allowedRateTypeIds={leg.applicableRateTypeIds}
+                  value={unit.rateTypeId}
+                  onChange={(rateTypeId) => updateUnit(unit.id, { rateTypeId })}
+                  id={`rate-type-${leg.id}-${unit.id}`}
+                  // Tours and cruises show no leg-level rate field, so "the leg" would mean
+                  // nothing there -- they keep naming the default they actually fall back to.
+                  label={pricesByTypeOnly ? "Rate type" : `Rate for this ${vocab.unitNoun.toLowerCase()}`}
+                  triggerClassName="w-full"
+                  inheritLabel={
+                    pricesByTypeOnly
+                      ? value.rateTypeId
+                        ? `Leg default (${legRateTypeName})`
+                        : leg.inheritedRateTypeName
+                          ? `Supplier default (${leg.inheritedRateTypeName})`
+                          : "Supplier default"
+                      : legRateTypeName
+                        ? `Same as leg (${legRateTypeName})`
+                        : "Same as leg"
+                  }
+                />
+                {unit.rateTypeId &&
+                unit.suiteTypeId &&
+                leg.pricingMode !== "manual" &&
+                (pricesByTypeOnly || value.routeId) &&
+                !hasAnyRateCardForRateType(leg.rateCards, value.routeId ?? "", unit.suiteTypeId, unit.rateTypeId) ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    No {rateTypes.find((rt) => rt.id === unit.rateTypeId)?.name ?? "such"} rate card for this{" "}
+                    {vocab.suiteType.toLowerCase()} — pick another rate or add one in Suppliers.
+                  </p>
+                ) : null}
+              </div>
+            ) : null
 
             return (
               <div key={unit.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1669,45 +1707,9 @@ export function SuiteLegEditor({
                   ) : null}
                 </div>
 
-                {/* Each suite, room, cabin or tour can be sold at its own rate level (two suites of
-                    one type, one at Rack and one at STO) -- changing it here must not silently
-                    reprice every other unit on this leg. Unset inherits the leg's rate, and the
-                    inherit option names it so it's obvious this is optional. */}
-                {showUnitRateType ? (
-                  <div className="space-y-1.5">
-                    <RateTypeSelect
-                      rateTypes={rateTypes}
-                      allowedRateTypeIds={leg.applicableRateTypeIds}
-                      value={unit.rateTypeId}
-                      onChange={(rateTypeId) => updateUnit(unit.id, { rateTypeId })}
-                      id={`rate-type-${leg.id}-${unit.id}`}
-                      // Tours and cruises show no leg-level rate field, so "the leg" would mean
-                      // nothing there -- they keep naming the default they actually fall back to.
-                      label={pricesByTypeOnly ? "Rate type" : "Rate"}
-                      inheritLabel={
-                        pricesByTypeOnly
-                          ? value.rateTypeId
-                            ? `Leg default (${legRateTypeName})`
-                            : leg.inheritedRateTypeName
-                              ? `Supplier default (${leg.inheritedRateTypeName})`
-                              : "Supplier default"
-                          : legRateTypeName
-                            ? `Same as leg (${legRateTypeName})`
-                            : "Same as leg"
-                      }
-                    />
-                    {unit.rateTypeId &&
-                    unit.suiteTypeId &&
-                    leg.pricingMode !== "manual" &&
-                    (pricesByTypeOnly || value.routeId) &&
-                    !hasAnyRateCardForRateType(leg.rateCards, value.routeId ?? "", unit.suiteTypeId, unit.rateTypeId) ? (
-                      <p className="text-xs text-amber-600 dark:text-amber-500">
-                        No {rateTypes.find((rt) => rt.id === unit.rateTypeId)?.name ?? "such"} rate card for this{" "}
-                        {vocab.suiteType.toLowerCase()} — pick another rate or add one in Suppliers.
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
+                {/* Kinds without a headcount row have nothing to sit beside, so the rate keeps its
+                    place in the grid. */}
+                {!showPassengerSplit ? unitRateBlock : null}
 
                 {/* Fare currency stays a leg-level fact even for tours -- a manual fare is typed
                     once for the whole leg, not per unit -- so it keeps its old single placement. */}
@@ -1789,43 +1791,48 @@ export function SuiteLegEditor({
                 ) : null}
 
                 {showPassengerSplit ? (
-                  <div className="flex items-end gap-3 md:col-span-2 xl:col-span-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`adults-${leg.id}-${unit.id}`}>Adults</Label>
-                      <NumericInput
-                        id={`adults-${leg.id}-${unit.id}`}
-                        min="0"
-                        step="1"
-                        integer
-                        className="h-8 w-14 text-center"
-                        value={unit.adultCount}
-                        onValueChange={(next) => updateUnit(unit.id, { adultCount: next ?? 0 })}
-                      />
+                  // Footer row: who travels in this unit (left) and the rate they're priced at
+                  // (right). The divider separates it from the fittings above.
+                  <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-t pt-3 md:col-span-2 xl:col-span-3">
+                    <div className="flex items-end gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`adults-${leg.id}-${unit.id}`}>Adults</Label>
+                        <NumericInput
+                          id={`adults-${leg.id}-${unit.id}`}
+                          min="0"
+                          step="1"
+                          integer
+                          className="h-9 w-16 text-center"
+                          value={unit.adultCount}
+                          onValueChange={(next) => updateUnit(unit.id, { adultCount: next ?? 0 })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`children-${leg.id}-${unit.id}`}>Children</Label>
+                        <NumericInput
+                          id={`children-${leg.id}-${unit.id}`}
+                          min="0"
+                          step="1"
+                          integer
+                          className="h-9 w-16 text-center"
+                          value={unit.childCount}
+                          onValueChange={(next) => updateUnit(unit.id, { childCount: next ?? 0 })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`infants-${leg.id}-${unit.id}`}>Infants</Label>
+                        <NumericInput
+                          id={`infants-${leg.id}-${unit.id}`}
+                          min="0"
+                          step="1"
+                          integer
+                          className="h-9 w-16 text-center"
+                          value={unit.infantCount}
+                          onValueChange={(next) => updateUnit(unit.id, { infantCount: next ?? 0 })}
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`children-${leg.id}-${unit.id}`}>Children</Label>
-                      <NumericInput
-                        id={`children-${leg.id}-${unit.id}`}
-                        min="0"
-                        step="1"
-                        integer
-                        className="h-8 w-14 text-center"
-                        value={unit.childCount}
-                        onValueChange={(next) => updateUnit(unit.id, { childCount: next ?? 0 })}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`infants-${leg.id}-${unit.id}`}>Infants</Label>
-                      <NumericInput
-                        id={`infants-${leg.id}-${unit.id}`}
-                        min="0"
-                        step="1"
-                        integer
-                        className="h-8 w-14 text-center"
-                        value={unit.infantCount}
-                        onValueChange={(next) => updateUnit(unit.id, { infantCount: next ?? 0 })}
-                      />
-                    </div>
+                    {unitRateBlock}
                   </div>
                 ) : null}
 
