@@ -8,6 +8,7 @@ import {
   applyAnchoredTourDates,
   applyAnchoredTransferDates,
   buildDefaultLegStates,
+  collectHeadcountWarnings,
   createDraftTransportRequest,
   getTransferAnchorContext,
   hydrateFromSaved,
@@ -1539,6 +1540,7 @@ describe("validateConfigureState", () => {
     hotel.selected = true
     hotel.routeId = "route-bb"
     hotel.units[0].suiteTypeId = "room-1"
+    hotel.units[0].adultCount = 2
     const transfer = transportState(states, "leg-transfer")
     transfer.selected = true
     transfer.requests[0] = {
@@ -1549,6 +1551,19 @@ describe("validateConfigureState", () => {
     }
 
     expect(validateConfigureState(pkg, states, { totalsBySupplierId: totals })).toEqual([])
+  })
+
+  it("blocks a hotel room holding nobody, even though a headcount difference only warns", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: totals })
+    suiteState(states, "leg-train").units[0].suiteTypeId = "suite-1"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.routeId = "route-bb"
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 0, childCount: 0, infantCount: 0 }
+
+    expect(validateConfigureState(pkg, states, { totalsBySupplierId: totals })).toContainEqual(
+      expect.stringMatching(/room 1 has nobody in it — add guests or remove the room$/),
+    )
   })
 
   it("flags missing route, unit type, and passenger sum mismatches, but pickup/drop-off is optional", () => {
@@ -1736,6 +1751,23 @@ describe("validateConfigureState", () => {
     })
   })
 
+  describe("headcount — only a train blocks (decided 2026-09-23)", () => {
+    const hotelTotals = { "supplier-leg-hotel": { adultCount: 2, childCount: 0, infantCount: 0 } }
+
+    it("never blocks Next for a hotel room holding a different headcount than the booking", () => {
+      const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: hotelTotals })
+      const hotel = suiteState(states, "leg-hotel")
+      hotel.selected = true
+      hotel.routeId = "route-bb"
+      // The booking's hotel headcount is 2 adults; this room holds 3 -- an extra guest joining
+      // for the stay only.
+      hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 3 }
+
+      const errors = validateConfigureState(pkg, states, { totalsBySupplierId: hotelTotals })
+      expect(errors.some((e) => e.includes("hold") && e.includes("but the booking is for"))).toBe(false)
+    })
+  })
+
   // Mirrors the server-side rule in lib/quotes/build-from-package.ts: a chosen rate type that has
   // no card for the date is caught here so the salesperson sees it on the leg, not at Apply.
   describe("chosen rate type", () => {
@@ -1790,6 +1822,69 @@ describe("validateConfigureState", () => {
       const errors = validateConfigureState(ratePkg, stateFor("2028-08-25", SADC))
       expect(errors.some((e) => e.includes(SADC))).toBe(true)
     })
+  })
+})
+
+describe("collectHeadcountWarnings", () => {
+  const hotelTotals = { "supplier-leg-hotel": { adultCount: 2, childCount: 0, infantCount: 0 } }
+
+  it("warns (never blocks) when a hotel room holds more people than the booking", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: hotelTotals })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 3 }
+
+    const warnings = collectHeadcountWarnings(pkg, states, hotelTotals)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].legId).toBe("leg-hotel")
+    expect(warnings[0].message).toBe("3 on this stay · booking has 2 (1 extra)")
+  })
+
+  it("says how many fewer when a hotel room holds fewer people than the booking", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: hotelTotals })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 1 }
+
+    const warnings = collectHeadcountWarnings(pkg, states, hotelTotals)
+    expect(warnings[0].message).toBe("1 on this stay · booking has 2 (1 fewer)")
+  })
+
+  it("spells out both mixes when the count matches but the adult/child/infant split doesn't", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: hotelTotals })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    // Same headcount (2) as the booking, but one child instead of two adults.
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 1, childCount: 1 }
+
+    const warnings = collectHeadcountWarnings(pkg, states, hotelTotals)
+    expect(warnings[0].message).toBe("1 adult, 1 child on this stay · booking has 2 adults")
+  })
+
+  it("has nothing to say when the hotel headcount matches", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: hotelTotals })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 2 }
+
+    expect(collectHeadcountWarnings(pkg, states, hotelTotals)).toEqual([])
+  })
+
+  it("never warns about a train — that leg blocks instead (validateConfigureState)", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: totals })
+    const train = suiteState(states, "leg-train")
+    train.units[0] = { ...train.units[0], suiteTypeId: "suite-1", adultCount: 1 }
+
+    expect(collectHeadcountWarnings(pkg, states, totals)).toEqual([])
+  })
+
+  it("ignores a deselected leg", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: hotelTotals })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = false
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 3 }
+
+    expect(collectHeadcountWarnings(pkg, states, hotelTotals)).toEqual([])
   })
 })
 

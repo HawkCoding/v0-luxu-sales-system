@@ -130,7 +130,7 @@ function buildAuth({
       booking_id: BOOKING_ID,
       kind: "voucher_pdf",
       status: "generated",
-      storage_path: "vouchers/BT-2026-0001/voucher-BT-2026-0001.pdf",
+      storage_path: "vouchers/LTT-2026-0001/Voucher-26-0001.pdf",
       created_at: "2026-05-08T00:00:00.000Z",
     },
     error: null,
@@ -177,7 +177,7 @@ function buildAuth({
       if (table === "bookings") {
         return createSelectResult({
           id: BOOKING_ID,
-          booking_number: "BT-2026-0001",
+          booking_number: "LTT-2026-0001",
           customer_invoice_number: customerInvoiceNumber,
           stage,
           invoice_balance: invoiceBalance,
@@ -503,6 +503,25 @@ describe("POST /api/voucher/generate", () => {
     expect(ctx.documentWrites.at(-1)).toMatchObject({ kind: "voucher_pdf", status: "generated" })
   })
 
+  it("stores the voucher under the capitalised short-reference name and re-points the existing row", async () => {
+    const ctx = buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      existingDocumentId: "document-1",
+      existingVoucherId: "voucher-1",
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    // The latest voucher_pdf row is updated in place (it may still point at the
+    // pre-rename lowercase file), keeping the booking-number directory.
+    expect(ctx.documentWrites.at(-1)).toMatchObject({
+      storage_path: "vouchers/LTT-2026-0001/Voucher-26-0001.pdf",
+      file_name: "Voucher-26-0001.pdf",
+    })
+  })
+
   it("scopes the voucher to the accepted quote's legs and drops transport requests tied to no leg", async () => {
     buildAuth({ stage: "final_paid", invoiceBalance: 0 })
 
@@ -623,7 +642,7 @@ describe("POST /api/voucher/generate", () => {
 
     expect(res.status).toBe(200)
     expect(body.voucherRecord.voucherNumber).toBe("242541")
-    expect(body.voucher.filename).toBe("voucher-242541.pdf")
+    expect(body.voucher.filename).toBe("Voucher-242541.pdf")
     expect(vi.mocked(renderVoucherPdf).mock.calls[0]?.[0].data.voucherNumber).toBe("242541")
     expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
@@ -638,7 +657,7 @@ describe("POST /api/voucher/generate", () => {
     const body = (await res.json()) as { voucherRecord: { voucherNumber: string } }
 
     expect(res.status).toBe(200)
-    expect(body.voucherRecord.voucherNumber).toBe("BT-2026-0001-INV")
+    expect(body.voucherRecord.voucherNumber).toBe("LTT-2026-0001-INV")
   })
 
   it("logs voucher_regenerated when a voucher row already exists", async () => {

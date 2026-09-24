@@ -1,6 +1,7 @@
 import { requireAnyRole, requireUser } from "@/lib/api/auth"
 import { writeAuditLog } from "@/lib/audit-write"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
+import { downloadNameForStoredFile } from "@/lib/documents/file-names"
 
 const ATTACHMENTS_BUCKET = "attachments"
 const PAYMENT_PROOFS_BUCKET = "payment-proofs"
@@ -10,10 +11,13 @@ const SIGNED_URL_EXPIRY_SECONDS = 3600
 // in dedicated buckets; the itinerary PDF shares the vouchers bucket.
 const PREFIXED_BUCKETS = ["quotes", "vouchers", "invoices"] as const
 
-function resolveStorageLocation(path: string, kind: string): { bucket: string; objectPath: string } {
+function resolveStorageLocation(
+  path: string,
+  kind: string,
+): { bucket: string; objectPath: string; generated: boolean } {
   for (const bucket of PREFIXED_BUCKETS) {
     if (path.startsWith(`${bucket}/`)) {
-      return { bucket, objectPath: path.slice(bucket.length + 1) }
+      return { bucket, objectPath: path.slice(bucket.length + 1), generated: true }
     }
   }
   // Legacy payment-proof rows (created before the attachments bucket) live at
@@ -21,9 +25,9 @@ function resolveStorageLocation(path: string, kind: string): { bucket: string; o
   // New uploads (all kinds, including proof_of_payment via /api/documents/upload)
   // live at `{booking_id}/{kind}/...` in the attachments bucket.
   if (kind === "proof_of_payment" && !path.includes("/proof_of_payment/")) {
-    return { bucket: PAYMENT_PROOFS_BUCKET, objectPath: path }
+    return { bucket: PAYMENT_PROOFS_BUCKET, objectPath: path, generated: false }
   }
-  return { bucket: ATTACHMENTS_BUCKET, objectPath: path }
+  return { bucket: ATTACHMENTS_BUCKET, objectPath: path, generated: false }
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -45,10 +49,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!doc) return jsonError("Document not found", 404)
   if (!doc.storage_path) return jsonError("Document has no stored file", 404)
 
-  const { bucket, objectPath } = resolveStorageLocation(doc.storage_path, doc.kind)
-  const { data: signed, error: signError } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(objectPath, SIGNED_URL_EXPIRY_SECONDS)
+  const { bucket, objectPath, generated } = resolveStorageLocation(doc.storage_path, doc.kind)
+  // Generated PDFs download under their capitalised name (`Quote-26-0039.pdf`) —
+  // including files stored before the rename, whose name is mapped from the path.
+  // Uploads keep opening inline as before.
+  const { data: signed, error: signError } = generated
+    ? await supabase.storage
+        .from(bucket)
+        .createSignedUrl(objectPath, SIGNED_URL_EXPIRY_SECONDS, {
+          download: downloadNameForStoredFile(objectPath),
+        })
+    : await supabase.storage.from(bucket).createSignedUrl(objectPath, SIGNED_URL_EXPIRY_SECONDS)
 
   if (signError || !signed) return safeSupabaseError("documents:get:sign", signError)
 

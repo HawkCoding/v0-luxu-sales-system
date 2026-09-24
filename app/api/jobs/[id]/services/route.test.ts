@@ -975,4 +975,27 @@ describe("PATCH /api/jobs/[id]/services", () => {
     )
     expect(res.status).toBe(400)
   })
+
+  it("lets a hotel hold fewer people than the booking, but refuses a room holding nobody", async () => {
+    mockAuth({ noOfAdults: 2, serviceKinds: { [SERVICE_A]: "hotel_property" } })
+    const patch = (units: unknown[]) =>
+      PATCH(
+        new Request("http://localhost", {
+          method: "PATCH",
+          body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, units }] }),
+        }),
+        makeParams(),
+      )
+
+    const fewer = await patch([{ suiteTypeId: SUITE_A, adultCount: 1, childCount: 0, infantCount: 0 }])
+    expect(fewer.status).toBe(200)
+
+    const empty = await patch([
+      { suiteTypeId: SUITE_A, adultCount: 2, childCount: 0, infantCount: 0 },
+      { suiteTypeId: SUITE_A, adultCount: 0, childCount: 0, infantCount: 0 },
+    ])
+    expect(empty.status).toBe(400)
+    const body = await empty.json()
+    expect(body.error).toBe("Room 2 has nobody in it — add guests or remove the room.")
+  })
 })

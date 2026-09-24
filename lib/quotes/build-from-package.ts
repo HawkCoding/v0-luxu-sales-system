@@ -5,7 +5,14 @@ import {
   SUPPLIER_VOCABULARY,
 } from "@/lib/types"
 import { displayRouteName, resolveDirectedRouteName } from "@/lib/routes/route-name"
-import type { CommissionKind, PackageDetail, PricingSnapshot, QuoteLineItem, SupplierRateCard } from "@/lib/types"
+import type {
+  CommissionKind,
+  PackageDetail,
+  PricingSnapshot,
+  QuoteLineItem,
+  SupplierKind,
+  SupplierRateCard,
+} from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
@@ -37,6 +44,21 @@ import {
 } from "@/lib/pricing/passenger-fares"
 import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
+import { effectiveUnitRateTypeId } from "@/lib/packages/unit-rate-type"
+import { describeEmptyUnit, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
+
+/** An airline seat, hotel room or cruise cabin may hold more or fewer people than the booking, but
+ *  never nobody -- it would price at R0 per person or bill an empty room (lib/packages/unit-headcount.ts). */
+function assertNoEmptyUnits(
+  kind: SupplierKind,
+  units: readonly PackageUnitSelection[],
+  legLabel: string,
+): void {
+  const [emptyIndex] = findEmptyUnitIndexes(kind, units)
+  if (emptyIndex !== undefined) {
+    throw new Error(`${legLabel}: ${describeEmptyUnit(kind, emptyIndex)}`)
+  }
+}
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
@@ -76,9 +98,11 @@ export interface PackageUnitSelection {
   /** Server-resolved provenance for manualTourPrice, same posture as manualRoomPriceSetAt/-Name. */
   manualTourPriceSetAt?: string | null
   manualTourPriceSetByName?: string | null
-  /** Tour legs only: this unit's own rate type, overriding the leg's rateTypeId (PackageLegSelection
-   *  below) -- a tour is the one kind whose units price independently, so each needs its own rate
-   *  choice instead of sharing the leg's one value. Null/absent falls back to the leg's rateTypeId. */
+  /** Train, hotel, cruise and tour legs (see supportsUnitRateType): this unit's own rate type,
+   *  overriding the leg's rateTypeId (PackageLegSelection below) -- two suites of the same type can
+   *  be sold at different rate levels (one at Rack, one at STO). Null/absent falls back to the leg's
+   *  rateTypeId, so a booking that never sets one prices exactly as before. Ignored on any other
+   *  kind. */
   rateTypeId?: string | null
 }
 
@@ -931,12 +955,18 @@ export async function buildPackageQuoteLineItems({
       activePricingDate = legPricingDate
       const supplierDescription = leg.supplierDescription ?? null
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
+      /** The rate type a unit prices at: its own on the kinds that support one, else the leg's. The
+       *  same rule Build Booking validates with (effectiveUnitRateTypeId), so a quote never prices a
+       *  unit at a different rate than the dialog just approved. */
+      function effectiveRateTypeIdOf(unitSelection: PackageUnitSelection): string | null {
+        return effectiveUnitRateTypeId(leg.supplierKind, unitSelection.rateTypeId, selection.rateTypeId)
+      }
 
       function resolveUnit(
         suiteTypeId: string,
         pricingDate: string = legPricingDate,
-        // Tours resolve their rate type per unit (see PackageUnitSelection.rateTypeId); every
-        // other kind falls straight through to the leg's own value.
+        // Train, hotel, cruise and tour units can resolve their own rate type (see
+        // PackageUnitSelection.rateTypeId); null falls straight through to the leg's own value.
         unitRateTypeId?: string | null,
       ) {
         const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
@@ -1030,6 +1060,7 @@ export async function buildPackageQuoteLineItems({
         if (units.length === 0) {
           throw new Error(`No room type selected for leg: ${legLabel}`)
         }
+        assertNoEmptyUnits(leg.supplierKind, units, legLabel)
         // Nights is a leg-level stay length (a booking's stay doesn't split per room); rooms is
         // implicitly units.length — each unit is an independent room with its own suite/bed/layout/
         // bathroom and its own occupants.
@@ -1050,33 +1081,16 @@ export async function buildPackageQuoteLineItems({
           accommodationPricingBasis: accommodationBasis,
         })
 
-        // Occupancy has to add up to the booking's travellers in BOTH bases -- every guest sleeps
-        // in exactly one room, and the voucher and worksheet read who is in which room off these
-        // counts. Under per_person it also decides the price; under per_room it does not, which is
-        // the only difference.
-        const hotelTotals = countsForBuckets(bucketsForLeg(leg))
-        const hotelSummed = units.reduce(
-          (acc, unitSelection) => ({
-            adultCount: acc.adultCount + (unitSelection.adultCount ?? 0),
-            childCount: acc.childCount + (unitSelection.childCount ?? 0),
-            infantCount: acc.infantCount + (unitSelection.infantCount ?? 0),
-          }),
-          { adultCount: 0, childCount: 0, infantCount: 0 },
-        )
-        if (
-          hotelSummed.adultCount !== hotelTotals.adultCount ||
-          hotelSummed.childCount !== hotelTotals.childCount ||
-          hotelSummed.infantCount !== hotelTotals.infantCount
-        ) {
-          throw new Error(
-            `${legLabel}: rooms hold ${hotelSummed.adultCount} adults, ${hotelSummed.childCount} children, ` +
-              `${hotelSummed.infantCount} infants but the booking is for ${hotelTotals.adultCount} adults, ` +
-              `${hotelTotals.childCount} children, ${hotelTotals.infantCount} infants. Update the booking's ` +
-              `travellers, or adjust who is in each room.`,
-          )
-        }
+        // Occupancy no longer has to add up to the booking's travellers: a stay can hold more
+        // people than the booking (an extra guest joining for the hotel only) or fewer (someone
+        // skipping it). The rooms' own counts are the truth -- under per_person they decide the
+        // price, under per_room they don't, and the voucher and worksheet print who is in which
+        // room off them either way. Build Booking warns about the difference instead of blocking
+        // (PASSENGER_WARN_SUPPLIER_KINDS in lib/packages/apply-dialog-state.ts); only a train must
+        // still match exactly (PASSENGER_SUM_SUPPLIER_KINDS, enforced below and in PATCH /services).
 
         for (const unitSelection of units) {
+          const unitRateTypeId = effectiveRateTypeIdOf(unitSelection)
           // 0 is a real override (a comped room), so this is a null check, not a truthiness one.
           const overridePrice =
             unitSelection.manualRoomPrice === null || unitSelection.manualRoomPrice === undefined
@@ -1099,7 +1113,7 @@ export async function buildPackageQuoteLineItems({
           // before per_room existed as a thing a consultant could state outright.
           if (overridePrice !== null) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } =
-              resolveOverriddenUnit(unitSelection.suiteTypeId)
+              resolveOverriddenUnit(unitSelection.suiteTypeId, legPricingDate, unitRateTypeId)
             activeRateCard = validRateCard
             activeRateCardInherited = rateTypeInherited ?? false
             // The typed figure is in the currency of the card it replaces; with no card to
@@ -1129,8 +1143,12 @@ export async function buildPackageQuoteLineItems({
             continue
           }
 
+          // Each room resolves its own card, so two rooms of the same type on different rate types
+          // already price as separate lines -- hotel rooms are never merged.
           const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveUnit(
             unitSelection.suiteTypeId,
+            legPricingDate,
+            unitRateTypeId,
           )
           activeRateCard = validRateCard
           activeRateCardInherited = rateTypeInherited
@@ -1430,12 +1448,14 @@ export async function buildPackageQuoteLineItems({
         if (units.length === 0) {
           throw new Error(`No suite type selected for leg: ${legLabel}`)
         }
+        assertNoEmptyUnits(leg.supplierKind, units, legLabel)
 
-        // A tour operator's units are independent activities the same travellers can all join, not
-        // sleeping/seating slots -- so unlike every other kind here, their per-unit counts have no
-        // reason to sum to the booking's totals (mirrors validateConfigureState's
-        // PASSENGER_SUM_SUPPLIER_KINDS in lib/packages/apply-dialog-state.ts).
-        if (!isTour) {
+        // Only a train's suites must hold exactly the booking's travellers -- the train is the
+        // journey everyone on the booking takes. Every other kind may carry more or fewer (an extra
+        // ticket for one flight, a cruise cabin for part of the party, a tour only some join) and
+        // prices off its units' own counts; Build Booking warns about the difference instead of
+        // blocking. Mirrors PASSENGER_SUM_SUPPLIER_KINDS in lib/packages/apply-dialog-state.ts.
+        if (leg.supplierKind === "train_operator") {
           const totals = countsForBuckets(bucketsForLeg(leg))
           const summed = units.reduce(
             (acc, unitSelection) => ({
@@ -1484,12 +1504,12 @@ export async function buildPackageQuoteLineItems({
                   unitSelection.manualChildPrice ?? "",
                   unitSelection.manualInfantPrice ?? "",
                 ].join("::")
-              // Two tour units of the same type on different rate types price at different cards
-              // and must not merge into one averaged line -- every other kind shares one rate type
-              // per leg, so its units of the same suite type always belong in the same group.
-              : isTour
-                ? `${unitSelection.suiteTypeId}::${unitSelection.rateTypeId ?? ""}`
-                : unitSelection.suiteTypeId
+              // Two units of the same type on different rate types price at different cards and
+              // must not merge into one averaged line. Keyed on the rate the unit actually prices
+              // at (its own, else the leg's), so a unit inheriting Rack and one set to Rack
+              // explicitly still share a line. On kinds without a per-unit rate every unit resolves
+              // to the leg's rate, so this is still one group per suite type there.
+              : `${unitSelection.suiteTypeId}::${effectiveRateTypeIdOf(unitSelection) ?? ""}`
           const group = unitsBySuiteType.get(groupKey) ?? []
           group.push(unitSelection)
           unitsBySuiteType.set(groupKey, group)
@@ -1510,7 +1530,7 @@ export async function buildPackageQuoteLineItems({
           if (tourOverridePrice !== null) {
             const unitSelection = groupUnits[0]
             const { validRateCard, rateTypeInherited, description, suiteTypeName } =
-              resolveOverriddenUnit(suiteTypeId, legPricingDate, unitSelection.rateTypeId)
+              resolveOverriddenUnit(suiteTypeId, legPricingDate, effectiveRateTypeIdOf(unitSelection))
             activeRateCard = validRateCard
             activeRateCardInherited = rateTypeInherited ?? false
             const overrideCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
@@ -1555,7 +1575,9 @@ export async function buildPackageQuoteLineItems({
             })
             lineSourceCurrency = selection.priceCurrency ?? targetCurrency
           } else {
-            const resolved = resolveUnit(suiteTypeId, legPricingDate, groupUnits[0].rateTypeId)
+            // Every unit in a group prices at the same effective rate by construction (see the
+            // grouping key above), so the first unit's rate speaks for the whole group.
+            const resolved = resolveUnit(suiteTypeId, legPricingDate, effectiveRateTypeIdOf(groupUnits[0]))
             description = resolved.description
             suiteTypeName = resolved.suiteTypeName
             activeRateCard = resolved.validRateCard

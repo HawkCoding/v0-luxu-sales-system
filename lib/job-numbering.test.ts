@@ -10,8 +10,8 @@ import type { Database } from "@/lib/supabase/types"
 
 type MockSupabase = SupabaseClient<Database>
 
-function createNumberingSupabase(): MockSupabase {
-  const state = new Map<string, number>()
+function createNumberingSupabase(initial: Record<string, number> = {}): MockSupabase {
+  const state = new Map<string, number>(Object.entries(initial))
   return {
     rpc: vi.fn(
       async (functionName: string, args: { p_product_code: string; p_year: number; p_count?: number }) => {
@@ -31,29 +31,45 @@ function createNumberingSupabase(): MockSupabase {
 }
 
 describe("allocateJobNumber", () => {
-  it("formats generated booking numbers", async () => {
+  it("formats generated booking numbers with a 2-digit year", async () => {
     const supabase = createNumberingSupabase()
 
     await expect(allocateJobNumber(supabase, "LTT", new Date("2026-05-16T00:00:00Z")))
-      .resolves.toMatch(/^LTT-\d{4}-\d{4}$/)
+      .resolves.toMatch(/^LTT-\d{2}-\d{4}$/)
   })
 
   it("increments within a year", async () => {
     const supabase = createNumberingSupabase()
 
     await expect(allocateJobNumber(supabase, "LTT", new Date("2026-01-01T00:00:00Z")))
-      .resolves.toBe("LTT-2026-0001")
+      .resolves.toBe("LTT-26-0001")
     await expect(allocateJobNumber(supabase, "LTT", new Date("2026-01-01T00:00:00Z")))
-      .resolves.toBe("LTT-2026-0002")
+      .resolves.toBe("LTT-26-0002")
+  })
+
+  it("keeps the database sequence keyed on the full year", async () => {
+    const supabase = createNumberingSupabase()
+
+    await allocateJobNumber(supabase, "LTT", new Date("2026-05-16T00:00:00Z"))
+
+    expect(supabase.rpc).toHaveBeenCalledWith("next_booking_number", { p_product_code: "LTT", p_year: 2026 })
+  })
+
+  it("continues the existing sequence after the format switch", async () => {
+    // 38 legacy LTT-2026-NNNN bookings already exist; the next one is 0039.
+    const supabase = createNumberingSupabase({ "LTT-2026": 38 })
+
+    await expect(allocateJobNumber(supabase, "LTT", new Date("2026-09-23T00:00:00Z")))
+      .resolves.toBe("LTT-26-0039")
   })
 
   it("resets counters when the year changes", async () => {
     const supabase = createNumberingSupabase()
 
     await expect(allocateJobNumber(supabase, "LTT", new Date("2026-12-31T00:00:00Z")))
-      .resolves.toBe("LTT-2026-0001")
+      .resolves.toBe("LTT-26-0001")
     await expect(allocateJobNumber(supabase, "LTT", new Date("2027-01-01T00:00:00Z")))
-      .resolves.toBe("LTT-2027-0001")
+      .resolves.toBe("LTT-27-0001")
   })
 
   it("returns distinct numbers for concurrent allocations", async () => {
@@ -65,7 +81,7 @@ describe("allocateJobNumber", () => {
     ])
 
     expect(new Set(results).size).toBe(2)
-    expect(results.sort()).toEqual(["LTT-2026-0001", "LTT-2026-0002"])
+    expect(results.sort()).toEqual(["LTT-26-0001", "LTT-26-0002"])
   })
 
   it("surfaces allocation failures", async () => {
@@ -84,7 +100,7 @@ describe("allocateJobNumberBlock", () => {
 
     const numbers = await allocateJobNumberBlock(supabase, 3, "LTT", new Date("2026-01-01T00:00:00Z"))
 
-    expect(numbers).toEqual(["LTT-2026-0001", "LTT-2026-0002", "LTT-2026-0003"])
+    expect(numbers).toEqual(["LTT-26-0001", "LTT-26-0002", "LTT-26-0003"])
     expect(supabase.rpc).toHaveBeenCalledTimes(1)
   })
 
@@ -96,8 +112,8 @@ describe("allocateJobNumberBlock", () => {
     const numbers = await allocateJobNumberBlock(supabase, 2, "LTT", createdAt)
     const afterBlock = await allocateJobNumber(supabase, "LTT", createdAt)
 
-    expect(numbers).toEqual(["LTT-2026-0002", "LTT-2026-0003"])
-    expect(afterBlock).toBe("LTT-2026-0004")
+    expect(numbers).toEqual(["LTT-26-0002", "LTT-26-0003"])
+    expect(afterBlock).toBe("LTT-26-0004")
   })
 
   it("rejects a non-positive block size before hitting the database", async () => {
@@ -122,7 +138,7 @@ describe("allocateJobNumberForBooking", () => {
 
     const allocation = await allocateJobNumberForBooking(supabase, new Date("2026-01-01T00:00:00Z"))
 
-    expect(allocation.bookingNumber).toBe("LTT-2026-0001")
+    expect(allocation.bookingNumber).toBe("LTT-26-0001")
   })
 
   it("does not read routes, packages or suppliers to pick a prefix", async () => {
@@ -138,6 +154,11 @@ describe("allocateJobNumberForBooking", () => {
 
 describe("formatBookingNumber", () => {
   it("zero-pads sequence numbers to four digits", () => {
-    expect(formatBookingNumber("LTT", 2026, 7)).toBe("LTT-2026-0007")
+    expect(formatBookingNumber("LTT", 2026, 7)).toBe("LTT-26-0007")
+  })
+
+  it("uses a zero-padded 2-digit year", () => {
+    expect(formatBookingNumber("LTT", 2026, 39)).toBe("LTT-26-0039")
+    expect(formatBookingNumber("LTT", 2105, 1)).toBe("LTT-05-0001")
   })
 })

@@ -5,16 +5,14 @@ import { renderWorksheetPdf } from "@/lib/worksheet/render-worksheet-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { getDocumentBrandSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
+import { documentFileName, sanitizeFileNamePart as sanitizePath } from "@/lib/documents/file-names"
+import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 
 // The worksheet is a "summary_pdf" (documents.kind), an existing but
 // previously-unused enum value purpose-built for a per-job internal record.
 // It shares the vouchers bucket rather than a dedicated one, so downloads
 // flow through the existing signed-URL route with no storage config change.
 export const WORKSHEET_BUCKET = "vouchers"
-
-function sanitizePath(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_\-]/g, "_")
-}
 
 export interface EnsuredWorksheetPdf {
   documentId: string
@@ -53,8 +51,10 @@ export async function ensureWorksheetPdf(
   }
 
   const safeNumber = sanitizePath(view.invoiceNumber)
-  const filename = `worksheet-${safeNumber}.pdf`
+  const filename = documentFileName("Worksheet", view.invoiceNumber)
   const objectPath = `${safeNumber}/${filename}`
+  // Pre-rename key; a documents row still on it is re-pointed, not duplicated.
+  const legacyObjectPath = `${safeNumber}/worksheet-${safeNumber}.pdf`
 
   const { error: uploadError } = await supabase.storage
     .from(WORKSHEET_BUCKET)
@@ -69,36 +69,20 @@ export async function ensureWorksheetPdf(
 
   const documentPath = `${WORKSHEET_BUCKET}/${objectPath}`
 
-  const { data: existingDocument } = await supabase
-    .from("documents")
-    .select("id")
-    .eq("booking_id", bookingId)
-    .eq("kind", "summary_pdf")
-    .eq("storage_path", documentPath)
-    .maybeSingle()
+  const document = await upsertGeneratedDocument(supabase, {
+    bookingId,
+    kind: "summary_pdf",
+    storagePath: documentPath,
+    legacyStoragePaths: [`${WORKSHEET_BUCKET}/${legacyObjectPath}`],
+    fileName: filename,
+  })
 
-  const documentPayload = {
-    booking_id: bookingId,
-    kind: "summary_pdf" as const,
-    status: "generated" as const,
-    storage_path: documentPath,
-  }
-
-  const documentWrite = existingDocument
-    ? await supabase
-        .from("documents")
-        .update(documentPayload)
-        .eq("id", existingDocument.id)
-        .select("id")
-        .single()
-    : await supabase.from("documents").insert(documentPayload).select("id").single()
-
-  if (documentWrite.error || !documentWrite.data) {
+  if (!document) {
     throw new Error("Worksheet document record could not be written")
   }
 
   return {
-    documentId: documentWrite.data.id,
+    documentId: document.id,
     bookingId,
     storagePath: documentPath,
     filename,

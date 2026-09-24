@@ -35,6 +35,13 @@ export interface ExtraLineSelection {
   quantity?: number
   rateTypeId?: string | null
   commissionOverride?: { type: CommissionKind; value: number } | null
+  /** How many people this extra is for, per passenger type -- an extra ticket may cover more or
+   * fewer people than the booking. Each one left undefined falls back to the booking's own
+   * projected headcount for that type, which is what every extra priced off before. Only the
+   * per-person bases read these; per-room, per-vehicle and per-day extras ignore them. */
+  adultCount?: number
+  childCount?: number
+  infantCount?: number
 }
 
 export interface PriceExtraLineItemsInput extends ExtraLineSelection {
@@ -108,6 +115,9 @@ export async function priceExtraLineItems(
     quoteCurrency = BASE_CURRENCY,
     fxRates = { [BASE_CURRENCY]: 1 },
     fxRateAsOf = null,
+    adultCount: adultCountOverride,
+    childCount: childCountOverride,
+    infantCount: infantCountOverride,
   } = input
 
   const targetCurrency = normaliseCurrency(quoteCurrency)
@@ -240,10 +250,14 @@ export async function priceExtraLineItems(
     childMaxAge: supplier.child_max_age ?? null,
   })
   const childAges: number[] = job.child_ages ?? []
-  const { adultCount, childCount, infantCount } = projectPassengerTotals(
+  const bookingHeadcount = projectPassengerTotals(
     { noOfAdults: job.no_of_adults, noOfChildren: job.no_of_children, childAges },
     buckets,
   )
+  // A stated count wins, one passenger type at a time; anything left unstated is the booking's.
+  const adultCount = adultCountOverride ?? bookingHeadcount.adultCount
+  const childCount = childCountOverride ?? bookingHeadcount.childCount
+  const infantCount = infantCountOverride ?? bookingHeadcount.infantCount
 
   // Re-bind to non-null locals so the addLine closure keeps the narrowing.
   const supplierRow = supplier

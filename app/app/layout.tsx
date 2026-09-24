@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { redirect } from "next/navigation"
 import AppClientLayout from "./client-layout"
+import { canUserViewReporting } from "@/lib/reports/access"
 import { extractRoleFromJwt, isRole } from "@/lib/role-utils"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { Role } from "@/lib/types"
@@ -61,10 +62,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     email = profile.email || user.email || ""
   }
 
+  // Read on its own rather than folded into the profile select above: if the reporting column is
+  // missing (code deployed before its migration) the grant fails closed to "hidden" instead of the
+  // profile lookup failing and signing every user out.
+  const canViewReporting = await canUserViewReporting(supabase, user.id)
+
   const initialUser = { id: user.id, name: displayName, email, role }
 
   return (
-    <AppClientLayout initialUser={initialUser}>
+    <AppClientLayout initialUser={initialUser} grants={{ viewReporting: canViewReporting }}>
       {children}
     </AppClientLayout>
   )

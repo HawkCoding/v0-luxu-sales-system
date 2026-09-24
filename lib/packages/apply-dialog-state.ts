@@ -27,6 +27,8 @@ import {
 import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
+import { effectiveUnitRateTypeId, supportsUnitRateType } from "@/lib/packages/unit-rate-type"
+import { describeEmptyUnit, findEmptyUnitIndexes, PASSENGER_WARN_SUPPLIER_KINDS } from "@/lib/packages/unit-headcount"
 
 /**
  * Pure state model for Build Booking's configure step (components/build-booking-dialog.tsx --
@@ -53,19 +55,17 @@ export const PASSENGER_SPLIT_SUPPLIER_KINDS = new Set<SupplierKind>([
   "tour_operator",
   "airline",
   "hotel_property",
+  // A cruise prices per person off each cabin's own headcount (build-from-package.ts reads the
+  // unit counts exactly as it does a train's), so the cabin needs the inputs to state it -- without
+  // them a cabin added in the dialog priced as nobody at all.
+  "cruise_line",
 ])
-/** Kinds where the per-unit counts must sum to the booking's traveller totals -- each unit is a
- * sleeping/seating slot, so every traveller has to land in exactly one of them. A tour operator's
- * units are independent activities the same travellers can all join, so it's excluded here even
- * though it still shows the per-unit inputs (PASSENGER_SPLIT_SUPPLIER_KINDS above). */
-export const PASSENGER_SUM_SUPPLIER_KINDS = new Set<SupplierKind>([
-  "train_operator",
-  "airline",
-  // A hotel room is a sleeping slot like a cabin: every guest is in exactly one of them, so the
-  // per-room split has to reconcile against the booking's travellers or somebody is billed twice
-  // or not at all.
-  "hotel_property",
-])
+/** Kinds where the per-unit counts must sum EXACTLY to the booking's traveller totals -- blocking.
+ * Only the train: it is the journey every traveller on the booking takes, so each one has to land in
+ * exactly one suite. Enforced here, in PATCH /api/jobs/[id]/services and in the pricing engine. */
+export const PASSENGER_SUM_SUPPLIER_KINDS = new Set<SupplierKind>(["train_operator"])
+// Lives in lib/packages/unit-headcount.ts so the pricing engine can share the empty-unit rule.
+export { PASSENGER_WARN_SUPPLIER_KINDS }
 
 export interface SuiteUnitState {
   /** Persisted unit uuid, or a `draft-` key for units added in the dialog. */
@@ -97,9 +97,10 @@ export interface SuiteUnitState {
   manualTourPrice: number | null
   /** Read-only provenance for the override, stamped server-side. Never sent back on save. */
   manualTourPriceSetAt?: string | null
-  /** Tour legs only: this unit's own rate type, overriding the leg's rateTypeId. Every other kind
-   *  keeps one rate type per leg -- see SuiteLegState.rateTypeId -- since a tour is the one kind
-   *  whose units price independently of each other. Null falls back to the leg's rate type. */
+  /** Train, hotel, cruise and tour legs (supportsUnitRateType): this unit's own rate type,
+   *  overriding the leg's rateTypeId (SuiteLegState.rateTypeId) -- two suites of the same type can
+   *  be sold at different rate levels. Null falls back to the leg's rate type. Airlines keep one
+   *  value per leg: their fares are typed, not read off a rate card. */
   rateTypeId: string | null
 }
 
@@ -1085,7 +1086,8 @@ export interface PackageSelectionsPatchBody {
       complimentaryFirstNight: boolean
       /** Tour legs only — the server rejects it on any other supplier kind. */
       manualTourPrice: number | null
-      /** Tour legs only — the server rejects it on any other supplier kind. */
+      /** Train, hotel, cruise and tour legs only (supportsUnitRateType) — the server rejects it on
+       *  any other supplier kind. */
       rateTypeId: string | null
     }>
   }>
@@ -1172,7 +1174,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
-          rateTypeId: state.supplierKind === "tour_operator" ? unit.rateTypeId : null,
+          rateTypeId: supportsUnitRateType(state.supplierKind) ? unit.rateTypeId : null,
         })),
       }
     }),
@@ -1294,7 +1296,8 @@ export interface ApplyLegSelectionPayload {
     complimentaryFirstNight: boolean
     /** Tour legs only: replaces the rate-card-computed total for this unit. */
     manualTourPrice: number | null
-    /** Tour legs only: this unit's own rate type, overriding the leg's rateTypeId below. */
+    /** Train, hotel, cruise and tour legs only: this unit's own rate type, overriding the leg's
+     *  rateTypeId below. */
     rateTypeId?: string | null
   }>
   nights?: number
@@ -1352,7 +1355,7 @@ export function toApplySelections(
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
-          rateTypeId: state.supplierKind === "tour_operator" ? unit.rateTypeId ?? undefined : undefined,
+          rateTypeId: supportsUnitRateType(state.supplierKind) ? unit.rateTypeId ?? undefined : undefined,
         })),
       nights: legStatesOwnSpan(state.supplierKind)
         ? state.supplierKind === "hotel_property"
@@ -1544,8 +1547,9 @@ export function validateConfigureState(
           state.routeId ?? "",
           unit.suiteTypeId,
           state.serviceDate,
-          // Tours resolve their rate type per unit; every other kind uses the one leg-level value.
-          unit.rateTypeId ?? state.rateTypeId,
+          // Train, hotel, cruise and tour units can each resolve their own rate type, so the card
+          // that must exist is the one for the rate this unit actually prices at.
+          effectiveUnitRateTypeId(state.supplierKind, unit.rateTypeId, state.rateTypeId),
           rateTypeNameById,
         )
         if (pricingError) errors.push(`${legLabel}: ${pricingError}`)
@@ -1565,22 +1569,19 @@ export function validateConfigureState(
       )
     }
 
+    // More or fewer people than the booking only warns (collectHeadcountWarnings), but a room, seat
+    // or cabin holding nobody at all is a mistake that would price at R0 or bill an empty room.
+    for (const index of findEmptyUnitIndexes(state.supplierKind, state.units)) {
+      errors.push(`${legLabel}: ${describeEmptyUnit(state.supplierKind, index)}`)
+    }
+
+    // Only the train blocks on a headcount difference. Airlines, hotels and cruises may hold more
+    // or fewer people than the booking -- see collectHeadcountWarnings for that non-blocking side.
     if (PASSENGER_SUM_SUPPLIER_KINDS.has(state.supplierKind)) {
       const totals = options.totalsBySupplierId?.[leg.supplierId]
       if (totals) {
-        const summed = state.units.reduce(
-          (acc, unit) => ({
-            adultCount: acc.adultCount + unit.adultCount,
-            childCount: acc.childCount + unit.childCount,
-            infantCount: acc.infantCount + unit.infantCount,
-          }),
-          { adultCount: 0, childCount: 0, infantCount: 0 },
-        )
-        if (
-          summed.adultCount !== totals.adultCount ||
-          summed.childCount !== totals.childCount ||
-          summed.infantCount !== totals.infantCount
-        ) {
+        const summed = sumUnitHeadcount(state.units)
+        if (!headcountsMatch(summed, totals)) {
           errors.push(
             `${legLabel}: ${unitVocab.unitNounPlural} hold ${summed.adultCount} adults, ${summed.childCount} children, ` +
               `${summed.infantCount} infants but the booking is for ${totals.adultCount} adults, ` +
@@ -1593,4 +1594,123 @@ export function validateConfigureState(
   }
 
   return errors
+}
+
+/** The people a leg's units hold, summed per passenger type. */
+export function sumUnitHeadcount(
+  units: readonly Pick<SuiteUnitState, "adultCount" | "childCount" | "infantCount">[],
+): PassengerTotals {
+  return units.reduce<PassengerTotals>(
+    (acc, unit) => ({
+      adultCount: acc.adultCount + unit.adultCount,
+      childCount: acc.childCount + unit.childCount,
+      infantCount: acc.infantCount + unit.infantCount,
+    }),
+    { adultCount: 0, childCount: 0, infantCount: 0 },
+  )
+}
+
+export function headcountsMatch(a: PassengerTotals, b: PassengerTotals): boolean {
+  return a.adultCount === b.adultCount && a.childCount === b.childCount && a.infantCount === b.infantCount
+}
+
+export interface HeadcountDifference {
+  /** Everyone the leg's units hold. */
+  onLeg: number
+  /** Everyone on the booking, bucketed for this leg's supplier. */
+  booking: number
+  /** onLeg - booking: positive is extra people, negative is fewer. */
+  delta: number
+  /** Same number of people, but a different adult/child/infant mix. */
+  mixOnly: boolean
+}
+
+/** Null when the leg holds exactly the booking's travellers. */
+export function describeHeadcountDifference(
+  summed: PassengerTotals,
+  totals: PassengerTotals,
+): HeadcountDifference | null {
+  if (headcountsMatch(summed, totals)) return null
+  const onLeg = summed.adultCount + summed.childCount + summed.infantCount
+  const booking = totals.adultCount + totals.childCount + totals.infantCount
+  return { onLeg, booking, delta: onLeg - booking, mixOnly: onLeg === booking }
+}
+
+function formatPassengerMix(totals: PassengerTotals): string {
+  const parts = [
+    totals.adultCount > 0 ? `${totals.adultCount} ${totals.adultCount === 1 ? "adult" : "adults"}` : null,
+    totals.childCount > 0 ? `${totals.childCount} ${totals.childCount === 1 ? "child" : "children"}` : null,
+    totals.infantCount > 0 ? `${totals.infantCount} ${totals.infantCount === 1 ? "infant" : "infants"}` : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? parts.join(", ") : "nobody"
+}
+
+/** What a leg is called in a headcount note: "flight", "stay", "voyage" -- the kind's own noun for
+ *  one booking of it, lower-cased. */
+export function headcountLegNoun(kind: SupplierKind): string {
+  return SUPPLIER_VOCABULARY[kind].primaryProduct.bookingNoun.toLowerCase()
+}
+
+/**
+ * The one-line note shown on a leg whose headcount differs from the booking's, e.g.
+ * "3 on this flight · booking has 2 (1 extra)". When only the adult/child/infant mix differs, the
+ * two mixes are spelled out instead, since "3 · booking has 3" would read as no difference at all.
+ */
+export function formatHeadcountDifference(
+  summed: PassengerTotals,
+  totals: PassengerTotals,
+  legNoun: string,
+): string | null {
+  const difference = describeHeadcountDifference(summed, totals)
+  if (!difference) return null
+  if (difference.mixOnly) {
+    return `${formatPassengerMix(summed)} on this ${legNoun} · booking has ${formatPassengerMix(totals)}`
+  }
+  const amount = Math.abs(difference.delta)
+  return `${difference.onLeg} on this ${legNoun} · booking has ${difference.booking} (${amount} ${
+    difference.delta > 0 ? "extra" : "fewer"
+  })`
+}
+
+export interface HeadcountWarning {
+  legId: string
+  legLabel: string
+  supplierKind: SupplierKind
+  summed: PassengerTotals
+  totals: PassengerTotals
+  message: string
+}
+
+/**
+ * The non-blocking side of the per-unit headcount check: every selected airline, hotel or cruise
+ * leg whose units hold a different number (or mix) of people than the booking. Never an error --
+ * the salesperson may be selling an extra ticket on purpose -- but always visible, so it is a
+ * choice and not a typo. Ordered as the legs are.
+ */
+export function collectHeadcountWarnings(
+  detail: PackageDetail,
+  states: readonly ApplyLegState[],
+  totalsBySupplierId: Record<string, PassengerTotals> = {},
+): HeadcountWarning[] {
+  const stateByLegId = new Map(states.map((state) => [state.legId, state]))
+  return sortedLegs(detail).flatMap((leg) => {
+    const state = stateByLegId.get(leg.id)
+    if (state?.kind !== "suite" || !state.selected) return []
+    if (!PASSENGER_WARN_SUPPLIER_KINDS.has(leg.supplierKind)) return []
+    const totals = totalsBySupplierId[leg.supplierId]
+    if (!totals) return []
+    const summed = sumUnitHeadcount(state.units)
+    const message = formatHeadcountDifference(summed, totals, headcountLegNoun(leg.supplierKind))
+    if (!message) return []
+    return [
+      {
+        legId: leg.id,
+        legLabel: leg.label ?? leg.supplierName,
+        supplierKind: leg.supplierKind,
+        summed,
+        totals,
+        message,
+      },
+    ]
+  })
 }

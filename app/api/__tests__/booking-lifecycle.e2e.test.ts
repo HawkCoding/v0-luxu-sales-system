@@ -25,12 +25,13 @@ vi.mock("@/lib/invoices/ensure-invoice-pdf", () => ({
       booking_id: invoice.booking_id,
       kind: "invoice_pdf",
       status: "generated",
-      storage_path: `invoices/${invoice.invoice_number}/invoice-${invoice.invoice_number}.pdf`,
+      storage_path: `invoices/${invoice.invoice_number}/Invoice-${invoice.invoice_number}.pdf`,
+      file_name: `Invoice-${invoice.invoice_number}.pdf`,
     })
     return {
       documentId: "doc-1",
-      storagePath: `invoices/${invoice.invoice_number}/invoice-${invoice.invoice_number}.pdf`,
-      filename: `invoice-${invoice.invoice_number}.pdf`,
+      storagePath: `invoices/${invoice.invoice_number}/Invoice-${invoice.invoice_number}.pdf`,
+      filename: `Invoice-${invoice.invoice_number}.pdf`,
       contentBase64: Buffer.from("pdf").toString("base64"),
     }
   }),

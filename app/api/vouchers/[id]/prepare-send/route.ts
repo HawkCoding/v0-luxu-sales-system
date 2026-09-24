@@ -254,14 +254,14 @@ export async function POST(_req: Request, { params }: RouteParams) {
     },
     attachments: [
       {
-        filename: `voucher-${filenameNumber}.pdf`,
+        filename: `Voucher-${filenameNumber}.pdf`,
         contentBase64: voucherBase64,
         contentType: "application/pdf",
       },
       ...(itineraryBase64
         ? [
             {
-              filename: `itinerary-${filenameNumber}.pdf`,
+              filename: `Itinerary-${filenameNumber}.pdf`,
               contentBase64: itineraryBase64,
               contentType: "application/pdf",
             },

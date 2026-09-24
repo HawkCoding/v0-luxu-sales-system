@@ -17,7 +17,7 @@ booking's **Quotes** tab.
 ## Quote versions and statuses
 
 A booking can carry several quotes. Each is numbered off the booking number with a version
-suffix — `LTT-2026-0001-Q1`, then `-Q2` and so on — but the cards on screen are titled
+suffix — `LTT-26-0001-Q1`, then `-Q2` and so on — but the cards on screen are titled
 **Quote 1**, **Quote 2**, in the order they were raised. Hover the title to see the full
 number.
 
@@ -498,17 +498,15 @@ quote, change what the customer asked to change, and re-apply.
 
 ### Finishing a revision
 
-Once a revision rewinds a booking, the money-side actions disappear from the booking header
-until the journey is re-walked — this is expected, not a fault. A blue banner takes their
-place: **Quote revised — finish the updated booking**, with the outstanding steps ticked off as
-you complete them:
+Once a revision rewinds a booking, the money-side actions step back from the booking header
+until the journey is re-walked — this is expected, not a fault. To finish the updated booking:
 
-1. Send the revised quote to the customer.
-2. Move the booking to Quote Accepted.
+1. Send the revised quote to the customer from the **Quotes** tab.
+2. Move the booking to **Quote Accepted**.
 3. Issue the amended invoice (deposit or full payment).
 
-Each step carries a button that takes you to it. The banner clears itself once the amended
-invoice is issued.
+The invoice actions return to the booking header as soon as the booking reaches Quote
+Accepted, ready for the amended invoice.
 
 ## Changing the quote currency
 

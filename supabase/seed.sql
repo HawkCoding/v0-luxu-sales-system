@@ -1397,7 +1397,8 @@ insert into public.templates (id,key,subject,body_html,version,active,is_system,
   ('00000000-0000-0000-0000-000000007006','payment_reminder','Payment Reminder — Invoice {{invoiceNumber}}','<p>Dear {{customerName}},</p><p>This is a friendly reminder that invoice <strong>{{invoiceNumber}}</strong> for <strong>{{amountDue}}</strong> is due by <strong>{{dueDate}}</strong>. Please find the invoice attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2026-07-13T20:23:38.992853+00:00','2026-07-13T20:23:38.992853+00:00'),
   ('00000000-0000-0000-0000-000000007008','thank_you','Thank you for travelling with us — {{jobNumber}}','<p>Dear {{customerName}},</p><p>We hope you had a wonderful journey on <strong>{{routeName}}</strong>. Thank you for travelling with Luxus Travel &amp; Tours — it was a privilege to arrange your trip.</p><p>We would love to welcome you aboard again.</p><p>Warm regards,<br/>{{consultantName}}<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2026-07-13T20:23:38.992853+00:00','2026-07-13T20:23:38.992853+00:00'),
   ('00000000-0000-0000-0000-000000007009','reservation_received','{{supplierName}} | {{clientSurname}} - {{direction}} - {{departureDateShort}}','<p>Dear {{customerName}}</p><p>Thank you for your reservation form well received.</p><p>The confirmation invoice with payment instructions will follow shortly.</p><p>In the meantime, I have secured your suite for you.</p>',3,true,true,'2026-07-21T11:11:33.288351+00:00','2026-07-22T10:31:31.037437+00:00'),
-  ('00000000-0000-0000-0000-000000007010','payment_received','Payment received — {{invoiceNumber}}','<p>Dear {{customerName}}</p><p>Thank you very much for your payment well received.</p><p>Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong><br>Amount received: <strong>{{receivedAmount}}</strong> – Received, thank you.</p><p>Final amount due {{finalDueDate}}: <strong>{{outstandingAmount}}</strong></p><p>Hope you have a wonderful day.</p>',5,true,true,'2026-07-21T11:11:33.288351+00:00','2026-08-04T00:00:00.000000+00:00')
+  ('00000000-0000-0000-0000-000000007010','payment_received','Payment received — {{invoiceNumber}}','<p>Dear {{customerName}}</p><p>Thank you very much for your payment well received.</p><p>Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong><br>Amount received: <strong>{{receivedAmount}}</strong> – Received, thank you.</p><p>Final amount due {{finalDueDate}}: <strong>{{outstandingAmount}}</strong></p><p>Hope you have a wonderful day.</p>',5,true,true,'2026-07-21T11:11:33.288351+00:00','2026-08-04T00:00:00.000000+00:00'),
+  ('00000000-0000-0000-0000-000000007011','full_payment_received','Full payment received — {{invoiceNumber}}','<p>Dear {{customerName}},</p><p>Thank you very much for your payment well received.</p><p>We are delighted to confirm that your booking is now paid in full. Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong></p><p>Amount received: <strong>{{receivedAmount}}</strong> – Paid in full, thank you</p><p><strong>TICKETS &amp; VOUCHERS</strong></p><p>Your travel vouchers will now be issued and sent to you electronically.</p><p>Hope you have a wonderful day.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2026-09-23T11:00:00.000000+00:00','2026-09-23T11:00:00.000000+00:00')
 -- Conflict target must match ux_templates_key_supplier_kind (key, supplier_id,
 -- supplier_kind) NULLS NOT DISTINCT -- Postgres infers an arbiter only from the
 -- index's full column set, so `(key)` alone raises 42P10. These rows leave both
@@ -1685,6 +1686,8 @@ insert into public.report_snapshots (id,period_start,period_end,metrics,created_
 ('00000000-0000-0000-0000-00000000ee01','2025-08-01','2026-04-30','{"bookings":37,"closed":5,"lost":2,"voucher_sent":3,"final_paid":4,"deposit_paid":4,"deposit_requested":4,"accepted":5,"quote_sent":5,"enquiry":5,"totalRevenue":1427230,"pipelineValue":510020,"outstandingBalance":824550,"conversionRate":15.6}'::jsonb,'2026-05-01T06:00:00Z');
 
 -- SECTION 21: BOOKING NUMBER SEQUENCES
+-- Accepts both the current LTT-YY-NNNN format and legacy LTT-YYYY-NNNN numbers;
+-- a 2-digit year maps to 20YY because the sequence is keyed on the full year.
 insert into public.booking_number_sequences (product_code, year, last_number)
 select
   parsed.product_code,
@@ -1692,11 +1695,20 @@ select
   max(parsed.sequence_number)
 from (
   select
-    substring(booking_number from '^([A-Z]+)-') as product_code,
-    substring(booking_number from '^[A-Z]+-([0-9]{4})-')::integer as year,
-    substring(booking_number from '^[A-Z]+-[0-9]{4}-([0-9]+)$')::integer as sequence_number
-  from public.bookings
-  where booking_number ~ '^LTT-[0-9]{4}-[0-9]{4}$'
+    raw.product_code,
+    case
+      when length(raw.year_text) = 2 then 2000 + raw.year_text::integer
+      else raw.year_text::integer
+    end as year,
+    raw.sequence_number
+  from (
+    select
+      substring(booking_number from '^([A-Z]+)-') as product_code,
+      substring(booking_number from '^[A-Z]+-([0-9]+)-') as year_text,
+      substring(booking_number from '^[A-Z]+-[0-9]+-([0-9]+)$')::integer as sequence_number
+    from public.bookings
+    where booking_number ~ '^LTT-([0-9]{2}|[0-9]{4})-[0-9]{4}$'
+  ) raw
 ) parsed
 group by parsed.product_code, parsed.year
 on conflict (product_code, year)

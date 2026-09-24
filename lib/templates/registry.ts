@@ -70,6 +70,11 @@ export const SYSTEM_TEMPLATE_KEYS = [
   "deposit_request",
   "full_payment_request",
   "payment_received",
+  // "Full payment received": the payment confirmation sent once the booking balance reaches
+  // zero (the final payment after a deposit, or a pay-in-full invoice settled). Same token set as
+  // every other key; its wording leaves out the final-due / outstanding lines, since nothing is
+  // owed. Deposit-only payments keep using payment_received.
+  "full_payment_received",
   "final_invoice",
   "payment_reminder",
   "voucher_email",
@@ -308,7 +313,7 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   // time so a customised template containing either token keeps working.
   ...(QUOTE_REFERENCE_ENABLED
     ? [
-        { name: "quoteNumber", description: "Quote number (e.g. LTT-2026-0001-Q1)", kind: "scalar", sample: "LTT-2026-0001-Q1" } satisfies TemplateTokenSpec,
+        { name: "quoteNumber", description: "Quote number (e.g. LTT-26-0001-Q1)", kind: "scalar", sample: "LTT-26-0001-Q1" } satisfies TemplateTokenSpec,
         { name: "quoteDate", description: "Date the quote was issued", kind: "scalar", sample: "12 July 2026" } satisfies TemplateTokenSpec,
       ]
     : []),

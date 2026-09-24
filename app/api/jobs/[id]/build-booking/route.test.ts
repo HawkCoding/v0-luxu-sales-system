@@ -132,6 +132,12 @@ function buildSupabase(state: MockState) {
 
       if (table === "booking_transport_requests") {
         return {
+          // persistServiceDateOrder (run after every build to keep the legs in date order) reads
+          // each service's linked pickups; none are dated in these fixtures, so an empty list is
+          // exactly right -- it makes the resort a no-op.
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: [], error: null })),
+          })),
           delete: vi.fn(() => ({
             in: vi.fn(() => ({
               // The route selects the deleted rows back so it can report how many went with the leg.

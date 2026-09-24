@@ -65,10 +65,10 @@ describe("GET /api/reports/[report]/export", () => {
     expect(res.status).toBe(403)
   })
 
-  it("returns CSV for consultant role (reporting is open to every active role)", async () => {
+  it("returns CSV for a consultant with the reporting grant", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
 
-    const profileChain = mockChain({ clearance_level: "consultant" })
+    const profileChain = mockChain(grantedProfile("consultant"))
 
     mockFrom.mockImplementation((table: string) => {
       if (table === "profiles") return profileChain
@@ -92,10 +92,10 @@ describe("GET /api/reports/[report]/export", () => {
     expect(res.status).not.toBe(403)
   })
 
-  it("returns CSV for manager role without checking setting", async () => {
+  it("returns CSV for a manager with the reporting grant", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
 
-    const profileChain = mockChain({ clearance_level: "manager" })
+    const profileChain = mockChain(grantedProfile("manager"))
     const bookingsChain = {
       select: vi.fn().mockReturnThis(),
       gte: vi.fn().mockReturnThis(),
@@ -130,11 +130,11 @@ describe("GET /api/reports/[report]/export", () => {
     expect(res.status).not.toBe(403)
   })
 
-  it("returns CSV for admin role", async () => {
+  it("returns CSV for an admin with the reporting grant", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
 
     mockFrom.mockImplementation((table: string) => {
-      if (table === "profiles") return mockChain({ clearance_level: "admin" })
+      if (table === "profiles") return mockChain(grantedProfile("admin"))
       if (table === "bookings") {
         return {
           select: vi.fn().mockResolvedValue({ data: [], error: null }),
@@ -157,9 +157,38 @@ describe("GET /api/reports/[report]/export", () => {
 
   it("returns 404 for unknown report name", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
-    mockFrom.mockReturnValue(mockChain({ clearance_level: "admin" }))
+    mockFrom.mockReturnValue(mockChain(grantedProfile("admin")))
 
     const res = await GET(makeRequest("unknown-report"), makeParams("unknown-report"))
     expect(res.status).toBe(404)
   })
+
+  // Reporting is a per-user grant, off by default — admins included.
+  it.each(["admin", "manager", "consultant"])(
+    "returns 403 for %s without the reporting grant",
+    async (role) => {
+      mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
+      mockFrom.mockReturnValue(
+        mockChain({ clearance_level: role, is_active: true, can_view_reporting: false }),
+      )
+
+      const res = await GET(makeRequest("sales-per-salesperson"), makeParams("sales-per-salesperson"))
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({ error: "Forbidden" })
+    },
+  )
+
+  it("checks the grant before the report name (403, not 404)", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
+    mockFrom.mockReturnValue(
+      mockChain({ clearance_level: "admin", is_active: true, can_view_reporting: false }),
+    )
+
+    const res = await GET(makeRequest("unknown-report"), makeParams("unknown-report"))
+    expect(res.status).toBe(403)
+  })
 })
+
+function grantedProfile(role: string) {
+  return { clearance_level: role, is_active: true, can_view_reporting: true }
+}

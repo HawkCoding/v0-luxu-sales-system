@@ -109,7 +109,7 @@ describe("GET /api/settings/email-appearance", () => {
     const res = await GET()
     const body = await res.json()
 
-    expect(body.email_font_family).toBe("Arial, sans-serif")
+    expect(body.email_font_family).toBe("Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif")
   })
 })
 

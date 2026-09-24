@@ -101,7 +101,7 @@ capture. The reader still sees where the fields are and what they do.
 ### UI references
 Bold for anything the reader clicks or types into: **Generate Invoice**, the **Quotes**
 tab, the **Valid until** field. Backticks only for literal system values a reader would
-recognise on screen (`LTT-2026-0001-Q1`, `deposit_paid`) — never for file paths in the
+recognise on screen (`LTT-26-0001-Q1`, `deposit_paid`) — never for file paths in the
 consultant or admin documents.
 
 ### Procedures

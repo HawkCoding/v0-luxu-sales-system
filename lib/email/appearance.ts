@@ -197,8 +197,10 @@ export interface EmailAppearanceSettings {
   email_font_size: EmailFontSize
 }
 
+// Calibri matches the house style of the team's own Outlook mail, so a fresh
+// install (or an unrecognised stored value) renders like the rest of the thread.
 export const EMAIL_APPEARANCE_DEFAULTS: EmailAppearanceSettings = {
-  email_font_family: "Arial, sans-serif",
+  email_font_family: "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif",
   email_font_size: "16px",
 }
 

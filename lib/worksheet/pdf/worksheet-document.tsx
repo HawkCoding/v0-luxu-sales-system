@@ -1,7 +1,7 @@
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
-import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import { DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 
 /** One row of the pax grid. Room fields are the v2 manual-capture columns - blank until then. */
@@ -99,8 +99,9 @@ function orBlank(value: string | null | undefined): string {
 }
 
 /** formatMoney's thousands separator is a non-breaking space (U+00A0) - the embedded Arimo font
- * this sheet uses crashes fontkit's glyph-metrics lookup on that codepoint, so swap it for a
- * plain space before the amount ever reaches a Text node. Built with fromCharCode rather than a
+ * this sheet was first set in crashed fontkit's glyph-metrics lookup on that codepoint, so it is
+ * swapped for a plain space before the amount ever reaches a Text node (kept as a guard now that
+ * the sheet is set in Carlito). Built with fromCharCode rather than a
  * literal character in source, so the codepoint can't get mangled by an editor/encoding round-trip. */
 function formatAmount(amount: number): string {
   const nbsp = String.fromCharCode(160)
@@ -129,11 +130,11 @@ function trainDateOrBlank(value: string | null | undefined): string {
   return `${day} ${monthName} ${year.slice(2)}`
 }
 
-// The base-14 Helvetica font's WinAnsi encoding has no slot for the route arrow characters used
-// in train route names, and mangles them into stray punctuation - see lib/pdf/document-fonts.ts.
+// Set in the embedded Carlito (Calibri clone), never base-14 Helvetica: Helvetica's WinAnsi encoding
+// has no slot for the route arrows used in train route names - see lib/pdf/document-fonts.ts.
 const styles = StyleSheet.create({
   page: {
-    fontFamily: "Arimo",
+    fontFamily: DOCUMENT_FONT_FAMILY,
     fontSize: 9,
     padding: 20,
     color: "#1a1a1a",
@@ -193,7 +194,7 @@ const styles = StyleSheet.create({
   },
   headText: {
     fontSize: 8,
-    fontFamily: "Arimo",
+    fontFamily: DOCUMENT_FONT_FAMILY,
     fontWeight: 700,
     textAlign: "center",
     textTransform: "uppercase",
@@ -203,7 +204,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   bold: {
-    fontFamily: "Arimo",
+    fontFamily: DOCUMENT_FONT_FAMILY,
     fontWeight: 700,
   },
   sectionGap: {

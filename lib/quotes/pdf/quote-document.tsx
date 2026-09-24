@@ -6,7 +6,7 @@ import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import { formatMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
-import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import { DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
   AGENT_COMMISSION_COLOR,
   AGENT_COMMISSION_LABEL,
@@ -78,7 +78,7 @@ function formatDate(value: string | null): string {
 
 const styles = StyleSheet.create({
   page: {
-    fontFamily: "Helvetica",
+    fontFamily: DOCUMENT_FONT_FAMILY,
     fontSize: 10,
     paddingTop: 40,
     paddingBottom: 40,
@@ -94,7 +94,8 @@ const styles = StyleSheet.create({
   },
   brand: {
     fontSize: 18,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: "#172018",
     marginBottom: 2,
   },
@@ -113,7 +114,8 @@ const styles = StyleSheet.create({
   },
   docTitle: {
     fontSize: 22,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: "#172018",
   },
   quoteNumberBadge: {
@@ -140,7 +142,8 @@ const styles = StyleSheet.create({
   },
   metaValue: {
     fontSize: 10,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: "#312b24",
   },
   metaContact: {
@@ -167,13 +170,15 @@ const styles = StyleSheet.create({
   },
   agentCommissionLine: {
     fontSize: 11,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: AGENT_COMMISSION_COLOR,
     marginBottom: 4,
   },
   discountLine: {
     fontSize: 11,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: DISCOUNT_COLOR,
     marginBottom: 4,
   },
@@ -184,12 +189,14 @@ const styles = StyleSheet.create({
   },
   grandTotalLine: {
     fontSize: 13,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: "#172018",
   },
   sectionHeading: {
     fontSize: 11,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: "#172018",
     textTransform: "uppercase",
     letterSpacing: 0.5,
@@ -204,10 +211,13 @@ const styles = StyleSheet.create({
   itineraryItem: {
     marginBottom: 6,
   },
-  // The itinerary reads a size smaller than the 10pt body, its bullets smaller again.
+  // The itinerary reads a size smaller than the 10pt body, its bullets smaller again. The bullet
+  // tier is 8.5pt, not 8: Carlito's x-height is ~9% below Helvetica's, and its taller built-in
+  // leading is why the bullets' marginTop is 1 rather than 2 — together they keep the old rhythm.
   itineraryDate: {
     fontSize: 9,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: "#172018",
   },
   itineraryText: {
@@ -217,34 +227,36 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
   },
   itineraryDetail: {
-    fontSize: 8,
+    fontSize: 8.5,
     color: "#554c42",
-    marginTop: 2,
+    marginTop: 1,
     paddingLeft: 10,
   },
   // A subheading inside the bullet list: bold and undashed, with extra air above it so it reads
   // as a section break rather than another inclusion.
   itineraryDetailHeading: {
-    fontSize: 8,
-    fontFamily: "Helvetica-Bold",
+    fontSize: 8.5,
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontWeight: 700,
     color: "#312b24",
     marginTop: 6,
     paddingLeft: 10,
   },
   // A caveat the client must not miss ("Train arrival times cannot be guaranteed").
   itineraryDetailWarning: {
-    fontSize: 8,
+    fontSize: 8.5,
     color: WARNING_TEXT_COLOR,
-    marginTop: 2,
+    marginTop: 1,
     paddingLeft: 10,
   },
-  // A hotel's own description, in place of its facility bullets. Helvetica-Oblique is a base-14
-  // face, so it needs no font registration.
+  // A hotel's own description, in place of its facility bullets, set in the regular-weight italic
+  // (Carlito has no bold-italic, so this must never gain fontWeight: 700).
   itineraryDescription: {
-    fontSize: 8,
-    fontFamily: "Helvetica-Oblique",
+    fontSize: 8.5,
+    fontFamily: DOCUMENT_FONT_FAMILY,
+    fontStyle: "italic",
     color: "#554c42",
-    marginTop: 2,
+    marginTop: 1,
     paddingLeft: 10,
     lineHeight: 1.4,
   },
@@ -309,8 +321,7 @@ export function QuoteDocument({
   brandPosition = "bottom",
   brandLogo = null,
 }: QuotePdfData) {
-  // BrandBlock's heading renders in Montserrat to match the invoice letterhead;
-  // register it here even though the rest of this document runs on base-14 Helvetica.
+  // The whole quote, BrandBlock included, is set in the embedded Carlito (Calibri clone).
   registerDocumentFonts()
 
   // The brand block is only shown when its copy is supplied; without it the
@@ -446,8 +457,9 @@ export function QuoteDocument({
           </View>
         ) : null}
 
-        {/* Total price renders last, after everything the quote covers. */}
-        <View style={styles.pricingBox}>
+        {/* Total price renders last, after everything the quote covers. Never split across a page:
+            a total stranded on its own page reads as a separate document. */}
+        <View style={styles.pricingBox} wrap={false}>
           {perPersonRate !== null ? (
             <Text style={styles.perPersonLine}>
               {paxLabel} x {formatMoney(perPersonRate, currency)} per person

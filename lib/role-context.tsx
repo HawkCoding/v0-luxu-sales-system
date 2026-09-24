@@ -2,11 +2,26 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 import { ALL_ROLES, SETTINGS_WRITE_ROLES, USER_ADMIN_ROLES } from "@/lib/permissions"
+import { isRole } from "@/lib/role-utils"
 import type { Role } from "./types"
+
+/**
+ * Per-user grants that sit outside the role matrix. They are set by an admin
+ * on the user's profile (Settings -> Users) and loaded server-side in
+ * app/app/layout.tsx. The server gates (layouts, API routes) are the real
+ * enforcement; these only drive what the client shows.
+ */
+export interface UserGrants {
+  /** profiles.can_view_reporting — the Reporting page and CSV exports. */
+  viewReporting: boolean
+}
+
+export const NO_GRANTS: UserGrants = { viewReporting: false }
 
 interface RoleContextValue {
   role: Role
   setRole: (r: Role) => void
+  grants: UserGrants
   can: (action: string) => boolean
 }
 
@@ -45,8 +60,6 @@ export const permissions: Record<string, Role[]> = {
   "edit:products": [...ALL_ROLES],
   "view:templates": [...ALL_ROLES],
   "edit:templates": [...ALL_ROLES],
-  "view:reporting": [...ALL_ROLES],
-  "export:reporting": [...ALL_ROLES],
   "view:audit": [...ALL_ROLES],
   "resolve:import_review": [...ALL_ROLES],
   "view:error_logs": [...ALL_ROLES],
@@ -55,27 +68,47 @@ export const permissions: Record<string, Role[]> = {
   "manage:users": [...USER_ADMIN_ROLES],
 }
 
-export function canRolePerform(role: Role, action: string) {
+/**
+ * Actions decided by a per-user grant instead of the role matrix. Every role —
+ * admin included — needs the grant; there is no role fallback.
+ */
+export const GRANT_GATED_ACTIONS: Record<string, keyof UserGrants> = {
+  "view:reporting": "viewReporting",
+  "export:reporting": "viewReporting",
+}
+
+export function canRolePerform(role: Role, action: string): boolean {
   const allowed = permissions[action]
   return allowed ? allowed.includes(role) : false
+}
+
+/** Role matrix plus per-user grants — what `can()` resolves to. */
+export function canUserPerform(role: Role, grants: UserGrants, action: string): boolean {
+  const grant = GRANT_GATED_ACTIONS[action]
+  if (grant) return isRole(role) && grants[grant] === true
+  return canRolePerform(role, action)
 }
 
 interface RoleProviderProps {
   children: ReactNode
   initialRole?: Role
+  grants?: UserGrants
 }
 
-export function RoleProvider({ children, initialRole = "consultant" }: RoleProviderProps) {
+export function RoleProvider({ children, initialRole = "consultant", grants = NO_GRANTS }: RoleProviderProps) {
   const [role, setRoleState] = useState<Role>(initialRole)
 
   const setRole = useCallback((newRole: Role) => {
     setRoleState(newRole)
   }, [])
 
-  const can = (action: string) => canRolePerform(role, action)
+  // `grants` is read straight from props (not copied into state) so a
+  // router.refresh() after an admin changes their own access re-renders the
+  // server layout and the nav follows without a full reload.
+  const can = (action: string) => canUserPerform(role, grants, action)
 
   return (
-    <RoleContext.Provider value={{ role, setRole, can }}>
+    <RoleContext.Provider value={{ role, setRole, grants, can }}>
       {children}
     </RoleContext.Provider>
   )

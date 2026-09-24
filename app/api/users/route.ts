@@ -20,6 +20,8 @@ const createUserSchema = z.object({
   email: z.string().trim().email("Invalid email address"),
   clearanceLevel: roleSchema,
   password: z.string().min(10, "Password must be at least 10 characters"),
+  // Reporting is off for everyone until an admin switches it on.
+  canViewReporting: z.boolean().optional().default(false),
 })
 
 export async function GET() {
@@ -31,7 +33,7 @@ export async function GET() {
   const supabase = await createSessionClient()
   const withIsActiveQuery = supabase
     .from("profiles")
-    .select("user_id, email, name, surname, clearance_level, is_active")
+    .select("user_id, email, name, surname, clearance_level, is_active, can_view_reporting")
     .order("name", { ascending: true })
 
   const { data: profilesWithStatus, error: withIsActiveError } = await withIsActiveQuery
@@ -44,6 +46,7 @@ export async function GET() {
       lastName: p.surname ?? "",
       clearanceLevel: p.clearance_level,
       isActive: p.is_active ?? true,
+      canViewReporting: p.can_view_reporting === true,
       isCurrentUser: p.user_id === auth.value.adminUserId,
     }))
 
@@ -68,6 +71,7 @@ export async function GET() {
     lastName: p.surname ?? "",
     clearanceLevel: p.clearance_level,
     isActive: true,
+    canViewReporting: false,
     isCurrentUser: p.user_id === auth.value.adminUserId,
   }))
 
@@ -121,6 +125,7 @@ export async function POST(request: Request) {
       surname: normalizedSurname,
       clearance_level: parsed.clearanceLevel,
       is_active: true,
+      can_view_reporting: parsed.canViewReporting,
     },
     { onConflict: "user_id" }
   )
@@ -158,7 +163,11 @@ export async function POST(request: Request) {
       actor_user_id: auth.value.adminUserId,
       entity_type: "user",
       entity_id: createdUserId,
-      meta_json: { email: normalizedEmail, clearance_level: parsed.clearanceLevel },
+      meta_json: {
+        email: normalizedEmail,
+        clearance_level: parsed.clearanceLevel,
+        can_view_reporting: parsed.canViewReporting,
+      },
     })
   } catch {
     // non-fatal
@@ -173,6 +182,7 @@ export async function POST(request: Request) {
         lastName: normalizedSurname ?? "",
         clearanceLevel: parsed.clearanceLevel,
         isActive: true,
+        canViewReporting: parsed.canViewReporting,
         isCurrentUser: false,
       },
     },

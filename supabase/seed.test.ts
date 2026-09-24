@@ -42,7 +42,10 @@ describe("local Supabase seed", () => {
     expect(seedSql).toContain("'LTT-2025-0001'")
     expect(seedSql).toContain("insert into public.booking_number_sequences")
     expect(seedSql).toContain("max(parsed.sequence_number)")
-    expect(seedSql).toContain("booking_number ~ '^LTT-[0-9]{4}-[0-9]{4}$'")
+    // Both the current LTT-YY-NNNN and legacy LTT-YYYY-NNNN numbers feed the
+    // high-water mark; a 2-digit year maps back to the full-year sequence key.
+    expect(seedSql).toContain("booking_number ~ '^LTT-([0-9]{2}|[0-9]{4})-[0-9]{4}$'")
+    expect(seedSql).toContain("when length(raw.year_text) = 2 then 2000 + raw.year_text::integer")
   })
 
   it("carries no product prefix in booking or quote numbers", () => {

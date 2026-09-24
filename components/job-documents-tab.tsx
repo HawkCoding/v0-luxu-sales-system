@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import type { DocRecord, Enquiry, Job, Customer } from "@/lib/types"
-import { AlertCircle, ClipboardList, FileOutput, FileText } from "lucide-react"
+import { AlertCircle, ClipboardList, FileText, Send } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { useJobLegReferences } from "@/lib/use-data"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -143,11 +143,11 @@ export function JobDocumentsTab({
           <CardContent className="p-4">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-medium text-foreground">Generate Travel Voucher</p>
+                <p className="text-sm font-medium text-foreground">Travel Voucher</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {missingReferenceCount > 0
                     ? `${missingReferenceCount} ${missingReferenceCount === 1 ? "leg is" : "legs are"} missing a supplier reference number`
-                    : "Create, preview, and send the PDF voucher"}
+                    : "Builds the voucher PDF from the latest booking details, then opens the email for review"}
                 </p>
               </div>
               {missingReferenceCount > 0 ? (
@@ -161,8 +161,8 @@ export function JobDocumentsTab({
                 </Button>
               ) : (
                 <Button size="sm" onClick={() => setVoucherOpen(true)}>
-                  <FileOutput data-icon="inline-start" />
-                  Generate Voucher
+                  <Send data-icon="inline-start" aria-hidden />
+                  Preview &amp; Send Voucher
                 </Button>
               )}
             </div>
@@ -172,7 +172,6 @@ export function JobDocumentsTab({
 
       {canGenerateVoucher && (
         <GenerateVoucherDialog
-          trigger={false}
           open={voucherOpen}
           onOpenChange={setVoucherOpen}
           jobId={job.id}

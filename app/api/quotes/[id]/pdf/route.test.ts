@@ -43,7 +43,7 @@ function buildAuth() {
                 data: {
                   id: QUOTE_ID,
                   booking_id: BOOKING_ID,
-                  quote_number: "BT-2026-0001-Q1",
+                  quote_number: "LTT-26-0001-Q1",
                   status: "ready",
                   validity_until: "2026-06-01",
                   subtotal: 1000,
@@ -51,7 +51,7 @@ function buildAuth() {
                   created_at: "2026-05-01T00:00:00.000Z",
                   booking: {
                     id: BOOKING_ID,
-                    booking_number: "BT-2026-0001",
+                    booking_number: "LTT-26-0001",
                     customer: { first_name: "Jane", last_name: "Doe" },
                   },
                 },
@@ -81,8 +81,8 @@ function buildAuth() {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               eq: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+                in: vi.fn(() => ({
+                  order: vi.fn(async () => ({ data: [], error: null })),
                 })),
               })),
             })),
@@ -98,7 +98,7 @@ function buildAuth() {
                     booking_id: BOOKING_ID,
                     kind: "quote_pdf",
                     status: "generated",
-                    storage_path: "quotes/BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf",
+                    storage_path: "quotes/LTT-26-0001-Q1/Quote-26-0001.pdf",
                     created_at: "2026-05-01T00:00:00.000Z",
                   },
                   error: null,
@@ -160,7 +160,7 @@ describe("POST /api/quotes/[id]/pdf", () => {
   })
 
   it("generates PDF, uploads to storage, creates document record, links pdf_document_id to quote", async () => {
-    const { storageUpload, documentUpsert, auditInsert } = buildAuth()
+    const { storageUpload, storageSignedUrl, documentUpsert, auditInsert } = buildAuth()
 
     const res = await POST(new Request("http://localhost"), {
       params: Promise.resolve({ id: QUOTE_ID }),
@@ -168,14 +168,18 @@ describe("POST /api/quotes/[id]/pdf", () => {
 
     expect(res.status).toBe(200)
     expect(pdfMocks.renderQuotePdf).toHaveBeenCalledOnce()
+    // Versioned directory, unversioned capitalised file name.
     expect(storageUpload).toHaveBeenCalledWith(
-      expect.stringContaining("BT-2026-0001-Q1"),
+      "LTT-26-0001-Q1/Quote-26-0001.pdf",
       expect.any(Buffer),
       expect.objectContaining({ contentType: "application/pdf" }),
     )
     expect(documentUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "quote_pdf", status: "generated" }),
+      expect.objectContaining({ kind: "quote_pdf", status: "generated", file_name: "Quote-26-0001.pdf" }),
     )
+    expect(storageSignedUrl).toHaveBeenCalledWith("LTT-26-0001-Q1/Quote-26-0001.pdf", 3600, {
+      download: "Quote-26-0001.pdf",
+    })
     expect(auditInsert).toHaveBeenCalledWith(
       expect.objectContaining({ action: "quote_pdf_generated", entity_id: QUOTE_ID }),
     )

@@ -9,7 +9,13 @@ import { Label } from "@/components/ui/label"
 import { HtmlBodyEditor } from "@/components/ui/html-body-editor"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SignatureBadgeList } from "@/components/signature-badge-list"
-import { useAssignableUsers, type EmailSignatureSettings } from "@/lib/use-data"
+import { useAssignableUsers, useEmailAppearanceSettings, type EmailSignatureSettings } from "@/lib/use-data"
+import { toEmailFontFamily } from "@/lib/email/appearance"
+import {
+  buildSignaturePreviewDocument,
+  SIGNATURE_BANNER_MAX_WIDTH,
+  signatureBannerSize,
+} from "@/lib/email/email-chrome"
 import type { SignatureBadge } from "@/lib/email/signature-brands"
 import { SENDER_LAYOUT_TOKENS } from "@/lib/email/sender-layout"
 
@@ -77,6 +83,10 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
 
   const { data: assignable } = useAssignableUsers()
   const users = assignable?.users ?? []
+  const { data: emailAppearance } = useEmailAppearanceSettings()
+  // Coerced through the allowlist: the family is interpolated into the preview's <style>.
+  const previewFontFamily = toEmailFontFamily(emailAppearance?.email_font_family)
+  const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
 
   useEffect(() => setName(brand.name), [brand.id, brand.name])
 
@@ -185,16 +195,23 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
 
         <div className="space-y-1.5">
           <Label>Banner image</Label>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {brand.bannerUrl ? (
+              // Same 320px cap the sent email uses (SIGNATURE_BANNER_MAX_WIDTH), so what you see here is what clients get.
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={brand.bannerUrl}
                 alt={brand.name}
-                className="h-14 max-w-[260px] rounded border object-contain bg-muted/30"
+                width={bannerSize.width}
+                height={bannerSize.height}
+                className="block h-auto w-full rounded border"
+                style={{ maxWidth: SIGNATURE_BANNER_MAX_WIDTH }}
               />
             ) : (
-              <div className="h-14 w-[260px] rounded border border-dashed flex items-center justify-center text-xs text-muted-foreground">
+              <div
+                className="h-14 w-full rounded border border-dashed flex items-center justify-center text-xs text-muted-foreground"
+                style={{ maxWidth: SIGNATURE_BANNER_MAX_WIDTH }}
+              >
                 No banner uploaded
               </div>
             )}
@@ -283,13 +300,19 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
       <div className="space-y-3">
         <div className="space-y-1.5">
           <Label>Live preview</Label>
-          <div className="h-[420px] overflow-auto rounded-md border bg-white">
+          {/* Angora background + email font, matching the container the signature sits in when sent. */}
+          <div className="h-[420px] overflow-auto rounded-md border bg-[#e8e5df]">
             {loadingPreview ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 Rendering…
               </div>
             ) : (
-              <iframe title="Signature preview" className="h-full w-full" sandbox="" srcDoc={previewHtml} />
+              <iframe
+                title="Signature preview"
+                className="h-full w-full"
+                sandbox=""
+                srcDoc={buildSignaturePreviewDocument(previewHtml, previewFontFamily)}
+              />
             )}
           </div>
         </div>

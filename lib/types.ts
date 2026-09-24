@@ -1732,7 +1732,8 @@ export const VOUCHER_TEMPLATE_DEFAULTS: VoucherTemplate = {
   product_line: "THE BLUE TRAIN • ROVOS RAIL • KRUGER SHALATI",
   accent_colour: "#0B2A3A",
   section_bg: "#1a3a4a",
-  font_family: "Arial, sans-serif",
+  // Calibri stack — matches production's saved voucher_template row; the PDFs embed Carlito for it.
+  font_family: "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif",
   section_order: ["guest_info", "service_provider", "footer"],
   hidden_sections: [],
   footer_company: "Luxus Travel & Tours",

@@ -330,8 +330,8 @@ function buildTrainScheduleBullets(
 }
 
 /** "Pretoria → Cape Town" → "Pretoria to Cape Town" — the flowing prose style used in the
- * itinerary line. The base-14 Helvetica font the PDF renders with has no glyph for the arrow, so
- * it must never reach this sentence as-is. */
+ * itinerary line. The quote PDF's embedded Carlito does carry the arrow glyphs; this is a
+ * copy-style choice (the line reads as a sentence), not a glyph workaround. */
 function toProseRoute(route: string): string {
   return route.replace(/\s*[→↔]\s*/g, " to ")
 }

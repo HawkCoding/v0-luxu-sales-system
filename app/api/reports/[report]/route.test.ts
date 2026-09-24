@@ -27,13 +27,19 @@ function makeRequest(report: string) {
   return new Request(`http://localhost/api/reports/${report}`)
 }
 
-function profileChain(clearanceLevel: string | null) {
+function profileChain(
+  clearanceLevel: string | null,
+  { canViewReporting = true, isActive = true }: { canViewReporting?: boolean; isActive?: boolean } = {},
+) {
   return {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
-    single: vi
-      .fn()
-      .mockResolvedValue({ data: clearanceLevel ? { clearance_level: clearanceLevel } : null, error: null }),
+    single: vi.fn().mockResolvedValue({
+      data: clearanceLevel
+        ? { clearance_level: clearanceLevel, is_active: isActive, can_view_reporting: canViewReporting }
+        : null,
+      error: null,
+    }),
   }
 }
 
@@ -66,7 +72,36 @@ describe("GET /api/reports/[report]", () => {
     expect(res.status).toBe(403)
   })
 
-  it.each(["admin", "manager", "consultant"])("returns report data for %s role", async (role) => {
+  // Reporting is a per-user grant, off by default — admins included.
+  it.each(["admin", "manager", "consultant"])(
+    "returns 403 for %s without the reporting grant",
+    async (role) => {
+      mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
+      mockFrom.mockReturnValue(profileChain(role, { canViewReporting: false }))
+
+      const res = await GET(makeRequest("sales-per-salesperson"), makeParams("sales-per-salesperson"))
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({ error: "Forbidden" })
+    },
+  )
+
+  it("returns 403 for an inactive account even with the grant", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
+    mockFrom.mockReturnValue(profileChain("admin", { isActive: false }))
+
+    const res = await GET(makeRequest("sales-per-salesperson"), makeParams("sales-per-salesperson"))
+    expect(res.status).toBe(403)
+  })
+
+  it("checks the grant before the report name (403, not 404)", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
+    mockFrom.mockReturnValue(profileChain("admin", { canViewReporting: false }))
+
+    const res = await GET(makeRequest("not-a-report"), makeParams("not-a-report"))
+    expect(res.status).toBe(403)
+  })
+
+  it.each(["admin", "manager", "consultant"])("returns report data for %s with the grant", async (role) => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
     mockFrom.mockReturnValue(profileChain(role))
 

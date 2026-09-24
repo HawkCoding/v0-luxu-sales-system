@@ -15,7 +15,7 @@ vi.mock("@/lib/job-numbering", () => ({
   allocateJobNumberForBooking: vi.fn(async () => {
     importBookingMocks.bookingSequence += 1
     return {
-      bookingNumber: `LTT-2026-${String(importBookingMocks.bookingSequence).padStart(4, "0")}`,
+      bookingNumber: `LTT-26-${String(importBookingMocks.bookingSequence).padStart(4, "0")}`,
     }
   }),
 }))

@@ -32,6 +32,12 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>Thank you very much for your payment well received.</p><p>Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong></p><p>Amount received: <strong>{{receivedAmount}}</strong> – Received, thank you</p><p>Final amount due {{finalDueDate}}: <strong>{{outstandingAmount}}</strong></p><p>Hope you have a wonderful day.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
+  // Kept identical to the row in supabase/migrations/20260923110000_full_payment_received_template.sql.
+  full_payment_received: {
+    subject: "Full payment received — {{invoiceNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Thank you very much for your payment well received.</p><p>We are delighted to confirm that your booking is now paid in full. Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong></p><p>Amount received: <strong>{{receivedAmount}}</strong> – Paid in full, thank you</p><p><strong>TICKETS &amp; VOUCHERS</strong></p><p>Your travel vouchers will now be issued and sent to you electronically.</p><p>Hope you have a wonderful day.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
   deposit_request: {
     subject: "Deposit Invoice {{invoiceNumber}}",
     bodyHtml:

@@ -27,7 +27,10 @@ export const runtime = "nodejs"
 import { isCoreBookingLeg, type SupplierKind } from "@/lib/types"
 import { normaliseCurrency } from "@/lib/money"
 import { PASSENGER_SUM_SUPPLIER_KINDS } from "@/lib/packages/apply-dialog-state"
+import { describeEmptyUnitSentence, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
 import { SERVICES_WITH_SUPPLIER_SELECT, SERVICES_WITH_UNITS_SELECT } from "@/lib/packages/service-columns"
+import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
+import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -77,8 +80,9 @@ const selectionUnitSchema = z.object({
   /** Tour legs only: this unit's typed flat price, replacing its rate-card-computed total.
    * Rejected on any other supplier kind — see the guard in PATCH. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
-  /** Tour legs only: this unit's own rate type, overriding the leg-level rateTypeId below.
-   * Rejected on any other supplier kind — see the guard in PATCH. */
+  /** Train, hotel, cruise and tour legs only (supportsUnitRateType): this unit's own rate type,
+   * overriding the leg-level rateTypeId below. Rejected on any other supplier kind — see the guard
+   * in PATCH. */
   rateTypeId: z.string().uuid().nullable().optional(),
 })
 
@@ -144,7 +148,9 @@ const patchServicesSchema = z.object({
   selections: z.array(updateServiceSchema).min(1, "At least one selection is required"),
   /** Skips the trip-date recompute (5 sequential reads) when the caller knows a transport-requests
    * PUT immediately follows and will recompute from the final state of both tables anyway — see
-   * PUT /api/jobs/[id]/transport-requests. Defaults to false so every other caller is unaffected. */
+   * PUT /api/jobs/[id]/transport-requests. The leg date-order pass is skipped with it (POST
+   * /services/apply sorts once both tables are final). Defaults to false so every other caller is
+   * unaffected. */
   deferTripDateRecompute: z.boolean().optional(),
 })
 
@@ -537,14 +543,14 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       })
     }
 
-    // A per-unit rate type only means something for a tour: every other passenger-split kind
-    // (trains, airlines) shares one rate type across the whole leg (see updateServiceSchema's
-    // leg-level rateTypeId), so a unit-level one there would silently be ignored.
+    // A per-unit rate type means something wherever units price off rate cards of their own --
+    // train suites, hotel rooms, cruise cabins and tours (supportsUnitRateType). An airline's
+    // fares are typed by hand, so a unit-level rate there would silently be ignored.
     if (
-      supplierKind !== "tour_operator" &&
+      !supportsUnitRateType(supplierKind) &&
       selection.units.some((unit) => unit.rateTypeId !== null && unit.rateTypeId !== undefined)
     ) {
-      return jsonError("A per-unit rate type is only available on tour services", 400, {
+      return jsonError("A per-unit rate type is only available on train, hotel, cruise and tour services", 400, {
         packageLegId: selection.packageLegId,
         supplierKind,
       })
@@ -563,6 +569,21 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       }
     }
 
+    // An airline seat, hotel room or cruise cabin may hold more or fewer people than the booking,
+    // but never nobody at all -- that would price at R0 or bill an empty room.
+    if (supplierKind) {
+      const [emptyIndex] = findEmptyUnitIndexes(supplierKind, selection.units)
+      if (emptyIndex !== undefined) {
+        return jsonError(describeEmptyUnitSentence(supplierKind, emptyIndex), 400, {
+          packageLegId: selection.packageLegId,
+          unitIndex: emptyIndex,
+        })
+      }
+    }
+
+    // Only a train's suites must hold exactly the booking's travellers. Airlines, hotels and
+    // cruises may carry more or fewer (extra tickets) -- Build Booking warns about that instead,
+    // and the pricing engine prices off the units' own counts.
     if (supplierKind && PASSENGER_SUM_SUPPLIER_KINDS.has(supplierKind) && selection.units.length > 0) {
       const totals = await computeLegPassengerTotals(supabase, {
         noOfAdults: booking.no_of_adults,
@@ -773,6 +794,17 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   if (!parsed.data.deferTripDateRecompute) {
     const recompute = await recomputeBookingTripDates(supabase, id)
     if (recompute.error) return jsonError(recompute.error, 500)
+
+    // Keep the legs in date order once they are dated, so the quote, the invoice and Build
+    // Booking's own lists read as an itinerary. Deferred along with the recompute: a caller that
+    // defers is about to write transport requests (whose pickups date the transfer legs) and then
+    // price, and POST /services/apply sorts from the final state of both tables. Runs before the
+    // reload below so the response carries the new sort_order and updated_at stamps.
+    const reorder = await persistServiceDateOrder(supabase, id)
+    if (reorder.error) {
+      // Ordering is presentation, not data: a failure here must not lose the save that just landed.
+      console.error("services:date-order", reorder.error)
+    }
   }
 
   // F-P3-1: the flag intake sets for an unresolved suite/tour type is source-agnostic (see

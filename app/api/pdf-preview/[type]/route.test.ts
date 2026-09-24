@@ -78,7 +78,7 @@ describe("GET /api/pdf-preview/[type]", () => {
     const res = await GET(req, makeParams("voucher"))
     expect(res.status).toBe(200)
     expect(res.headers.get("Content-Type")).toBe("application/pdf")
-    expect(res.headers.get("Content-Disposition")).toContain('inline; filename="preview-voucher.pdf"')
+    expect(res.headers.get("Content-Disposition")).toContain('inline; filename="Preview-voucher.pdf"')
 
     const bytes = Buffer.from(await res.arrayBuffer())
     expect(bytes.subarray(0, 4).toString("ascii")).toBe("%PDF")

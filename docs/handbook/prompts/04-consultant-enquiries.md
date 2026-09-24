@@ -30,8 +30,9 @@ From a new enquiry landing in the queue to a draft quote existing. Stops at **St
 2. **The Enquiries queue** — the filter chips (Needs Review, Complete, Unassigned, My
    Enquiries, Possible Duplicates), search, the Source dropdown.
 3. **Creating an enquiry by hand** — **New Enquiry**, every field on the dialog.
-4. **The booking number** — the `LTT-YYYY-NNNN` format, when it is assigned, and that it
-   never changes for the life of the booking.
+4. **The booking number** — the `LTT-YY-NNNN` format, when it is assigned, and that it
+   never changes for the life of the booking. Older bookings may still carry a legacy
+   `LTT-YYYY-NNNN` number.
 5. **Email-imported enquiries** — the **Needs review** flag, what the consultant is
    actually checking, **Mark reviewed**, and **Reject Import** for a bad parse.
    Include the WARNING that an unreviewed import blocks every forward stage move.

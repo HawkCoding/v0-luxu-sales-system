@@ -44,7 +44,7 @@ function buildSupabase(options: BuildOptions = {}) {
   const documentInsertResult = {
     id: "doc-new",
     booking_id: BOOKING_ID,
-    storage_path: "vouchers/BT-2026-0001/itinerary-BT-2026-0001.pdf",
+    storage_path: "vouchers/LTT-2026-0001/Itinerary-26-0001.pdf",
     created_at: "2026-07-22T00:00:00Z",
   }
 
@@ -88,7 +88,7 @@ function buildSupabase(options: BuildOptions = {}) {
           single: vi.fn(async () => ({
             data: {
               id: BOOKING_ID,
-              booking_number: "BT-2026-0001",
+              booking_number: "LTT-2026-0001",
               consultant: "CDJ",
               departure_date: "2026-09-14",
               no_of_adults: 2,
@@ -127,7 +127,7 @@ describe("ensureItineraryPdf", () => {
   beforeEach(() => {
     buildMocks.buildItineraryData.mockReset()
     buildMocks.buildItineraryData.mockResolvedValue({
-      bookingNumber: "BT-2026-0001",
+      bookingNumber: "LTT-2026-0001",
       tripTitle: "Pretoria → Cape Town — Smith Family",
       tripNotes: "",
       guestNames: "Mrs Smith — 2 adults",
@@ -148,12 +148,13 @@ describe("ensureItineraryPdf", () => {
     settingsMocks.resolveDocumentBrand.mockReturnValue({ brand: {}, position: {} })
   })
 
-  it("returns the existing document without rebuilding when one already exists", async () => {
+  it("returns an existing pre-rename document from its stored path without rebuilding it", async () => {
+    const legacyPath = "vouchers/LTT-2026-0001/itinerary-LTT-2026-0001.pdf"
     const { supabase, upload } = buildSupabase({
       existingDocument: {
         id: "doc-existing",
         booking_id: BOOKING_ID,
-        storage_path: "vouchers/BT-2026-0001/itinerary-BT-2026-0001.pdf",
+        storage_path: legacyPath,
       },
       existingItinerary: { id: "itin-existing", name: "Existing Trip", notes: "" },
     })
@@ -162,6 +163,7 @@ describe("ensureItineraryPdf", () => {
 
     expect(result.regenerated).toBe(false)
     expect(result.documentId).toBe("doc-existing")
+    expect(result.storagePath).toBe(legacyPath)
     expect(upload).not.toHaveBeenCalled()
     expect(buildMocks.buildItineraryData).not.toHaveBeenCalled()
   })
@@ -174,6 +176,12 @@ describe("ensureItineraryPdf", () => {
     expect(result.regenerated).toBe(true)
     expect(result.documentId).toBe("doc-new")
     expect(upload).toHaveBeenCalledTimes(1)
+    // Booking-number directory, capitalised short-reference file name.
+    expect(upload).toHaveBeenCalledWith(
+      "LTT-2026-0001/Itinerary-26-0001.pdf",
+      expect.any(Buffer),
+      expect.objectContaining({ contentType: "application/pdf" }),
+    )
     expect(buildMocks.buildItineraryData).toHaveBeenCalledWith(
       supabase,
       expect.objectContaining({
