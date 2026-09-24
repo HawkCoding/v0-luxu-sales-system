@@ -1533,6 +1533,7 @@ export type Database = {
           address_line1: string | null
           address_line2: string | null
           city: string | null
+          club_memberships: Json
           communication_preferences: string | null
           company_name: string | null
           country: string | null
@@ -1561,6 +1562,7 @@ export type Database = {
           address_line1?: string | null
           address_line2?: string | null
           city?: string | null
+          club_memberships?: Json
           communication_preferences?: string | null
           company_name?: string | null
           country?: string | null
@@ -1589,6 +1591,7 @@ export type Database = {
           address_line1?: string | null
           address_line2?: string | null
           city?: string | null
+          club_memberships?: Json
           communication_preferences?: string | null
           company_name?: string | null
           country?: string | null
@@ -3963,6 +3966,7 @@ export type Database = {
       travellers: {
         Row: {
           booking_id: string
+          club_memberships: Json
           created_at: string
           date_of_birth: string | null
           first_name: string
@@ -3979,6 +3983,7 @@ export type Database = {
         }
         Insert: {
           booking_id: string
+          club_memberships?: Json
           created_at?: string
           date_of_birth?: string | null
           first_name: string
@@ -3995,6 +4000,7 @@ export type Database = {
         }
         Update: {
           booking_id?: string
+          club_memberships?: Json
           created_at?: string
           date_of_birth?: string | null
           first_name?: string

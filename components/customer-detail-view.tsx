@@ -29,7 +29,14 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
-import { useCustomerDetail } from "@/lib/use-data"
+import { useClubNames, useCustomerDetail } from "@/lib/use-data"
+import {
+  cleanClubMemberships,
+  clubMembershipsEqual,
+  hasIncompleteClubMembership,
+  type ClubMembership,
+} from "@/lib/club-memberships"
+import { ClubMemberNumbersEditor } from "@/components/club-member-numbers-editor"
 import { COUNTRIES, TITLES } from "@/lib/form-data"
 import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -59,6 +66,7 @@ interface CustomerPatchPayload {
   vip_status: boolean
   preferences: string | null
   communication_preferences: string | null
+  club_memberships: ClubMembership[]
 }
 
 interface CustomerPatchResponse {
@@ -116,6 +124,8 @@ export function CustomerDetailView({
   const [vipStatusDraft, setVipStatusDraft] = useState(false)
   const [preferencesDraft, setPreferencesDraft] = useState("")
   const [communicationPreferencesDraft, setCommunicationPreferencesDraft] = useState("")
+  const [clubMembershipsDraft, setClubMembershipsDraft] = useState<ClubMembership[]>([])
+  const { data: clubNamesData } = useClubNames()
   const [isEditing, setIsEditing] = useState(false)
   const [editingStartedUpdatedAt, setEditingStartedUpdatedAt] = useState<string | undefined>(undefined)
   const [hasExternalUpdate, setHasExternalUpdate] = useState(false)
@@ -181,6 +191,7 @@ export function CustomerDetailView({
         setVipStatusDraft(data.customer.vipStatus ?? false)
         setPreferencesDraft(data.customer.preferences ?? "")
         setCommunicationPreferencesDraft(data.customer.communicationPreferences ?? "")
+        setClubMembershipsDraft(data.customer.clubMemberships ?? [])
         setEditingStartedUpdatedAt(undefined)
       }
 
@@ -269,7 +280,9 @@ export function CustomerDetailView({
     idPassportDraft !== (customer.idPassport ?? "") ||
     vipStatusDraft !== (customer.vipStatus ?? false) ||
     preferencesDraft !== (customer.preferences ?? "") ||
-    communicationPreferencesDraft !== (customer.communicationPreferences ?? "")
+    communicationPreferencesDraft !== (customer.communicationPreferences ?? "") ||
+    !clubMembershipsEqual(cleanClubMemberships(clubMembershipsDraft), customer.clubMemberships ?? [])
+  const clubMembershipsIncomplete = isEditing && hasIncompleteClubMembership(clubMembershipsDraft)
 
   function getCustomerPatchPayload(): CustomerPatchPayload {
     return {
@@ -293,6 +306,7 @@ export function CustomerDetailView({
       vip_status: vipStatusDraft,
       preferences: preferencesDraft || null,
       communication_preferences: communicationPreferencesDraft || null,
+      club_memberships: cleanClubMemberships(clubMembershipsDraft),
     }
   }
 
@@ -340,6 +354,11 @@ export function CustomerDetailView({
 
     if (firstNameDraftError || lastNameDraftError) {
       toast.error(firstNameDraftError ?? lastNameDraftError ?? "Please fix the highlighted fields")
+      return
+    }
+
+    if (clubMembershipsIncomplete) {
+      toast.error("Each club member number needs both the club and the number")
       return
     }
 
@@ -531,6 +550,7 @@ export function CustomerDetailView({
                       setVipStatusDraft(customer.vipStatus ?? false)
                       setPreferencesDraft(customer.preferences ?? "")
                       setCommunicationPreferencesDraft(customer.communicationPreferences ?? "")
+                      setClubMembershipsDraft(customer.clubMemberships ?? [])
                       setIsEditing(false)
                       editingBaselineRef.current = null
                       setHasExternalUpdate(false)
@@ -548,7 +568,8 @@ export function CustomerDetailView({
                       isSaving ||
                       Boolean(phoneDraftError) ||
                       Boolean(firstNameDraftError) ||
-                      Boolean(lastNameDraftError)
+                      Boolean(lastNameDraftError) ||
+                      clubMembershipsIncomplete
                     }
                   >
                     <Save className="mr-2 h-4 w-4" />
@@ -804,6 +825,26 @@ export function CustomerDetailView({
               </p>
             </div>
           </div>
+
+          <section aria-labelledby="customer-club-numbers-heading" className="space-y-3 rounded-md border p-4">
+            <div>
+              <h3 id="customer-club-numbers-heading" className="text-sm font-semibold">
+                Club member numbers
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Loyalty and club numbers for this client. Updated from the primary guest when guest details are
+                saved on a booking.
+              </p>
+            </div>
+            <ClubMemberNumbersEditor
+              idPrefix="customer"
+              value={isEditing ? clubMembershipsDraft : (customer.clubMemberships ?? [])}
+              onChange={setClubMembershipsDraft}
+              readOnly={!canEditCustomers || !isEditing}
+              disabled={isSaving}
+              suggestions={clubNamesData?.names}
+            />
+          </section>
 
           <div className="space-y-4 rounded-md border p-4">
             <div>

@@ -1,3 +1,7 @@
+import type { ClubMembership } from "@/lib/club-memberships"
+
+export type { ClubMembership }
+
 // `consultant` is the lowest clearance level. The database enum still carries a
 // retired `readonly` value (Postgres cannot drop enum labels) — it is not a Role.
 export type Role = "admin" | "manager" | "consultant"
@@ -123,6 +127,7 @@ export interface Customer {
   lastTravelDate?: string | null
   lastTravelDateDisplay?: string
   isRepeatClient?: boolean
+  clubMemberships?: ClubMembership[]
   createdAt: string
   createdAtDisplay?: string
   updatedAt?: string

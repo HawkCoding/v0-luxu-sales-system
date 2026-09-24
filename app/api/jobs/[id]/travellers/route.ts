@@ -7,7 +7,16 @@ import { compareRosterToBooking, type RosterComparison } from "@/lib/packages/ro
 import { fetchDefaultAgeBuckets } from "@/lib/pricing/age-buckets"
 import { TRAVELLER_COLUMNS } from "@/lib/supabase/columns"
 import type { createSessionClient } from "@/lib/supabase/server"
-import type { Database } from "@/lib/supabase/types"
+import type { Database, Json } from "@/lib/supabase/types"
+import {
+  cleanClubMemberships,
+  clubMembershipsEqual,
+  clubMembershipsSchema,
+  clubMembershipsToJson,
+  mergeClubMemberships,
+  parseClubMemberships,
+  type ClubMembership,
+} from "@/lib/club-memberships"
 
 type SessionClient = Awaited<ReturnType<typeof createSessionClient>>
 
@@ -29,6 +38,7 @@ const travellerInputSchema = z.object({
   roomType: z.string().trim().max(100).nullable().optional(),
   isChild: z.boolean().default(false),
   isPrimary: z.boolean().default(false),
+  clubMemberships: clubMembershipsSchema.default([]),
 })
 
 const putTravellersSchema = z.object({
@@ -49,18 +59,21 @@ type TravellerRow = {
   is_child: boolean
   is_primary: boolean
   sort_order: number
+  club_memberships: Json
 }
 
 /**
- * Copies the primary guest's ID/passport and date of birth onto the linked
- * customer record so the CRM profile can prefill future bookings. Guest data
- * wins; blank guest fields never wipe an existing customer value. Best-effort —
- * a failure here must not fail the guest save.
+ * Copies the primary guest's ID/passport, date of birth and club member numbers
+ * onto the linked customer record so the CRM profile can prefill future bookings.
+ * Guest data wins; blank guest fields never wipe an existing customer value.
+ * Best-effort — a failure here must not fail the guest save.
  */
 async function syncPrimaryGuestToCustomer(
   supabase: SessionClient,
   customerId: string | null,
-  primary: { idPassport: string; dateOfBirth?: string | null } | undefined,
+  primary:
+    | { idPassport: string; dateOfBirth?: string | null; clubMemberships: ClubMembership[] }
+    | undefined,
 ): Promise<void> {
   if (!customerId || !primary) return
 
@@ -69,7 +82,7 @@ async function syncPrimaryGuestToCustomer(
 
   const { data: customer, error } = await supabase
     .from("customers")
-    .select("id, date_of_birth, id_passport")
+    .select("id, date_of_birth, id_passport, club_memberships")
     .eq("id", customerId)
     .maybeSingle()
 
@@ -84,6 +97,11 @@ async function syncPrimaryGuestToCustomer(
   // returns null for anything it can't read confidently.
   if (dateOfBirth && dateOfBirth !== (customer.date_of_birth ?? "")) {
     updates.date_of_birth = dateOfBirth
+  }
+  const existingClubs = parseClubMemberships(customer.club_memberships)
+  const mergedClubs = mergeClubMemberships(existingClubs, primary.clubMemberships)
+  if (!clubMembershipsEqual(existingClubs, mergedClubs)) {
+    updates.club_memberships = clubMembershipsToJson(mergedClubs)
   }
 
   if (Object.keys(updates).length === 0) return
@@ -105,6 +123,7 @@ function mapTraveller(row: TravellerRow) {
     isChild: row.is_child,
     isPrimary: row.is_primary,
     sortOrder: row.sort_order,
+    clubMemberships: parseClubMemberships(row.club_memberships),
   }
 }
 
@@ -209,6 +228,7 @@ export async function PUT(req: Request, { params }: RouteParams) {
     is_child: traveller.isChild,
     is_primary: traveller.isPrimary,
     sort_order: index,
+    club_memberships: clubMembershipsToJson(cleanClubMemberships(traveller.clubMemberships)),
   }))
 
   // Replace-set semantics: the delete is unconditional. Count what goes so an empty payload can
