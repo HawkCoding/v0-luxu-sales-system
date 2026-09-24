@@ -6,6 +6,7 @@ const customerDetailMock = vi.hoisted(() => ({
   useCustomerDetail: vi.fn(),
   useActiveSuppliers: vi.fn(() => ({ data: [] })),
   useRateTypes: vi.fn(() => ({ data: { rateTypes: [], canEdit: false } })),
+  useClubNames: vi.fn(() => ({ data: { names: [] } })),
 }))
 
 vi.mock("next/navigation", () => ({
@@ -94,6 +95,7 @@ const customer = {
   lastTravelDate: "2026-03-15",
   lastTravelDateDisplay: "15 Mar 2026",
   isRepeatClient: true,
+  clubMemberships: [{ club: "Rovos Rail Club", number: "RR-20431" }],
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-02T00:00:00.000Z",
   createdAtDisplay: "1 Jan 2026, 00:00",
@@ -197,5 +199,19 @@ describe("CustomerDetailView", () => {
     expect(html).toContain("Pretoria to Cape Town")
     expect(html).toContain("John Doe")
     expect(html).toContain("Spouse")
+    expect(html).toContain("Club member numbers")
+    expect(html).toContain("Rovos Rail Club")
+    expect(html).toContain("RR-20431")
+  })
+
+  it("says none recorded when the customer has no club member numbers", () => {
+    customerDetailMock.useCustomerDetail.mockReturnValue({
+      data: { customer: { ...customer, clubMemberships: [] }, bookings: [], linkedAccounts: [] },
+      isLoading: false,
+      error: null,
+      mutate: vi.fn(),
+    })
+
+    expect(renderCustomerDetail()).toContain("None recorded")
   })
 })

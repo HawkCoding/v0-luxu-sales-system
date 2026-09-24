@@ -39,6 +39,7 @@ function baseCustomerRow(overrides: MockRow = {}): MockRow {
     vip_status: false,
     preferences: null,
     communication_preferences: null,
+    club_memberships: [],
     first_travel_date: null,
     last_travel_date: null,
     updated_at: INITIAL_UPDATED_AT,
@@ -250,6 +251,75 @@ describe("PATCH /api/customers/[id]", () => {
     expect(response.status).toBe(200)
     expect(payload.country).toBe("Germany")
     expect(store.rows("customers")[0].country).toBe("Germany")
+  })
+
+  it("saves and returns club member numbers, dropping blank rows", async () => {
+    const { supabase, store } = seedSupabase()
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(
+      patchRequest(
+        validPatchBody({
+          club_memberships: [{ club: " Rovos Rail ", number: "RR-1" }, { club: "SAA Voyager", number: "998877" }],
+        }),
+      ),
+      routeParams(),
+    )
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.clubMemberships).toEqual([
+      { club: "Rovos Rail", number: "RR-1" },
+      { club: "SAA Voyager", number: "998877" },
+    ])
+    expect(store.rows("customers")[0].club_memberships).toEqual(payload.clubMemberships)
+  })
+
+  it("leaves club member numbers alone when the caller does not send them", async () => {
+    const existing = [{ club: "Rovos Rail", number: "RR-1" }]
+    const { supabase, store } = seedSupabase({ customers: [baseCustomerRow({ club_memberships: existing })] })
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(patchRequest(validPatchBody({ notes: "changed" })), routeParams())
+
+    expect(response.status).toBe(200)
+    expect(store.rows("customers")[0].club_memberships).toEqual(existing)
+  })
+
+  it("rejects a club entry without a member number", async () => {
+    const { supabase, store } = seedSupabase()
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(
+      patchRequest(validPatchBody({ club_memberships: [{ club: "Rovos Rail", number: " " }] })),
+      routeParams(),
+    )
+
+    expect(response.status).toBe(400)
+    expect(store.rows("customers")[0].club_memberships).toEqual([])
+  })
+
+  it("does not report a club-number conflict when only an unrelated field drifted", async () => {
+    const clubs = [{ club: "Rovos Rail", number: "RR-1" }]
+    const { supabase } = seedSupabase({
+      customers: [
+        baseCustomerRow({ updated_at: "2026-08-01T01:00:00.000Z", notes: "sibling write", club_memberships: clubs }),
+      ],
+    })
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(
+      patchRequest(
+        validPatchBody({
+          club_memberships: [...clubs, { club: "Blue Train", number: "BT-1" }],
+          expectedUpdatedAt: INITIAL_UPDATED_AT,
+          baseline: { club_memberships: clubs },
+        }),
+      ),
+      routeParams(),
+    )
+
+    expect(response.status).toBe(200)
   })
 
   // F05-4

@@ -8,11 +8,16 @@
  * repeat booker doesn't retype details we already have.
  */
 
+import type { ClubMembership } from "@/lib/club-memberships"
+
+const TEXT_PREFILL_FIELDS = ["prefix", "idPassport", "dateOfBirth", "residence"] as const
+type TextPrefillField = (typeof TEXT_PREFILL_FIELDS)[number]
+
 /**
  * Fields we can carry from the customer profile onto their guest row. Order
  * drives the wording of the "prefilled" hint shown in the UI.
  */
-export const PREFILL_FIELDS = ["prefix", "idPassport", "dateOfBirth", "residence"] as const
+export const PREFILL_FIELDS = [...TEXT_PREFILL_FIELDS, "clubMemberships"] as const
 export type PrefillField = (typeof PREFILL_FIELDS)[number]
 
 const PREFILL_FIELD_LABELS: Record<PrefillField, string> = {
@@ -20,15 +25,17 @@ const PREFILL_FIELD_LABELS: Record<PrefillField, string> = {
   idPassport: "ID/passport",
   dateOfBirth: "date of birth",
   residence: "residence",
+  clubMemberships: "club member numbers",
 }
 
 /** The parts of a guest row this module reads and writes. */
-export type PrefillableTraveller = Record<PrefillField, string> & {
+export type PrefillableTraveller = Record<TextPrefillField, string> & {
   key: string
   firstName: string
   lastName: string
   isChild: boolean
   isPrimary: boolean
+  clubMemberships: ClubMembership[]
 }
 
 /** The parts of a customer record this module reads. */
@@ -39,9 +46,10 @@ export interface PrefillSourceCustomer {
   idPassport?: string | null
   dateOfBirth?: string | null
   country?: string | null
+  clubMemberships?: ClubMembership[] | null
 }
 
-export function customerPrefillValues(customer: PrefillSourceCustomer): Record<PrefillField, string> {
+function customerPrefillValues(customer: PrefillSourceCustomer): Record<TextPrefillField, string> {
   return {
     prefix: customer.title ?? "",
     idPassport: customer.idPassport ?? "",
@@ -93,11 +101,13 @@ export function fillBlanksFromCustomer<T extends PrefillableTraveller, C extends
   createRow: (customer: C) => T,
 ): PrefillResult<T> {
   const values = customerPrefillValues(customer)
+  const customerClubs = customer.clubMemberships ?? []
   const prefilled = new Map<string, Set<PrefillField>>()
 
   if (rows.length === 0) {
     const seeded = createRow(customer)
-    const filled = new Set(PREFILL_FIELDS.filter((field) => values[field]))
+    const filled = new Set<PrefillField>(TEXT_PREFILL_FIELDS.filter((field) => values[field]))
+    if (seeded.clubMemberships.length > 0) filled.add("clubMemberships")
     if (filled.size > 0) prefilled.set(seeded.key, filled)
     return { rows: [seeded], prefilled, changed: true }
   }
@@ -107,11 +117,17 @@ export function fillBlanksFromCustomer<T extends PrefillableTraveller, C extends
 
   const target = rows[targetIndex]
   const filled = new Set<PrefillField>()
-  const patch: Partial<Record<PrefillField, string>> = {}
-  for (const field of PREFILL_FIELDS) {
+  const patch: Partial<Record<TextPrefillField, string>> & { clubMemberships?: ClubMembership[] } = {}
+  for (const field of TEXT_PREFILL_FIELDS) {
     if (target[field].trim() || !values[field]) continue
     patch[field] = values[field]
     filled.add(field)
+  }
+  // All-or-nothing: a guest who already has any club entries keeps exactly what they have.
+  const guestHasClubs = target.clubMemberships.some((row) => row.club.trim() || row.number.trim())
+  if (!guestHasClubs && customerClubs.length > 0) {
+    patch.clubMemberships = customerClubs.map((row) => ({ ...row }))
+    filled.add("clubMemberships")
   }
 
   // Matched on name rather than the flag: adopt them as primary so the
