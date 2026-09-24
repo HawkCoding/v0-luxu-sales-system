@@ -5,7 +5,14 @@ import {
   SUPPLIER_VOCABULARY,
 } from "@/lib/types"
 import { displayRouteName, resolveDirectedRouteName } from "@/lib/routes/route-name"
-import type { CommissionKind, PackageDetail, PricingSnapshot, QuoteLineItem, SupplierRateCard } from "@/lib/types"
+import type {
+  CommissionKind,
+  PackageDetail,
+  PricingSnapshot,
+  QuoteLineItem,
+  SupplierKind,
+  SupplierRateCard,
+} from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
@@ -37,7 +44,21 @@ import {
 } from "@/lib/pricing/passenger-fares"
 import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
-import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
+import { effectiveUnitRateTypeId } from "@/lib/packages/unit-rate-type"
+import { describeEmptyUnit, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
+
+/** An airline seat, hotel room or cruise cabin may hold more or fewer people than the booking, but
+ *  never nobody -- it would price at R0 per person or bill an empty room (lib/packages/unit-headcount.ts). */
+function assertNoEmptyUnits(
+  kind: SupplierKind,
+  units: readonly PackageUnitSelection[],
+  legLabel: string,
+): void {
+  const [emptyIndex] = findEmptyUnitIndexes(kind, units)
+  if (emptyIndex !== undefined) {
+    throw new Error(`${legLabel}: ${describeEmptyUnit(kind, emptyIndex)}`)
+  }
+}
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
@@ -934,11 +955,11 @@ export async function buildPackageQuoteLineItems({
       activePricingDate = legPricingDate
       const supplierDescription = leg.supplierDescription ?? null
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
-      const legSupportsUnitRate = supportsUnitRateType(leg.supplierKind)
-      /** A unit's own rate type, or null to inherit the leg's -- only read on the kinds that can
-       *  carry one (see supportsUnitRateType), so a stray value on any other kind changes nothing. */
-      function unitRateTypeIdOf(unitSelection: PackageUnitSelection): string | null {
-        return legSupportsUnitRate ? unitSelection.rateTypeId ?? null : null
+      /** The rate type a unit prices at: its own on the kinds that support one, else the leg's. The
+       *  same rule Build Booking validates with (effectiveUnitRateTypeId), so a quote never prices a
+       *  unit at a different rate than the dialog just approved. */
+      function effectiveRateTypeIdOf(unitSelection: PackageUnitSelection): string | null {
+        return effectiveUnitRateTypeId(leg.supplierKind, unitSelection.rateTypeId, selection.rateTypeId)
       }
 
       function resolveUnit(
@@ -1039,6 +1060,7 @@ export async function buildPackageQuoteLineItems({
         if (units.length === 0) {
           throw new Error(`No room type selected for leg: ${legLabel}`)
         }
+        assertNoEmptyUnits(leg.supplierKind, units, legLabel)
         // Nights is a leg-level stay length (a booking's stay doesn't split per room); rooms is
         // implicitly units.length — each unit is an independent room with its own suite/bed/layout/
         // bathroom and its own occupants.
@@ -1068,7 +1090,7 @@ export async function buildPackageQuoteLineItems({
         // still match exactly (PASSENGER_SUM_SUPPLIER_KINDS, enforced below and in PATCH /services).
 
         for (const unitSelection of units) {
-          const unitRateTypeId = unitRateTypeIdOf(unitSelection)
+          const unitRateTypeId = effectiveRateTypeIdOf(unitSelection)
           // 0 is a real override (a comped room), so this is a null check, not a truthiness one.
           const overridePrice =
             unitSelection.manualRoomPrice === null || unitSelection.manualRoomPrice === undefined
@@ -1426,6 +1448,7 @@ export async function buildPackageQuoteLineItems({
         if (units.length === 0) {
           throw new Error(`No suite type selected for leg: ${legLabel}`)
         }
+        assertNoEmptyUnits(leg.supplierKind, units, legLabel)
 
         // Only a train's suites must hold exactly the booking's travellers -- the train is the
         // journey everyone on the booking takes. Every other kind may carry more or fewer (an extra
@@ -1484,11 +1507,9 @@ export async function buildPackageQuoteLineItems({
               // Two units of the same type on different rate types price at different cards and
               // must not merge into one averaged line. Keyed on the rate the unit actually prices
               // at (its own, else the leg's), so a unit inheriting Rack and one set to Rack
-              // explicitly still share a line. Kinds without a per-unit rate (airline) keep one
-              // group per suite type, exactly as before.
-              : legSupportsUnitRate
-                ? `${unitSelection.suiteTypeId}::${unitRateTypeIdOf(unitSelection) ?? selection.rateTypeId ?? ""}`
-                : unitSelection.suiteTypeId
+              // explicitly still share a line. On kinds without a per-unit rate every unit resolves
+              // to the leg's rate, so this is still one group per suite type there.
+              : `${unitSelection.suiteTypeId}::${effectiveRateTypeIdOf(unitSelection) ?? ""}`
           const group = unitsBySuiteType.get(groupKey) ?? []
           group.push(unitSelection)
           unitsBySuiteType.set(groupKey, group)
@@ -1509,7 +1530,7 @@ export async function buildPackageQuoteLineItems({
           if (tourOverridePrice !== null) {
             const unitSelection = groupUnits[0]
             const { validRateCard, rateTypeInherited, description, suiteTypeName } =
-              resolveOverriddenUnit(suiteTypeId, legPricingDate, unitRateTypeIdOf(unitSelection))
+              resolveOverriddenUnit(suiteTypeId, legPricingDate, effectiveRateTypeIdOf(unitSelection))
             activeRateCard = validRateCard
             activeRateCardInherited = rateTypeInherited ?? false
             const overrideCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
@@ -1556,7 +1577,7 @@ export async function buildPackageQuoteLineItems({
           } else {
             // Every unit in a group prices at the same effective rate by construction (see the
             // grouping key above), so the first unit's rate speaks for the whole group.
-            const resolved = resolveUnit(suiteTypeId, legPricingDate, unitRateTypeIdOf(groupUnits[0]))
+            const resolved = resolveUnit(suiteTypeId, legPricingDate, effectiveRateTypeIdOf(groupUnits[0]))
             description = resolved.description
             suiteTypeName = resolved.suiteTypeName
             activeRateCard = resolved.validRateCard

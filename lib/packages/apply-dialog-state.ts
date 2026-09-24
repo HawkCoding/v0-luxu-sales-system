@@ -28,6 +28,7 @@ import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { effectiveUnitRateTypeId, supportsUnitRateType } from "@/lib/packages/unit-rate-type"
+import { describeEmptyUnit, findEmptyUnitIndexes, PASSENGER_WARN_SUPPLIER_KINDS } from "@/lib/packages/unit-headcount"
 
 /**
  * Pure state model for Build Booking's configure step (components/build-booking-dialog.tsx --
@@ -63,17 +64,8 @@ export const PASSENGER_SPLIT_SUPPLIER_KINDS = new Set<SupplierKind>([
  * Only the train: it is the journey every traveller on the booking takes, so each one has to land in
  * exactly one suite. Enforced here, in PATCH /api/jobs/[id]/services and in the pricing engine. */
 export const PASSENGER_SUM_SUPPLIER_KINDS = new Set<SupplierKind>(["train_operator"])
-/** Kinds whose per-unit counts MAY differ from the booking's traveller totals -- an extra ticket on
- * one flight, a hotel room for a guest joining only that stay, a cabin for part of the party. They
- * price off their own counts; a difference is surfaced as an amber, non-blocking warning (see
- * collectHeadcountWarnings) so it is a deliberate choice rather than a typo nobody noticed. A tour
- * operator is in neither set: its units are independent activities the same travellers can all
- * join, so there is no single headcount to compare against. */
-export const PASSENGER_WARN_SUPPLIER_KINDS = new Set<SupplierKind>([
-  "airline",
-  "hotel_property",
-  "cruise_line",
-])
+// Lives in lib/packages/unit-headcount.ts so the pricing engine can share the empty-unit rule.
+export { PASSENGER_WARN_SUPPLIER_KINDS }
 
 export interface SuiteUnitState {
   /** Persisted unit uuid, or a `draft-` key for units added in the dialog. */
@@ -1577,8 +1569,14 @@ export function validateConfigureState(
       )
     }
 
-    // Only the train blocks. Airlines, hotels and cruises may hold more or fewer people than the
-    // booking -- see collectHeadcountWarnings for the non-blocking side of this check.
+    // More or fewer people than the booking only warns (collectHeadcountWarnings), but a room, seat
+    // or cabin holding nobody at all is a mistake that would price at R0 or bill an empty room.
+    for (const index of findEmptyUnitIndexes(state.supplierKind, state.units)) {
+      errors.push(`${legLabel}: ${describeEmptyUnit(state.supplierKind, index)}`)
+    }
+
+    // Only the train blocks on a headcount difference. Airlines, hotels and cruises may hold more
+    // or fewer people than the booking -- see collectHeadcountWarnings for that non-blocking side.
     if (PASSENGER_SUM_SUPPLIER_KINDS.has(state.supplierKind)) {
       const totals = options.totalsBySupplierId?.[leg.supplierId]
       if (totals) {

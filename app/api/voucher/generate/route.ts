@@ -563,7 +563,6 @@ export async function POST(req: Request) {
       filename,
       contentType: "application/pdf",
       contentBase64: pdfBuffer.toString("base64"),
-      dataUrl: `data:application/pdf;base64,${pdfBuffer.toString("base64")}`,
     },
     email: {
       to: customer.email,

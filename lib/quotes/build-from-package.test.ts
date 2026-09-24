@@ -1312,6 +1312,37 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].unitPrice).toBe(4000)
   })
 
+  it("refuses a hotel room holding nobody, instead of pricing it at R0 or billing an empty room", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    await expect(
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [
+              { suiteTypeId: "room-std", adultCount: 2, childCount: 1 },
+              { suiteTypeId: "room-std", adultCount: 0, childCount: 0, infantCount: 0 },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/room 2 has nobody in it/)
+  })
+
   it("prices a per_person stay from the room's own occupants even when they don't sum to the booking's travellers", async () => {
     const hotelLeg = leg({
       id: "leg-hotel",
@@ -1371,7 +1402,9 @@ describe("buildPackageQuoteLineItems", () => {
               manualRoomPrice: 3600,
               manualRoomPriceSetAt: "2026-08-14T09:00:00Z",
               manualRoomPriceSetByName: "Carmen de Jager",
-              // An overridden room prices as a room whatever its occupancy, so it needs none.
+              // An overridden room prices as a room whatever its occupancy, but it still has to hold
+              // someone -- an empty room is refused (lib/packages/unit-headcount.ts).
+              adultCount: 1,
             },
             // Second room keeps the card price: the override is per room, not per leg.
             { suiteTypeId: "room-std", adultCount: 2, childCount: 1 },

@@ -27,6 +27,7 @@ export const runtime = "nodejs"
 import { isCoreBookingLeg, type SupplierKind } from "@/lib/types"
 import { normaliseCurrency } from "@/lib/money"
 import { PASSENGER_SUM_SUPPLIER_KINDS } from "@/lib/packages/apply-dialog-state"
+import { describeEmptyUnitSentence, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
 import { SERVICES_WITH_SUPPLIER_SELECT, SERVICES_WITH_UNITS_SELECT } from "@/lib/packages/service-columns"
 import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
 import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
@@ -564,6 +565,18 @@ export async function PATCH(req: Request, { params }: RouteParams) {
           packageLegId: selection.packageLegId,
           unitIndex,
           field: invalidField,
+        })
+      }
+    }
+
+    // An airline seat, hotel room or cruise cabin may hold more or fewer people than the booking,
+    // but never nobody at all -- that would price at R0 or bill an empty room.
+    if (supplierKind) {
+      const [emptyIndex] = findEmptyUnitIndexes(supplierKind, selection.units)
+      if (emptyIndex !== undefined) {
+        return jsonError(describeEmptyUnitSentence(supplierKind, emptyIndex), 400, {
+          packageLegId: selection.packageLegId,
+          unitIndex: emptyIndex,
         })
       }
     }

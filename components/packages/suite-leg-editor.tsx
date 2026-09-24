@@ -54,6 +54,7 @@ import {
   type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
 import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
+import { describeEmptyUnitSentence, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
 import { resolveDirectedEndpointCodes, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import {
   findRateCardCandidates,
@@ -832,6 +833,8 @@ export function SuiteLegEditor({
       ? formatHeadcountDifference(splitSummed, expectedTotals, headcountLegNoun(leg.supplierKind))
       : null
   const showHeadcountTally = (showPassengerSumCheck || showPassengerWarnCheck) && Boolean(expectedTotals)
+  // More or fewer people only warns, but a unit holding nobody blocks Next -- said on the card itself.
+  const emptyUnitIndexes = new Set(findEmptyUnitIndexes(leg.supplierKind, value.units))
 
   const nights = Math.max(1, value.nights ?? 1)
   const anchored = value.dateAnchor === "pre" || value.dateAnchor === "post"
@@ -1596,8 +1599,9 @@ export function SuiteLegEditor({
             <p className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
               <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span>
-                <span className="font-medium">{headcountNote}.</span> Priced for the people entered —
-                this won&apos;t block the quote.
+                <span className="font-medium">{headcountNote}.</span>
+                {/* An empty unit does block (see the card below), so don't promise otherwise. */}
+                {emptyUnitIndexes.size === 0 ? " Priced for the people entered — this won't block the quote." : null}
               </span>
             </p>
           ) : null}
@@ -1618,6 +1622,15 @@ export function SuiteLegEditor({
                 {pricesByTypeOnly ? (
                   <p className="text-xs font-medium text-muted-foreground md:col-span-2 xl:col-span-3">
                     {vocab.unitNoun.charAt(0).toUpperCase() + vocab.unitNoun.slice(1)} {index + 1}
+                  </p>
+                ) : null}
+                {emptyUnitIndexes.has(index) ? (
+                  <p
+                    role="alert"
+                    className="flex items-start gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive md:col-span-2 xl:col-span-3"
+                  >
+                    <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>{describeEmptyUnitSentence(leg.supplierKind, index)}</span>
                   </p>
                 ) : null}
                 <div className="space-y-1.5">

@@ -1540,6 +1540,7 @@ describe("validateConfigureState", () => {
     hotel.selected = true
     hotel.routeId = "route-bb"
     hotel.units[0].suiteTypeId = "room-1"
+    hotel.units[0].adultCount = 2
     const transfer = transportState(states, "leg-transfer")
     transfer.selected = true
     transfer.requests[0] = {
@@ -1550,6 +1551,19 @@ describe("validateConfigureState", () => {
     }
 
     expect(validateConfigureState(pkg, states, { totalsBySupplierId: totals })).toEqual([])
+  })
+
+  it("blocks a hotel room holding nobody, even though a headcount difference only warns", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: totals })
+    suiteState(states, "leg-train").units[0].suiteTypeId = "suite-1"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.routeId = "route-bb"
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 0, childCount: 0, infantCount: 0 }
+
+    expect(validateConfigureState(pkg, states, { totalsBySupplierId: totals })).toContainEqual(
+      expect.stringMatching(/room 1 has nobody in it — add guests or remove the room$/),
+    )
   })
 
   it("flags missing route, unit type, and passenger sum mismatches, but pickup/drop-off is optional", () => {

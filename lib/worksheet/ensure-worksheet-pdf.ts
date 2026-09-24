@@ -5,7 +5,7 @@ import { renderWorksheetPdf } from "@/lib/worksheet/render-worksheet-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { getDocumentBrandSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
-import { documentFileName } from "@/lib/documents/file-names"
+import { documentFileName, sanitizeFileNamePart as sanitizePath } from "@/lib/documents/file-names"
 import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 
 // The worksheet is a "summary_pdf" (documents.kind), an existing but
@@ -13,10 +13,6 @@ import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-docume
 // It shares the vouchers bucket rather than a dedicated one, so downloads
 // flow through the existing signed-URL route with no storage config change.
 export const WORKSHEET_BUCKET = "vouchers"
-
-function sanitizePath(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_\-]/g, "_")
-}
 
 export interface EnsuredWorksheetPdf {
   documentId: string

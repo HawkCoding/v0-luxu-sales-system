@@ -12,14 +12,10 @@ import {
 } from "@/lib/settings-access"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { logError } from "@/lib/error-log"
-import { documentFileName } from "@/lib/documents/file-names"
+import { documentFileName, sanitizeFileNamePart as sanitizePath } from "@/lib/documents/file-names"
 import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 
 export const INVOICE_BUCKET = "invoices"
-
-function sanitizePath(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_\-]/g, "_")
-}
 
 export interface EnsureInvoicePdfInput {
   invoice: {

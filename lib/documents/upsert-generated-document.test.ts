@@ -6,7 +6,7 @@ interface ExistingRow {
   storage_path: string
 }
 
-function createSupabase(existingRows: ExistingRow[]) {
+function createSupabase(existingRows: ExistingRow[], lookupError: { message: string } | null = null) {
   const writes: { op: "insert" | "update"; payload: Record<string, unknown>; id?: string }[] = []
   const lookups: { column: string; values: string[] }[] = []
 
@@ -22,10 +22,14 @@ function createSupabase(existingRows: ExistingRow[]) {
         lookups.push({ column, values })
         return chain
       }),
-      order: vi.fn(async () => ({
-        data: existingRows.filter((row) => lookups.at(-1)?.values.includes(row.storage_path)),
-        error: null,
-      })),
+      order: vi.fn(async () =>
+        lookupError
+          ? { data: null, error: lookupError }
+          : {
+              data: existingRows.filter((row) => lookups.at(-1)?.values.includes(row.storage_path)),
+              error: null,
+            },
+      ),
       insert: vi.fn((payload: Record<string, unknown>) => {
         pending = { op: "insert", payload }
         return chain
@@ -129,5 +133,24 @@ describe("upsertGeneratedDocument", () => {
       },
     ])
     expect(row?.id).toBe("new-doc")
+  })
+
+  it("writes nothing when the lookup fails, rather than inserting a duplicate row", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const { supabase, writes } = createSupabase([{ id: "legacy-doc", storage_path: LEGACY_PATH }], {
+      message: "connection reset",
+    })
+
+    const row = await upsertGeneratedDocument(supabase, {
+      bookingId: "booking-1",
+      kind: "invoice_pdf",
+      storagePath: NEW_PATH,
+      legacyStoragePaths: [LEGACY_PATH],
+      fileName: "Invoice-244453.pdf",
+    })
+
+    expect(row).toBeNull()
+    expect(writes).toEqual([])
+    consoleError.mockRestore()
   })
 })

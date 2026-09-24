@@ -18,17 +18,18 @@ import {
 } from "@/lib/settings-access"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { logError } from "@/lib/error-log"
-import { documentFileName, shortBookingRef, stripQuoteVersion } from "@/lib/documents/file-names"
+import {
+  documentFileName,
+  sanitizeFileNamePart as sanitizePath,
+  shortBookingRef,
+  stripQuoteVersion,
+} from "@/lib/documents/file-names"
 import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-document"
 import type { PricingSnapshot } from "@/lib/types"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
 
 export const QUOTE_BUCKET = "quotes"
-
-function sanitizePath(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_\-]/g, "_")
-}
 
 /**
  * Name of the quote PDF — both the emailed attachment and the stored file:

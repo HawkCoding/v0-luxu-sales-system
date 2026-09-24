@@ -36,6 +36,11 @@ const DOCUMENT_COLUMNS = "id, booking_id, kind, status, storage_path, created_at
 /**
  * Insert or update the documents row for a generated PDF, matching an existing
  * row by its current or any legacy storage path.
+ *
+ * The row's status is always written as `status` (default "generated"). A
+ * document whose status must survive a regeneration -- the voucher PDF keeps
+ * "sent", which gates the Voucher Sent stage -- must not use this as-is; that
+ * is why app/api/voucher/generate/route.ts keeps its own write.
  */
 export async function upsertGeneratedDocument(
   supabase: SupabaseClient<Database>,
@@ -43,13 +48,20 @@ export async function upsertGeneratedDocument(
 ): Promise<GeneratedDocumentRow | null> {
   const candidatePaths = Array.from(new Set([storagePath, ...legacyStoragePaths]))
 
-  const { data: existingRows } = await supabase
+  const { data: existingRows, error: lookupError } = await supabase
     .from("documents")
     .select("id, storage_path")
     .eq("booking_id", bookingId)
     .eq("kind", kind)
     .in("storage_path", candidatePaths)
     .order("created_at", { ascending: false })
+
+  // A failed lookup is not "no row": inserting here would duplicate the document in the Documents
+  // tab. Report it the same way a failed write is reported.
+  if (lookupError) {
+    console.error("upsertGeneratedDocument:lookup", lookupError)
+    return null
+  }
 
   const rows = existingRows ?? []
   // Prefer the row already on the current path; otherwise adopt the newest legacy row.
