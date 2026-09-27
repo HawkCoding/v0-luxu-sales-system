@@ -2,9 +2,9 @@ import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 
 /** Buckets in the order a supplier reads them, with their singular/plural forms. */
 const BUCKETS: Array<{ key: keyof PassengerTotals; one: string; many: string }> = [
-  { key: "adultCount", one: "adult", many: "adults" },
-  { key: "childCount", one: "child", many: "children" },
-  { key: "infantCount", one: "infant", many: "infants" },
+  { key: "adultCount", one: "Adult", many: "Adults" },
+  { key: "childCount", one: "Child", many: "Children" },
+  { key: "infantCount", one: "Infant", many: "Infants" },
 ]
 
 /**

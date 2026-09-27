@@ -317,16 +317,26 @@ function buildTrainScheduleBullets(
   rawStartTime: string | null | undefined,
   offsetMinutes: number | null | undefined,
 ): BulletLine[] {
-  const departure = formatTimeOfDay(rawStartTime)
-  if (!departure) return []
-  const effectiveOffset = offsetMinutes ?? 120
-  if (effectiveOffset <= 0) return []
-  const checkIn = subtractMinutes(rawStartTime, effectiveOffset)
-  if (!checkIn) return []
+  const times = trainScheduleTimes(rawStartTime, offsetMinutes)
+  if (!times) return []
   return [
-    { kind: "item", text: `Check in at ${checkIn}` },
-    { kind: "item", text: `Departure time: ${departure}` },
+    { kind: "item", text: `Check in at ${times.checkIn}` },
+    { kind: "item", text: `Departure time: ${times.departure}` },
   ]
+}
+
+/** The check-in and departure times behind buildTrainScheduleBullets — null on the same terms. */
+function trainScheduleTimes(
+  rawStartTime: string | null | undefined,
+  offsetMinutes: number | null | undefined,
+): { checkIn: string; departure: string } | null {
+  const departure = formatTimeOfDay(rawStartTime)
+  if (!departure) return null
+  const effectiveOffset = offsetMinutes ?? 120
+  if (effectiveOffset <= 0) return null
+  const checkIn = subtractMinutes(rawStartTime, effectiveOffset)
+  if (!checkIn) return null
+  return { checkIn, departure }
 }
 
 /** "Pretoria → Cape Town" → "Pretoria to Cape Town" — the flowing prose style used in the
@@ -352,17 +362,42 @@ function withLeadingThe(value: string): string {
   return /^the\s/i.test(value) ? value : `the ${value}`
 }
 
+/** A line's main clause and the facts trailed onto it ("… | Check in from 14h00"). */
+interface Sentence {
+  main: string
+  tail: string[]
+  separator: string
+}
+
+function sentence(
+  parts: Array<string | null | undefined>,
+  suffixes: Array<string | null | undefined>,
+  separator = " | ",
+): Sentence {
+  return {
+    main: parts.filter((part): part is string => Boolean(part?.trim())).join(" "),
+    tail: suffixes.filter((part): part is string => Boolean(part?.trim())),
+    separator,
+  }
+}
+
+function renderSentence({ main, tail, separator }: Sentence): string {
+  return tail.length > 0 ? `${main}${separator}${tail.join(" – ")}` : main
+}
+
 function joinSentence(
   parts: Array<string | null | undefined>,
   suffixes: Array<string | null | undefined>,
   separator = " | ",
 ): string {
-  const main = parts.filter((part): part is string => Boolean(part?.trim())).join(" ")
-  const tail = suffixes.filter((part): part is string => Boolean(part?.trim()))
-  return tail.length > 0 ? `${main}${separator}${tail.join(" – ")}` : main
+  return renderSentence(sentence(parts, suffixes, separator))
 }
 
 function describeBlock(block: VoucherServiceBlock): string {
+  return renderSentence(describeBlockSentence(block))
+}
+
+function describeBlockSentence(block: VoucherServiceBlock): Sentence {
   const d = block.serviceData
   const supplier = block.contactDetails.name?.trim() || null
   const location = block.contactDetails.location?.trim() || null
@@ -372,7 +407,7 @@ function describeBlock(block: VoucherServiceBlock): string {
     case "hotel": {
       const stay = d.nights && d.nights > 0 ? formatNights(d.nights) : "Stay"
       const at = [supplier, location].filter(Boolean).join(", ")
-      return joinSentence(
+      return sentence(
         [
           `${stay} at ${at ? withLeadingThe(at) : "the hotel"}`,
           d.roomType ? `in a ${d.roomType}` : null,
@@ -403,7 +438,7 @@ function describeBlock(block: VoucherServiceBlock): string {
       // bullet ahead of it (checkInOffsetMinutes 0, or no offset known) -- see
       // buildTrainScheduleBullets, which owns the "Check in at … / Departure time: …" wording.
       const scheduleBullets = buildTrainScheduleBullets(d.startTime, d.checkInOffsetMinutes)
-      return joinSentence(
+      return sentence(
         [
           `${onBoard} ${supplier ? withLeadingThe(supplier) : "the train"}`,
           suiteLabel ? `in a ${suiteLabel}` : null,
@@ -423,7 +458,7 @@ function describeBlock(block: VoucherServiceBlock): string {
             : null
       // isComplimentary still drives the voucher's callout -- never spelled out on the quote
       // itself, for the same reason as the hotel case above.
-      return joinSentence(
+      return sentence(
         ["Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
         [start ? `at ${start}` : null],
         " ",
@@ -441,7 +476,7 @@ function describeBlock(block: VoucherServiceBlock): string {
       // bullets further down.
       const tourType = d.suiteType?.trim() || null
       const namesTourType = tourType ? title.toLowerCase().includes(tourType.toLowerCase()) : true
-      return joinSentence(
+      return sentence(
         [
           title,
           namesLocation ? null : `in ${location}`,
@@ -456,7 +491,7 @@ function describeBlock(block: VoucherServiceBlock): string {
       // earns its own dated line instead (see describeEndLine).
       const landsSameDay = Boolean(d.arrivalDate) && d.arrivalDate === d.departureDate
       const end = landsSameDay ? formatTimeOfDay(d.endTime) : null
-      return joinSentence(
+      return sentence(
         [
           supplier ? `Flight with ${supplier}` : "Flight",
           d.flightNumber,
@@ -467,7 +502,7 @@ function describeBlock(block: VoucherServiceBlock): string {
       )
     }
     default:
-      return block.title?.trim() || supplier || voucherServiceTypeLabel(block.serviceType)
+      return sentence([block.title?.trim() || supplier || voucherServiceTypeLabel(block.serviceType)], [])
   }
 }
 
@@ -615,4 +650,74 @@ export function collectQuoteExclusions(
   if (fallback && !seen.has(fallback.toLowerCase())) exclusions.push(fallback)
 
   return exclusions
+}
+
+/** One date of the quote PDF's "Travel Package Includes" list: each entry prints as its own bullet. */
+export interface QuoteSummaryDay {
+  dateISO: string | null
+  items: string[]
+}
+
+/**
+ * The quote PDF's first-page summary: what happens on each date, as short bullets, with the
+ * supplier inclusions and hotel descriptions left for the separate "Travel Package Details" page
+ * (see lib/quotes/pdf/quote-details.ts). Same sentences and ordering as buildQuoteItineraryLines —
+ * the email keeps that one untouched — but a stay's or journey's trailing fact ("Check in from
+ * 14h00", "Check in at 10h00 - Train departs at 12h00") becomes its own bullet, and a train's
+ * arrival caveat joins its arrival line, as the approved template sets them.
+ */
+export function buildQuoteSummaryDays(
+  blocks: VoucherServiceBlock[],
+  flightCapBullet?: string | null,
+): QuoteSummaryDay[] {
+  const lines: Array<{ dateISO: string | null; items: string[] }> = []
+  let flightCapAttached = false
+
+  blocks.forEach((block) => {
+    const d = block.serviceData
+    const described = describeBlockSentence(block)
+    const splitsTail = block.serviceType === "hotel" || block.serviceType === "train"
+    const items = splitsTail ? [described.main, ...described.tail] : [renderSentence(described)]
+
+    if (block.serviceType === "train") {
+      const times = trainScheduleTimes(d.startTime, d.checkInOffsetMinutes)
+      if (times) items.push(`Check in at ${times.checkIn} - Train departs at ${times.departure}`)
+    }
+    if (flightCapBullet && !flightCapAttached && block.serviceType === "airline") {
+      items.push(flightCapBullet)
+      flightCapAttached = true
+    }
+    lines.push({ dateISO: d.departureDate ?? null, items })
+
+    const endLine = describeEndLine(block)
+    if (endLine) {
+      const [headline, ...notes] = endLine.text.split(" | ")
+      const warnings = endLine.bullets.filter((bullet) => bullet.kind === "warning").map((bullet) => bullet.text)
+      lines.push({ dateISO: endLine.dateISO, items: [[headline, ...warnings].join(" - "), ...notes] })
+    }
+  })
+
+  // Undated lines keep their position at the end rather than sorting to the front.
+  const sorted = lines
+    .map((line, index) => ({ line, index }))
+    .sort((a, b) => {
+      const aDate = a.line.dateISO ?? "9999-12-31"
+      const bDate = b.line.dateISO ?? "9999-12-31"
+      if (aDate !== bDate) return aDate < bDate ? -1 : 1
+      return a.index - b.index
+    })
+    .map((entry) => entry.line)
+
+  const days: QuoteSummaryDay[] = []
+  const seen = new Set<string>()
+  for (const line of sorted) {
+    // Same backstop as buildQuoteItineraryLines: two stays ending the same day never print twice.
+    const key = `${line.dateISO ?? ""} ${line.items.join("")}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const last = days[days.length - 1]
+    if (last && last.dateISO === line.dateISO) last.items.push(...line.items)
+    else days.push({ dateISO: line.dateISO, items: [...line.items] })
+  }
+  return days
 }

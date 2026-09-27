@@ -17,6 +17,9 @@
         "current",
         "x64"
       ]
+    },
+    "patchedDependencies": {
+      "@react-pdf/textkit@6.3.0": "patches/@react-pdf__textkit@6.3.0.patch"
     }
   },
   "scripts": {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   formatBulletLinesInline,
+  nestBulletLines,
   isHeadingLine,
   parseBulletLines,
   splitBulletLines,
@@ -85,5 +86,47 @@ describe("formatBulletLinesInline", () => {
   it("falls back to a plain comma list when no subheading is used", () => {
     expect(formatBulletLinesInline(["High Tea", "Wi-Fi"])).toBe("High Tea, Wi-Fi")
     expect(formatBulletLinesInline([])).toBe("")
+  })
+})
+
+describe("nestBulletLines", () => {
+  it("nests items under a subheading and keeps earlier items at the first level", () => {
+    expect(nestBulletLines(parseBulletLines(["Welcome drink", "# Onboard:", "All meals"]))).toEqual([
+      { text: "Welcome drink", level: 1, bold: false },
+      { text: "Onboard:", level: 1, bold: true },
+      { text: "All meals", level: 2, bold: false },
+    ])
+  })
+
+  it("turns a subheading that only heads other subheadings into an unbulleted group label", () => {
+    const lines = nestBulletLines(parseBulletLines(["# Long Journeys", "# Onboard:", "All meals", "# Off-train:", "Flights"]))
+
+    expect(lines.map((line) => [line.text, line.level])).toEqual([
+      ["Long Journeys", 0],
+      ["Onboard:", 1],
+      ["All meals", 2],
+      ["Off-train:", 1],
+      ["Flights", 2],
+    ])
+  })
+
+  it("ranks a sibling section before the group as a label too, its items as plain dots", () => {
+    const lines = nestBulletLines(
+      parseBulletLines(["# Short Journeys", "Government tax", "# Long Journeys", "# Onboard:", "All meals"]),
+    )
+
+    expect(lines.map((line) => [line.text, line.level])).toEqual([
+      ["Short Journeys", 0],
+      ["Government tax", 1],
+      ["Long Journeys", 0],
+      ["Onboard:", 1],
+      ["All meals", 2],
+    ])
+  })
+})
+
+describe("formatBulletLinesInline — typed colons", () => {
+  it("never doubles a subheading's own colon", () => {
+    expect(formatBulletLinesInline(["# Onboard:", "All meals"])).toBe("Onboard: All meals")
   })
 })

@@ -14,11 +14,22 @@
 
 export const FOOTER_BRAND_ALT = "SARAIL"
 export const FOOTER_BRAND_DIVISION_LINE = "A division of Luxus Travel & Tours"
-export const FOOTER_BRAND_PRODUCT_LINE = "BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI"
+export const FOOTER_BRAND_PRODUCT_LINE = "THE BLUE TRAIN - ROVOS RAIL - KRUGER SHALATI"
 
 export const FOOTER_BRAND_BUCKET = "voucher-assets"
 export const FOOTER_BRAND_OBJECT_PATH = "brand/sarail-footer-logo.png"
 export const FOOTER_BRAND_LOCAL_PATH = "assets/brand/sarail-footer-logo.png"
+
+/**
+ * The seal every PDF prints when no logo has been uploaded in Settings: the designer's full SA-Rail
+ * logo on a white sticker ring, exactly as embedded in the approved templates (Figma "SA-Rail new
+ * Templates"). Separate from the email footer logo above, which is mirrored into the public bucket
+ * and keeps its own asset.
+ */
+export const DOCUMENT_BRAND_LOGO_LOCAL_PATH = "assets/brand/sarail-document-logo.png"
+
+/** The trading name after the copyright mark in every PDF's footer: "©SA Rail 2026". */
+export const DOCUMENT_FOOTER_BRAND_NAME = "SA Rail"
 
 /**
  * Absolute public URL of the footer logo for email embedding. Each environment

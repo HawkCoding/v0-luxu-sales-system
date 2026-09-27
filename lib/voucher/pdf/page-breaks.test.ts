@@ -47,7 +47,9 @@ const voucherData = {
   consultant: "TC",
   enquiry: { noOfAdults: 2, noOfChildren: 0, noOfSuites: 1 },
   serviceBlocks: Array.from({ length: 9 }, (_, i) =>
-    serviceBlock(i + 1, i + 1 === OVERSIZED_BLOCK ? "X ".repeat(1200) : undefined),
+    // Block 8 is taller than a whole page on its own (~110 lines of notes) — the one block allowed
+    // to break.
+    serviceBlock(i + 1, i + 1 === OVERSIZED_BLOCK ? "X ".repeat(6000) : undefined),
   ),
 } as unknown as VoucherData
 

@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError } from "@/lib/api/responses"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import { loadDocumentFooterCompany } from "@/lib/pdf/document-footer-company"
 import { getPaymentMethod } from "@/lib/payment-methods"
 import {
   getDocumentBrandSettings,
@@ -66,7 +67,7 @@ export async function GET(
   let buffer: Buffer
   try {
     const { brand, position } = resolveDocumentBrand(await getDocumentBrandSettings(supabase, kind))
-    const brandLogo = await loadBrandLogo(brand.logoUrl)
+    const [brandLogo, company] = await Promise.all([loadBrandLogo(brand.logoUrl), loadDocumentFooterCompany(supabase)])
 
     if (type === "voucher") {
       const [template, documentText] = await Promise.all([
@@ -79,6 +80,7 @@ export async function GET(
         docTitle: documentText.voucher_doc_title,
         brand,
         brandLogo,
+        company,
       })
     } else if (type === "itinerary") {
       const [template, documentText] = await Promise.all([
@@ -92,6 +94,7 @@ export async function GET(
         introText: documentText.itinerary_doc_intro_text,
         brand,
         brandLogo,
+        company,
       })
     } else if (type === "quote") {
       const documentText = await getDocumentTextSettings(supabase, kind)
@@ -105,6 +108,7 @@ export async function GET(
         brand,
         brandPosition: position.quote,
         brandLogo,
+        company,
       })
     } else if (type === "worksheet") {
       buffer = await renderWorksheetPdf({

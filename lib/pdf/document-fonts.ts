@@ -31,6 +31,17 @@ export const DOCUMENT_FONT_FAMILY = "Carlito"
  */
 export const BOLD_TEXT = { fontFamily: DOCUMENT_FONT_FAMILY, fontWeight: 700 } as const
 
+/**
+ * The SA-Rail document design (quote, invoice, voucher, itinerary): Manrope for every word on the
+ * page and Cormorant Garamond for the letterhead line, both Google fonts shipped by the designer.
+ * Manrope has no bold-italic or italic files at all, so never give its text `fontStyle: "italic"`.
+ * It also lacks a few glyphs the booking data can carry (↔ on round-trip routes), so body text is
+ * set as a family list: react-pdf falls back to Carlito glyph by glyph rather than dropping them.
+ */
+export const DESIGN_BODY_FONT = "Manrope"
+export const DESIGN_DISPLAY_FONT = "Cormorant Garamond"
+export const DESIGN_BODY_FAMILY: string[] = [DESIGN_BODY_FONT, DOCUMENT_FONT_FAMILY]
+
 const DISPLAY_FAMILY = "Playfair Display"
 const SANS_FAMILY = "Montserrat"
 
@@ -106,6 +117,17 @@ export function registerDocumentFonts(): void {
       { src: fontPath("Tinos-Italic.ttf"), fontStyle: "italic" },
       { src: fontPath("Tinos-Bold.ttf"), fontWeight: 700 },
     ],
+  })
+  Font.register({
+    family: DESIGN_BODY_FONT,
+    fonts: [
+      { src: fontPath("Manrope-Regular.ttf") },
+      { src: fontPath("Manrope-Bold.ttf"), fontWeight: 700 },
+    ],
+  })
+  Font.register({
+    family: DESIGN_DISPLAY_FONT,
+    fonts: [{ src: fontPath("CormorantGaramond-Regular.ttf") }],
   })
   Font.register({
     family: "DejaVu Sans",

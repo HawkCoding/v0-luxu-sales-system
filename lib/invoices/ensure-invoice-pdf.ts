@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import { buildInvoiceView } from "@/lib/invoices/build-invoice-view"
+import { buildInvoiceView, invoiceJourneyHeading } from "@/lib/invoices/build-invoice-view"
 import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
@@ -90,7 +90,7 @@ export async function ensureInvoicePdf(
   const view = await buildInvoiceView(supabase, {
     bookingId: invoice.booking_id,
     quoteId: invoice.quote_id ?? null,
-    journeyHeading: documentText.itinerary_doc_journey_heading,
+    journeyHeading: invoiceJourneyHeading(documentText.itinerary_doc_journey_heading, primarySupplierKind),
     primarySupplierKind,
   })
 

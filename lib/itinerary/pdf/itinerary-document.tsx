@@ -1,31 +1,77 @@
-import { Document, Page, Text, View } from "@react-pdf/renderer"
-import { StyleSheet } from "@react-pdf/renderer"
+import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import {
+  FOOTER_BRAND_DIVISION_LINE,
+  FOOTER_BRAND_PRODUCT_LINE,
+} from "@/lib/assets/footer-brand"
 import type { ItineraryData } from "@/lib/itinerary/build-itinerary"
+import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
+import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import {
+  BOLD,
+  DESIGN_COLORS,
+  DocumentFooter,
+  DocumentHeader,
+  FOOTER_CLEARANCE,
+  FooterClearance,
+  PageBackground,
+  RULE_WIDTH,
+  buildDocumentFooterLines,
+  withColon,
+  type DocumentFooterCompany,
+} from "@/lib/pdf/sarail-design"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { registerDocumentFonts, resolveDocumentFontPairing } from "@/lib/pdf/document-fonts"
-import { voucherStyles } from "@/lib/voucher/pdf/styles"
-import { HeaderBanner } from "@/lib/voucher/pdf/sections/header-banner"
-import { VoucherFooter } from "@/lib/voucher/pdf/sections/footer"
-import { ServiceBlock } from "@/lib/voucher/pdf/sections/service-block"
-import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import { joinGuestNames } from "@/lib/voucher/pdf/sections/guest-info"
+import { InfoRow } from "@/lib/voucher/pdf/sections/info-row"
+import { ServiceBlock, serviceBlockFitsOnOnePage } from "@/lib/voucher/pdf/sections/service-block"
+import { VOUCHER_PAGE_PADDING, voucherStyles } from "@/lib/voucher/pdf/styles"
 
 export interface ItineraryDocumentProps {
   data: ItineraryData
   template?: VoucherTemplate | null
   journeyHeading?: string
   introText?: string
-  /** Shared brand copy for the masthead. */
+  /** Shared brand copy for the letterhead. */
   brand?: DocumentBrand
   /** Brand logo resolved to embeddable bytes (see lib/pdf/brand-logo.ts). */
   brandLogo?: BrandLogoImage | null
+  /** Company details for the last page's footer. */
+  company?: DocumentFooterCompany
 }
 
 function normalizeTemplate(t?: VoucherTemplate | null): VoucherTemplate {
   return { ...VOUCHER_TEMPLATE_DEFAULTS, ...t }
 }
+
+// The itinerary has no template of its own in the design hand-over; it wears the voucher's
+// (patterned page, letterhead, Swirl boxes) so every client document reads as one family, and its
+// footer is the shared one the brief says "matches the itineraries".
+const extra = StyleSheet.create({
+  intro: {
+    fontSize: 8,
+    lineHeight: 1.4,
+    marginLeft: 27.7,
+    marginRight: 27.7,
+    marginTop: 14.7,
+  },
+  notes: {
+    fontSize: 8,
+    lineHeight: 1.4,
+  },
+  journeyHeading: {
+    ...BOLD,
+    fontSize: 12,
+    marginLeft: 27.7,
+    marginRight: 27.7,
+    // Boxes carry their own 14.7pt gap above them, which spaces the first one off this rule.
+    marginTop: 14.7,
+    paddingBottom: 5.3,
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
+  },
+})
 
 export function ItineraryDocument({
   data,
@@ -33,80 +79,24 @@ export function ItineraryDocument({
   journeyHeading = "Your Journey",
   introText,
   brand,
-  brandLogo,
+  brandLogo = null,
+  company,
 }: ItineraryDocumentProps) {
   registerDocumentFonts()
 
   const t = normalizeTemplate(template)
-  const styles = voucherStyles({
-    accentColour: t.accent_colour,
-    sectionBg: t.section_bg,
-    fonts: resolveDocumentFontPairing(t.font_family),
-  })
-
-  const extra = StyleSheet.create({
-    titleRow: {
-      alignItems: "flex-start",
-      flexDirection: "column",
-      marginBottom: 6,
-      marginTop: 16,
-    },
-    tripTitle: {
-      color: t.accent_colour,
-      fontSize: 18,
-      fontWeight: 700,
-    },
-    ref: {
-      color: "#888888",
-      fontSize: 9,
-      marginTop: 2,
-    },
-    guestRow: {
-      flexDirection: "row",
-      marginBottom: 12,
-      marginTop: 4,
-    },
-    guestLabel: {
-      color: "#555555",
-      fontSize: 10,
-      fontWeight: 700,
-      width: 90,
-    },
-    guestValue: {
-      color: "#333333",
-      flex: 1,
-      fontSize: 10,
-    },
-    notesBox: {
-      backgroundColor: "#f8f5f0",
-      borderLeftColor: t.accent_colour,
-      borderLeftWidth: 3,
-      color: "#444444",
-      fontSize: 10,
-      lineHeight: 1.5,
-      marginBottom: 20,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    introText: {
-      color: "#444444",
-      fontSize: 10,
-      lineHeight: 1.5,
-      marginBottom: 14,
-    },
-    journeyHeading: {
-      backgroundColor: t.section_bg,
-      borderRadius: 2,
-      color: "#ffffff",
-      fontSize: 12,
-      fontWeight: 700,
-      marginBottom: 14,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-    },
-  })
+  const styles = voucherStyles()
+  const resolvedBrand: DocumentBrand = brand ?? {
+    heading: FOOTER_BRAND_PRODUCT_LINE,
+    subheading: FOOTER_BRAND_DIVISION_LINE,
+    logoUrl: null,
+  }
+  const footerLines = t.hidden_sections.includes("footer")
+    ? []
+    : buildDocumentFooterLines(company ?? {}, { division: resolvedBrand.subheading, year: new Date().getFullYear() })
 
   const sorted = sortItineraryBlocksChronologically(data.serviceBlocks)
+  const last = sorted.at(-1)
 
   return (
     <Document
@@ -115,50 +105,57 @@ export function ItineraryDocument({
       title={data.tripTitle || `Itinerary — ${data.bookingNumber}`}
     >
       <Page size="A4" style={styles.page}>
-        <HeaderBanner styles={styles} brand={brand} brandLogo={brandLogo} />
+        <PageBackground />
+        <DocumentHeader brand={resolvedBrand} logo={brandLogo} padding={VOUCHER_PAGE_PADDING} />
 
-        <View style={extra.titleRow}>
-          <Text style={extra.tripTitle}>{data.tripTitle || "Your Itinerary"}</Text>
-          <Text style={extra.ref}>Booking ref: {data.bookingNumber}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>{data.tripTitle || "Your Itinerary"}</Text>
+          <View style={styles.reference}>
+            <Text style={styles.referenceLabel}>Booking Ref:</Text>
+            <Text style={styles.referenceValue}>{data.bookingNumber}</Text>
+          </View>
         </View>
 
-        <View style={extra.guestRow}>
-          <Text style={extra.guestLabel}>Guests:</Text>
-          <Text style={extra.guestValue}>{data.guestNames}</Text>
-        </View>
-        <View style={extra.guestRow}>
-          <Text style={extra.guestLabel}>Departure:</Text>
-          <Text style={extra.guestValue}>{data.departure}</Text>
+        <View style={[styles.box, styles.guestBox]} wrap={false}>
+          <InfoRow label="Guests" value={joinGuestNames(data.guestNames)} styles={styles} />
+          <InfoRow label="Departure" value={data.departure} styles={styles} />
+          {data.consultantName ? <InfoRow label="Consultant" value={data.consultantName} styles={styles} /> : null}
         </View>
 
-        {introText?.trim() ? (
-          <Text style={extra.introText}>{introText.trim()}</Text>
-        ) : null}
+        {introText?.trim() ? <Text style={extra.intro}>{introText.trim()}</Text> : null}
 
         {data.tripNotes ? (
-          <Text style={extra.notesBox}>{data.tripNotes}</Text>
+          <View style={styles.box} wrap={false}>
+            <Text style={extra.notes}>{data.tripNotes}</Text>
+          </View>
         ) : null}
 
         {sorted.length > 0 ? (
           <>
-            <Text style={extra.journeyHeading}>{journeyHeading}</Text>
-            {sorted.map((block, idx) => (
-              <ServiceBlock
-                key={`${block.serviceType}-${idx}`}
-                block={block}
-                styles={styles}
-              />
+            <Text style={extra.journeyHeading} minPresenceAhead={80}>
+              {withColon(journeyHeading)}
+            </Text>
+            {sorted.slice(0, -1).map((block, idx) => (
+              <ServiceBlock key={`${block.serviceType}-${idx}`} block={block} styles={styles} />
             ))}
           </>
         ) : null}
 
-        <VoucherFooter template={t} styles={styles} />
-
-        <Text
-          fixed
-          render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
-          style={styles.pageNumber}
-        />
+        {/* The last block travels with the footer's clearance, so the footer never overprints it and
+            never sits alone on an otherwise empty page — unless the block is too tall to keep whole,
+            when it breaks like any other and the clearance follows it. */}
+        {last && !serviceBlockFitsOnOnePage(last, {}, FOOTER_CLEARANCE) ? (
+          <>
+            <ServiceBlock block={last} styles={styles} />
+            <FooterClearance />
+          </>
+        ) : (
+          <View wrap={false}>
+            {last ? <ServiceBlock block={last} styles={styles} /> : null}
+            <FooterClearance />
+          </View>
+        )}
+        <DocumentFooter lines={footerLines} />
       </Page>
     </Document>
   )

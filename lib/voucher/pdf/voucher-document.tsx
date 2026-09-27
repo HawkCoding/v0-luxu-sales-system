@@ -1,77 +1,122 @@
 import { Document, Page, Text, View } from "@react-pdf/renderer"
-import type { VoucherData } from "@/lib/generate-voucher"
+import {
+  FOOTER_BRAND_DIVISION_LINE,
+  FOOTER_BRAND_PRODUCT_LINE,
+} from "@/lib/assets/footer-brand"
+import type { VoucherData, VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
+import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import {
+  DocumentFooter,
+  DocumentHeader,
+  FOOTER_CLEARANCE,
+  FooterClearance,
+  PageBackground,
+  buildDocumentFooterLines,
+  displayDocumentTitle,
+  type DocumentFooterCompany,
+} from "@/lib/pdf/sarail-design"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherSectionKey, VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { registerDocumentFonts, resolveDocumentFontPairing } from "@/lib/pdf/document-fonts"
-import { voucherStyles } from "./styles"
-import { HeaderBanner } from "./sections/header-banner"
+import { VOUCHER_PAGE_PADDING, voucherStyles, type VoucherStyles } from "./styles"
 import { GuestInfo } from "./sections/guest-info"
 import { ServiceProvider } from "./sections/service-provider"
-import { ServiceBlock } from "./sections/service-block"
-import { VoucherFooter } from "./sections/footer"
+import { ServiceBlock, serviceBlockFitsOnOnePage } from "./sections/service-block"
 
 export interface VoucherDocumentProps {
   data: VoucherData
   template?: VoucherTemplate | null
   docTitle?: string
-  /** Shared brand copy for the masthead. */
+  /** Shared brand copy for the letterhead. */
   brand?: DocumentBrand
   /** Brand logo resolved to embeddable bytes (see lib/pdf/brand-logo.ts). */
   brandLogo?: BrandLogoImage | null
+  /** Company details for the last page's footer. */
+  company?: DocumentFooterCompany
 }
 
 function normalizeTemplate(template?: VoucherTemplate | null): VoucherTemplate {
   return { ...VOUCHER_TEMPLATE_DEFAULTS, ...template }
 }
 
-function sectionFor(key: VoucherSectionKey, data: VoucherData, template: VoucherTemplate, styles: ReturnType<typeof voucherStyles>) {
-  if (key === "guest_info") return <GuestInfo key={key} data={data} styles={styles} />
+/** "End Of Services" (21.7 gap + one 10pt line) plus the footer's clearance under it. */
+const CLOSING_HEIGHT = 21.7 + 13.7 + FOOTER_CLEARANCE
+
+function sectionFor(key: VoucherSectionKey, data: VoucherData, template: VoucherTemplate, styles: VoucherStyles) {
+  if (key === "guest_info") {
+    return <GuestInfo key={key} data={data} styles={styles} guidance={template.guidance_text} />
+  }
   if (key === "service_provider") {
-    const blocks = data.serviceBlocks ?? []
-    if (blocks.length === 0) {
-      return (
-        <View key={key}>
-          <ServiceProvider data={data} styles={styles} />
-          <Text style={styles.endOfServices}>End of Services</Text>
-        </View>
-      )
-    }
+    const blocks = sortedVoucherServiceBlocks(data.serviceBlocks ?? [])
+    const last = blocks.at(-1)
+    const closing = (
+      <>
+        <Text style={styles.endOfServices}>End Of Services. Thank you</Text>
+        <FooterClearance />
+      </>
+    )
+    const blockFor = (block: VoucherServiceBlock, idx: number) => (
+      <ServiceBlock
+        key={`${block.serviceType}-${idx}`}
+        block={block}
+        styles={styles}
+        showDescription={false}
+        showInclusions={false}
+      />
+    )
+    // The closing line and the footer's clearance travel with the last block, so the footer never
+    // overprints them and "End Of Services" never sits alone on a page — unless the block and the
+    // closing line together would not fit one page, when the block goes on its own (whole, or
+    // breaking if it is taller than a page) and the closing line follows it.
+    const lastKeptWhole = last
+      ? serviceBlockFitsOnOnePage(last, { showDescription: false, showInclusions: false }, CLOSING_HEIGHT)
+      : true
     return (
       <View key={key}>
-        {sortedVoucherServiceBlocks(blocks).map((block, idx) => (
-          <ServiceBlock
-            key={`${block.serviceType}-${idx}`}
-            block={block}
-            styles={styles}
-            density="compact"
-            showEyebrow={false}
-            showDescription={false}
-            showInclusions={false}
-          />
-        ))}
-        <Text style={styles.endOfServices}>End of Services</Text>
+        {blocks.length === 0 ? <ServiceProvider data={data} styles={styles} /> : blocks.slice(0, -1).map(blockFor)}
+        {last && !lastKeptWhole ? (
+          <>
+            {blockFor(last, blocks.length - 1)}
+            <View wrap={false}>{closing}</View>
+          </>
+        ) : (
+          <View wrap={false}>
+            {last ? blockFor(last, blocks.length - 1) : null}
+            {closing}
+          </View>
+        )}
       </View>
     )
   }
-  if (key === "footer") return <VoucherFooter key={key} template={template} styles={styles} />
+  // "footer" is the company footer on the last page — drawn by the Page itself, see below.
   return null
 }
 
-export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", brand, brandLogo }: VoucherDocumentProps) {
+export function VoucherDocument({
+  data,
+  template,
+  docTitle = "Travel Vouchers",
+  brand,
+  brandLogo = null,
+  company,
+}: VoucherDocumentProps) {
   registerDocumentFonts()
 
   const t = normalizeTemplate(template)
-  const styles = voucherStyles({
-    accentColour: t.accent_colour,
-    sectionBg: t.section_bg,
-    fonts: resolveDocumentFontPairing(t.font_family),
-    density: "compact",
-  })
+  const styles = voucherStyles()
   const sectionOrder = t.section_order.length > 0 ? t.section_order : VOUCHER_TEMPLATE_DEFAULTS.section_order
   const hiddenSections = new Set(t.hidden_sections)
+  const visibleSections = sectionOrder.filter((key) => !hiddenSections.has(key))
+  const resolvedBrand: DocumentBrand = brand ?? {
+    heading: FOOTER_BRAND_PRODUCT_LINE,
+    subheading: FOOTER_BRAND_DIVISION_LINE,
+    logoUrl: null,
+  }
+  const footerLines = hiddenSections.has("footer")
+    ? []
+    : buildDocumentFooterLines(company ?? {}, { division: resolvedBrand.subheading, year: new Date().getFullYear() })
 
   return (
     <Document
@@ -80,30 +125,25 @@ export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", 
       title={`Travel Voucher - ${data.voucherNumber}`}
     >
       <Page size="A4" style={styles.page}>
-        <View fixed style={styles.frameOuter} />
-        <View fixed style={styles.frameInner} />
+        <PageBackground />
+        <DocumentHeader brand={resolvedBrand} logo={brandLogo} padding={VOUCHER_PAGE_PADDING} />
 
-        <HeaderBanner styles={styles} brand={brand} brandLogo={brandLogo} />
-
-        <View style={styles.voucherNumberRow}>
-          <Text style={styles.title}>{docTitle}</Text>
-          <View style={styles.voucherStub}>
-            <Text style={styles.voucherStubLabel}>Reference no.</Text>
-            <Text style={styles.voucherStubNumber}>{data.voucherNumber}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>{displayDocumentTitle(docTitle) || "Travel Vouchers"}</Text>
+          <View style={styles.reference}>
+            <Text style={styles.referenceLabel}>Reference Nr:</Text>
+            <Text style={styles.referenceValue}>{data.voucherNumber}</Text>
           </View>
         </View>
 
-        {t.guidance_text ? <Text style={styles.guidance}>{t.guidance_text}</Text> : null}
+        {/* Without the guest box the hand-over note still prints, just on its own. */}
+        {!visibleSections.includes("guest_info") && t.guidance_text?.trim() ? (
+          <Text style={[styles.guidanceStandalone, { marginTop: 4.3 }]}>{t.guidance_text.trim()}</Text>
+        ) : null}
 
-        {sectionOrder
-          .filter((key) => !hiddenSections.has(key))
-          .map((key) => sectionFor(key, data, t, styles))}
+        {visibleSections.map((key) => sectionFor(key, data, t, styles))}
 
-        <Text
-          fixed
-          render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
-          style={styles.pageNumber}
-        />
+        <DocumentFooter lines={footerLines} />
       </Page>
     </Document>
   )

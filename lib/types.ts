@@ -1740,5 +1740,5 @@ export const VOUCHER_TEMPLATE_DEFAULTS: VoucherTemplate = {
   footer_phone: "",
   footer_email: "",
   guidance_text:
-    "Please hand to your service provider. Pre-payment was made by Luxus Travel & Tours for all services mentioned below. Guests must settle extras direct with the service providers.",
+    "Please hand to your service provider. Pre-payment was made by Luxus Travel & Tours for all services mentioned below. Guests must settle extras directly with the service providers.",
 }

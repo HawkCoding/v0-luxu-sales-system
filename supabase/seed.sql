@@ -1442,16 +1442,16 @@ insert into public.app_settings (key,value,updated_at) values
   ('email_footer_tagline','Luxury train journeys, handled with care.','2026-07-13T20:23:38.009841+00:00'),
   ('quote_doc_excludes_heading','Your Package Excludes','2026-07-21T11:11:29.487455+00:00'),
   ('quote_doc_excludes_default','Services not mentioned.','2026-07-21T11:11:29.487455+00:00'),
-  ('quote_doc_footer_text','This quotation is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.','2026-07-21T11:11:29.84507+00:00'),
+  ('quote_doc_footer_text','This quotation is subject to availability. Prices are quoted in {{currency}}.','2026-07-21T11:11:29.84507+00:00'),
   ('quote_doc_title','QUOTATION','2026-07-13T20:23:38.009841+00:00'),
   ('company_tel','','2026-07-21T11:11:32.604265+00:00'),
   ('company_cell','','2026-07-21T11:11:32.604265+00:00'),
   ('company_fax','','2026-07-21T11:11:32.604265+00:00'),
   ('company_website','','2026-07-21T11:11:32.604265+00:00'),
-  ('invoice_doc_payment_note','Please e-mail proof of payment. Reservations can only be confirmed once payment has been received.','2026-07-21T11:11:32.604265+00:00'),
+  ('invoice_doc_payment_note','Please email proof of payment. Reservations can only be confirmed once payment has been received.','2026-07-21T11:11:32.604265+00:00'),
   ('invoice_doc_bank_charges_note','Please note that the amounts transferred should be exclusive of all bank charges.','2026-07-21T11:11:32.604265+00:00'),
   ('invoice_status_options','[{"role":"provisional","label":"Provisional"},{"role":"confirmed","label":"Confirmed"},{"role":"paid","label":"Paid in Full"},{"role":"cancelled","label":"Cancelled"}]','2026-07-21T11:11:33.288351+00:00'),
-  ('brand_block_heading','BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI','2026-07-21T11:11:33.661601+00:00'),
+  ('brand_block_heading','THE BLUE TRAIN - ROVOS RAIL - KRUGER SHALATI','2026-07-21T11:11:33.661601+00:00'),
   ('brand_block_subheading','A division of Luxus Travel & Tours','2026-07-21T11:11:33.661601+00:00'),
   ('brand_block_position_quote','top','2026-07-21T11:11:33.661601+00:00'),
   ('brand_block_position_invoice','top','2026-07-21T11:11:33.661601+00:00'),
@@ -1461,7 +1461,7 @@ insert into public.app_settings (key,value,updated_at) values
   ('email_font_family','Calibri, Candara, Segoe, ''Segoe UI'', Optima, Arial, sans-serif','2026-07-22T08:53:01.264+00:00'),
   ('email_font_size','14px','2026-07-22T08:53:01.264+00:00'),
   ('brand_block_position_email','top','2026-07-22T09:05:10.628+00:00'),
-  ('brand_block_logo_url','https://qlwldfhjfbxliyjvoziu.supabase.co/storage/v1/object/public/voucher-assets/brand/sarail-footer-logo.png?t=1784711198487','2026-07-22T09:06:38.69+00:00')
+  ('brand_block_logo_url','','2026-07-22T09:06:38.69+00:00')
 on conflict (key) do update set value=excluded.value,updated_at=excluded.updated_at;
 
 update public.voucher_template set

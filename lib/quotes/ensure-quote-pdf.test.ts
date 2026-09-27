@@ -120,3 +120,26 @@ describe("legacyQuoteObjectPath", () => {
     expect(legacyQuoteObjectPath("LTT-2026-0038-Q1")).toBe("LTT-2026-0038-Q1/quote-LTT-2026-0038-Q1.pdf")
   })
 })
+
+describe("quoteCustomerAddressLines", () => {
+  it("prints the street, town and code on one line and the country beneath", async () => {
+    const { quoteCustomerAddressLines } = await import("./ensure-quote-pdf")
+
+    expect(
+      quoteCustomerAddressLines({
+        address_line1: "49 Mitchell Ave",
+        address_line2: " ",
+        city: "New Castle-Upon-Tyme",
+        province: null,
+        postal_code: "NE23JY",
+        country: "United Kingdom",
+      }),
+    ).toEqual(["49 Mitchell Ave, New Castle-Upon-Tyme, NE23JY", "United Kingdom"])
+  })
+
+  it("is empty when the client has no address on file", async () => {
+    const { quoteCustomerAddressLines } = await import("./ensure-quote-pdf")
+
+    expect(quoteCustomerAddressLines(null)).toEqual([])
+  })
+})

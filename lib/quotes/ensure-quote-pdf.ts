@@ -9,6 +9,9 @@ import {
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
+import { selectPrimaryBlocks } from "@/lib/invoices/build-invoice-view"
+import { loadDocumentFooterCompany } from "@/lib/pdf/document-footer-company"
+import { buildQuoteJourneyDetails } from "@/lib/quotes/pdf/quote-journey-details"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import {
@@ -46,6 +49,31 @@ export function buildAttachmentFilename(quoteNumber: string, bookingNumber: stri
 export function legacyQuoteObjectPath(quoteNumber: string): string {
   const safeQuoteNumber = sanitizePath(quoteNumber)
   return `${safeQuoteNumber}/quote-${safeQuoteNumber}.pdf`
+}
+
+/**
+ * The client's postal address as the quote's "Client details" prints it: street, suburb, city,
+ * province and postal code on one line, the country beneath. Blank parts drop out.
+ */
+export function quoteCustomerAddressLines(
+  customer:
+    | {
+        address_line1?: string | null
+        address_line2?: string | null
+        city?: string | null
+        province?: string | null
+        postal_code?: string | null
+        country?: string | null
+      }
+    | null
+    | undefined,
+): string[] {
+  const clean = (value: string | null | undefined) => value?.trim() ?? ""
+  const street = [customer?.address_line1, customer?.address_line2, customer?.city, customer?.province, customer?.postal_code]
+    .map(clean)
+    .filter(Boolean)
+    .join(", ")
+  return [street, clean(customer?.country)].filter(Boolean)
 }
 
 export interface EnsureQuotePdfOptions {
@@ -89,7 +117,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, primary_supplier_id, customer:customers(title, first_name, last_name, email, phone))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, primary_supplier_id, route:routes(name), customer:customers(title, first_name, last_name, email, phone, address_line1, address_line2, city, province, postal_code, country))",
     )
     .eq("id", quoteId)
     .single()
@@ -204,6 +232,12 @@ export async function ensureQuotePdf(
     mapSupplierKindToServiceType(primarySupplierKind),
   ) ?? { start: null, end: null }
 
+  // The "Train Journey details" box names the same main product the invoice's journey block does.
+  const bookingRoute = Array.isArray(booking?.route) ? booking.route[0] : booking?.route
+  const [primaryBlock] = selectPrimaryBlocks(itineraryBlocks, quoteConfig.primarySupplierId, primarySupplierKind)
+  const journeyDetails = buildQuoteJourneyDetails(primaryBlock, bookingRoute?.name ?? null)
+  const company = await loadDocumentFooterCompany(supabase)
+
   let pdfBuffer: Buffer
   try {
     pdfBuffer = await renderQuotePdf({
@@ -216,6 +250,9 @@ export async function ensureQuotePdf(
       customerName,
       customerPhone: customer?.phone ?? null,
       customerEmail: customer?.email ?? null,
+      customerAddressLines: quoteCustomerAddressLines(customer),
+      journeyDetails,
+      company,
       quoteDate: quote.created_at.slice(0, 10),
       validUntil: quote.validity_until,
       journeyStart: journey.start,

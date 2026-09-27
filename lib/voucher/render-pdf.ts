@@ -2,6 +2,7 @@ import { renderToBuffer } from "@react-pdf/renderer"
 import { createElement } from "react"
 import type { VoucherData } from "@/lib/generate-voucher"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
+import type { DocumentFooterCompany } from "@/lib/pdf/sarail-design"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherTemplate } from "@/lib/types"
 import { VoucherDocument } from "./pdf/voucher-document"
@@ -12,6 +13,8 @@ export interface RenderVoucherPdfInput {
   docTitle?: string
   brand?: DocumentBrand
   brandLogo?: BrandLogoImage | null
+  /** Company details for the last page's footer. */
+  company?: DocumentFooterCompany
 }
 
 const SLOW_RENDER_THRESHOLD_MS = 2_000

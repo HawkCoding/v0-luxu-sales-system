@@ -3,10 +3,13 @@ import {
   buildBillingParty,
   buildDaysLabel,
   buildDeparture,
+  invoiceItemSchedule,
+  invoiceJourneyHeading,
   resolveDurationNights,
   selectPrimaryBlocks,
 } from "@/lib/invoices/build-invoice-view"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
+import type { PricingSnapshot } from "@/lib/types"
 
 function trainBlock(durationDays: number | null, displayOrder = 0): VoucherServiceBlock {
   return {
@@ -321,5 +324,55 @@ describe("buildDeparture", () => {
       children: 0,
     })
     expect(departure?.tourName).toBe("Pride of Africa")
+  })
+})
+
+describe("invoiceItemSchedule", () => {
+  const transfer = (startTime: string, route: string, displayOrder: number): VoucherServiceBlock => ({
+    serviceType: "transfer",
+    title: "Transfer",
+    supplierId: "s-transfers",
+    contactDetails: {},
+    displayOrder,
+    serviceData: { departureDate: "2027-03-25", startTime, route },
+  })
+  const snapshot = (partial: Partial<PricingSnapshot>) => ({ travelDate: "2027-03-25", supplierId: "s-transfers", ...partial }) as PricingSnapshot
+
+  it("dates a line by its travel date and times it from the one service it priced", () => {
+    expect(invoiceItemSchedule(snapshot({}), [transfer("11:00", "PTY – STA APT", 0)])).toEqual({
+      date: "2027-03-25",
+      time: "11:00",
+    })
+  })
+
+  it("tells two same-day services from one supplier apart by the route the line priced", () => {
+    const blocks = [transfer("11:00", "PTY – STA APT", 0), transfer("17:00", "PTY – PHTL APT", 1)]
+
+    expect(invoiceItemSchedule(snapshot({ routeName: "PTY – PHTL APT" }), blocks).time).toBe("17:00")
+  })
+
+  it("prints the date alone rather than guess between two times", () => {
+    const blocks = [transfer("11:00", "Same", 0), transfer("17:00", "Same", 1)]
+
+    expect(invoiceItemSchedule(snapshot({ routeName: "Same" }), blocks)).toEqual({ date: "2027-03-25", time: null })
+  })
+
+  it("leaves a line without a travel date undated", () => {
+    expect(invoiceItemSchedule(null, [])).toEqual({ date: null, time: null })
+  })
+})
+
+describe("invoiceJourneyHeading", () => {
+  it("names a rail booking's journey as the template does", () => {
+    expect(invoiceJourneyHeading("Your Journey", "train_operator")).toBe("Your Train Journey")
+  })
+
+  it("keeps the stock wording for every other product", () => {
+    expect(invoiceJourneyHeading("Your Journey", "hotel_property")).toBe("Your Journey")
+    expect(invoiceJourneyHeading(null, null)).toBe("Your Journey")
+  })
+
+  it("prints an admin's own heading exactly as typed", () => {
+    expect(invoiceJourneyHeading("Your Rail Adventure", "train_operator")).toBe("Your Rail Adventure")
   })
 })

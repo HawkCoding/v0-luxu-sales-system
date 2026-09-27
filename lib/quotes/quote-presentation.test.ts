@@ -6,6 +6,7 @@ import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusio
 import type { BulletLine } from "@/lib/inclusions/bullet-lines"
 import {
   buildQuoteItineraryLines,
+  buildQuoteSummaryDays,
   collectQuoteExclusions,
   deriveFlightCapPerPerson,
   deriveJourneyFromBlocks,
@@ -988,6 +989,52 @@ describe("buildQuoteItineraryLines — Rovos-style journey/rate tagged inclusion
       { kind: "item", text: "All meals, all beverages" },
       { kind: "item", text: "Complimentary night pre/post departure" },
       { kind: "item", text: "Vehicle transfer between the Hotel and Station" },
+    ])
+  })
+})
+
+describe("buildQuoteSummaryDays", () => {
+  it("groups each date's short facts, splitting a stay's check-in time into its own bullet", () => {
+    const days = buildQuoteSummaryDays([hotelBlock, trainBlock])
+
+    expect(days).toEqual([
+      {
+        dateISO: "2026-07-18",
+        items: [
+          "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast",
+          "Check in from 14h00",
+        ],
+      },
+      {
+        dateISO: "2026-07-20",
+        items: [
+          "Check out at 10h00",
+          "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town",
+          "Departs at 12h00",
+        ],
+      },
+      {
+        dateISO: "2026-07-22",
+        items: ["Arrival at Cape Town station at 18h00 - Train arrival times cannot be guaranteed"],
+      },
+    ])
+  })
+
+  it("states a train's check-in and departure as one bullet, and leaves its inclusions to the details page", () => {
+    const [day] = buildQuoteSummaryDays([{ ...trainBlock, serviceData: { ...trainBlock.serviceData, checkInOffsetMinutes: 120 } }])
+
+    expect(day.items).toEqual([
+      "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town",
+      "Check in at 10h00 - Train departs at 12h00",
+    ])
+  })
+
+  it("keeps a flight's times in its sentence and adds the fare cap under the first flight", () => {
+    const [day] = buildQuoteSummaryDays([flightBlock], "Flights are capped at R2 000pp — incl. baggage & fees")
+
+    expect(day.items).toEqual([
+      "Flight with SA Airways SA123 — Johannesburg to Cape Town in Economy | departing at 08h00",
+      "Flights are capped at R2 000pp — incl. baggage & fees",
     ])
   })
 })

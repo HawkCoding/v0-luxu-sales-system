@@ -1,19 +1,41 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import {
+  FOOTER_BRAND_DIVISION_LINE,
+  FOOTER_BRAND_PRODUCT_LINE,
+} from "@/lib/assets/footer-brand"
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
-import { BrandBlock } from "@/lib/pdf/brand-block"
 import { formatMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
-import { BOLD_TEXT, DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
-  AGENT_COMMISSION_COLOR,
+  BOLD,
+  BOX_RADIUS,
+  BulletRow,
+  DESIGN_COLORS,
+  DocumentFooter,
+  DocumentHeader,
+  FooterClearance,
+  NestedBulletList,
+  PAGE_BOTTOM,
+  PAGE_TOP,
+  PageBackground,
+  REGULAR,
+  RULE_WIDTH,
+  buildDocumentFooterLines,
+  displayDocumentTitle,
+  withColon,
+  type DocumentFooterCompany,
+  type PagePadding,
+} from "@/lib/pdf/sarail-design"
+import { buildQuoteDetailSections, type QuoteDetailBullet } from "@/lib/quotes/pdf/quote-details"
+import { quoteJourneyHeading, type QuoteJourneyDetails } from "@/lib/quotes/pdf/quote-journey-details"
+import {
   AGENT_COMMISSION_LABEL,
-  buildQuoteItineraryLines,
+  buildQuoteSummaryDays,
   collectQuoteExclusions,
-  derivePerPersonRate,
-  DISCOUNT_COLOR,
   DISCOUNT_LABEL,
   formatAgentCommission,
   formatDiscount,
@@ -21,30 +43,30 @@ import {
   formatJourneyRange,
   formatPaxLabel,
   formatPreparedForContact,
-  formatTotalLabel,
-  TRAVEL_DATES_LABEL,
-  VAT_INCLUSIVE_SUFFIX,
-  WARNING_TEXT_COLOR,
 } from "@/lib/quotes/quote-presentation"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 export interface QuotePdfData {
   quoteNumber: string
   customerName: string
-  /** Printed under the name in "Prepared for"; blank omits the line. */
+  /** Printed under "Client details"; blank omits the row. */
   customerPhone?: string | null
-  /** Printed under the phone in "Prepared for"; blank omits the line. */
+  /** Printed under "Client details"; blank omits the row. */
   customerEmail?: string | null
+  /** The client's postal address, one printed line each; empty omits the row. */
+  customerAddressLines?: string[]
   quoteDate: string
   validUntil: string | null
   journeyStart: string | null
   journeyEnd: string | null
   adults: number
   children: number
+  /** The booking's main product for the "Train Journey details" box; null omits its product rows. */
+  journeyDetails?: QuoteJourneyDetails | null
   /** VAT-inclusive grand total (quotes.total) — already net of agentCommission. */
   total: number
-  /** Gross travel price before the agency discount (quotes.subtotal). Only shown, and only used
-   *  to derive the per-person rate, when agentCommission is greater than zero. */
+  /** Gross travel price before the agency discount (quotes.subtotal). Only shown when a
+   *  commission or visible discount is deducted from it. */
   subtotal?: number
   /** Flat discount given to a booking agency (quotes.agent_commission). Zero/absent renders the
    *  pricing box exactly as it did before this field existed. */
@@ -52,8 +74,8 @@ export interface QuotePdfData {
   /** Client-facing Discount (quotes.discount_amount). Only rendered when discountVisible is true. */
   discount?: number
   /** quotes.discount_visible — the total is net of the discount either way; this only controls
-   *  whether the red line prints. Defaults to true so a caller that never sets it (there are none
-   *  left after this field's introduction) still shows a nonzero discount. */
+   *  whether the line prints. Defaults to true so a caller that never sets it still shows a
+   *  nonzero discount. */
   discountVisible?: boolean
   /** Package itinerary; empty array omits the section entirely. */
   itineraryBlocks: VoucherServiceBlock[]
@@ -66,216 +88,25 @@ export interface QuotePdfData {
   packageExcludesDefault?: string
   /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
   flightCapPerPerson?: number | null
-  /** SARAIL brand block copy + logo. Omitted falls back to the plain wordmark. */
+  /** SARAIL brand block copy + logo. Omitted falls back to the fixed constants. */
   brand?: DocumentBrand
+  /** "hidden" drops the letterhead; the design has no bottom slot, so "bottom" prints it on top. */
   brandPosition?: BrandBlockPosition
   brandLogo?: BrandLogoImage | null
+  /** Company details for the last page's footer. */
+  company?: DocumentFooterCompany
 }
 
 function formatDate(value: string | null): string {
   return formatDisplayDate(value) || "To be confirmed"
 }
 
-const styles = StyleSheet.create({
-  page: {
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontSize: 10,
-    paddingTop: 40,
-    paddingBottom: 40,
-    paddingHorizontal: 40,
-    color: "#312b24",
-    backgroundColor: "#ffffff",
-  },
-  header: {
-    marginBottom: 16,
-    borderBottomWidth: 2,
-    borderBottomColor: "#8b5a2b",
-    paddingBottom: 12,
-  },
-  brand: {
-    fontSize: 18,
-    ...BOLD_TEXT,
-    color: "#172018",
-    marginBottom: 2,
-  },
-  brandSub: {
-    fontSize: 9,
-    color: "#8a7f74",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  titleRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginTop: 14,
-    marginBottom: 12,
-  },
-  docTitle: {
-    fontSize: 22,
-    ...BOLD_TEXT,
-    color: "#172018",
-  },
-  quoteNumberBadge: {
-    fontSize: 10,
-    color: "#6f675d",
-    textAlign: "right",
-  },
-  metaBox: {
-    backgroundColor: "#fbf8f3",
-    borderWidth: 1,
-    borderColor: "#e8dfd2",
-    padding: 9,
-    marginBottom: 12,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-  },
-  metaLabel: {
-    fontSize: 9,
-    color: "#8a7f74",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  metaValue: {
-    fontSize: 10,
-    ...BOLD_TEXT,
-    color: "#312b24",
-  },
-  metaContact: {
-    fontSize: 9,
-    color: "#554c42",
-    marginTop: 1,
-  },
-  pricingBox: {
-    backgroundColor: "#f4efe6",
-    borderWidth: 1,
-    borderColor: "#d8cdbc",
-    padding: 11,
-    marginTop: 14,
-  },
-  perPersonLine: {
-    fontSize: 11,
-    color: "#554c42",
-    marginBottom: 6,
-  },
-  subtotalLine: {
-    fontSize: 11,
-    color: "#554c42",
-    marginBottom: 4,
-  },
-  agentCommissionLine: {
-    fontSize: 11,
-    ...BOLD_TEXT,
-    color: AGENT_COMMISSION_COLOR,
-    marginBottom: 4,
-  },
-  discountLine: {
-    fontSize: 11,
-    ...BOLD_TEXT,
-    color: DISCOUNT_COLOR,
-    marginBottom: 4,
-  },
-  pricingDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#d8cdbc",
-    marginBottom: 6,
-  },
-  grandTotalLine: {
-    fontSize: 13,
-    ...BOLD_TEXT,
-    color: "#172018",
-  },
-  sectionHeading: {
-    fontSize: 11,
-    ...BOLD_TEXT,
-    color: "#172018",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    borderBottomWidth: 1,
-    borderBottomColor: "#d8cdbc",
-    paddingBottom: 5,
-    marginBottom: 6,
-  },
-  itinerarySection: {
-    marginTop: 14,
-  },
-  itineraryItem: {
-    marginBottom: 6,
-  },
-  // The itinerary reads a size smaller than the 10pt body, its bullets smaller again. The bullet
-  // tier is 8.5pt, not 8: Carlito's x-height is ~9% below Helvetica's, and its taller built-in
-  // leading is why the bullets' marginTop is 1 rather than 2 — together they keep the old rhythm.
-  itineraryDate: {
-    fontSize: 9,
-    ...BOLD_TEXT,
-    color: "#172018",
-  },
-  itineraryText: {
-    fontSize: 9,
-    color: "#312b24",
-    marginTop: 1,
-    lineHeight: 1.4,
-  },
-  itineraryDetail: {
-    fontSize: 8.5,
-    color: "#554c42",
-    marginTop: 1,
-    paddingLeft: 10,
-  },
-  // A subheading inside the bullet list: bold and undashed, with extra air above it so it reads
-  // as a section break rather than another inclusion.
-  itineraryDetailHeading: {
-    fontSize: 8.5,
-    ...BOLD_TEXT,
-    color: "#312b24",
-    marginTop: 6,
-    paddingLeft: 10,
-  },
-  // A caveat the client must not miss ("Train arrival times cannot be guaranteed").
-  itineraryDetailWarning: {
-    fontSize: 8.5,
-    color: WARNING_TEXT_COLOR,
-    marginTop: 1,
-    paddingLeft: 10,
-  },
-  // A hotel's own description, in place of its facility bullets, set in the regular-weight italic
-  // (Carlito has no bold-italic, so this must never gain fontWeight: 700).
-  itineraryDescription: {
-    fontSize: 8.5,
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontStyle: "italic",
-    color: "#554c42",
-    marginTop: 1,
-    paddingLeft: 10,
-    lineHeight: 1.4,
-  },
-  excludesSection: {
-    marginTop: 14,
-  },
-  excludesItem: {
-    fontSize: 9,
-    color: "#554c42",
-    marginBottom: 3,
-    lineHeight: 1.4,
-  },
-  footer: {
-    marginTop: 24,
-    borderTopWidth: 1,
-    borderTopColor: "#e8dfd2",
-    paddingTop: 12,
-    fontSize: 8,
-    color: "#8a7f74",
-    textAlign: "center",
-  },
-})
-
 const DEFAULT_FOOTER_TEXT = QUOTE_VALIDITY_ENABLED
-  ? "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
-  : "This quotation is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
+  ? "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}."
+  : "This quotation is subject to availability. Prices are quoted in {{currency}}."
 
-const DEFAULT_INCLUDES_HEADING = "Your Package Includes"
+const DEFAULT_INCLUDES_HEADING = "Travel Package Includes"
+const DETAILS_HEADING = "Travel Package Details:"
 const DEFAULT_EXCLUDES_HEADING = "Your Package Excludes"
 
 function resolveFooterText(template: string, validUntil: string | null, currency: string): string {
@@ -284,17 +115,165 @@ function resolveFooterText(template: string, validUntil: string | null, currency
     .replaceAll("{{currency}}", currency)
 }
 
+// Layout, in points, from the designer's quote template (A4).
+const PADDING: PagePadding = { top: PAGE_TOP, left: 30.4, right: 30.28 }
+const BOX_INSET = 24.3
+/** The Travel Package sections run x 51.7 → 550.2. */
+const SECTION_LEFT = 21.3
+const SECTION_RIGHT = 14.8
+/** Box columns: labels at 54.7 / 329.1, values at 155.1 / 408.8. */
+const BOX_RIGHT_COLUMN = 274.4
+const LEFT_LABEL = 100.4
+const RIGHT_LABEL = 79.7
+/** Date / title column of both package tables (51.7 → 187.5). */
+const DATE_COLUMN = 135.8
+const SMALL_LINE = 10.65 / 8
+const RIGHT_LINE = 9.9 / 8
+/** The details page runs x 48.5 → 547. */
+const DETAILS_LEFT = 18.1
+const DETAILS_RIGHT = 18
+
+const styles = StyleSheet.create({
+  page: {
+    ...REGULAR,
+    fontSize: 10,
+    color: DESIGN_COLORS.ink,
+    backgroundColor: DESIGN_COLORS.page,
+    paddingTop: PADDING.top,
+    paddingLeft: PADDING.left,
+    paddingRight: PADDING.right,
+    paddingBottom: PAGE_BOTTOM,
+  },
+
+  titleRow: {
+    flexDirection: "row",
+    marginTop: 8.5,
+    marginLeft: BOX_INSET,
+  },
+  title: { ...BOLD, fontSize: 21.66, width: BOX_RIGHT_COLUMN },
+  preparedFor: { flex: 1, paddingTop: 2.8 },
+  row: { flexDirection: "row" },
+  preparedLabel: { ...BOLD, fontSize: 10, lineHeight: 1.15, width: LEFT_LABEL },
+  preparedValue: { fontSize: 10, lineHeight: 1.15, flex: 1 },
+
+  box: {
+    marginTop: 8.5,
+    backgroundColor: DESIGN_COLORS.box,
+    borderRadius: BOX_RADIUS,
+    paddingTop: 9.6,
+    paddingBottom: 12.7,
+    paddingLeft: BOX_INSET,
+    paddingRight: BOX_INSET,
+    flexDirection: "row",
+  },
+  boxLeft: { width: BOX_RIGHT_COLUMN, paddingRight: 8 },
+  boxRight: { flex: 1 },
+  boxHeading: { ...BOLD, fontSize: 10 },
+  leftLabel: { ...BOLD, fontSize: 8, lineHeight: SMALL_LINE, width: LEFT_LABEL },
+  // The journey column sets its rows a little tighter (9.9pt) than the client column, as drawn.
+  rightLabel: { ...BOLD, fontSize: 8, lineHeight: RIGHT_LINE, width: RIGHT_LABEL },
+  rightValue: { fontSize: 8, lineHeight: RIGHT_LINE, flex: 1 },
+  addressLine: { fontSize: 8, lineHeight: SMALL_LINE },
+  smallValue: { fontSize: 8, lineHeight: SMALL_LINE, flex: 1 },
+
+  section: {
+    marginLeft: SECTION_LEFT,
+    marginRight: SECTION_RIGHT,
+  },
+  sectionHeading: {
+    ...BOLD,
+    fontSize: 12,
+    paddingBottom: 5.3,
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
+  },
+  sectionBody: {
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
+  },
+  day: {
+    flexDirection: "row",
+    marginTop: 6.6,
+  },
+  dayDate: { fontSize: 10, width: DATE_COLUMN },
+  // The details page leaves a little more air between suppliers than the includes list does per day.
+  detailRow: {
+    flexDirection: "row",
+    marginTop: 9.5,
+  },
+  dayItems: { flex: 1 },
+  detailTitle: { width: DATE_COLUMN },
+  detailTitleLine: { fontSize: 10, width: 95 },
+
+  totals: {
+    marginTop: 20.9,
+    marginLeft: 287.9,
+    marginRight: SECTION_RIGHT,
+    paddingBottom: 4.65,
+    rowGap: 5.65,
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
+  },
+  totalsRow: {
+    flexDirection: "row",
+    paddingLeft: 6.3,
+    paddingRight: 4.8,
+  },
+  totalsLabel: { fontSize: 10, width: 140 },
+  totalsValue: { fontSize: 10, flex: 1, textAlign: "right" },
+
+  disclaimer: {
+    fontSize: 10,
+    marginTop: 14.2,
+    textAlign: "center",
+  },
+})
+
+/** A supplier's details row stays whole unless it could never fit a page on its own. */
+const DETAIL_ROW_MAX_HEIGHT = 650
+/** Roughly how many 8pt Manrope characters fit the details page's bullet column (~352pt). */
+const DETAIL_CHARS_PER_LINE = 88
+
+/** The row's printed height, estimated from its bullets' lengths (react-pdf gives no measurement
+ * before layout). */
+function estimatedDetailHeight(bullets: QuoteDetailBullet[]): number {
+  return bullets.reduce(
+    (sum, bullet) => sum + Math.max(1, Math.ceil(bullet.text.length / DETAIL_CHARS_PER_LINE)) * 10.67,
+    0,
+  )
+}
+
+function BoxRow({ label, value, right = false }: { label: string; value: string; right?: boolean }) {
+  return (
+    <View style={styles.row}>
+      <Text style={right ? styles.rightLabel : styles.leftLabel}>{label}</Text>
+      <Text style={right ? styles.rightValue : styles.smallValue}>{value}</Text>
+    </View>
+  )
+}
+
+function TotalsRow({ label, value, bold = false }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <View style={styles.totalsRow}>
+      <Text style={bold ? [styles.totalsLabel, BOLD] : styles.totalsLabel}>{label}</Text>
+      <Text style={styles.totalsValue}>{value}</Text>
+    </View>
+  )
+}
+
 export function QuoteDocument({
   quoteNumber,
   customerName,
   customerPhone,
   customerEmail,
+  customerAddressLines,
   quoteDate,
   validUntil,
   journeyStart,
   journeyEnd,
   adults,
   children,
+  journeyDetails,
   total,
   subtotal,
   agentCommission = 0,
@@ -302,40 +281,68 @@ export function QuoteDocument({
   discountVisible = true,
   itineraryBlocks,
   currency = "ZAR",
-  title = "QUOTATION",
+  title = "Quotation",
   footerText = DEFAULT_FOOTER_TEXT,
   packageIncludesHeading = DEFAULT_INCLUDES_HEADING,
   packageExcludesHeading = DEFAULT_EXCLUDES_HEADING,
   packageExcludesDefault,
   flightCapPerPerson,
   brand,
-  brandPosition = "bottom",
+  brandPosition = "top",
   brandLogo = null,
+  company,
 }: QuotePdfData) {
-  // The whole quote, BrandBlock included, is set in the embedded Carlito (Calibri clone).
   registerDocumentFonts()
 
-  // The brand block is only shown when its copy is supplied; without it the
-  // document keeps the plain wordmark masthead and no footer mark.
-  const showBrandTop = brand !== undefined && brandPosition === "top"
-  const showBrandBottom = brand !== undefined && brandPosition === "bottom"
-  const pax = { adults, children }
-  const paxLabel = formatPaxLabel(pax)
+  const resolvedBrand: DocumentBrand = brand ?? {
+    heading: FOOTER_BRAND_PRODUCT_LINE,
+    subheading: FOOTER_BRAND_DIVISION_LINE,
+    logoUrl: null,
+  }
+  const showBrand = brandPosition !== "hidden"
+  const money = (value: number) => formatMoney(value, currency)
+
+  const paxLabel = formatPaxLabel({ adults, children })
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
-  const contactLines = formatPreparedForContact({ phone: customerPhone, email: customerEmail })
+  const [phone, email] = [customerPhone?.trim() || null, customerEmail?.trim() || null]
+  const hasContact = formatPreparedForContact({ phone, email }).length > 0
+  const addressLines = (customerAddressLines ?? []).map((line) => line.trim()).filter(Boolean)
   const hasAgentCommission = agentCommission > 0
   const hasVisibleDiscount = discountVisible && discount > 0
-  const showSubtotal = hasAgentCommission || hasVisibleDiscount
-  // Per-person rate is always the gross rate — the discount is the agency's cut, not the
-  // traveller's. Falls back to `total` when no subtotal is supplied (pre-existing callers).
-  const perPersonRate = derivePerPersonRate(showSubtotal ? (subtotal ?? total) : total, pax)
+  const hasDeduction = hasAgentCommission || hasVisibleDiscount
+
   const sortedBlocks = sortItineraryBlocksChronologically(itineraryBlocks)
   const flightCapBullet =
     flightCapPerPerson != null
       ? formatFlightCapLine((amount) => formatMoney(amount, currency, { decimals: false }), flightCapPerPerson)
       : null
-  const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet)
+  const summaryDays = buildQuoteSummaryDays(sortedBlocks, flightCapBullet)
+  const detailSections = buildQuoteDetailSections(sortedBlocks)
   const exclusions = collectQuoteExclusions(sortedBlocks, packageExcludesDefault)
+  const hasDetails = detailSections.length > 0 || exclusions.length > 0
+
+  const journeyRows: Array<{ label: string; value: string }> = [
+    { label: "Travel dates:", value: journeyRange ?? "To be confirmed" },
+    ...(paxLabel ? [{ label: "Guests:", value: paxLabel }] : []),
+    ...(journeyDetails?.productName
+      ? [{ label: withColon(journeyDetails.productLabel), value: journeyDetails.productName }]
+      : []),
+    ...(journeyDetails?.tourName ? [{ label: "Tour:", value: journeyDetails.tourName }] : []),
+    ...(journeyDetails?.route ? [{ label: "Route:", value: journeyDetails.route }] : []),
+  ]
+
+  const footerLines = buildDocumentFooterLines(company ?? {}, {
+    division: resolvedBrand.subheading,
+    year: Number((quoteDate || new Date().toISOString()).slice(0, 4)),
+  })
+  const disclaimer = resolveFooterText(footerText, validUntil, currency)
+
+  const closing = (
+    <View wrap={false}>
+      {disclaimer ? <Text style={styles.disclaimer}>{disclaimer}</Text> : null}
+      <FooterClearance />
+    </View>
+  )
 
   return (
     <Document
@@ -350,137 +357,148 @@ export function QuoteDocument({
       }
     >
       <Page size="A4" style={styles.page}>
-        {showBrandTop && brand ? (
-          <BrandBlock brand={brand} logoImage={brandLogo} placement="top" />
+        <PageBackground />
+        {showBrand ? (
+          <DocumentHeader brand={resolvedBrand} logo={brandLogo} padding={PADDING} />
         ) : (
-          <View style={styles.header}>
-            <Text style={styles.brand}>Luxus Travel & Tours</Text>
-            <Text style={styles.brandSub}>Luxury Rail Journeys</Text>
-          </View>
+          <View style={{ marginTop: -PADDING.top, height: 80 }} />
         )}
 
+        {/* Section one: dates, brief journey details and pricing — may flow across pages. */}
         <View style={styles.titleRow}>
-          <View>
-            <Text style={styles.docTitle}>{title}</Text>
-          </View>
-          {QUOTE_REFERENCE_ENABLED ? (
-            <View>
-              <Text style={styles.quoteNumberBadge}>{quoteNumber}</Text>
+          <Text style={styles.title}>{displayDocumentTitle(title) || "Quotation"}</Text>
+          <View style={styles.preparedFor}>
+            <View style={styles.row}>
+              <Text style={styles.preparedLabel}>Prepared for:</Text>
+              <Text style={styles.preparedValue}>{customerName || "Valued Guest"}</Text>
             </View>
-          ) : null}
-        </View>
-
-        <View style={styles.metaBox}>
-          <View>
-            <Text style={styles.metaLabel}>Prepared for</Text>
-            <Text style={styles.metaValue}>{customerName || "Valued Guest"}</Text>
-            {contactLines.map((contactLine) => (
-              <Text key={contactLine} style={styles.metaContact}>
-                {contactLine}
-              </Text>
-            ))}
-          </View>
-          <View>
-            <Text style={styles.metaLabel}>{TRAVEL_DATES_LABEL}</Text>
-            <Text style={styles.metaValue}>{journeyRange ?? "To be confirmed"}</Text>
-          </View>
-          {paxLabel ? (
-            <View>
-              <Text style={styles.metaLabel}>Guests</Text>
-              <Text style={styles.metaValue}>{paxLabel}</Text>
+            <View style={styles.row}>
+              <Text style={styles.preparedLabel}>Date:</Text>
+              <Text style={styles.preparedValue}>{formatDisplayDateLong(quoteDate) || formatDate(quoteDate)}</Text>
             </View>
-          ) : null}
-          {QUOTE_REFERENCE_ENABLED ? (
-            <View>
-              <Text style={styles.metaLabel}>Quote date</Text>
-              <Text style={styles.metaValue}>{formatDate(quoteDate)}</Text>
-            </View>
-          ) : null}
-          {QUOTE_VALIDITY_ENABLED ? (
-            <View>
-              <Text style={styles.metaLabel}>Valid until</Text>
-              <Text style={styles.metaValue}>{formatDate(validUntil)}</Text>
-            </View>
-          ) : null}
-        </View>
-
-        {itineraryLines.length > 0 ? (
-          <View style={styles.itinerarySection}>
-            <Text style={styles.sectionHeading}>{packageIncludesHeading}</Text>
-            {itineraryLines.map((line, index) => (
-              <View key={index} style={styles.itineraryItem} wrap={false}>
-                <Text style={styles.itineraryDate}>
-                  {line.dateISO
-                    ? formatDisplayDateLong(line.dateISO) || "Date to be confirmed"
-                    : "Date to be confirmed"}
-                </Text>
-                <Text style={styles.itineraryText}>{line.text}</Text>
-                {line.description ? (
-                  <Text style={styles.itineraryDescription}>{line.description}</Text>
-                ) : null}
-                {line.bullets.map((bullet, bulletIndex) => (
-                  <Text
-                    key={bulletIndex}
-                    style={
-                      bullet.kind === "heading"
-                        ? styles.itineraryDetailHeading
-                        : bullet.kind === "warning"
-                          ? styles.itineraryDetailWarning
-                          : styles.itineraryDetail
-                    }
-                  >
-                    {bullet.kind === "heading" ? bullet.text : `- ${bullet.text}`}
-                  </Text>
-                ))}
+            {QUOTE_REFERENCE_ENABLED ? (
+              <View style={styles.row}>
+                <Text style={styles.preparedLabel}>Quote No:</Text>
+                <Text style={styles.preparedValue}>{quoteNumber}</Text>
               </View>
-            ))}
+            ) : null}
+            {QUOTE_VALIDITY_ENABLED ? (
+              <View style={styles.row}>
+                <Text style={styles.preparedLabel}>Valid until:</Text>
+                <Text style={styles.preparedValue}>{formatDate(validUntil)}</Text>
+              </View>
+            ) : null}
           </View>
-        ) : null}
-
-        {exclusions.length > 0 ? (
-          <View style={styles.excludesSection}>
-            <Text style={styles.sectionHeading}>{packageExcludesHeading}</Text>
-            {exclusions.map((item, index) => (
-              <Text key={index} style={styles.excludesItem}>
-                {`- ${item}`}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-
-        {/* Total price renders last, after everything the quote covers. Never split across a page:
-            a total stranded on its own page reads as a separate document. */}
-        <View style={styles.pricingBox} wrap={false}>
-          {perPersonRate !== null ? (
-            <Text style={styles.perPersonLine}>
-              {paxLabel} x {formatMoney(perPersonRate, currency)} per person
-            </Text>
-          ) : null}
-          {showSubtotal ? (
-            <>
-              <Text style={styles.subtotalLine}>Subtotal: {formatMoney(subtotal ?? total, currency)}</Text>
-              {hasAgentCommission ? (
-                <Text style={styles.agentCommissionLine}>
-                  {AGENT_COMMISSION_LABEL}: {formatAgentCommission(agentCommission, (v) => formatMoney(v, currency))}
-                </Text>
-              ) : null}
-              {hasVisibleDiscount ? (
-                <Text style={styles.discountLine}>
-                  {DISCOUNT_LABEL}: {formatDiscount(discount, (v) => formatMoney(v, currency))}
-                </Text>
-              ) : null}
-              <View style={styles.pricingDivider} />
-            </>
-          ) : null}
-          <Text style={styles.grandTotalLine}>
-            {formatTotalLabel(pax)}: {formatMoney(total, currency)} {VAT_INCLUSIVE_SUFFIX}
-          </Text>
         </View>
 
-        <Text style={styles.footer}>{resolveFooterText(footerText, validUntil, currency)}</Text>
-        {showBrandBottom && brand ? (
-          <BrandBlock brand={brand} logoImage={brandLogo} placement="bottom" />
+        <View style={styles.box} wrap={false}>
+          <View style={styles.boxLeft}>
+            <Text style={styles.boxHeading}>Client details:</Text>
+            {phone ? <BoxRow label="Phone:" value={phone} /> : null}
+            {email ? <BoxRow label="E-mail:" value={email} /> : null}
+            {addressLines.length > 0 ? (
+              <View style={styles.row}>
+                <Text style={styles.leftLabel}>Address:</Text>
+                <View style={{ flex: 1 }}>
+                  {addressLines.map((line, index) => (
+                    <Text key={index} style={styles.addressLine}>
+                      {line}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+            {!hasContact && addressLines.length === 0 ? <BoxRow label="Phone:" value="–" /> : null}
+          </View>
+          <View style={styles.boxRight}>
+            <Text style={styles.boxHeading}>{quoteJourneyHeading(journeyDetails?.serviceType)}</Text>
+            {journeyRows.map((row) => (
+              <BoxRow key={row.label} label={row.label} value={row.value} right />
+            ))}
+          </View>
+        </View>
+
+        {summaryDays.length > 0 ? (
+          <View style={[styles.section, { marginTop: 11.1 }]}>
+            <Text style={styles.sectionHeading} minPresenceAhead={60}>
+              {withColon(packageIncludesHeading)}
+            </Text>
+            <View style={[styles.sectionBody, { paddingTop: 0.5, paddingBottom: 14 }]}>
+              {summaryDays.map((day, index) => (
+                <View key={index} style={styles.day} wrap={false}>
+                  <Text style={styles.dayDate}>
+                    {day.dateISO ? formatDisplayDateLong(day.dateISO) || "Date to be confirmed" : "Date to be confirmed"}
+                  </Text>
+                  <View style={styles.dayItems}>
+                    {day.items.map((item, itemIndex) => (
+                      <BulletRow key={itemIndex} text={item} bulletLeft={0} textLeft={10.2} />
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
         ) : null}
+
+        {/* Pricing closes section one. Never split across a page: a total stranded on its own
+            page reads as a separate document. */}
+        <View style={styles.totals} wrap={false}>
+          {hasDeduction ? (
+            <TotalsRow label="Sub Total incl VAT:" value={money(subtotal ?? total)} bold />
+          ) : null}
+          {hasAgentCommission ? (
+            <TotalsRow
+              label={withColon(AGENT_COMMISSION_LABEL)}
+              value={formatAgentCommission(agentCommission, money)}
+            />
+          ) : null}
+          {hasVisibleDiscount ? (
+            <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(discount, money)} />
+          ) : null}
+          <TotalsRow label="Total incl VAT:" value={money(total)} bold />
+        </View>
+
+        {hasDetails ? (
+          // Section two always starts on a new page.
+          <View break style={{ marginLeft: DETAILS_LEFT, marginRight: DETAILS_RIGHT, marginTop: 3.3 }}>
+            <Text style={styles.sectionHeading} minPresenceAhead={60}>
+              {DETAILS_HEADING}
+            </Text>
+            <View style={[styles.sectionBody, { paddingTop: 2.5, paddingBottom: 8.1 }]}>
+              {detailSections.map((section, index) => (
+                <View key={index} style={styles.detailRow} wrap={estimatedDetailHeight(section.bullets) > DETAIL_ROW_MAX_HEIGHT}>
+                  <View style={styles.detailTitle}>
+                    {section.title.map((line, lineIndex) => (
+                      <Text key={lineIndex} style={styles.detailTitleLine}>
+                        {line}
+                      </Text>
+                    ))}
+                  </View>
+                  <View style={styles.dayItems}>
+                    <NestedBulletList lines={section.bullets} />
+                  </View>
+                </View>
+              ))}
+              {exclusions.length > 0 ? (
+                <View style={styles.detailRow} wrap={false}>
+                  <View style={styles.detailTitle}>
+                    <Text style={styles.detailTitleLine}>{withColon(packageExcludesHeading)}</Text>
+                  </View>
+                  <View style={styles.dayItems}>
+                    {exclusions.map((item, index) => (
+                      <BulletRow key={index} text={item} bulletLeft={0} textLeft={10.3} />
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+            </View>
+            {closing}
+          </View>
+        ) : (
+          closing
+        )}
+
+        <DocumentFooter lines={footerLines} />
       </Page>
     </Document>
   )

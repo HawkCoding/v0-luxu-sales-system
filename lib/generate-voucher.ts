@@ -364,9 +364,9 @@ export function generateVoucherHTML(
     })
     .join("\n")
 
-  // Preview mirrors lib/voucher/pdf/styles.ts pt-for-pt at the "compact" density (the only
-  // density the voucher ever renders at); the PDF is the source of truth — update both when the
-  // design changes. See lib/voucher/pdf/density.ts for the numbers being mirrored.
+  // Preview of the pre-2026-09 voucher layout. The PDF (lib/voucher/pdf/styles.ts) has since moved
+  // to the SA-Rail document design — patterned page, Swirl boxes, Manrope — and this preview has
+  // not followed yet; the rows themselves still come from the same voucherRowsForBlock.
   const rule = tintWithWhite(t.accent_colour, 0.45)
   const ruleFaint = tintWithWhite(t.section_bg, 0.3)
   const frameOuter = tintWithWhite(t.accent_colour, 0.9)
