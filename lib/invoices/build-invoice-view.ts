@@ -204,6 +204,33 @@ export function buildDeparture(
   }
 }
 
+/**
+ * When a priced line happens: its day comes from the snapshot's travelDate (the leg's own date the
+ * pricing engine priced), and its time from the one booked service block that starts that day for
+ * the same supplier. Several same-day blocks from one supplier (two transfers on the 25th) are told
+ * apart by the route the line priced; if that still leaves more than one, no time is printed rather
+ * than a guessed one.
+ */
+export function invoiceItemSchedule(
+  snapshot: PricingSnapshot | null,
+  blocks: readonly VoucherServiceBlock[],
+): Pick<InvoiceItem, "date" | "time"> {
+  const date = snapshot?.travelDate?.slice(0, 10) || null
+  if (!date) return { date: null, time: null }
+
+  const sameDay = blocks.filter(
+    (block) =>
+      block.serviceData.departureDate?.slice(0, 10) === date &&
+      (!snapshot?.supplierId || !block.supplierId || block.supplierId === snapshot.supplierId),
+  )
+  const byRoute =
+    sameDay.length > 1 && snapshot?.routeName
+      ? sameDay.filter((block) => block.serviceData.route === snapshot.routeName)
+      : sameDay
+  const times = new Set(byRoute.map((block) => block.serviceData.startTime ?? null).filter(Boolean))
+  return { date, time: times.size === 1 ? [...times][0] : null }
+}
+
 export function buildInvoiceItems(
   lineItems: Array<
     Pick<
@@ -211,18 +238,20 @@ export function buildInvoiceItems(
       "description" | "qty" | "unit_price" | "total" | "pricing_snapshot"
     >
   >,
+  blocks: readonly VoucherServiceBlock[] = [],
 ): InvoiceItem[] {
   // Commission is an internal figure, never a client-facing line. Fold it into the largest
   // travel line rather than dropping it, so the printed items still sum to the subtotal.
-  return foldCommissionLines(lineItems).map((item) => ({
-    pax: Number(item.qty ?? 0),
-    description: describeInvoiceLine(
-      item.description,
-      (item.pricing_snapshot as PricingSnapshot | null) ?? null,
-    ),
-    unitPrice: Number(item.unit_price ?? 0),
-    total: Number(item.total ?? 0),
-  }))
+  return foldCommissionLines(lineItems).map((item) => {
+    const snapshot = (item.pricing_snapshot as PricingSnapshot | null) ?? null
+    return {
+      pax: Number(item.qty ?? 0),
+      description: describeInvoiceLine(item.description, snapshot),
+      unitPrice: Number(item.unit_price ?? 0),
+      total: Number(item.total ?? 0),
+      ...invoiceItemSchedule(snapshot, blocks),
+    }
+  })
 }
 
 export function buildPaxLabel(adults: number, children: number): string | null {
@@ -231,6 +260,18 @@ export function buildPaxLabel(adults: number, children: number): string | null {
     children > 0 ? `${children} Child${children === 1 ? "" : "ren"}` : "",
   ].filter(Boolean)
   return parts.length > 0 ? parts.join(", ") : null
+}
+
+const STOCK_JOURNEY_HEADING = "Your Journey"
+
+/**
+ * The journey block's heading. The approved invoice template reads "YOUR TRAIN JOURNEY:" on a rail
+ * booking, so the stock global wording ("Your Journey", shared with the itinerary) gains "Train"
+ * there; any heading an admin has typed — globally or per supplier kind — prints exactly as typed.
+ */
+export function invoiceJourneyHeading(setting: string | null | undefined, primarySupplierKind: SupplierKind | null): string {
+  const heading = setting?.trim() || STOCK_JOURNEY_HEADING
+  return heading === STOCK_JOURNEY_HEADING && primarySupplierKind === "train_operator" ? "Your Train Journey" : heading
 }
 
 export interface BuildInvoiceViewOptions {
@@ -276,7 +317,7 @@ export async function buildInvoiceView(
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
   const route = Array.isArray(booking?.route) ? booking.route[0] : booking?.route
 
-  let items: InvoiceItem[] = []
+  let lineItemRows: Parameters<typeof buildInvoiceItems>[0] = []
   // The invoice's quote is the accepted one, so its priced legs also scope the departure block
   // below — no second lookup needed. Empty means a manual quote, which stays unfiltered.
   let quoteLegIds: Set<string> | undefined
@@ -295,20 +336,24 @@ export async function buildInvoiceView(
         details: { bookingId, quoteId, error: error.message },
       })
     } else {
-      items = buildInvoiceItems(lineItems ?? [])
+      lineItemRows = lineItems ?? []
       const legIds = legIdsFromLineItems(lineItems)
       quoteLegIds = legIds.size > 0 ? legIds : undefined
     }
   }
 
   let departure: InvoiceDeparture | null = null
+  // Also dates the description table's lines (their clock time is the booked leg's own).
+  let blocks: VoucherServiceBlock[] = []
   try {
-    const { blocks } = await buildVoucherServiceBlocks(supabase, {
-      bookingId,
-      additionalServicesDetails: null,
-      legIds: quoteLegIds,
-      includeUnlinkedTransportRequests: false,
-    })
+    blocks = (
+      await buildVoucherServiceBlocks(supabase, {
+        bookingId,
+        additionalServicesDetails: null,
+        legIds: quoteLegIds,
+        includeUnlinkedTransportRequests: false,
+      })
+    ).blocks
     const primaryBlocks = selectPrimaryBlocks(blocks, booking?.primary_supplier_id ?? null, primarySupplierKind)
     departure = buildDeparture(primaryBlocks, journeyHeading, {
       tourName: route?.name ?? null,
@@ -326,6 +371,8 @@ export async function buildInvoiceView(
       details: { bookingId, error: err instanceof Error ? err.message : String(err) },
     })
   }
+
+  const items = buildInvoiceItems(lineItemRows, blocks)
 
   const guestNames = (travellers ?? [])
     .map((traveller) =>

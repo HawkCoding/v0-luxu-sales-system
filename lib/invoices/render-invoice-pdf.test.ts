@@ -87,7 +87,8 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     const text = await extractPdfText(buffer)
     expect(text).toContain("Pretoria → Cape Town")
     expect(text).not.toContain("Pretoria ’ Cape Town")
-    expect(text).toContain("PLEASE USE REFERENCE")
+    // The reference sentence soft-wraps inside the Terms column, so match it without line breaks.
+    expect(text.replace(/\s+/g, " ")).toContain("Please use reference LTT-2026-0001-INV when making payment.")
     expect(text).toContain("LTT-2026-0001-INV")
     expect(text).not.toContain("Payable by")
     expect(text).not.toContain("Commission")
@@ -113,7 +114,7 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     // heading that wraps onto a second line would break this substring match.
     expect(text).toContain(FOOTER_BRAND_PRODUCT_LINE)
     expect(text).toContain(FOOTER_BRAND_DIVISION_LINE)
-    expect(text).toContain("Invoice No.")
+    expect(text).toContain("Invoice No:")
     expect(text).toContain("LTT-2026-0001-INV")
     expect(text).toContain("Provisional")
     expect(text).toContain("Consultant")
@@ -235,7 +236,7 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
     const text = await extractPdfText(buffer)
     expect(text).toContain("Agent Commission")
-    expect(text).toContain("Total incl. VAT")
+    expect(text).toContain("Total incl VAT:")
   })
 
   it("renders a visible Discount row independently of Agent Commission", async () => {
@@ -266,7 +267,7 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
     const text = await extractPdfText(buffer)
     expect(text).toContain("Discount")
-    expect(text).toContain("Total incl. VAT")
+    expect(text).toContain("Total incl VAT:")
   })
 
   it("hides the Discount row when discountVisible is false", async () => {

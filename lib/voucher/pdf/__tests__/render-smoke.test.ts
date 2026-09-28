@@ -9,7 +9,7 @@ import type { VoucherData } from "@/lib/generate-voucher"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { extractPdfText } from "@/lib/pdf/extract-text.fixtures"
+import { extractPdfPageTexts, extractPdfText } from "@/lib/pdf/extract-text.fixtures"
 import { sampleVoucherData, sampleVoucherServiceBlocks } from "../sample-data"
 import { renderVoucherPdf } from "../../render-pdf"
 
@@ -47,6 +47,14 @@ describe("renderVoucherPdf smoke", { timeout: 20_000 }, () => {
     expect(text).toContain("Cape Town → Pretoria")
   })
 
+  it("falls back to Carlito for a glyph Manrope lacks instead of dropping it", async () => {
+    const [train, ...rest] = serviceBlocks()
+    const roundTrip = { ...train, serviceData: { ...train.serviceData, route: "Pretoria ↔ Cape Town" } }
+    const buffer = await renderAndAssert("round-trip-arrow", { ...sampleData(), serviceBlocks: [roundTrip, ...rest] })
+    const text = await extractPdfText(buffer)
+    expect(text).toContain("Pretoria ↔ Cape Town")
+  })
+
   it("renders multiple service blocks across pages", async () => {
     await renderAndAssert("multi-block", { ...sampleData(), serviceBlocks: serviceBlocks() })
   })
@@ -65,6 +73,22 @@ describe("renderVoucherPdf smoke", { timeout: 20_000 }, () => {
   it("renders the logo header variant", async () => {
     const png = readFileSync(path.join(process.cwd(), "public", "placeholder-logo.png"))
     await renderAndAssert("logo", sampleData(), VOUCHER_TEMPLATE_DEFAULTS, { data: png, format: "png" })
+  })
+
+  it("prints the letterhead on the first page only and the company footer on the last page only", async () => {
+    const buffer = await renderVoucherPdf({
+      data: { ...sampleData(), serviceBlocks: [...serviceBlocks(), ...serviceBlocks()] },
+      company: { tel: "+27 12 100 3596", email: "info@sa-rail.co.za" },
+    })
+    const pages = await extractPdfPageTexts(buffer)
+
+    expect(pages.length).toBeGreaterThan(1)
+    // The letterhead heading; the division line under it also closes the footer, so it is not a page-one marker.
+    expect(pages[0]).toContain("KRUGER SHALATI")
+    pages.slice(1).forEach((page) => expect(page).not.toContain("KRUGER SHALATI"))
+    pages.slice(0, -1).forEach((page) => expect(page).not.toContain("©SA Rail"))
+    expect(pages.at(-1)).toContain("©SA Rail")
+    expect(pages.at(-1)).toContain("End Of Services. Thank you")
   })
 
   it("renders a custom document title", async () => {

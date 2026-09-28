@@ -21,6 +21,7 @@ import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import { loadDocumentFooterCompany } from "@/lib/pdf/document-footer-company"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
@@ -213,7 +214,7 @@ export async function POST(req: Request) {
     getDocumentBrandSettings(supabase, primarySupplierKind),
   ])
   const { brand } = resolveDocumentBrand(documentBrandSettings)
-  const brandLogo = await loadBrandLogo(brand.logoUrl)
+  const [brandLogo, company] = await Promise.all([loadBrandLogo(brand.logoUrl), loadDocumentFooterCompany(supabase)])
 
   let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
   try {
@@ -378,6 +379,7 @@ export async function POST(req: Request) {
       docTitle: documentText.voucher_doc_title,
       brand,
       brandLogo,
+      company,
     })
   } catch (error) {
     console.error("voucher:render-pdf", error)

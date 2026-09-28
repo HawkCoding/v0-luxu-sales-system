@@ -1,0 +1,16 @@
+diff --git a/lib/textkit.js b/lib/textkit.js
+index 0b8b6fa636c48ef0ac9cecb27040d2bac9303ce8..f46eb28decdeabbcccd0730fafe64344d372e9b1 100644
+--- a/lib/textkit.js
++++ b/lib/textkit.js
+@@ -2629,7 +2629,10 @@ const getNodes = (attributedString, { align }, options) => {
+         const width = advanceWidthBetween(start, start + s.length, attributedString);
+         if (s.trim() === '') {
+             const stretch = (width * opts.width) / opts.stretch;
+-            const shrink = (width * opts.width) / opts.shrink;
++            // Luxus patch: word spaces never shrink. Upstream lets a line overrun its box by up to
++            // a third of every space and then squeezes it back, so left-aligned text in the SA-Rail
++            // PDFs printed near-touching words. With no shrink a line simply wraps one word earlier.
++            const shrink = 0;
+             const end = start + s.length;
+             // Add glue node. Glue nodes are used to fill the space between words.
+             acc.push(linebreak.glue(width, start, end, stretch, shrink));

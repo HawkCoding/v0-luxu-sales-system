@@ -3,16 +3,31 @@ import {
   FOOTER_BRAND_DIVISION_LINE,
   FOOTER_BRAND_PRODUCT_LINE,
 } from "@/lib/assets/footer-brand"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import type { InvoiceDepartureRow } from "@/lib/invoices/departure-rows"
 import { formatMoney } from "@/lib/money"
-import { BrandBlock } from "@/lib/pdf/brand-block"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
-import { BOLD_TEXT, DOCUMENT_FONT_FAMILY, registerDocumentFonts } from "@/lib/pdf/document-fonts"
+import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
-  AGENT_COMMISSION_COLOR,
+  BOLD,
+  BOX_RADIUS,
+  BulletRow,
+  DESIGN_COLORS,
+  DocumentFooter,
+  DocumentHeader,
+  FooterClearance,
+  PAGE_BOTTOM,
+  PAGE_TOP,
+  PageBackground,
+  REGULAR,
+  RULE_WIDTH,
+  buildDocumentFooterLines,
+  footerCompanyFromBanking,
+  withColon,
+  type PagePadding,
+} from "@/lib/pdf/sarail-design"
+import {
   AGENT_COMMISSION_LABEL,
-  DISCOUNT_COLOR,
   DISCOUNT_LABEL,
   formatAgentCommission,
   formatDiscount,
@@ -62,6 +77,10 @@ export interface InvoiceItem {
   description: string
   unitPrice: number
   total: number
+  /** The day the service is used (YYYY-MM-DD) — printed in the description table's date column. */
+  date?: string | null
+  /** HH:MM the service starts, when the booking has one captured for it. */
+  time?: string | null
 }
 
 /**
@@ -108,37 +127,36 @@ export interface InvoicePdfData {
   currency?: string
   statusLabel?: string
   banking: BankingSettings
+  /** Settings' invoice footer wording. The SA-Rail design's footer is the company block alone, so
+   *  this is no longer printed; kept so callers and the Settings field stay valid. */
   footerText?: string
   paymentNote?: string
   bankChargesNote?: string
   /** SARAIL brand block copy + logo. Omitted falls back to the fixed constants. */
   brand?: DocumentBrand
+  /** "hidden" drops the letterhead; the design has no bottom slot, so "bottom" prints it on top. */
   brandPosition?: BrandBlockPosition
   brandLogo?: BrandLogoImage | null
 }
-
 
 function formatDate(value: string | null | undefined): string {
   return formatDisplayDate(value?.slice(0, 10)) || "To be confirmed"
 }
 
-/** Empty cells print as an em dash so a blank never reads as missing data. */
+/** "16 March 2027 12h00" — the description table's date column. Blank when the line has no date. */
+export function formatInvoiceItemWhen(date: string | null | undefined, time: string | null | undefined): string {
+  const day = date ? formatDisplayDateLong(date.slice(0, 10)) : ""
+  if (!day) return ""
+  const [hours, minutes] = (time ?? "").split(":")
+  return hours && minutes ? `${day} ${hours}h${minutes.slice(0, 2)}` : day
+}
+
+/** Empty cells print as an en dash so a blank never reads as missing data. */
 const EMPTY = "–"
 
 function orDash(value: string | null | undefined): string {
   return value?.trim() || EMPTY
 }
-
-/** One label/value pair in the header's meta strip, e.g. "Invoice No.  LTT-26-0001-INV". */
-function MetaField({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.headerMetaField}>
-      <Text style={styles.headerMetaLabel}>{label}</Text>
-      <Text style={styles.headerMetaValue}>{value}</Text>
-    </View>
-  )
-}
-
 
 /**
  * "25% Deposit due now" reads as a fresh demand once the deposit has actually
@@ -152,287 +170,195 @@ function depositRowLabel(totals: InvoiceTotals): string {
   return isPaid ? `${pctPrefix} — received` : `${pctPrefix} due now`
 }
 
-// Type sizes are set for Carlito (Calibri clone), whose x-height (~0.48em) is about 9% smaller than
-// the Montserrat this invoice used before — the small body tiers sit 0.5pt higher to read the same.
+function finalRowLabel(totals: InvoiceTotals): string {
+  if (totals.fullPayment) {
+    return totals.finalDueDate ? `Full amount due ${formatDate(totals.finalDueDate)}` : "Full amount due now"
+  }
+  return totals.finalDueDate ? `Final amount due ${formatDate(totals.finalDueDate)}` : "Final amount due now"
+}
+
+/** Settings store the payment note as one paragraph; the Terms list gives each sentence a bullet. */
+function sentences(value: string | null | undefined): string[] {
+  return (value ?? "")
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+}
+
+// Layout, in points, from the designer's invoice template (A4). The page's side padding puts the
+// Swirl box edge-to-edge; the sections outside the box are inset to the template's own margins.
+const PADDING: PagePadding = { top: PAGE_TOP, left: 30.4, right: 30.1 }
+/** Left inset of the meta strip, and of everything inside the box. */
+const META_INSET = 20.3
+const BOX_INSET = 24.3
+/** The table/totals column the template draws outside the box (x 36.4 → 535). */
+const SECTION_LEFT = 6
+const SECTION_RIGHT = 30.2
+/** Box columns: labels at 54.7 / 322.3, values at 155.1 / 377.7. */
+const BOX_LEFT_LABEL = 100.4
+const BOX_RIGHT_COLUMN = 267.6
+const BOX_RIGHT_LABEL = 55.4
+/** 8pt rows sit on a 10.65pt pitch, as the template sets them. */
+const SMALL_LINE = 10.65 / 8
+
 const styles = StyleSheet.create({
   page: {
-    fontFamily: DOCUMENT_FONT_FAMILY,
-    fontSize: 9,
-    paddingTop: 32,
-    paddingBottom: 36,
-    paddingHorizontal: 36,
-    color: "#312b24",
-    backgroundColor: "#ffffff",
-  },
-
-  // Header: BrandBlock (seal + full-width brand lines + rule) sits above a
-  // compact two-row strip of invoice identity fields.
-  headerRule: {
-    borderBottomWidth: 2,
-    borderBottomColor: "#8b5a2b",
-    marginBottom: 12,
-  },
-  headerMetaStrip: {
-    marginBottom: 12,
-  },
-  headerMetaRow: {
-    flexDirection: "row",
-    marginBottom: 3,
-  },
-  headerMetaField: {
-    flexDirection: "row",
-    flex: 1,
-  },
-  headerMetaLabel: {
-    fontSize: 8.5,
-    ...BOLD_TEXT,
-    color: "#6f675d",
-    marginRight: 6,
-  },
-  headerMetaValue: {
-    fontSize: 8.5,
-    color: "#312b24",
-    flex: 1,
-  },
-
-  // Guest + billing identity.
-  guestRow: {
-    flexDirection: "row",
-    marginBottom: 8,
-  },
-  // Narrower centered column for guest identity + journey details, distinct
-  // from the full-width billing grid below it.
-  centeredBlock: {
-    width: 400,
-    alignSelf: "center",
-  },
-  guestLabel: {
+    ...REGULAR,
     fontSize: 10,
-    ...BOLD_TEXT,
-    color: "#172018",
-    width: 62,
-  },
-  guestValue: {
-    fontSize: 10,
-    color: "#312b24",
-    flex: 1,
-  },
-  billingGrid: {
-    flexDirection: "row",
-    marginBottom: 14,
-  },
-  billingColumn: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  billingRow: {
-    flexDirection: "row",
-    marginBottom: 2,
-  },
-  // Address is the only multi-line value: keep the label pinned to the first
-  // line instead of stretching alongside a tall stack.
-  billingRowTop: {
-    flexDirection: "row",
-    marginBottom: 2,
-    alignItems: "flex-start",
-  },
-  billingLabel: {
-    fontSize: 9,
-    color: "#8a7f74",
-    width: 62,
-  },
-  billingValue: {
-    fontSize: 9,
-    color: "#312b24",
-    flex: 1,
-  },
-  // Container for stacked address lines. Column layout with no flex on the
-  // children, so the box grows to the natural height of every line; `flex: 1`
-  // on the children would make them share one line's worth of space and paint
-  // over the rows below. `minWidth: 0` lets a long street line soft-wrap.
-  billingValueStack: {
-    flex: 1,
-    minWidth: 0,
-  },
-  billingLine: {
-    fontSize: 9,
-    color: "#312b24",
+    color: DESIGN_COLORS.ink,
+    backgroundColor: DESIGN_COLORS.page,
+    paddingTop: PADDING.top,
+    paddingLeft: PADDING.left,
+    paddingRight: PADDING.right,
+    paddingBottom: PAGE_BOTTOM,
   },
 
-  // Departure information: paired label/value columns (left + right). Rows now come from
-  // invoiceRowsForBlock (lib/invoices/departure-rows.ts), which fills the right column where the
-  // row has a second fact to state — Train | Days, Departure | Time, Suite Type | Qty — and leaves
-  // it blank otherwise.
-  sectionHeading: {
-    fontSize: 10.5,
-    ...BOLD_TEXT,
-    color: "#172018",
+  meta: {
+    marginTop: 9.8,
+    marginLeft: META_INSET,
+    flexDirection: "row",
+  },
+  // Status/Consultant labels sit at x 318.3 (4pt left of the box's right column).
+  metaColumn: {
+    width: BOX_RIGHT_COLUMN,
+  },
+  metaRow: {
+    flexDirection: "row",
+    marginBottom: 1.65,
+  },
+  metaLabel: { ...BOLD, fontSize: 10, width: 72.6 },
+  metaLabelRight: { ...BOLD, fontSize: 10, width: 66.6 },
+  metaValue: { fontSize: 10, flex: 1 },
+
+  box: {
+    marginTop: 6.6,
+    backgroundColor: DESIGN_COLORS.box,
+    borderRadius: BOX_RADIUS,
+    paddingTop: 16.6,
+    paddingBottom: 12.7,
+    paddingLeft: BOX_INSET,
+    paddingRight: BOX_INSET,
+  },
+  boxColumns: {
+    flexDirection: "row",
+  },
+  boxLeftColumn: {
+    width: BOX_RIGHT_COLUMN,
+    paddingRight: 8,
+  },
+  boxRightColumn: {
+    flex: 1,
+  },
+  row: {
+    flexDirection: "row",
+  },
+  guestLabel: { ...BOLD, fontSize: 10, width: BOX_LEFT_LABEL },
+  guestLabelRight: { ...BOLD, fontSize: 10, width: BOX_RIGHT_LABEL },
+  guestValue: { fontSize: 10, flex: 1 },
+  smallLabel: { ...BOLD, fontSize: 8, lineHeight: SMALL_LINE, width: BOX_LEFT_LABEL },
+  smallLabelRight: { ...BOLD, fontSize: 8, lineHeight: SMALL_LINE, width: BOX_RIGHT_LABEL },
+  addressLine: { fontSize: 8, lineHeight: SMALL_LINE },
+  smallValue: { fontSize: 8, lineHeight: SMALL_LINE, flex: 1, paddingRight: 6 },
+  boxRule: {
+    marginTop: 13,
+    marginRight: -11.7,
+    marginLeft: -0.7,
+    borderTopWidth: RULE_WIDTH,
+    borderTopColor: DESIGN_COLORS.ink,
+  },
+  journeyHeading: {
+    ...BOLD,
+    fontSize: 10,
+    marginTop: 7.75,
+    marginBottom: 5.75,
     textTransform: "uppercase",
-    letterSpacing: 0.5,
-    textAlign: "center",
-    marginBottom: 7,
-  },
-  departureRow: {
-    flexDirection: "row",
-    marginBottom: 2.5,
-  },
-  departureLabel: {
-    fontSize: 9,
-    ...BOLD_TEXT,
-    color: "#6f675d",
-    width: 88,
-    textAlign: "right",
-    marginRight: 10,
-  },
-  departureValue: {
-    fontSize: 9,
-    color: "#312b24",
-    flex: 1,
   },
 
-  // Line-item table.
-  table: {
-    marginTop: 14,
+  section: {
+    marginLeft: SECTION_LEFT,
+    marginRight: SECTION_RIGHT,
   },
-  tableHead: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#8b5a2b",
-    paddingBottom: 4,
-    marginBottom: 3,
+  tableHeading: {
+    ...BOLD,
+    fontSize: 12,
+    marginTop: 8.1,
+    paddingBottom: 4.7,
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
+  },
+  tableBody: {
+    paddingTop: 4.4,
+    paddingBottom: 5.2,
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
   },
   tableRow: {
     flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee6dc",
-    paddingVertical: 5,
+    paddingLeft: 1,
   },
-  colDesc: { flex: 1, fontSize: 9, paddingRight: 8 },
-  headText: {
-    fontSize: 9,
-    ...BOLD_TEXT,
-    color: "#172018",
-  },
+  tableWhen: { fontSize: 10, width: 152.8 },
+  tableDescription: { fontSize: 10, flex: 1 },
 
-  // Totals ladder right-aligned; banking details full-width beneath it.
-  paymentSplit: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 18,
+  totals: {
+    marginLeft: 272.7,
+    marginRight: SECTION_RIGHT,
   },
-  bankingBox: {
-    marginTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#e8dfd2",
-    paddingTop: 10,
+  // Rows sit on a 19.3pt pitch (13.65pt line + 5.65pt gap), each group closed by a rule.
+  totalsGroup: {
+    paddingTop: 9.3,
+    paddingBottom: 4.65,
+    rowGap: 5.65,
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
   },
-  bankingTitle: {
-    fontSize: 9,
-    ...BOLD_TEXT,
-    color: "#172018",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-    marginBottom: 5,
-  },
-  bankingLine: {
-    flexDirection: "row",
-    marginBottom: 2,
-  },
-  bankingLabel: {
-    fontSize: 8.5,
-    color: "#8a7f74",
-    width: 84,
-  },
-  bankingValue: {
-    fontSize: 8.5,
-    color: "#312b24",
-    flex: 1,
-  },
-  referenceLine: {
-    fontSize: 9,
-    ...BOLD_TEXT,
-    color: "#172018",
-    textAlign: "left",
-    marginTop: 8,
-    letterSpacing: 0.3,
-  },
-  totalsBox: {
-    width: 250,
+  paymentsGroup: {
+    paddingTop: 9,
+    paddingBottom: 9.2,
+    rowGap: 5.65,
+    borderBottomWidth: RULE_WIDTH,
+    borderBottomColor: DESIGN_COLORS.ink,
   },
   totalsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 2.5,
+    paddingLeft: 6.2,
+    paddingRight: 4.9,
   },
-  totalsLabel: {
-    fontSize: 9,
-    color: "#6f675d",
-    flex: 1,
-    textAlign: "right",
-    marginRight: 10,
-  },
-  totalsValue: {
-    fontSize: 9,
-    color: "#312b24",
-    width: 84,
-    textAlign: "right",
-  },
-  totalsDivider: {
-    borderTopWidth: 1,
-    borderTopColor: "#d8cdbc",
-    marginVertical: 3,
-  },
+  totalsLabel: { fontSize: 10, width: 152 },
+  totalsValue: { fontSize: 10, flex: 1, textAlign: "right" },
   outstandingRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: "#172018",
-    paddingVertical: 6,
-    paddingHorizontal: 7,
-    marginTop: 3,
+    paddingLeft: 6.2,
+    paddingRight: 4.9,
+    paddingTop: 5.9,
+    paddingBottom: 9.1,
   },
-  outstandingLabel: {
-    fontSize: 9,
-    ...BOLD_TEXT,
-    color: "#f6f2ea",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-    flex: 1,
-    textAlign: "right",
-    marginRight: 10,
-  },
-  outstandingValue: {
-    fontSize: 11,
-    ...BOLD_TEXT,
-    color: "#ffffff",
-    width: 84,
-    textAlign: "right",
-  },
-  bankChargesNote: {
-    fontSize: 7.5,
-    color: "#a3564b",
-    textAlign: "right",
-    marginTop: 5,
-    lineHeight: 1.4,
+  closingRule: {
+    // Spans x 37.4 → 536 from inside the totals column (which starts at x 303.1).
+    marginLeft: SECTION_LEFT + 1 - 272.7,
+    marginRight: -1,
+    borderTopWidth: RULE_WIDTH,
+    borderTopColor: DESIGN_COLORS.ink,
   },
 
-  paymentNote: {
-    marginTop: 16,
-    fontSize: 9,
-    ...BOLD_TEXT,
-    color: "#172018",
-    textAlign: "center",
-    lineHeight: 1.4,
+  closing: {
+    flexDirection: "row",
+    marginLeft: SECTION_LEFT + 1,
+    marginRight: SECTION_RIGHT,
   },
-  footer: {
-    marginTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#e8dfd2",
-    paddingTop: 8,
-    fontSize: 7.5,
-    color: "#8a7f74",
-    textAlign: "center",
-    lineHeight: 1.5,
+  termsColumn: {
+    width: 215,
+    paddingTop: 6,
   },
+  bankColumn: {
+    marginLeft: 309.3 - 37.4 - 215,
+    flex: 1,
+    paddingTop: 4.5,
+  },
+  closingHeading: { ...BOLD, fontSize: 10 },
+  termsList: { marginTop: 2.95 },
+  bankList: { marginTop: 5.55 },
+  bankLabel: { ...BOLD, fontSize: 8, lineHeight: 10.7 / 8, width: 92.8 },
+  bankValue: { fontSize: 8, lineHeight: 10.7 / 8, flex: 1 },
 })
 
 const BANKING_ROWS: Array<{ key: keyof BankingSettings; label: string }> = [
@@ -477,6 +403,11 @@ function paxRows(departure: InvoiceDeparture, legRows: InvoiceDepartureRow[]): I
   return rows
 }
 
+/** The design writes the count label in capitals ("QTY:") and every other label as typed. */
+function journeyLabel(label: string): string {
+  return withColon(label.toLowerCase() === "qty" ? "QTY" : label)
+}
+
 function DepartureLegBlock({
   departure,
   leg,
@@ -492,26 +423,49 @@ function DepartureLegBlock({
     ...(isFirst ? paxRows(departure, leg.rows) : []),
   ]
   return (
-    <View style={{ marginBottom: 8 }}>
-      <Text style={styles.sectionHeading}>{leg.heading}</Text>
+    <View wrap={false}>
+      <Text style={styles.journeyHeading}>{withColon(leg.heading)}</Text>
       {rows.map((row, index) => (
-        <View key={index} style={styles.departureRow}>
-          <Text style={styles.departureLabel}>{row.left ? `${row.left.label}:` : ""}</Text>
-          <Text style={styles.departureValue}>{row.left?.value ?? ""}</Text>
-          <Text style={styles.departureLabel}>{row.right ? `${row.right.label}:` : ""}</Text>
-          <Text style={styles.departureValue}>{row.right?.value ?? ""}</Text>
+        <View key={index} style={styles.row}>
+          <View style={[styles.row, styles.boxLeftColumn]}>
+            <Text style={styles.smallLabel}>{row.left ? journeyLabel(row.left.label) : ""}</Text>
+            <Text style={styles.smallValue}>{row.left?.value ?? ""}</Text>
+          </View>
+          <View style={[styles.row, styles.boxRightColumn]}>
+            <Text style={styles.smallLabelRight}>{row.right ? journeyLabel(row.right.label) : ""}</Text>
+            <Text style={styles.smallValue}>{row.right?.value ?? ""}</Text>
+          </View>
         </View>
       ))}
     </View>
   )
 }
 
-function DepartureBlock({ departure }: { departure: InvoiceDeparture }) {
+function SmallRow({
+  label,
+  value,
+  right = false,
+  nudge = 0,
+}: {
+  label: string
+  value: string
+  right?: boolean
+  /** Extra space above the row — keeps the right column's rows level with the left's. */
+  nudge?: number
+}) {
   return (
-    <View>
-      {departure.legs.map((leg, index) => (
-        <DepartureLegBlock key={index} departure={departure} leg={leg} isFirst={index === 0} />
-      ))}
+    <View style={nudge ? [styles.row, { marginTop: nudge }] : styles.row}>
+      <Text style={right ? styles.smallLabelRight : styles.smallLabel}>{withColon(label)}</Text>
+      <Text style={styles.smallValue}>{value}</Text>
+    </View>
+  )
+}
+
+function TotalsRow({ label, value, bold = false }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <View style={styles.totalsRow}>
+      <Text style={bold ? [styles.totalsLabel, BOLD] : styles.totalsLabel}>{label}</Text>
+      <Text style={styles.totalsValue}>{value}</Text>
     </View>
   )
 }
@@ -529,7 +483,6 @@ export function InvoiceDocument({
   currency = "ZAR",
   statusLabel = "Provisional",
   banking,
-  footerText = "Luxus Travel & Tours — Luxury Rail Journeys",
   paymentNote,
   bankChargesNote,
   brand,
@@ -543,52 +496,32 @@ export function InvoiceDocument({
     subheading: FOOTER_BRAND_DIVISION_LINE,
     logoUrl: null,
   }
-  const showBrandTop = brandPosition === "top"
-  const showBrandBottom = brandPosition === "bottom"
+  const showBrand = brandPosition !== "hidden"
 
   const bankingRows = BANKING_ROWS.filter(({ key }) => banking[key])
-  const reference = invoiceNumber
   const guests = (guestNames ?? []).map((name) => name.trim()).filter(Boolean)
   const guest1 = guests[0] ?? customerName ?? "Valued Guest"
   const guest2 = guests[1] ?? null
   const extraGuests = guests.slice(2)
-
   const addressLines = billing?.addressLines?.filter((line) => line.trim()) ?? []
 
-  // Supplier identity lines a full tax invoice must carry, plus the contact
-  // channels the sales team's own footer prints. Unset settings drop out.
-  const contactLine = [
-    banking.company_tel ? `Tel: ${banking.company_tel}` : "",
-    banking.company_cell ? `Cell: ${banking.company_cell}` : "",
-  ]
-    .filter(Boolean)
-    .join("  •  ")
-
-  const webLine = [
-    banking.company_email ? `E-mail: ${banking.company_email}` : "",
-    banking.company_website ? `Web: ${banking.company_website}` : "",
-  ]
-    .filter(Boolean)
-    .join("  •  ")
-
-  const registrationLine = [
-    banking.company_reg_number ? `Company Registration ${banking.company_reg_number}` : "",
-    banking.company_vat_number ? `VAT number ${banking.company_vat_number}` : "",
-  ]
-    .filter(Boolean)
-    .join("  •  ")
-
-  const footerLines = [
-    footerText,
-    banking.company_address,
-    contactLine,
-    webLine,
-    registrationLine,
-  ].filter(Boolean)
-
+  const money = (value: number) => formatMoney(value, currency)
   const hasAgentCommission = Boolean(totals.agentCommission)
   const hasVisibleDiscount = (totals.discountVisible ?? true) && Boolean(totals.discount)
-  const showTotalInclVatRow = hasAgentCommission || hasVisibleDiscount
+  const hasDeduction = hasAgentCommission || hasVisibleDiscount
+  const hasDeposit = totals.depositAmount !== null && totals.depositAmount !== undefined
+
+  const terms = [
+    bankChargesNote?.trim() ?? "",
+    `Please use reference ${invoiceNumber} when making payment.`,
+    ...sentences(paymentNote),
+  ].filter(Boolean)
+
+  const footerLines = buildDocumentFooterLines(footerCompanyFromBanking(banking), {
+    division: resolvedBrand.subheading,
+    year: Number((issueDate || new Date().toISOString()).slice(0, 4)),
+    includeVatNumber: true,
+  })
 
   return (
     <Document
@@ -597,207 +530,167 @@ export function InvoiceDocument({
       title={`Invoice ${invoiceNumber} — ${customerName}`}
     >
       <Page size="A4" style={styles.page}>
-        {showBrandTop ? (
-          <BrandBlock brand={resolvedBrand} logoImage={brandLogo} placement="top" />
+        <PageBackground />
+        {showBrand ? (
+          <DocumentHeader brand={resolvedBrand} logo={brandLogo} padding={PADDING} />
         ) : (
-          // Keep the rule when the brand block has been moved to the bottom (or hidden).
-          <View style={styles.headerRule} />
+          <View style={{ marginTop: -PADDING.top, height: 80 }} />
         )}
-        <View style={styles.headerMetaStrip}>
-          <View style={styles.headerMetaRow}>
-            <MetaField label="Invoice No." value={invoiceNumber} />
-            <MetaField label="Status" value={statusLabel} />
+
+        <View style={styles.meta}>
+          <View style={styles.metaColumn}>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Invoice No:</Text>
+              <Text style={styles.metaValue}>{invoiceNumber}</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Invoice date:</Text>
+              <Text style={styles.metaValue}>{formatDate(issueDate)}</Text>
+            </View>
           </View>
-          <View style={styles.headerMetaRow}>
-            <MetaField label="Invoice date" value={formatDate(issueDate)} />
-            <MetaField label="Consultant" value={orDash(consultant)} />
+          <View style={{ flex: 1 }}>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabelRight}>Status:</Text>
+              <Text style={styles.metaValue}>{statusLabel}</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabelRight}>Consultant:</Text>
+              <Text style={styles.metaValue}>{orDash(consultant)}</Text>
+            </View>
           </View>
         </View>
 
-        <View style={styles.centeredBlock}>
-          <View style={styles.guestRow}>
-            <Text style={styles.guestLabel}>Guest 1</Text>
-            <Text style={styles.guestValue}>{guest1}</Text>
-            <Text style={styles.guestLabel}>Guest 2</Text>
-            <Text style={styles.guestValue}>{guest2 ?? EMPTY}</Text>
-          </View>
-          {extraGuests.length > 0 ? (
-            <View style={styles.guestRow}>
-              <Text style={styles.guestLabel}>Guests</Text>
-              <Text style={styles.guestValue}>{extraGuests.join(", ")}</Text>
-            </View>
-          ) : null}
-          <View style={styles.billingGrid}>
-          <View style={styles.billingColumn}>
-            <View style={styles.billingRow}>
-              <Text style={styles.billingLabel}>Company</Text>
-              <Text style={styles.billingValue}>{orDash(billing?.companyName)}</Text>
-            </View>
-            <View style={styles.billingRowTop}>
-              <Text style={styles.billingLabel}>Address</Text>
-              <View style={styles.billingValueStack}>
-                {addressLines.length > 0 ? (
-                  addressLines.map((line, index) => (
-                    <Text key={index} style={styles.billingLine}>
+        <View style={styles.box}>
+          <View style={styles.boxColumns}>
+            <View style={styles.boxLeftColumn}>
+              <View style={styles.row}>
+                <Text style={styles.guestLabel}>Guest 1:</Text>
+                <Text style={styles.guestValue}>{guest1}</Text>
+              </View>
+              <SmallRow label="Company" value={orDash(billing?.companyName)} />
+              <View style={[styles.row, { marginTop: 1.4 }]}>
+                <Text style={styles.smallLabel}>Address:</Text>
+                {/* Column of lines with no flex on the children, so the stack grows to every line
+                    instead of sharing one line's height and painting over the Phone row. */}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  {(addressLines.length > 0 ? addressLines : [EMPTY]).map((line, index) => (
+                    <Text key={index} style={styles.addressLine}>
                       {line}
                     </Text>
-                  ))
-                ) : (
-                  <Text style={styles.billingLine}>{EMPTY}</Text>
-                )}
+                  ))}
+                </View>
               </View>
+              <SmallRow label="Phone" value={orDash(billing?.phone)} />
+              <SmallRow label="E-mail" value={orDash(billing?.email)} />
             </View>
-            <View style={styles.billingRow}>
-              <Text style={styles.billingLabel}>Phone</Text>
-              <Text style={styles.billingValue}>{orDash(billing?.phone)}</Text>
-            </View>
-            <View style={styles.billingRow}>
-              <Text style={styles.billingLabel}>E-mail</Text>
-              <Text style={styles.billingValue}>{orDash(billing?.email)}</Text>
-            </View>
-          </View>
-          <View style={styles.billingColumn}>
-            <View style={styles.billingRow}>
-              <Text style={styles.billingLabel}>VAT</Text>
-              <Text style={styles.billingValue}>{orDash(billing?.vatNumber)}</Text>
-            </View>
-            <View style={styles.billingRow}>
-              <Text style={styles.billingLabel}>Code</Text>
-              <Text style={styles.billingValue}>{orDash(billing?.postalCode)}</Text>
+            <View style={styles.boxRightColumn}>
+              <View style={styles.row}>
+                <Text style={styles.guestLabelRight}>Guest 2:</Text>
+                <Text style={styles.guestValue}>{guest2 ?? EMPTY}</Text>
+              </View>
+              <SmallRow label="VAT" value={orDash(billing?.vatNumber)} right />
+              <SmallRow label="Code" value={orDash(billing?.postalCode)} right nudge={1.4} />
+              {extraGuests.length > 0 ? (
+                <SmallRow label="Guests" value={extraGuests.join(", ")} right />
+              ) : null}
             </View>
           </View>
+
+          {departure && departure.legs.length > 0 ? (
+            <>
+              <View style={styles.boxRule} />
+              {departure.legs.map((leg, index) => (
+                <DepartureLegBlock key={index} departure={departure} leg={leg} isFirst={index === 0} />
+              ))}
+            </>
+          ) : null}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.tableHeading} minPresenceAhead={30}>
+            Travel Package Description
+          </Text>
+          <View style={styles.tableBody}>
+            {items.map((item, index) => (
+              <View key={index} style={styles.tableRow} wrap={false}>
+                <Text style={styles.tableWhen}>{formatInvoiceItemWhen(item.date, item.time)}</Text>
+                <Text style={styles.tableDescription}>{item.description}</Text>
+              </View>
+            ))}
           </View>
         </View>
 
-        {departure ? (
-          <View style={styles.centeredBlock}>
-            <DepartureBlock departure={departure} />
-          </View>
-        ) : null}
-
-        <View style={styles.table}>
-          <View style={styles.tableHead}>
-            <Text style={[styles.colDesc, styles.headText]}>Travel Package Description</Text>
-          </View>
-          {items.map((item, index) => (
-            <View key={index} style={styles.tableRow} wrap={false}>
-              <Text style={styles.colDesc}>{item.description}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.paymentSplit}>
-          <View style={styles.totalsBox}>
-            {/* VAT-inclusive amounts only — the sales team's invoices never break out VAT. */}
-            <View style={styles.totalsRow}>
-              <Text style={[styles.totalsLabel, { ...BOLD_TEXT }]}>
-                Subtotal incl. VAT
-              </Text>
-              <Text style={[styles.totalsValue, { ...BOLD_TEXT }]}>
-                {formatMoney(totals.subtotalInclVat, currency)}
-              </Text>
-            </View>
+        {/* VAT-inclusive amounts only — the sales team's invoices never break out VAT. */}
+        <View style={styles.totals} wrap={false}>
+          <View style={styles.totalsGroup}>
+            {hasDeduction ? (
+              <TotalsRow label="Sub Total incl VAT:" value={money(totals.subtotalInclVat)} bold />
+            ) : null}
             {hasAgentCommission ? (
-              <View style={styles.totalsRow}>
-                <Text
-                  style={[styles.totalsLabel, { ...BOLD_TEXT, color: AGENT_COMMISSION_COLOR }]}
-                >
-                  {AGENT_COMMISSION_LABEL}
-                </Text>
-                <Text
-                  style={[styles.totalsValue, { ...BOLD_TEXT, color: AGENT_COMMISSION_COLOR }]}
-                >
-                  {formatAgentCommission(totals.agentCommission ?? 0, (v) => formatMoney(v, currency))}
-                </Text>
-              </View>
+              <TotalsRow
+                label={withColon(AGENT_COMMISSION_LABEL)}
+                value={formatAgentCommission(totals.agentCommission ?? 0, money)}
+              />
             ) : null}
             {hasVisibleDiscount ? (
-              <View style={styles.totalsRow}>
-                <Text
-                  style={[styles.totalsLabel, { ...BOLD_TEXT, color: DISCOUNT_COLOR }]}
-                >
-                  {DISCOUNT_LABEL}
-                </Text>
-                <Text
-                  style={[styles.totalsValue, { ...BOLD_TEXT, color: DISCOUNT_COLOR }]}
-                >
-                  {formatDiscount(totals.discount ?? 0, (v) => formatMoney(v, currency))}
-                </Text>
-              </View>
+              <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(totals.discount ?? 0, money)} />
             ) : null}
-            {showTotalInclVatRow ? (
-              <View style={styles.totalsRow}>
-                <Text style={[styles.totalsLabel, { ...BOLD_TEXT }]}>
-                  Total incl. VAT
-                </Text>
-                <Text style={[styles.totalsValue, { ...BOLD_TEXT }]}>
-                  {formatMoney(totals.totalInclVat ?? totals.subtotalInclVat, currency)}
-                </Text>
-              </View>
+            <TotalsRow
+              label="Total incl VAT:"
+              value={money(hasDeduction ? (totals.totalInclVat ?? totals.subtotalInclVat) : totals.subtotalInclVat)}
+              bold
+            />
+          </View>
+          <View style={styles.paymentsGroup}>
+            {hasDeposit ? (
+              <TotalsRow label={depositRowLabel(totals)} value={money(totals.depositAmount ?? 0)} />
             ) : null}
-            <View style={styles.totalsDivider} />
-            {totals.depositAmount !== null && totals.depositAmount !== undefined ? (
-              <View style={styles.totalsRow}>
-                <Text style={styles.totalsLabel}>{depositRowLabel(totals)}</Text>
-                <Text style={styles.totalsValue}>{formatMoney(totals.depositAmount, currency)}</Text>
-              </View>
-            ) : null}
-            <View style={styles.totalsRow}>
-              <Text style={styles.totalsLabel}>
-                {totals.fullPayment
-                  ? totals.finalDueDate
-                    ? `Full amount due ${formatDate(totals.finalDueDate)}`
-                    : "Full amount due now"
-                  : totals.finalDueDate
-                    ? `Final amount due ${formatDate(totals.finalDueDate)}`
-                    : "Final amount due now"}
-              </Text>
-              <Text style={styles.totalsValue}>{formatMoney(totals.finalAmount, currency)}</Text>
-            </View>
-            <View style={styles.totalsRow}>
-              <Text style={styles.totalsLabel}>
-                {totals.amountReceivedAt
+            <TotalsRow label={finalRowLabel(totals)} value={money(totals.finalAmount)} />
+            <TotalsRow
+              label={
+                totals.amountReceivedAt
                   ? `Amount received, thank you ${formatDate(totals.amountReceivedAt)}`
-                  : "Amount received"}
-              </Text>
-              <Text style={styles.totalsValue}>{formatMoney(totals.amountReceived, currency)}</Text>
+                  : "Amount received"
+              }
+              value={money(totals.amountReceived)}
+            />
+          </View>
+          <View style={styles.outstandingRow}>
+            <Text style={[styles.totalsLabel, BOLD]}>OUTSTANDING AMOUNT:</Text>
+            <Text style={styles.totalsValue}>{money(totals.outstanding)}</Text>
+          </View>
+          {/* Full-width rule closing the money section — kept with the totals so it never opens a page. */}
+          <View style={styles.closingRule} />
+        </View>
+
+        <View wrap={false}>
+          <View style={styles.closing}>
+            <View style={styles.termsColumn}>
+              <Text style={styles.closingHeading}>Terms and Conditions:</Text>
+              <View style={styles.termsList}>
+                {terms.map((term, index) => (
+                  <BulletRow key={index} text={term} bulletLeft={3.4} textLeft={13.6} />
+                ))}
+              </View>
             </View>
-            <View style={styles.outstandingRow}>
-              <Text style={styles.outstandingLabel}>Outstanding amount</Text>
-              <Text style={styles.outstandingValue}>
-                {formatMoney(totals.outstanding, currency)}
-              </Text>
-            </View>
-            {bankChargesNote ? (
-              <Text style={styles.bankChargesNote}>{bankChargesNote}</Text>
+            {bankingRows.length > 0 ? (
+              <View style={styles.bankColumn}>
+                <Text style={styles.closingHeading}>Bank Details for EFT:</Text>
+                <View style={styles.bankList}>
+                  {bankingRows.map(({ key, label }) => (
+                    <View key={key} style={styles.row}>
+                      <Text style={styles.bankLabel}>{withColon(label)}</Text>
+                      <Text style={styles.bankValue}>{banking[key]}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
             ) : null}
           </View>
+          <FooterClearance />
         </View>
 
-        <View style={styles.bankingBox}>
-          <Text style={styles.bankingTitle}>Bank details for electronic payments</Text>
-          {bankingRows.map(({ key, label }) => (
-            <View key={key} style={styles.bankingLine}>
-              <Text style={styles.bankingLabel}>{label}</Text>
-              <Text style={styles.bankingValue}>{banking[key]}</Text>
-            </View>
-          ))}
-          <Text style={styles.referenceLine}>
-            PLEASE USE REFERENCE  {reference}  WHEN MAKING PAYMENT
-          </Text>
-        </View>
-
-        {paymentNote ? <Text style={styles.paymentNote}>{paymentNote}</Text> : null}
-
-        <View style={styles.footer}>
-          {footerLines.map((line, index) => (
-            <Text key={index}>{line}</Text>
-          ))}
-        </View>
-
-        {showBrandBottom ? (
-          <BrandBlock brand={resolvedBrand} logoImage={brandLogo} placement="bottom" />
-        ) : null}
+        <DocumentFooter lines={footerLines} />
       </Page>
     </Document>
   )

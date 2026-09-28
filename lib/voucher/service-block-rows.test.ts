@@ -193,7 +193,7 @@ describe("voucherRowsForBlock", () => {
       "Suite Type",
       "Meal Basis",
     ])
-    expect(rows.find((r) => r.label === "Duration")?.value).toBe("2 days")
+    expect(rows.find((r) => r.label === "Duration")?.value).toBe("2 Days")
   })
 
   it("train block: suite type and quantity table together as a single two-cell row", () => {

@@ -33,7 +33,7 @@ const TEXT_FIELDS: { key: TextKey; label: string; placeholder: string }[] = [
   {
     key: "brand_block_heading",
     label: "Heading",
-    placeholder: "BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI",
+    placeholder: "THE BLUE TRAIN - ROVOS RAIL - KRUGER SHALATI",
   },
   {
     key: "brand_block_subheading",

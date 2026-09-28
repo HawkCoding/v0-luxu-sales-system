@@ -192,8 +192,8 @@ export type DocumentTextSettings = Record<(typeof DOCUMENT_TEXT_SETTING_KEYS)[nu
 const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   quote_doc_title: "QUOTATION",
   quote_doc_footer_text:
-    "This quotation is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.",
-  quote_doc_includes_heading: "Your Package Includes",
+    "This quotation is subject to availability. Prices are quoted in {{currency}}.",
+  quote_doc_includes_heading: "Travel Package Includes",
   quote_doc_excludes_heading: "Your Package Excludes",
   // Appended after the suppliers' own exclusions. Seeded to "Services not mentioned." by
   // migration; the default here is empty so clearing it in Settings actually omits the line.
@@ -203,7 +203,7 @@ const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   invoice_doc_final_title: "FINAL INVOICE",
   invoice_doc_footer_text: "Luxus Travel & Tours — Luxury Rail Journeys",
   invoice_doc_payment_note:
-    "Please e-mail proof of payment. Reservations can only be confirmed once payment has been received.",
+    "Please email proof of payment. Reservations can only be confirmed once payment has been received.",
   invoice_doc_bank_charges_note:
     "Please note that the amounts transferred should be exclusive of all bank charges.",
   itinerary_doc_journey_heading: "Your Journey",
