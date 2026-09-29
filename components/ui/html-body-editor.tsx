@@ -98,10 +98,13 @@ export function HtmlBodyEditor({
   const [mode, setMode] = useState<Mode>(richSafe ? "rich" : "source")
   const [sourceDraft, setSourceDraft] = useState(value)
   const lastEmitted = useRef(value)
+  // An external value that arrived while the editor had focus, waiting for blur.
+  const deferredValue = useRef<string | null>(null)
 
   const emit = useCallback(
     (html: string) => {
       lastEmitted.current = html
+      deferredValue.current = null
       onChange(html)
     },
     [onChange],
@@ -142,18 +145,53 @@ export function HtmlBodyEditor({
     editor.view.dom.style.fontSize = baseFontSize ?? ""
   }, [editor, baseFontSize])
 
-  // Sync external value changes (e.g. an async preview load resolving) into the
-  // editor without bouncing our own edits back through it.
+  // Sync external value changes (e.g. an async preview load resolving, a
+  // discarded draft, or a save adopting the server's sanitized HTML) into the
+  // editor without bouncing our own edits back through it. Never replaces the
+  // document while the editor has focus — that resets the caret mid-typing,
+  // and the user's next keystroke re-emits the editor's own content anyway.
+  // A change that arrives while focused is parked and applied on blur instead,
+  // unless the user types first (emit clears it — their content wins).
+  const applyExternal = useCallback(
+    (next: string) => {
+      if (!editor) return
+      // Deferred to a microtask: Tiptap's internal flushSync can't run while
+      // React is still mid-commit from the state update that triggered this effect.
+      queueMicrotask(() => {
+        if (editor.isDestroyed) return
+        editor.commands.setContent(toEditorHtml(next, blockTokens).html, { emitUpdate: false })
+        lastEmitted.current = next
+      })
+    },
+    [editor, blockTokens],
+  )
+
   useEffect(() => {
     if (!editor || mode !== "rich") return
-    if (value === lastEmitted.current) return
-    // Deferred to a microtask: Tiptap's internal flushSync can't run while
-    // React is still mid-commit from the state update that triggered this effect.
-    queueMicrotask(() => {
-      editor.commands.setContent(toEditorHtml(value, blockTokens).html, { emitUpdate: false })
-      lastEmitted.current = value
-    })
-  }, [value, editor, mode, blockTokens])
+    if (value === lastEmitted.current) {
+      deferredValue.current = null
+      return
+    }
+    if (editor.isFocused) {
+      deferredValue.current = value
+      return
+    }
+    deferredValue.current = null
+    applyExternal(value)
+  }, [value, editor, mode, applyExternal])
+
+  useEffect(() => {
+    if (!editor) return
+    const handleBlur = () => {
+      const next = deferredValue.current
+      deferredValue.current = null
+      if (next !== null && next !== lastEmitted.current) applyExternal(next)
+    }
+    editor.on("blur", handleBlur)
+    return () => {
+      editor.off("blur", handleBlur)
+    }
+  }, [editor, applyExternal])
 
   function switchToSource() {
     setSourceDraft(value)

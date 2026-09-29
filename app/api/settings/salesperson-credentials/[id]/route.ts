@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
+import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { encryptCredential } from "@/lib/inbound-email/crypto"
 import {
   getEmailSignaturesByProfileIds,
   signatureFieldsSchema,
   upsertEmailSignature,
 } from "@/lib/email/signature-admin"
-import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
+import { requireRole } from "@/lib/api/auth"
+import { ALL_ROLES, SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 import { requireSettingsWrite } from "@/lib/settings-access"
-import { createSessionClient } from "@/lib/supabase/server"
-import { extractRoleFromJwt } from "@/lib/role-utils"
 import type { Database } from "@/lib/supabase/types"
 
 type SalespersonCredentialUpdate = Database["public"]["Tables"]["salesperson_credentials"]["Update"]
@@ -32,21 +31,22 @@ const updateSchema = z
 const SAFE_COLUMNS =
   "id, profile_id, email_address, smtp_host, smtp_port, smtp_encryption, imap_host, imap_port, imap_encryption, imap_sent_folder, created_at, updated_at"
 
+function isSettingsWriter(role: string): boolean {
+  return (SETTINGS_WRITE_ROLES as readonly string[]).includes(role)
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const supabase = await createSessionClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  // Role comes from profiles.clearance_level (requireRole) — the auth user's
+  // app_metadata never carries it, so reading it off the JWT user 403'd everyone.
+  const auth = await requireRole(ALL_ROLES)
+  if (!auth.ok) return auth.response
+  const { supabase, user, profile } = auth.value
 
-  const role = extractRoleFromJwt(user)
-  if (!role || !["admin", "manager", "consultant"].includes(role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
-
-  const isManagerOrAbove = ["admin", "manager"].includes(role)
+  const isManagerOrAbove = isSettingsWriter(profile.clearanceLevel)
 
   const query = supabase
     .from("salesperson_credentials")
@@ -73,27 +73,30 @@ export async function PATCH(
 
   // Admin/manager may edit any row; a consultant may edit only their own —
   // mirrors the GET handler's isManagerOrAbove scoping above.
-  const supabase = await createSessionClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const auth = await requireRole(ALL_ROLES)
+  if (!auth.ok) return auth.response
+  const { supabase, user, profile } = auth.value
 
-  const role = extractRoleFromJwt(user)
-  if (!role || !["admin", "manager", "consultant"].includes(role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
-
-  if (!(SETTINGS_WRITE_ROLES as readonly string[]).includes(role)) {
-    const { data: existing } = await supabase
+  if (!isSettingsWriter(profile.clearanceLevel)) {
+    const { data: existing, error: existingError } = await supabase
       .from("salesperson_credentials")
       .select("profile_id")
       .eq("id", id)
       .maybeSingle()
+    if (existingError) return safeSupabaseError("salesperson-credentials:read", existingError)
     if (!existing || existing.profile_id !== user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
   }
 
-  const result = updateSchema.safeParse(await request.json())
+  let raw: unknown
+  try {
+    raw = await request.json()
+  } catch {
+    return jsonError("Invalid JSON body", 400)
+  }
+
+  const result = updateSchema.safeParse(raw)
   if (!result.success) return jsonZodError(result.error, "Invalid request payload")
   const parsed = result.data
 

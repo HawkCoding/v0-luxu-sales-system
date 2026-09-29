@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { ArrowLeft, ArrowDown, ArrowUp, Loader2, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,8 +18,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 import { EmailSignatureSettingsEditor } from "@/components/email-signature-settings-editor"
 import { SignatureBrandEditor, type AdminSignatureBrand } from "@/components/signature-brand-editor"
+import { useLinkNavigationGuard } from "@/hooks/use-link-navigation-guard"
+import { useUnloadGuard } from "@/hooks/use-unload-guard"
 import { useRole } from "@/lib/role-context"
 import { useEmailSignatureSettings } from "@/lib/use-data"
 import { MAX_SIGNATURE_BRANDS } from "@/lib/email/signature-brands"
@@ -40,6 +44,50 @@ export default function EmailSignaturesPage() {
   const [addName, setAddName] = useState("")
   const [adding, setAdding] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // Unsaved drafts: the brand editor's guards brand switches; either one guards
+  // in-app links and tab close/refresh.
+  const [editorDirty, setEditorDirty] = useState(false)
+  const [defaultsDirty, setDefaultsDirty] = useState(false)
+  const [pendingSelectId, setPendingSelectId] = useState<string | null>(null)
+  const [pendingHref, setPendingHref] = useState<string | null>(null)
+  const router = useRouter()
+  const anyDirty = editorDirty || defaultsDirty
+
+  useUnloadGuard(anyDirty)
+  useLinkNavigationGuard(anyDirty, setPendingHref)
+
+  function requestSelect(id: string) {
+    if (id === selectedId) return
+    if (editorDirty) {
+      setPendingSelectId(id)
+      return
+    }
+    setSelectedId(id)
+  }
+
+  function confirmDiscard() {
+    if (pendingSelectId) {
+      setEditorDirty(false)
+      setSelectedId(pendingSelectId)
+      setPendingSelectId(null)
+    }
+    if (pendingHref) {
+      const href = pendingHref
+      setEditorDirty(false)
+      setDefaultsDirty(false)
+      setPendingHref(null)
+      router.push(href)
+    }
+  }
+
+  function cancelDiscard() {
+    setPendingSelectId(null)
+    setPendingHref(null)
+  }
+
+  const updateBrand = useCallback((id: string, patch: Partial<AdminSignatureBrand>) => {
+    setBrands((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -183,7 +231,8 @@ export default function EmailSignaturesPage() {
           <TabsTrigger value="defaults">Shared defaults</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="brands" className="space-y-6">
+        {/* forceMount keeps an unsaved brand draft alive while the Shared defaults tab is open. */}
+        <TabsContent value="brands" forceMount className="space-y-6 data-[state=inactive]:hidden">
           <div className="grid gap-6 md:grid-cols-[280px_minmax(0,1fr)]">
             <Card>
               <CardHeader className="pb-3">
@@ -222,7 +271,7 @@ export default function EmailSignaturesPage() {
                         className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 cursor-pointer ${
                           brand.id === selectedId ? "bg-secondary" : "hover:bg-secondary/50"
                         }`}
-                        onClick={() => setSelectedId(brand.id)}
+                        onClick={() => requestSelect(brand.id)}
                       >
                         <span className={brand.enabled ? "" : "text-muted-foreground line-through"}>
                           {brand.name}
@@ -284,12 +333,12 @@ export default function EmailSignaturesPage() {
                 </CardHeader>
                 <CardContent>
                   <SignatureBrandEditor
+                    key={selected.id}
                     brand={selected}
                     defaults={defaults}
                     canEdit={canEdit}
-                    onUpdated={(updated) =>
-                      setBrands((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
-                    }
+                    onUpdated={updateBrand}
+                    onDirtyChange={setEditorDirty}
                   />
                 </CardContent>
               </Card>
@@ -303,7 +352,7 @@ export default function EmailSignaturesPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="defaults">
+        <TabsContent value="defaults" forceMount className="data-[state=inactive]:hidden">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Shared defaults</CardTitle>
@@ -313,11 +362,18 @@ export default function EmailSignaturesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <EmailSignatureSettingsEditor canEdit={canEdit} />
+              <EmailSignatureSettingsEditor canEdit={canEdit} onDirtyChange={setDefaultsDirty} />
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      <DiscardChangesDialog
+        open={pendingSelectId !== null || pendingHref !== null}
+        onKeepEditing={cancelDiscard}
+        onDiscard={confirmDiscard}
+        description="You have unsaved signature changes. Leaving now will throw them away."
+      />
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="sm:max-w-sm">

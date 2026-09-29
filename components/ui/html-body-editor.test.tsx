@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { HtmlBodyEditor } from "@/components/ui/html-body-editor"
 import { normalizeForCompare } from "@/lib/templates/rich-text/serialize"
 
@@ -145,6 +145,29 @@ describe("HtmlBodyEditor", () => {
     fireEvent.click(screen.getByText("Insert field"))
     fireEvent.click(screen.getByText("Full name"))
     expect(onChange).toHaveBeenCalledWith(expect.stringContaining("{{fullName}}"))
+  })
+
+  it("adopts an external value change while the editor is not focused", async () => {
+    const { rerender } = render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
+    rerender(<HtmlBodyEditor value="<p>Server copy</p>" onChange={() => {}} />)
+    await waitFor(() => expect(document.querySelector(".ProseMirror")).toHaveTextContent("Server copy"))
+  })
+
+  it("does not replace the document under an active caret; applies the change on blur", async () => {
+    const { rerender } = render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
+    const editable = document.querySelector(".ProseMirror") as HTMLElement
+    await waitFor(() => expect(editable).toHaveTextContent("Hello"))
+
+    editable.focus()
+    expect(document.activeElement).toBe(editable)
+
+    rerender(<HtmlBodyEditor value="<p>Server copy</p>" onChange={() => {}} />)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(editable).toHaveTextContent("Hello")
+
+    editable.blur()
+    await waitFor(() => expect(editable).toHaveTextContent("Server copy"))
   })
 
   it("calls onBlur when the editable area loses focus", () => {
