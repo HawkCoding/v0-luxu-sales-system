@@ -64,6 +64,11 @@ function unit(partial: Partial<BookingServiceUnitRow> & Pick<BookingServiceUnitR
     manual_tour_price: null,
     manual_tour_price_set_at: null,
     manual_tour_price_set_by: null,
+    fare_override_adult: null,
+    fare_override_child: null,
+    fare_override_infant: null,
+    fare_override_set_at: null,
+    fare_override_set_by: null,
     complimentary_first_night: false,
     rate_type_id: null,
     sort_order: 0,
@@ -140,6 +145,31 @@ describe("bookingServicesToLegSelections", () => {
       adultCount: 1,
       childCount: 1,
       infantCount: 0,
+    })
+  })
+
+  it("carries a train suite's per-person fare override and its set-at stamp through per unit", () => {
+    const services = [service({ id: "svc-1" })]
+    const units = [
+      unit({
+        id: "u1",
+        service_id: "svc-1",
+        suite_type_id: "suite-a",
+        adult_count: 2,
+        fare_override_adult: 9000,
+        fare_override_child: null,
+        fare_override_infant: 0,
+        fare_override_set_at: "2026-09-29T08:00:00Z",
+      }),
+    ]
+
+    const [selection] = bookingServicesToLegSelections(services, units)
+
+    expect(selection.units?.[0]).toMatchObject({
+      fareOverrideAdult: 9000,
+      fareOverrideChild: null,
+      fareOverrideInfant: 0,
+      fareOverrideSetAt: "2026-09-29T08:00:00Z",
     })
   })
 

@@ -4,7 +4,11 @@ import { requireRole } from "@/lib/api/auth"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
-import { loadRoomOverrideProvenance, loadTourOverrideProvenance } from "@/lib/quotes/room-override-provenance"
+import {
+  loadRoomOverrideProvenance,
+  loadTourOverrideProvenance,
+  loadTrainFareOverrideProvenance,
+} from "@/lib/quotes/room-override-provenance"
 import { describeValidationIssue } from "@/lib/api/describe-zod-issue"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { getCachedRates } from "@/lib/fx/rates"
@@ -65,6 +69,11 @@ const unitSelectionSchema = z.object({
   complimentaryFirstNight: z.boolean().optional(),
   /** Tour legs only: the typed flat price that replaces this unit's rate-card-computed total. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
+  /** Train rate-card legs only: per-person fares replacing the rate card's for each passenger kind
+   * (blank kinds stay on the card). The pricing engine ignores them on any other kind. */
+  fareOverrideAdult: z.number().nonnegative().nullable().optional(),
+  fareOverrideChild: z.number().nonnegative().nullable().optional(),
+  fareOverrideInfant: z.number().nonnegative().nullable().optional(),
   /** Train, hotel, cruise and tour legs (supportsUnitRateType): this unit's own rate type,
    * overriding the leg-level rateTypeId below. The pricing engine ignores it on any other kind. */
   rateTypeId: z.string().uuid().nullable().optional(),
@@ -215,9 +224,10 @@ export async function POST(req: Request, { params }: RouteParams) {
   const unitIds = parsed.selections.flatMap((selection) =>
     (selection.units ?? []).map((unit) => unit.unitId).filter((unitId): unitId is string => Boolean(unitId)),
   )
-  const [roomOverrideProvenance, tourOverrideProvenance] = await Promise.all([
+  const [roomOverrideProvenance, tourOverrideProvenance, trainFareOverrideProvenance] = await Promise.all([
     loadRoomOverrideProvenance(supabase, unitIds),
     loadTourOverrideProvenance(supabase, unitIds),
+    loadTrainFareOverrideProvenance(supabase, unitIds),
   ])
 
   const selections = parsed.selections.map((selection) => ({
@@ -225,12 +235,15 @@ export async function POST(req: Request, { params }: RouteParams) {
     units: selection.units?.map((unit) => {
       const roomProvenance = unit.unitId ? roomOverrideProvenance.get(unit.unitId) : undefined
       const tourProvenance = unit.unitId ? tourOverrideProvenance.get(unit.unitId) : undefined
+      const fareProvenance = unit.unitId ? trainFareOverrideProvenance.get(unit.unitId) : undefined
       return {
         ...unit,
         manualRoomPriceSetAt: roomProvenance?.setAt ?? null,
         manualRoomPriceSetByName: roomProvenance?.setByName ?? null,
         manualTourPriceSetAt: tourProvenance?.setAt ?? null,
         manualTourPriceSetByName: tourProvenance?.setByName ?? null,
+        fareOverrideSetAt: fareProvenance?.setAt ?? null,
+        fareOverrideSetByName: fareProvenance?.setByName ?? null,
       }
     }),
   }))

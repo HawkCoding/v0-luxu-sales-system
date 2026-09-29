@@ -1284,6 +1284,10 @@ describe("toApplySelections", () => {
         manualRoomPrice: null,
         complimentaryFirstNight: false,
         manualTourPrice: null,
+        // No fare typed on this suite, so the train fare override goes out as all-null.
+        fareOverrideAdult: null,
+        fareOverrideChild: null,
+        fareOverrideInfant: null,
         suiteTypeId: "suite-1",
         bedroomTypeId: null,
         bedroomLayoutId: null,
@@ -1973,5 +1977,122 @@ describe("mergeLegStatesAfterRebuild", () => {
     const merged = mergeLegStatesAfterRebuild([], next)
 
     expect(merged).toEqual(next)
+  })
+})
+
+describe("train fare override", () => {
+  function savedTrain(unit: Partial<SavedPackageState["selections"][number]["units"][number]>): SavedPackageState {
+    return {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-train",
+          package_leg_id: "leg-train",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-train",
+          route_id: "route-1",
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-02",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              suite_type_id: "suite-1",
+              bedroom_type_id: null,
+              bedroom_layout_id: null,
+              bathroom_type_id: null,
+              adult_count: 2,
+              child_count: 1,
+              infant_count: 0,
+              sort_order: 0,
+              ...unit,
+            },
+          ],
+        },
+      ],
+    }
+  }
+
+  it("round-trips a saved override through hydrate, the PATCH payload and the apply payload", () => {
+    const states = hydrateFromSaved(
+      pkg,
+      savedTrain({
+        fare_override_adult: 9000,
+        fare_override_child: null,
+        fare_override_infant: 0,
+        fare_override_set_at: "2026-09-29T08:00:00Z",
+      }),
+      [],
+      { tripStartDate: "2026-09-01" },
+    )
+    const [hydratedUnit] = suiteState(states, "leg-train").units
+    expect(hydratedUnit).toMatchObject({
+      fareOverrideAdult: 9000,
+      fareOverrideChild: null,
+      fareOverrideInfant: 0,
+      fareOverrideSetAt: "2026-09-29T08:00:00Z",
+    })
+
+    const patchUnit = toPackageSelectionsPatch(states).selections.find((s) => s.packageLegId === "leg-train")
+      ?.units?.[0]
+    expect(patchUnit).toMatchObject({ fareOverrideAdult: 9000, fareOverrideChild: null, fareOverrideInfant: 0 })
+    // Provenance is the server's to stamp; the client never sends it back.
+    expect(patchUnit).not.toHaveProperty("fareOverrideSetAt")
+
+    const applyUnit = toApplySelections(states).find((s) => s.legId === "leg-train")?.units?.[0]
+    expect(applyUnit).toMatchObject({ fareOverrideAdult: 9000, fareOverrideChild: null, fareOverrideInfant: 0 })
+  })
+
+  it("hydrates a unit saved before the override existed as not overridden", () => {
+    const states = hydrateFromSaved(pkg, savedTrain({}), [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-train").units[0]).toMatchObject({
+      fareOverrideAdult: null,
+      fareOverrideChild: null,
+      fareOverrideInfant: null,
+    })
+  })
+
+  it("never sends a fare override off a non-train leg, even if the unit somehow carries one", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: totals })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", fareOverrideAdult: 500 }
+
+    const patchUnit = toPackageSelectionsPatch(states).selections.find((s) => s.packageLegId === "leg-hotel")
+      ?.units?.[0]
+    expect(patchUnit?.fareOverrideAdult).toBeNull()
+    const applyUnit = toApplySelections(states).find((s) => s.legId === "leg-hotel")?.units?.[0]
+    expect(applyUnit?.fareOverrideAdult).toBeNull()
+  })
+
+  describe("missing rate card", () => {
+    // The train's only card starts 2026-01-01, so a 2025 service date has no card at all.
+    function uncoveredTrain(patch: Partial<SuiteLegState["units"][number]>) {
+      const states = buildDefaultLegStates(pkg, { tripStartDate: "2025-06-01", totalsBySupplierId: totals })
+      const train = suiteState(states, "leg-train")
+      train.serviceDate = "2025-06-01"
+      train.units[0] = { ...train.units[0], suiteTypeId: "suite-1", adultCount: 2, childCount: 1, ...patch }
+      return validateConfigureState(pkg, states, { totalsBySupplierId: totals })
+    }
+
+    it("still blocks with no override", () => {
+      expect(uncoveredTrain({}).some((e) => e.includes("rate card"))).toBe(true)
+    })
+
+    it("does not block when every passenger kind the suite carries has a typed fare", () => {
+      // 2 adults + 1 child, no infants: adult and child typed is enough -- infant is irrelevant.
+      const errors = uncoveredTrain({ fareOverrideAdult: 9000, fareOverrideChild: 4500 })
+      expect(errors.some((e) => e.includes("rate card"))).toBe(false)
+    })
+
+    it("still blocks when a present kind is left blank, because that kind prices off the card", () => {
+      const errors = uncoveredTrain({ fareOverrideAdult: 9000 })
+      expect(errors.some((e) => e.includes("rate card"))).toBe(true)
+    })
   })
 })

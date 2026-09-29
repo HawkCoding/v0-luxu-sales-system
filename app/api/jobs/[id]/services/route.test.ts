@@ -59,6 +59,11 @@ interface MockState {
     manual_tour_price?: number | null
     manual_tour_price_set_at?: string | null
     manual_tour_price_set_by?: string | null
+    fare_override_adult?: number | null
+    fare_override_child?: number | null
+    fare_override_infant?: number | null
+    fare_override_set_at?: string | null
+    fare_override_set_by?: string | null
   }>
   /** Rows the GET's services-with-supplier select returns, embedded join included. */
   getServiceRows?: Array<Record<string, unknown>>
@@ -426,6 +431,51 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect((await res.json()).error).toMatch(/only available on tour services/)
   })
 
+  it.each(["hotel_property", "tour_operator", "airline", "cruise_line"])(
+    "rejects a per-person fare override on a %s service",
+    async (kind) => {
+      const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: kind } })
+      const res = await PATCH(
+        new Request("http://localhost", {
+          method: "PATCH",
+          body: JSON.stringify({
+            selections: [
+              {
+                packageLegId: SERVICE_A,
+                units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 1, fareOverrideChild: 4000 }],
+              },
+            ],
+          }),
+        }),
+        makeParams(),
+      )
+
+      expect(res.status).toBe(400)
+      expect((await res.json()).error).toMatch(/only available on train services/)
+      expect(built.unitInserts).toHaveLength(0)
+    },
+  )
+
+  it("rejects a negative fare override", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "train_operator" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 1, fareOverrideAdult: -1 }],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+  })
+
   it("persists a flight schedule on an airline service, uppercasing the airport codes", async () => {
     const built = mockAuth({
       validServiceIds: [SERVICE_A],
@@ -775,6 +825,79 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect(changed.manual_tour_price).toBe(3000)
     expect(changed.manual_tour_price_set_at).not.toBe("2026-08-01T08:00:00.000Z")
     expect(changed.manual_tour_price_set_by).toBe("u1")
+  })
+
+  it("stamps a train suite's fare override, carries an unchanged one, and clears a removed one", async () => {
+    const built = mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "train_operator" },
+      existingUnits: [
+        {
+          id: UNIT_A,
+          fare_override_adult: 9000,
+          fare_override_child: null,
+          fare_override_infant: null,
+          fare_override_set_at: "2026-09-01T08:00:00.000Z",
+          fare_override_set_by: "someone-else",
+        },
+        {
+          id: UNIT_B,
+          fare_override_adult: 9000,
+          fare_override_child: 4000,
+          fare_override_infant: null,
+          fare_override_set_at: "2026-09-01T08:00:00.000Z",
+          fare_override_set_by: "someone-else",
+        },
+      ],
+    })
+
+    // Units sum to the booking's 2 adults + 1 child so the train's exact-sum guard passes.
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [
+                // Untouched: keeps the original stamp.
+                { id: UNIT_A, suiteTypeId: SUITE_A, adultCount: 1, fareOverrideAdult: 9000 },
+                // One of three fares changed: the whole set is re-stamped with this save's actor.
+                {
+                  id: UNIT_B,
+                  suiteTypeId: SUITE_A,
+                  adultCount: 1,
+                  fareOverrideAdult: 9000,
+                  fareOverrideChild: 4500,
+                },
+                // No override: every fare column and its stamp is null.
+                { suiteTypeId: SUITE_A, childCount: 1 },
+              ],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    const [untouched, changed, none] = built.unitInserts
+    expect(untouched).toMatchObject({
+      fare_override_adult: 9000,
+      fare_override_child: null,
+      fare_override_infant: null,
+      fare_override_set_at: "2026-09-01T08:00:00.000Z",
+      fare_override_set_by: "someone-else",
+    })
+    expect(changed).toMatchObject({ fare_override_adult: 9000, fare_override_child: 4500, fare_override_set_by: "u1" })
+    expect(changed.fare_override_set_at).not.toBe("2026-09-01T08:00:00.000Z")
+    expect(none).toMatchObject({
+      fare_override_adult: null,
+      fare_override_child: null,
+      fare_override_infant: null,
+      fare_override_set_at: null,
+      fare_override_set_by: null,
+    })
   })
 
   it("updates leg-level fields directly on booking_services, tagged origin: consultant", async () => {

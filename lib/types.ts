@@ -1023,6 +1023,16 @@ export interface PricingSnapshot {
   manualTourPriceBase?: number | null
   manualTourPriceSetAt?: string | null
   manualTourPriceSetByName?: string | null
+  /** Train rate-card legs only: the consultant-typed per-person fare that replaced the rate card
+   *  for this line's passenger kind on this suite, in sourceCurrency. Stamped only on a line whose
+   *  own kind was overridden (a kind left blank prices off the card and carries none of this).
+   *  Internal-only, same posture as manualTransportPrice. */
+  manualTrainFare?: number | null
+  /** The rate card's per-person fare for this kind that the override replaced, same currency. Null
+   *  when the suite had no valid card at all. */
+  manualTrainFareBase?: number | null
+  manualTrainFareSetAt?: string | null
+  manualTrainFareSetByName?: string | null
   /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
   unit?: string | null
   /** Hotel per-person legs only: how the line's qty was arrived at. The qty on such a line is

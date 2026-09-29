@@ -42,6 +42,7 @@ import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { RoomOverrideNote } from "@/components/quotes/room-override-note"
 import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { TourOverrideNote } from "@/components/quotes/tour-override-note"
+import { TrainOverrideNote } from "@/components/quotes/train-override-note"
 import { useFxRates } from "@/lib/fx/use-fx-rates"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -1569,6 +1570,7 @@ export function BuildBookingDialog({
                         <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <TourOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
+                        <TrainOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <CommissionBadge
                           commission={li.pricingSnapshot?.commission ?? null}
                           currency={quoteCurrency}
