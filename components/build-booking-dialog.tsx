@@ -1054,8 +1054,9 @@ export function BuildBookingDialog({
       if (savedTransportRows) setExistingTransportRequests(savedTransportRows)
 
       // 3. Price the quote from the persisted configuration. Commission is no longer decided
-      // here — the server prices the Commission line off the house default (see
-      // buildPackageQuoteLineItems), editable afterward on the Job Quotes tab.
+      // here — the server keeps the quote's current commission type + value (set on the Quotes
+      // tab), or the house default when it has none, and re-prices the amount (see
+      // services/apply/route.ts).
       const res = await fetch(`/api/jobs/${jobId}/services/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

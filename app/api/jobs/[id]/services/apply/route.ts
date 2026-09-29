@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
+import { readQuoteCommissionSetting } from "@/lib/quotes/apply-commission-bonus"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
@@ -235,12 +236,22 @@ export async function POST(req: Request, { params }: RouteParams) {
     }),
   }))
 
+  // Commission is no longer decided in Build Booking, and no leg carries an override. A rebuild
+  // keeps the commission type + value the quote already carries (set on the Quotes-tab ledger,
+  // PATCH /api/quotes/[id]/adjustments) -- it used to be replaced by the house default, silently
+  // discarding the salesperson's choice. Only the amount is re-priced, against the new subtotal
+  // and the booking's current headcount. A quote with no Commission line yet falls back to the
+  // house default from Settings, so Apply still prices one unattended.
+  const { data: quoteLineRows, error: quoteLinesError } = await supabase
+    .from("quote_line_items")
+    .select("pricing_snapshot")
+    .eq("quote_id", parsed.quoteId)
+    .order("sort_order")
+  if (quoteLinesError) return safeSupabaseError("services-apply:load-quote-commission", quoteLinesError)
+  const quoteCommission = readQuoteCommissionSetting((quoteLineRows ?? []).map((row) => row.pricing_snapshot))
+
   try {
-    // Commission is no longer decided in Build Booking -- a leg that carries no override (every
-    // leg, now that the UI never sets one) falls back to the house default from Settings, so
-    // Apply still prices a Commission line unattended. It stays fully editable afterward on the
-    // Job Quotes tab (PATCH /api/quotes/[id]/commission).
-    const defaultCommission = await getDefaultCommission(supabase)
+    const defaultCommission = quoteCommission ?? (await getDefaultCommission(supabase))
 
     const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
       supabase,

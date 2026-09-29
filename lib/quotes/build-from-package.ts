@@ -1706,7 +1706,10 @@ export async function buildPackageQuoteLineItems({
     lineItems.push({
       description: "Commission",
       supplierDescription: null,
-      qty: isPerPerson ? Math.max(1, travellerCount) : 1,
+      // qty must be the real headcount, even 0: PATCH /api/quotes/[id] re-derives every line's
+      // total as unitPrice × qty (resolveLineTotal), so padding a 0-traveller per-person line to
+      // qty 1 turned its R0 commission into value × 1 on save.
+      qty: isPerPerson ? travellerCount : 1,
       unitPrice: isPerPerson ? resolvedCommission.value : commissionAmount,
       total: commissionAmount,
       pricingSnapshot: {

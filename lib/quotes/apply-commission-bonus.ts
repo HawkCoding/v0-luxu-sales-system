@@ -1,11 +1,33 @@
 import { roundMoney } from "@/lib/quotes/pricing-engine"
-import type { PricingSnapshot, QuoteLineItem } from "@/lib/types"
+import type { CommissionKind, PricingSnapshot, QuoteLineItem } from "@/lib/types"
 
 export const COMMISSION_LINE_DESCRIPTION = "Commission"
 
 /** The single Commission line is the one carrying a commission breakdown in its snapshot. */
 export function findCommissionLineIndex(lineItems: QuoteLineItem[]): number {
   return lineItems.findIndex((li) => li.pricingSnapshot?.commission != null)
+}
+
+const COMMISSION_KINDS: readonly CommissionKind[] = ["percent", "per_person", "fixed"]
+
+/**
+ * The commission type + value the quote currently carries on its Commission line (what the
+ * Quotes-tab ledger shows and saves), or null when the quote has no Commission line. A Build
+ * Booking re-price uses this so a ledger-set commission survives the rebuild instead of being
+ * replaced by the house default. The amount is NOT reused — the caller re-prices it against the
+ * new subtotal and the booking's current headcount.
+ */
+export function readQuoteCommissionSetting(
+  pricingSnapshots: readonly unknown[],
+): { type: CommissionKind; value: number } | null {
+  for (const raw of pricingSnapshots) {
+    const commission = (raw as PricingSnapshot | null)?.commission
+    if (commission == null) continue
+    const value = Number(commission.value)
+    if (!COMMISSION_KINDS.includes(commission.type) || !Number.isFinite(value) || value < 0) return null
+    return { type: commission.type, value }
+  }
+  return null
 }
 
 /**
@@ -102,7 +124,9 @@ export function applyCommissionBonus(lineItems: QuoteLineItem[], bonus: number):
       : {
           // Restore the canonical shape the pricing engine would have produced.
           ...line,
-          qty: isPerPerson ? Math.max(1, passengerCount) : 1,
+          // The real count, even 0 — the quote API re-derives total as unitPrice × qty, so a
+          // padded qty 1 would re-charge a 0-traveller per-person commission ×1.
+          qty: isPerPerson ? passengerCount : 1,
           unitPrice: isPerPerson ? commission.value : baseAmount,
           total: baseAmount,
           pricingSnapshot: {
