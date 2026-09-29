@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { applyCommissionBonus, getCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
+import {
+  applyCommissionBonus,
+  getCommissionBonus,
+  readQuoteCommissionSetting,
+} from "@/lib/quotes/apply-commission-bonus"
 import type { CommissionBreakdown, PricingSnapshot, QuoteLineItem } from "@/lib/types"
 
 function snapshot(commission: CommissionBreakdown | null, unit: string | null = null): PricingSnapshot {
@@ -144,6 +148,15 @@ describe("applyCommissionBonus", () => {
     expect(cleared[1].pricingSnapshot?.unit).toBe("per person")
   })
 
+  it("keeps a 0-traveller per-person line at qty 0 so unitPrice × qty can't re-charge it ×1", () => {
+    // The quote API re-derives total as unitPrice × qty; a padded qty 1 turned R0 into R1 000.
+    const cleared = applyCommissionBonus([travelLine, perPersonCommissionLine(1_000, 0)], 0)
+
+    expect(cleared[1].qty).toBe(0)
+    expect(cleared[1].total).toBe(0)
+    expect(cleared[1].unitPrice * cleared[1].qty).toBe(cleared[1].total)
+  })
+
   it("recovers per-person qty from the amount when passengerCount is missing", () => {
     const legacy: QuoteLineItem = {
       description: "Commission",
@@ -205,5 +218,21 @@ describe("applyCommissionBonus", () => {
 
     expect(cleared[1].total).toBe(10_000)
     expect(getCommissionBonus(cleared[1])).toBe(0)
+  })
+})
+
+describe("readQuoteCommissionSetting", () => {
+  it("returns the Commission line's type and value", () => {
+    const snapshots = [travelLine.pricingSnapshot ?? null, perPersonCommissionLine(500, 2).pricingSnapshot]
+    expect(readQuoteCommissionSetting(snapshots)).toEqual({ type: "per_person", value: 500 })
+  })
+
+  it("returns null when the quote has no Commission line", () => {
+    expect(readQuoteCommissionSetting([null, travelLine.pricingSnapshot ?? null])).toBeNull()
+  })
+
+  it("returns null for a malformed stored commission", () => {
+    expect(readQuoteCommissionSetting([{ commission: { type: "bogus", value: 5 } }])).toBeNull()
+    expect(readQuoteCommissionSetting([{ commission: { type: "percent", value: -1 } }])).toBeNull()
   })
 })

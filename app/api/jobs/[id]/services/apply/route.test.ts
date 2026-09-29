@@ -146,9 +146,35 @@ function withUnconfiguredHotelLeg(detail: PackageDetail): PackageDetail {
   }
 }
 
-function createSupabaseMock(bookingExists = true, commissionBonus = 0) {
+function createSupabaseMock(
+  bookingExists = true,
+  commissionBonus = 0,
+  options: {
+    /** pricing_snapshot of each of the quote's current line items. */
+    quoteLineSnapshots?: unknown[]
+    /** app_settings rows (the house default commission lives here). */
+    appSettings?: { key: string; value: string }[]
+  } = {},
+) {
   return {
     from: vi.fn((table: string) => {
+      // The route reads the quote's current Commission line so a ledger-set commission survives
+      // a rebuild instead of being replaced by the house default.
+      if (table === "quote_line_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({
+                data: (options.quoteLineSnapshots ?? []).map((pricing_snapshot) => ({ pricing_snapshot })),
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === "app_settings") {
+        return { select: vi.fn(() => ({ in: vi.fn(async () => ({ data: options.appSettings ?? [], error: null })) })) }
+      }
       if (table === "bookings") {
         return {
           select: vi.fn(() => ({
@@ -467,6 +493,81 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     expect(response.status).toBe(400)
     expect(payload.error).toMatch(/No meal plan selected/)
     expect(payload.incompleteLegs).toHaveLength(1)
+  })
+
+  describe("commission on a rebuild", () => {
+    const TRAIN_SELECTION = {
+      legId: TRAIN_SERVICE_ID,
+      selected: true,
+      units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+    }
+    const HOUSE_DEFAULT_10_PERCENT = [
+      { key: "default_commission_type", value: "percent" },
+      { key: "default_commission_value", value: "10" },
+    ]
+
+    function useSupabase(options: Parameters<typeof createSupabaseMock>[2]) {
+      helperMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase: createSupabaseMock(true, 0, options),
+          user: { id: "abababab-abab-4aba-8aba-abababababab", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane Doe", name: "Jane", surname: "Doe", email: "u@example.com" },
+        },
+      })
+    }
+
+    async function commissionLineAfterRebuild() {
+      const response = await postApply({ jobId: JOB_ID, quoteId: QUOTE_ID, travelDate: "2026-06-01", selections: [TRAIN_SELECTION] })
+      expect(response.status).toBe(200)
+      const payload = (await response.json()) as {
+        lineItems: { description: string; qty: number; unitPrice: number; total: number; pricingSnapshot?: { commission?: unknown } }[]
+      }
+      return payload.lineItems.find((li) => li.description === "Commission")
+    }
+
+    it("keeps a ledger-set per-person commission instead of replacing it with the house default", async () => {
+      // The quote's Commission line was set to R500 per person on the Quotes tab, when the
+      // booking held 1 traveller. The booking now holds 2 (see the bookings mock).
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [
+          null,
+          { commission: { type: "per_person", value: 500, amount: 500, source: "line", passengerCount: 1 } },
+        ],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      // Re-priced with the booking's current headcount: 500 × 2, not the house 10% (R200) and not ×1.
+      expect(commissionLine).toMatchObject({ qty: 2, unitPrice: 500, total: 1000 })
+      expect(commissionLine?.pricingSnapshot?.commission).toMatchObject({
+        type: "per_person",
+        value: 500,
+        amount: 1000,
+        passengerCount: 2,
+      })
+    })
+
+    it("re-prices a ledger-set percent commission against the new subtotal", async () => {
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [{ commission: { type: "percent", value: 25, amount: 999, source: "line" } }],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      // 25% of the rebuilt R2 000 train line.
+      expect(commissionLine).toMatchObject({ qty: 1, total: 500 })
+    })
+
+    it("falls back to the house default when the quote has no Commission line yet", async () => {
+      useSupabase({ appSettings: HOUSE_DEFAULT_10_PERCENT, quoteLineSnapshots: [null] })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      expect(commissionLine).toMatchObject({ qty: 1, total: 200 })
+    })
   })
 
   it("returns 400 with the engine's message when a required suite type is missing", async () => {

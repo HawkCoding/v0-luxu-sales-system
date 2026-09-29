@@ -58,6 +58,9 @@ interface JobQuotesTabProps {
   bookingNumber: string
   travelDate: string | null
   customerName: string
+  /** The booking's current headcount (adults + children, infants excluded) — what a per-person
+   *  Commission/Discount on the adjustments ledger is multiplied by. */
+  bookingHeadcount: number
   emailImportNeedsReview?: boolean
   mutate: () => void
   autoOpenBuildBookingQuoteId?: string | null
@@ -70,6 +73,7 @@ export function JobQuotesTab({
   bookingNumber,
   travelDate,
   customerName,
+  bookingHeadcount,
   emailImportNeedsReview = false,
   mutate,
   autoOpenBuildBookingQuoteId: externalAutoOpenBuildBookingQuoteId = null,
@@ -378,7 +382,12 @@ export function JobQuotesTab({
                 </table>
               </div>
               <div className="mt-3">
-                <QuoteAdjustmentsLedger quote={q} editable={canEditLines} onSaved={mutate} />
+                <QuoteAdjustmentsLedger
+                  quote={q}
+                  editable={canEditLines}
+                  bookingHeadcount={bookingHeadcount}
+                  onSaved={mutate}
+                />
               </div>
               {q.overrideReason && (
                 <div className="mt-3 p-2 bg-payment-yellow/10 rounded-md">

@@ -4,10 +4,10 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import { calculateCommissionAmount } from "@/lib/pricing/commission"
-import { findCommissionLineIndex } from "@/lib/quotes/apply-commission-bonus"
 import { calculateQuoteTotals } from "@/lib/quotes/pricing-engine"
+import { normalizeHeadcount, PER_PERSON_NEEDS_HEADCOUNT_ERROR } from "@/lib/quotes/quote-adjustments"
 import type { Json } from "@/lib/supabase/types"
-import type { CommissionKind, QuoteLineItem } from "@/lib/types"
+import type { CommissionKind } from "@/lib/types"
 
 // Mirrors the Rounding/Agent Commission edit gate: the discount is only editable while the
 // quote is still provisional, before a client has seen the total.
@@ -31,8 +31,10 @@ interface RouteParams {
  * fixed), but deducted at the same final step as Agent Commission rather than changing what
  * Commission was calculated on. Unlike Agent Commission, a percent/per_person type needs a
  * base amount and passenger count to resolve to a rand figure, so this route (unlike
- * agent-commission/route.ts) reads quote_line_items — only to recover the passenger count off
- * the existing Commission line, never to change them.
+ * agent-commission/route.ts) reads the booking's current headcount.
+ *
+ * Legacy: the Quotes tab now saves through PATCH /api/quotes/[id]/adjustments. Kept for API
+ * compatibility, aligned to the same per-person rule.
  */
 export async function PATCH(req: Request, { params }: RouteParams) {
   const auth = await requireRole(["admin", "manager", "consultant"])
@@ -58,7 +60,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, status, subtotal, total, agent_commission, discount_type, discount_value, discount_amount, discount_visible, updated_at",
+      "id, status, subtotal, total, agent_commission, discount_type, discount_value, discount_amount, discount_visible, updated_at, booking:bookings(no_of_adults, no_of_children)",
     )
     .eq("id", id)
     .single()
@@ -81,24 +83,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const subtotal = Number(quote.subtotal)
   const agentCommission = Number(quote.agent_commission ?? 0)
 
-  let passengerCount = 1
-  if (parsed.type === "per_person") {
-    const { data: existingLineItems } = await supabase
-      .from("quote_line_items")
-      .select("description, supplier_description, qty, unit_price, total, pricing_snapshot")
-      .eq("quote_id", id)
-      .order("sort_order")
-    const lineItems: QuoteLineItem[] = (existingLineItems ?? []).map((li) => ({
-      description: li.description,
-      supplierDescription: li.supplier_description,
-      qty: li.qty,
-      unitPrice: Number(li.unit_price),
-      total: Number(li.total),
-      pricingSnapshot: li.pricing_snapshot as QuoteLineItem["pricingSnapshot"],
-    }))
-    const commissionIndex = findCommissionLineIndex(lineItems)
-    const snapshotCommission = commissionIndex >= 0 ? lineItems[commissionIndex].pricingSnapshot?.commission : null
-    if (snapshotCommission?.passengerCount) passengerCount = snapshotCommission.passengerCount
+  // Per-person: the booking's current headcount (adults + children), same rule as
+  // lib/quotes/quote-adjustments.ts. This used to read the count off the Commission line and fall
+  // back to 1 when the quote had none, pricing a per-person discount ×1.
+  const booking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
+  const passengerCount = normalizeHeadcount((booking?.no_of_adults ?? 0) + (booking?.no_of_children ?? 0))
+  if (parsed.type === "per_person" && parsed.value > 0 && passengerCount === 0) {
+    return jsonError(PER_PERSON_NEEDS_HEADCOUNT_ERROR, 400)
   }
 
   const discountAmount = calculateCommissionAmount({

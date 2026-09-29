@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { computeQuoteAdjustments, type QuoteAdjustmentsInput } from "@/lib/quotes/quote-adjustments"
+import {
+  computeQuoteAdjustments,
+  PER_PERSON_NEEDS_HEADCOUNT_ERROR,
+  type QuoteAdjustmentsInput,
+} from "@/lib/quotes/quote-adjustments"
 import type { QuoteLineItem } from "@/lib/types"
 
 const SERVICE_LINE: QuoteLineItem = {
@@ -158,5 +162,125 @@ describe("computeQuoteAdjustments", () => {
       bookingHeadcount: 3,
     })
     expect(result.commissionAmount).toBe(1500)
+  })
+
+  describe("per-person amounts use the booking's current headcount", () => {
+    function commissionLineFor(passengerCount: number): QuoteLineItem {
+      return {
+        description: "Commission",
+        supplierDescription: null,
+        qty: 1,
+        unitPrice: 25_000,
+        total: 25_000,
+        pricingSnapshot: {
+          source: "pricing_engine",
+          pricingMode: "rate_card",
+          packageId: "",
+          packageName: "",
+          legId: null,
+          legLabel: null,
+          supplierId: null,
+          supplierName: null,
+          supplierKind: null,
+          routeId: null,
+          routeName: null,
+          suiteTypeId: null,
+          suiteTypeName: null,
+          rateCardId: null,
+          travelDate: "",
+          passengerKind: "service",
+          baseUnitPrice: 25_000,
+          markupPct: 0,
+          singleSupplementPct: null,
+          serviceType: null,
+          commission: { type: "percent", value: 10, amount: 25_000, source: "line", passengerCount },
+          unit: null,
+        },
+      }
+    }
+
+    it("re-counts a per_person commission when the booking's headcount changed since the line was built", () => {
+      // Regression: the Commission line was built when the booking held 1 adult; the booking now
+      // holds 4. The old code read passengerCount back off the line and priced ×1.
+      const result = computeQuoteAdjustments([SERVICE_LINE, commissionLineFor(1)], {
+        ...NO_ADJUSTMENTS,
+        commission: { type: "per_person", value: 5000 },
+        bookingHeadcount: 4,
+      })
+
+      expect(result.errors).toEqual([])
+      expect(result.commissionAmount).toBe(20_000)
+      expect(result.headcount).toBe(4)
+      const line = result.lineItems.find((li) => li.description === "Commission")
+      expect(line?.qty).toBe(4)
+      expect(line?.unitPrice).toBe(5000)
+      expect(line?.pricingSnapshot?.commission?.passengerCount).toBe(4)
+    })
+
+    it("does not let a stored passengerCount of 0 stick", () => {
+      const result = computeQuoteAdjustments([SERVICE_LINE, commissionLineFor(0)], {
+        ...NO_ADJUSTMENTS,
+        commission: { type: "per_person", value: 5000 },
+        bookingHeadcount: 5,
+      })
+
+      expect(result.errors).toEqual([])
+      expect(result.commissionAmount).toBe(25_000)
+    })
+
+    it("multiplies a per_person discount by the headcount when there is no Commission line", () => {
+      const result = computeQuoteAdjustments([SERVICE_LINE], {
+        ...NO_ADJUSTMENTS,
+        discount: { type: "per_person", value: 1000, visible: true },
+        bookingHeadcount: 4,
+      })
+
+      expect(result.errors).toEqual([])
+      expect(result.discountAmount).toBe(4000)
+      expect(result.total).toBe(246_000)
+    })
+
+    it("multiplies a per_person discount by the current headcount, not a stale Commission-line count", () => {
+      const result = computeQuoteAdjustments([SERVICE_LINE, commissionLineFor(1)], {
+        ...NO_ADJUSTMENTS,
+        commission: { type: "percent", value: 10 },
+        discount: { type: "per_person", value: 1000, visible: true },
+        bookingHeadcount: 4,
+      })
+
+      expect(result.discountAmount).toBe(4000)
+    })
+
+    it("errors on a per_person commission when the booking has no travellers", () => {
+      const result = computeQuoteAdjustments([SERVICE_LINE], {
+        ...NO_ADJUSTMENTS,
+        commission: { type: "per_person", value: 5000 },
+        bookingHeadcount: 0,
+      })
+
+      expect(result.errors).toEqual([PER_PERSON_NEEDS_HEADCOUNT_ERROR])
+    })
+
+    it("errors once on per_person commission and discount when the booking has no travellers", () => {
+      const result = computeQuoteAdjustments([SERVICE_LINE], {
+        ...NO_ADJUSTMENTS,
+        commission: { type: "per_person", value: 5000 },
+        discount: { type: "per_person", value: 1000, visible: true },
+        bookingHeadcount: 0,
+      })
+
+      expect(result.errors).toEqual([PER_PERSON_NEEDS_HEADCOUNT_ERROR])
+    })
+
+    it("allows a zero-value per_person amount without travellers, and non-per-person types", () => {
+      const result = computeQuoteAdjustments([SERVICE_LINE], {
+        ...NO_ADJUSTMENTS,
+        commission: { type: "per_person", value: 0 },
+        discount: { type: "percent", value: 5, visible: true },
+        bookingHeadcount: 0,
+      })
+
+      expect(result.errors).toEqual([])
+    })
   })
 })

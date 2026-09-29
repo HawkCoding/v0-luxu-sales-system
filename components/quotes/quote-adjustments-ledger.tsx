@@ -12,13 +12,17 @@ import { Info, Loader2, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { currencySymbol, formatMoney } from "@/lib/money"
 import { findCommissionLineIndex, getCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
-import { computeQuoteAdjustments } from "@/lib/quotes/quote-adjustments"
+import { computeQuoteAdjustments, PER_PERSON_NEEDS_HEADCOUNT_ERROR } from "@/lib/quotes/quote-adjustments"
+import { roundMoney } from "@/lib/quotes/pricing-engine"
 import type { CommissionKind, Quote } from "@/lib/types"
 
 interface QuoteAdjustmentsLedgerProps {
   quote: Quote
   /** False on a sent/accepted quote, or without the edit:quotes permission — renders read-only. */
   editable: boolean
+  /** The booking's current headcount (adults + children, infants excluded) — what every
+   *  per-person Commission/Discount is multiplied by, same as the adjustments API. */
+  bookingHeadcount: number
   onSaved: () => void
 }
 
@@ -54,23 +58,32 @@ function buildSavedDraft(quote: Quote): Draft {
   }
 }
 
-const KIND_OPTIONS: { key: CommissionKind; label: string }[] = [
-  { key: "percent", label: "%" },
-  { key: "per_person", label: "pp" },
-  { key: "fixed", label: "R" },
+const KIND_OPTIONS: { key: CommissionKind; label: string; name: string }[] = [
+  { key: "percent", label: "%", name: "Percentage" },
+  { key: "per_person", label: "pp", name: "Per person" },
+  { key: "fixed", label: "R", name: "Fixed amount" },
 ]
+
+/** "R5,000 × 4 people" — the per-person working shown beside the amount. */
+function perPersonWorking(value: number, people: number, currency: string): string {
+  const unit = formatMoney(value, currency, { decimals: !Number.isInteger(value) })
+  return `${unit} × ${people} ${people === 1 ? "person" : "people"}`
+}
 
 function KindToggle({
   id,
+  label,
   value,
   onChange,
 }: {
   id: string
+  /** Names the group for assistive tech, e.g. "Commission type". */
+  label: string
   value: CommissionKind
   onChange: (kind: CommissionKind) => void
 }) {
   return (
-    <div id={id} role="radiogroup" className="inline-flex rounded-md border bg-muted p-0.5">
+    <div id={id} role="radiogroup" aria-label={label} className="inline-flex rounded-md border bg-muted p-0.5">
       {KIND_OPTIONS.map((option) => {
         const selected = value === option.key
         return (
@@ -79,6 +92,8 @@ function KindToggle({
             type="button"
             role="radio"
             aria-checked={selected}
+            aria-label={option.name}
+            title={option.name}
             onClick={() => onChange(option.key)}
             className={`px-2 py-1 text-[11px] rounded-sm transition-colors ${
               selected ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -119,7 +134,7 @@ function ValueInput({
         onValueChange={onChange}
       />
       {type !== "fixed" && (
-        <span className="text-xs text-muted-foreground">{type === "percent" ? "%" : "/ pax"}</span>
+        <span className="text-xs text-muted-foreground">{type === "percent" ? "%" : "per person"}</span>
       )}
     </div>
   )
@@ -131,6 +146,7 @@ function LedgerRow({
   control,
   onRemove,
   removeLabel,
+  working,
   amount,
   amountClassName,
 }: {
@@ -139,6 +155,8 @@ function LedgerRow({
   control?: React.ReactNode
   onRemove?: () => void
   removeLabel?: string
+  /** How the amount was worked out (e.g. "R5,000 × 4 people"), shown just before it. */
+  working?: string
   amount: string
   amountClassName?: string
 }) {
@@ -170,6 +188,11 @@ function LedgerRow({
           <X className="h-3.5 w-3.5" />
         </button>
       )}
+      {working && (
+        <span className="text-[11px] tabular-nums text-muted-foreground" data-testid="ledger-working">
+          {working}
+        </span>
+      )}
       <span className={cn("w-28 text-right text-xs font-medium tabular-nums text-foreground", amountClassName)}>
         {amount}
       </span>
@@ -177,7 +200,7 @@ function LedgerRow({
   )
 }
 
-export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjustmentsLedgerProps) {
+export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSaved }: QuoteAdjustmentsLedgerProps) {
   const saved = useMemo(() => buildSavedDraft(quote), [quote])
   const [draft, setDraft] = useState<Draft>(saved)
   const [saving, setSaving] = useState(false)
@@ -189,10 +212,9 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
 
-  // Client-side preview only — it doesn't know the real booking headcount, so a brand-new
-  // per_person Commission/Discount (no existing breakdown to read one off) previews against a
-  // fallback of 1 pax until Save reloads the server-computed figure. Reuses the exact function the
-  // API route calls, so once a breakdown exists the preview matches the save precisely.
+  // Client-side preview. Reuses the exact function the API route calls, fed the same booking
+  // headcount (adults + children), so a per-person Commission/Discount previews exactly what Save
+  // will store — it used to preview against a hard-coded 1 person.
   const preview = useMemo(() => {
     const commission =
       draft.commissionType !== null && draft.commissionValue !== null
@@ -207,16 +229,17 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
       commissionBonus: draft.roundingShown ? draft.roundingValue : 0,
       agentCommission: draft.agentShown ? draft.agentValue : 0,
       discount,
-      bookingHeadcount: 1,
+      bookingHeadcount,
     })
-  }, [quote.lineItems, draft])
+  }, [quote.lineItems, draft, bookingHeadcount])
 
   const idPrefix = `quote-adjustments-${quote.id}`
 
+  const commissionIndex = findCommissionLineIndex(quote.lineItems)
+  const commissionLine = commissionIndex >= 0 ? quote.lineItems[commissionIndex] : null
+  const commissionBreakdown = commissionLine?.pricingSnapshot?.commission ?? null
+
   if (!editable) {
-    const commissionIndex = findCommissionLineIndex(quote.lineItems)
-    const commissionLine = commissionIndex >= 0 ? quote.lineItems[commissionIndex] : null
-    const commissionBreakdown = commissionLine?.pricingSnapshot?.commission ?? null
     const commissionAmount = commissionBreakdown?.amount ?? 0
     const bonus = commissionLine ? getCommissionBonus(commissionLine) : 0
     const servicesSubtotal = quote.lineItems.reduce(
@@ -225,13 +248,27 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
     )
     const agentCommission = quote.agentCommission ?? 0
     const discountAmount = quote.discountAmount ?? 0
+    // Read-only shows the working as it was SAVED (the count stored on the line), not a recount.
+    const commissionWorking =
+      commissionBreakdown?.type === "per_person" && commissionBreakdown.passengerCount !== undefined
+        ? perPersonWorking(commissionBreakdown.value, commissionBreakdown.passengerCount, quote.currency)
+        : undefined
+    const discountValue = quote.discountValue ?? 0
+    const discountWorking =
+      quote.discountType === "per_person" && discountValue > 0
+        ? perPersonWorking(discountValue, Math.round(discountAmount / discountValue), quote.currency)
+        : undefined
 
     return (
       <div className="space-y-1">
         {commissionBreakdown && (
           <>
             <LedgerRow label="Services" amount={formatMoney(servicesSubtotal, quote.currency)} />
-            <LedgerRow label="Commission" amount={`+ ${formatMoney(commissionAmount, quote.currency)}`} />
+            <LedgerRow
+              label="Commission"
+              working={commissionWorking}
+              amount={`+ ${formatMoney(commissionAmount, quote.currency)}`}
+            />
             {bonus !== 0 && <LedgerRow label="Rounding" amount={`+ ${formatMoney(bonus, quote.currency)}`} />}
           </>
         )}
@@ -245,6 +282,7 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
         {discountAmount > 0 && (
           <LedgerRow
             label={`Discount${quote.discountVisible ? "" : " (hidden)"}`}
+            working={discountWorking}
             amount={`− ${formatMoney(discountAmount, quote.currency)}`}
             amountClassName="text-destructive/80"
           />
@@ -316,6 +354,26 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
   const commissionActiveType = draft.commissionType ?? "percent"
   const discountActiveType = draft.discountType ?? "percent"
 
+  const commissionWorking =
+    draft.commissionType === "per_person" && draft.commissionValue !== null
+      ? perPersonWorking(draft.commissionValue, preview.headcount, quote.currency)
+      : undefined
+  const discountWorking =
+    draft.discountShown && draft.discountType === "per_person"
+      ? perPersonWorking(draft.discountValue, preview.headcount, quote.currency)
+      : undefined
+  const headcountError = preview.errors.includes(PER_PERSON_NEEDS_HEADCOUNT_ERROR)
+
+  // The booking's travellers changed since a per-person amount was saved: the preview already
+  // shows the recount, but nothing in the draft changed, so offer Save to store it.
+  const recountPending =
+    !dirty &&
+    ((saved.commissionType === "per_person" &&
+      roundMoney(preview.commissionAmount) !== roundMoney(commissionBreakdown?.amount ?? 0)) ||
+      (saved.discountShown &&
+        saved.discountType === "per_person" &&
+        roundMoney(preview.discountAmount) !== roundMoney(quote.discountAmount ?? 0)))
+
   return (
     <div className="space-y-2">
       <LedgerRow label="Services" amount={formatMoney(preview.servicesSubtotal, quote.currency)} />
@@ -327,6 +385,7 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
           <>
             <KindToggle
               id={`${idPrefix}-commission-kind`}
+              label="Commission type"
               value={commissionActiveType}
               onChange={(kind) =>
                 setDraft((d) => ({ ...d, commissionType: kind, commissionValue: d.commissionValue ?? 0 }))
@@ -341,6 +400,7 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
             />
           </>
         }
+        working={commissionWorking}
         amount={`+ ${formatMoney(preview.commissionAmount, quote.currency)}`}
       />
 
@@ -393,6 +453,7 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
             <>
               <KindToggle
                 id={`${idPrefix}-discount-kind`}
+                label="Discount type"
                 value={discountActiveType}
                 onChange={(kind) => setDraft((d) => ({ ...d, discountType: kind }))}
               />
@@ -417,6 +478,7 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
           }
           onRemove={() => toggleDiscount(false)}
           removeLabel="Remove discount"
+          working={discountWorking}
           amount={`− ${formatMoney(preview.discountAmount, quote.currency)}`}
           amountClassName="text-destructive/80"
         />
@@ -449,11 +511,25 @@ export function QuoteAdjustmentsLedger({ quote, editable, onSaved }: QuoteAdjust
         amountClassName="text-sm font-semibold"
       />
 
-      {dirty && (
+      {headcountError && (
+        <p role="alert" className="text-right text-xs text-destructive">
+          {PER_PERSON_NEEDS_HEADCOUNT_ERROR}
+        </p>
+      )}
+
+      {recountPending && (
+        <p className="text-right text-xs text-muted-foreground">
+          The number of travellers changed since this was saved. Save to update the per-person amounts.
+        </p>
+      )}
+
+      {(dirty || recountPending) && (
         <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" size="sm" variant="outline" className="h-8" disabled={saving} onClick={() => setDraft(saved)}>
-            Discard
-          </Button>
+          {dirty && (
+            <Button type="button" size="sm" variant="outline" className="h-8" disabled={saving} onClick={() => setDraft(saved)}>
+              Discard
+            </Button>
+          )}
           <Button type="button" size="sm" className="h-8" disabled={saving} onClick={() => void save()}>
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save changes"}
           </Button>
