@@ -80,6 +80,12 @@ const selectionUnitSchema = z.object({
   /** Tour legs only: this unit's typed flat price, replacing its rate-card-computed total.
    * Rejected on any other supplier kind — see the guard in PATCH. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
+  /** Train legs only: this suite's typed per-person fares, one per passenger kind, replacing the
+   * rate card's price for that kind (blank kinds stay on the card). Rejected on any other supplier
+   * kind — see the guard in PATCH. */
+  fareOverrideAdult: z.number().nonnegative().nullable().optional(),
+  fareOverrideChild: z.number().nonnegative().nullable().optional(),
+  fareOverrideInfant: z.number().nonnegative().nullable().optional(),
   /** Train, hotel, cruise and tour legs only (supportsUnitRateType): this unit's own rate type,
    * overriding the leg-level rateTypeId below. Rejected on any other supplier kind — see the guard
    * in PATCH. */
@@ -178,6 +184,10 @@ interface ServiceUnitRow {
   manual_room_price_set_at: string | null
   manual_tour_price: number | null
   manual_tour_price_set_at: string | null
+  fare_override_adult: number | null
+  fare_override_child: number | null
+  fare_override_infant: number | null
+  fare_override_set_at: string | null
   complimentary_first_night: boolean
   rate_type_id: string | null
 }
@@ -543,6 +553,26 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       })
     }
 
+    // The per-person fare override replaces a train suite's rate-card fares kind by kind. Only a
+    // train suite prices per person sharing with a single supplement the typed fare is defined
+    // against; hotels, tours and airlines each have their own override (or typed fares) with
+    // different meaning, so accepting it there would silently price something other than what
+    // was typed.
+    if (
+      supplierKind !== "train_operator" &&
+      selection.units.some(
+        (unit) =>
+          (unit.fareOverrideAdult !== null && unit.fareOverrideAdult !== undefined) ||
+          (unit.fareOverrideChild !== null && unit.fareOverrideChild !== undefined) ||
+          (unit.fareOverrideInfant !== null && unit.fareOverrideInfant !== undefined),
+      )
+    ) {
+      return jsonError("A per-person fare override is only available on train services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
+    }
+
     // A per-unit rate type means something wherever units price off rate cards of their own --
     // train suites, hotel rooms, cruise cabins and tours (supportsUnitRateType). An airline's
     // fares are typed by hand, so a unit-level rate there would silently be ignored.
@@ -675,11 +705,17 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   // keep re-dating an override nobody touched.
   const existingUnitProvenance = new Map<string, { price: number | null; setAt: string | null; setBy: string | null }>()
   const existingTourProvenance = new Map<string, { price: number | null; setAt: string | null; setBy: string | null }>()
+  // A train suite's fare override is three amounts stamped as one: it counts as unchanged only
+  // when all three kinds match what was saved, so editing any one fare re-stamps the whole set.
+  const existingFareProvenance = new Map<
+    string,
+    { adult: number | null; child: number | null; infant: number | null; setAt: string | null; setBy: string | null }
+  >()
   if (servicesWithUnits.length > 0) {
     const { data: existingUnits, error: existingUnitsError } = await supabase
       .from("booking_service_units")
       .select(
-        "id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by, manual_tour_price, manual_tour_price_set_at, manual_tour_price_set_by",
+        "id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by, manual_tour_price, manual_tour_price_set_at, manual_tour_price_set_by, fare_override_adult, fare_override_child, fare_override_infant, fare_override_set_at, fare_override_set_by",
       )
       .in(
         "service_id",
@@ -698,6 +734,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         price: unit.manual_tour_price,
         setAt: unit.manual_tour_price_set_at,
         setBy: unit.manual_tour_price_set_by,
+      })
+      existingFareProvenance.set(unit.id, {
+        adult: unit.fare_override_adult,
+        child: unit.fare_override_child,
+        infant: unit.fare_override_infant,
+        setAt: unit.fare_override_set_at,
+        setBy: unit.fare_override_set_by,
       })
     }
   }
@@ -727,6 +770,17 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       const tourPrice = unit.manualTourPrice ?? null
       const previousTour = unit.id ? existingTourProvenance.get(unit.id) : undefined
       const tourUnchanged = tourPrice !== null && previousTour?.price === tourPrice
+      const fareAdult = unit.fareOverrideAdult ?? null
+      const fareChild = unit.fareOverrideChild ?? null
+      const fareInfant = unit.fareOverrideInfant ?? null
+      const hasFareOverride = fareAdult !== null || fareChild !== null || fareInfant !== null
+      const previousFare = unit.id ? existingFareProvenance.get(unit.id) : undefined
+      const fareUnchanged =
+        hasFareOverride &&
+        previousFare !== undefined &&
+        previousFare.adult === fareAdult &&
+        previousFare.child === fareChild &&
+        previousFare.infant === fareInfant
       return {
         service_id: selection.packageLegId,
         suite_type_id: unit.suiteTypeId,
@@ -749,6 +803,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
           tourPrice === null ? null : tourUnchanged ? previousTour?.setAt ?? savedAt : savedAt,
         manual_tour_price_set_by:
           tourPrice === null ? null : tourUnchanged ? previousTour?.setBy ?? user.id : user.id,
+        fare_override_adult: fareAdult,
+        fare_override_child: fareChild,
+        fare_override_infant: fareInfant,
+        fare_override_set_at: !hasFareOverride ? null : fareUnchanged ? previousFare?.setAt ?? savedAt : savedAt,
+        fare_override_set_by: !hasFareOverride ? null : fareUnchanged ? previousFare?.setBy ?? user.id : user.id,
         rate_type_id: unit.rateTypeId ?? null,
         origin: "consultant" as const,
       }

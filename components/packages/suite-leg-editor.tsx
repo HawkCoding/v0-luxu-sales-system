@@ -38,6 +38,7 @@ import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { anchorPresetLabels } from "@/lib/packages/anchor-labels"
 import { formatPrimaryProductDuration } from "@/lib/enquiry/primary-product"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
+import { PerPersonPriceOverride } from "@/components/packages/per-person-price-override"
 // TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
 // import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import {
@@ -660,6 +661,7 @@ export function SuiteLegEditor({
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
   const isTour = leg.supplierKind === "tour_operator"
+  const isTrain = leg.supplierKind === "train_operator"
   const isAirline = leg.supplierKind === "airline"
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = !isCoreBookingLeg(leg, primarySupplierId)
@@ -914,7 +916,9 @@ export function SuiteLegEditor({
    * correctly — the server resolves the real card when it stamps the snapshot.
    */
   function resolveRoomRateCard(suiteTypeId: string | null, unitRateTypeId?: string | null) {
-    if (!(isHotel || isTour) || !suiteTypeId || !value.serviceDate) return null
+    // Train suites read it too: a typed per-person fare override shows the card's fares as its
+    // placeholders and takes the card's currency.
+    if (!(isHotel || isTour || isTrain) || !suiteTypeId || !value.serviceDate) return null
     const candidates = findRateCardCandidates(
       leg.rateCards,
       value.routeId ?? "",
@@ -923,7 +927,8 @@ export function SuiteLegEditor({
     )
     const selected = selectRateCard(
       candidates,
-      // Hotel rooms and tours can resolve their own rate type; unset falls back to the leg's.
+      // Hotel rooms, tours and train suites can resolve their own rate type; unset falls back to
+      // the leg's.
       unitRateTypeId ?? value.rateTypeId,
       leg.quoteRateTypeId,
       leg.baseRateTypeId,
@@ -1862,6 +1867,48 @@ export function SuiteLegEditor({
                     quoteCurrency={quoteCurrency}
                     formatInQuoteCurrency={formatInQuoteCurrency}
                     onChange={(next) => updateUnit(unit.id, { manualTourPrice: next })}
+                  />
+                ) : null}
+
+                {/* Train suites on a rate card can type their own per-person fares. A manual-
+                    pricing train already types every fare below, so it gets no override. */}
+                {isTrain && leg.pricingMode !== "manual" ? (
+                  <PerPersonPriceOverride
+                    values={{
+                      adult: unit.fareOverrideAdult ?? null,
+                      child: unit.fareOverrideChild ?? null,
+                      infant: unit.fareOverrideInfant ?? null,
+                    }}
+                    onChange={(patch) =>
+                      updateUnit(unit.id, {
+                        ...(patch.adult !== undefined ? { fareOverrideAdult: patch.adult } : {}),
+                        ...(patch.child !== undefined ? { fareOverrideChild: patch.child } : {}),
+                        ...(patch.infant !== undefined ? { fareOverrideInfant: patch.infant } : {}),
+                      })
+                    }
+                    onRevert={() =>
+                      updateUnit(unit.id, {
+                        fareOverrideAdult: null,
+                        fareOverrideChild: null,
+                        fareOverrideInfant: null,
+                      })
+                    }
+                    card={resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)}
+                    noCardMessage={
+                      unit.suiteTypeId
+                        ? "No rate card price for this suite yet"
+                        : `Pick a ${vocab.suiteType.toLowerCase()} to see its rate card`
+                    }
+                    fallbackCurrency={value.priceCurrency}
+                    formatInQuoteCurrency={formatInQuoteCurrency}
+                    pax={{
+                      adultCount: unit.adultCount,
+                      childCount: unit.childCount,
+                      infantCount: unit.infantCount,
+                    }}
+                    subject={`${vocab.unitNoun} ${index + 1}`}
+                    note="A typed fare is final: the single supplement is not added on top of it."
+                    setAt={unit.fareOverrideSetAt ?? null}
                   />
                 ) : null}
 

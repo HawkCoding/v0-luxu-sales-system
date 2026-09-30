@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SuiteLegEditor } from "./suite-leg-editor"
@@ -81,6 +82,9 @@ const mismatchedUnits: SuiteLegState["units"] = [
     manualRoomPrice: null,
     complimentaryFirstNight: false,
     manualTourPrice: null,
+    fareOverrideAdult: null,
+    fareOverrideChild: null,
+    fareOverrideInfant: null,
     rateTypeId: null,
   },
 ]
@@ -287,6 +291,141 @@ describe("SuiteLegEditor hotel date anchor", () => {
 
     expect(screen.getByRole("button", { name: "Pre-journey" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Post-journey" })).toBeInTheDocument()
+  })
+})
+
+describe("SuiteLegEditor train fare override", () => {
+  const trainLeg: PackageLeg = {
+    ...leg,
+    baseRateTypeId: "rate-1",
+    routes: [
+      {
+        id: "route-train",
+        supplierId: "supplier-1",
+        name: "Pretoria - Cape Town",
+        originLocationId: null,
+        destinationLocationId: null,
+        active: true,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+    suiteTypes: [
+      {
+        id: "suite-dlx",
+        supplierId: "supplier-1",
+        name: "Deluxe Suite",
+        active: true,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+    rateCards: [
+      {
+        id: "card-train",
+        routeId: "route-train",
+        suiteTypeId: "suite-dlx",
+        rateTypeId: "rate-1",
+        pricePerPerson: 10000,
+        childPrice: 5000,
+        infantPrice: null,
+        currency: "ZAR",
+        validFrom: "2026-01-01",
+        validTo: null,
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+  }
+
+  function trainState(overrides: Partial<SuiteLegState["units"][number]> = {}): SuiteLegState {
+    return {
+      ...makeLegState([
+        { ...mismatchedUnits[0], suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, ...overrides },
+      ]),
+      routeId: "route-train",
+    }
+  }
+
+  /** The editor is controlled, so a harness keeps typed values on screen like the dialog does. */
+  function Harness({ initial, legOverride }: { initial: SuiteLegState; legOverride?: PackageLeg }) {
+    const [value, setValue] = useState(initial)
+    return <SuiteLegEditor leg={legOverride ?? trainLeg} value={value} onChange={setValue} />
+  }
+
+  it("stays collapsed on a suite with no override, showing the card's per-person fares", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState()} onChange={vi.fn()} />)
+
+    expect(screen.getByText(/per person \(adult \/ child \/ infant\)/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/adult price override for suite 1/i)).not.toBeInTheDocument()
+  })
+
+  it("opens on request with an accessible adult/child/infant input each, the card fares as placeholders", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState()} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+
+    const adult = screen.getByLabelText(/adult price override for suite 1/i)
+    const child = screen.getByLabelText(/child price override for suite 1/i)
+    const infant = screen.getByLabelText(/infant price override for suite 1/i)
+    expect(adult).toHaveAttribute("placeholder", expect.stringMatching(/10[\s,]?000/))
+    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/5[\s,]?000/))
+    // No infant price on the card means infants travel free (rateCardFares), so 0 is what it replaces.
+    expect(infant).toHaveAttribute("placeholder", expect.stringMatching(/^0[.,]00$/))
+  })
+
+  it("updates the live total as the adult fare is typed, keeping the blank child on the card", () => {
+    render(<Harness initial={trainState()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+    fireEvent.change(screen.getByLabelText(/adult price override for suite 1/i), { target: { value: "9000" } })
+
+    // 2 adults × 9 000 + 1 child × 5 000 (card) = 23 000
+    expect(screen.getByTestId("per-person-override-total")).toHaveTextContent(/23[\s,]?000/)
+    expect(screen.getByTestId("per-person-override-total")).toHaveTextContent("2A / 1C / 0I")
+    expect(screen.getByText("Overridden")).toBeInTheDocument()
+  })
+
+  it("clears every fare in one update and collapses on Revert", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={trainLeg}
+        value={trainState({ fareOverrideAdult: 9000, fareOverrideChild: 4000 })}
+        onChange={onChange}
+      />,
+    )
+
+    expect(screen.getByLabelText(/adult price override for suite 1/i)).toHaveValue(9000)
+    fireEvent.click(screen.getByRole("button", { name: /revert/i }))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        units: [expect.objectContaining({ fareOverrideAdult: null, fareOverrideChild: null, fareOverrideInfant: null })],
+      }),
+    )
+  })
+
+  it("collapses back to the link after Revert when driven by real state", () => {
+    render(<Harness initial={trainState({ fareOverrideAdult: 9000 })} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /revert/i }))
+    expect(screen.queryByLabelText(/adult price override for suite 1/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /override price for suite 1/i })).toBeInTheDocument()
+  })
+
+  it("is not offered on a manual-pricing train, which already types every fare", () => {
+    render(
+      <SuiteLegEditor leg={{ ...trainLeg, pricingMode: "manual" }} value={trainState()} onChange={vi.fn()} />,
+    )
+
+    expect(screen.queryByRole("button", { name: /override price for suite 1/i })).not.toBeInTheDocument()
+  })
+
+  it("is not offered on a hotel room (it has its own room override)", () => {
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price/i }))
+    expect(screen.queryByLabelText(/adult price override/i)).not.toBeInTheDocument()
   })
 })
 
@@ -747,6 +886,9 @@ function makeTourUnit(id: string, suiteTypeId: string | null): SuiteLegState["un
     manualRoomPrice: null,
     complimentaryFirstNight: false,
     manualTourPrice: null,
+    fareOverrideAdult: null,
+    fareOverrideChild: null,
+    fareOverrideInfant: null,
     rateTypeId: null,
   }
 }

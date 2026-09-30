@@ -83,6 +83,24 @@ export function manualFares(prices: {
 }
 
 /**
+ * True when every passenger kind actually present (count > 0) has its own typed override, so the
+ * line never needs to read a rate card at all. A kind that is present but blank still prices off
+ * the card, which therefore has to exist -- the same hard "no rate card" error as with no override.
+ * A kind with nobody in it needs no fare either way. Shared by the pricing engine and Build
+ * Booking's pre-flight validation so the two never disagree on when a missing card blocks.
+ */
+export function overridesCoverEveryPresentKind(
+  overrides: { adult: number | null; child: number | null; infant: number | null },
+  counts: { adultCount: number; childCount: number; infantCount: number },
+): boolean {
+  return (
+    (counts.adultCount <= 0 || overrides.adult !== null) &&
+    (counts.childCount <= 0 || overrides.child !== null) &&
+    (counts.infantCount <= 0 || overrides.infant !== null)
+  )
+}
+
+/**
  * Fares for an overridden line: each kind takes its own typed override when set, otherwise falls
  * back to that kind's rate-card fare (card may be absent entirely — an override needs no rate
  * card, the same non-fatal posture as a hotel room override or a complimentary trip). Child falls

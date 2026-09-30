@@ -23,6 +23,7 @@ import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { RoomOverrideNote } from "@/components/quotes/room-override-note"
 import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { TourOverrideNote } from "@/components/quotes/tour-override-note"
+import { TrainOverrideNote } from "@/components/quotes/train-override-note"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
@@ -325,6 +326,7 @@ export function JobQuotesTab({
                           <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                           <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                           <TourOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
+                          <TrainOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                         </td>
                         <td className="py-2 pl-4 text-xs text-right text-muted-foreground">
                           <div>{li.qty}</div>
