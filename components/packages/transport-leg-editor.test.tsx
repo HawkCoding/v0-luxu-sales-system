@@ -173,6 +173,15 @@ describe("TransportLegEditor price override", () => {
     expect(screen.getByLabelText(/price override for transfer 1/i)).toBeInTheDocument()
   })
 
+  // A per-vehicle price has no passenger kind -- it used to be announced as the "Adult" price.
+  it("names a flat per-vehicle field without a passenger kind", () => {
+    render(<TransportLegEditor leg={transferLeg} value={makeLegState([makeRequest()])} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price/i }))
+    expect(screen.getByLabelText("Price override for transfer 1")).toBeInTheDocument()
+    expect(screen.queryByLabelText(/adult price override/i)).not.toBeInTheDocument()
+  })
+
   it("opens expanded when the request already carries a saved override", () => {
     render(
       <TransportLegEditor

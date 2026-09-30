@@ -10,7 +10,8 @@ interface CommissionBadgeProps {
 function formatValue(commission: CommissionBreakdown, currency: string): string {
   if (commission.type === "percent") return `${commission.value.toFixed(2)}%`
   if (commission.type === "fixed") return `${formatMoney(commission.value, currency)} total`
-  return `${formatMoney(commission.value, currency)} / pax`
+  // "per person", matching the Quotes-tab adjustments ledger's wording for the same setting.
+  return `${formatMoney(commission.value, currency)} per person`
 }
 
 export function CommissionBadge({
