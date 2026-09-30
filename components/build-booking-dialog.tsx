@@ -1136,7 +1136,10 @@ export function BuildBookingDialog({
           Edit Quote
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl" {...closeGuard.contentProps}>
+      <DialogContent
+        className="max-h-[92vh] grid-cols-1 overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl [&>*]:min-w-0"
+        {...closeGuard.contentProps}
+      >
         <DiscardChangesDialog
           open={closeGuard.confirming}
           onKeepEditing={closeGuard.cancelDiscard}
@@ -1533,7 +1536,7 @@ export function BuildBookingDialog({
               </div>
             )}
 
-            <div className="rounded-md border">
+            <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
