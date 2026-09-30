@@ -170,6 +170,57 @@ describe("HtmlBodyEditor", () => {
     await waitFor(() => expect(editable).toHaveTextContent("Server copy"))
   })
 
+  it("focuses the rich editor when its <label for> is clicked, and takes the label as its name", async () => {
+    render(
+      <>
+        <label htmlFor="company-line">Company line</label>
+        <HtmlBodyEditor id="company-line" value="<p>Hello</p>" onChange={() => {}} />
+      </>,
+    )
+    const editable = document.querySelector(".ProseMirror") as HTMLElement
+    await waitFor(() => expect(editable).toHaveAttribute("aria-label", "Company line"))
+    expect(screen.getByRole("textbox", { name: "Company line" })).toBe(editable)
+
+    fireEvent.click(screen.getByText("Company line"))
+
+    await waitFor(() => expect(editable).toHaveFocus())
+  })
+
+  describe("never emits without a user edit", () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+
+    it.each([
+      ["an empty value", ""],
+      ["a plain paragraph", "<p>Hello</p>"],
+      ["bare text the editor wraps in <p>", "Plain text"],
+      ["a style the editor re-serialises", '<p><span style="color:rgb(68, 80, 90)">SA Rail</span></p>'],
+    ])("does not emit on mount for %s", async (_label, value) => {
+      const onChange = vi.fn()
+      render(<HtmlBodyEditor value={value} onChange={onChange} variant="compact" />)
+      await settle()
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    it("does not emit when disabled is toggled", async () => {
+      const onChange = vi.fn()
+      const { rerender } = render(<HtmlBodyEditor value="<p>Hello</p>" onChange={onChange} />)
+      rerender(<HtmlBodyEditor value="<p>Hello</p>" onChange={onChange} disabled />)
+      rerender(<HtmlBodyEditor value="<p>Hello</p>" onChange={onChange} />)
+      await settle()
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    it("does not emit when an external value is applied, and leaves nothing to undo", async () => {
+      const onChange = vi.fn()
+      const { rerender } = render(<HtmlBodyEditor value="" onChange={onChange} />)
+      rerender(<HtmlBodyEditor value="<p>Loaded</p>" onChange={onChange} />)
+      await waitFor(() => expect(document.querySelector(".ProseMirror")).toHaveTextContent("Loaded"))
+      await settle()
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByLabelText("Undo")).toBeDisabled()
+    })
+  })
+
   describe("HTML source mode", () => {
     function renderInSource(initial: string, onChange: (html: string) => void = () => {}) {
       const view = render(<HtmlBodyEditor value={initial} onChange={onChange} />)

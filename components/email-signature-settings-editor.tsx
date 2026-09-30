@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch"
 import { HtmlBodyEditor } from "@/components/ui/html-body-editor"
 import { useEmailSignatureSettings, type EmailSignatureSettings } from "@/lib/use-data"
 import { SENDER_LAYOUT_TOKENS } from "@/lib/email/sender-layout"
+import { isEquivalentEditorHtml } from "@/lib/templates/rich-text/equivalent-html"
 import { cn } from "@/lib/utils"
 
 interface EmailSignatureSettingsEditorProps {
@@ -36,15 +37,12 @@ interface SettingsForm {
   synced: Partial<EmailSignatureSettings> | null
 }
 
-function isBlankHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").trim() === ""
-}
-
-/** A cleared rich-text field can serialize to `<p></p>` — treat every blank form as equal. */
+/**
+ * Compared as the editor would render them: every blank form is equal, and the editor's own
+ * normalisation of a stored value (a <p> wrapper, re-serialised inline styles) is not a change.
+ */
 function sameValue(a: string | undefined, b: string | undefined): boolean {
-  const left = a ?? ""
-  const right = b ?? ""
-  return left === right || (isBlankHtml(left) && isBlankHtml(right))
+  return isEquivalentEditorHtml(a ?? "", b ?? "")
 }
 
 /**
@@ -179,7 +177,10 @@ export function EmailSignatureSettingsEditor({ canEdit, onDirtyChange }: EmailSi
     )
   }
 
-  if (isLoading || !data) {
+  // Wait for the draft to be seeded too, not just the fetch: the editors used to mount on the
+  // render before the seeding effect ran, holding "" — and anything they emitted then was a blank
+  // written into the draft over the stored value.
+  if (isLoading || !data || !synced) {
     return (
       <div className="animate-pulse space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (

@@ -327,7 +327,8 @@ export function SalespersonCredentialsSettings() {
                 return (
                   <li
                     key={cred.id}
-                    className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                    // Stacks on a phone: the SMTP badge ran into the Test button side by side.
+                    className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium truncate">{cred.email_address}</p>
@@ -335,8 +336,14 @@ export function SalespersonCredentialsSettings() {
                         <p className="text-xs text-muted-foreground">{linkedUser.name || linkedUser.email}</p>
                       )}
                       <div className="mt-1 flex flex-wrap gap-1.5">
-                        <Badge variant="outline" className="text-xs font-mono">
-                          SMTP {cred.smtp_host}:{cred.smtp_port}
+                        <Badge
+                          variant="outline"
+                          className="max-w-full text-xs font-mono"
+                          title={`SMTP ${cred.smtp_host}:${cred.smtp_port}`}
+                        >
+                          <span className="min-w-0 truncate">
+                            SMTP {cred.smtp_host}:{cred.smtp_port}
+                          </span>
                         </Badge>
                         {result && (
                           <>
@@ -346,7 +353,7 @@ export function SalespersonCredentialsSettings() {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <Button
                         size="sm"
                         variant="outline"
@@ -540,7 +547,7 @@ export function SalespersonCredentialsSettings() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="sc-sig-name">Name on signature</Label>
                 <Input
@@ -561,7 +568,8 @@ export function SalespersonCredentialsSettings() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            {/* One column on a phone, two from sm up: three across truncated the phone numbers. */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="sc-sig-tel">Tel</Label>
                 <Input
@@ -591,7 +599,7 @@ export function SalespersonCredentialsSettings() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="sc-sig-email">Signature email</Label>
                 <Input

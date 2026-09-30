@@ -26,6 +26,7 @@ import { useUnloadGuard } from "@/hooks/use-unload-guard"
 import { useRole } from "@/lib/role-context"
 import { useEmailSignatureSettings } from "@/lib/use-data"
 import { MAX_SIGNATURE_BRANDS } from "@/lib/email/signature-brands"
+import { cn } from "@/lib/utils"
 
 interface BrandsResponse {
   brands: AdminSignatureBrand[]
@@ -208,7 +209,7 @@ export default function EmailSignaturesPage() {
   const atCap = brands.length >= MAX_SIGNATURE_BRANDS
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl">
+    <div className="p-4 sm:p-6 space-y-6 max-w-7xl">
       <div className="flex items-center gap-3">
         <Link href="/app/settings">
           <Button variant="ghost" size="sm" aria-label="Back to settings">
@@ -233,7 +234,9 @@ export default function EmailSignaturesPage() {
 
         {/* forceMount keeps an unsaved brand draft alive while the Shared defaults tab is open. */}
         <TabsContent value="brands" forceMount className="space-y-6 data-[state=inactive]:hidden">
-          <div className="grid gap-6 md:grid-cols-[280px_minmax(0,1fr)]">
+          {/* The editor column gets the width: a narrow list, and the brand editor keeps its
+              preview beside the fields only on very wide screens (see SignatureBrandEditor). */}
+          <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,1fr)]">
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -268,16 +271,25 @@ export default function EmailSignaturesPage() {
                     {ordered.map((brand, index) => (
                       <li
                         key={brand.id}
-                        className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 cursor-pointer ${
-                          brand.id === selectedId ? "bg-secondary" : "hover:bg-secondary/50"
-                        }`}
-                        onClick={() => requestSelect(brand.id)}
+                        className={cn(
+                          "rounded-md px-2 py-1.5",
+                          brand.id === selectedId ? "bg-secondary" : "hover:bg-secondary/50",
+                        )}
                       >
-                        <span className={brand.enabled ? "" : "text-muted-foreground line-through"}>
-                          {brand.name}
-                        </span>
+                        {/* A real button, so the list is reachable and selectable from the keyboard. */}
+                        <button
+                          type="button"
+                          onClick={() => requestSelect(brand.id)}
+                          aria-current={brand.id === selectedId ? "true" : undefined}
+                          className="w-full rounded-sm text-left text-sm break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <span className={brand.enabled ? "" : "text-muted-foreground line-through"}>
+                            {brand.name}
+                          </span>
+                          {!brand.enabled && <span className="ml-1 text-xs text-muted-foreground">(off)</span>}
+                        </button>
                         {canEdit && (
-                          <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="mt-1 flex items-center gap-0.5">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -302,6 +314,8 @@ export default function EmailSignaturesPage() {
                               checked={brand.enabled}
                               disabled={busyId === brand.id}
                               onCheckedChange={() => toggleEnabled(brand)}
+                              aria-label={`${brand.name} enabled`}
+                              className="mx-1"
                             />
                             <Button
                               variant="ghost"

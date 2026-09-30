@@ -19,6 +19,7 @@ import {
 } from "@/lib/email/email-chrome"
 import type { SignatureBadge } from "@/lib/email/signature-brands"
 import { SENDER_LAYOUT_TOKENS } from "@/lib/email/sender-layout"
+import { isEquivalentEditorHtml } from "@/lib/templates/rich-text/equivalent-html"
 import { cn } from "@/lib/utils"
 
 export interface AdminSignatureBrand {
@@ -86,10 +87,6 @@ function toPlainText(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
 }
 
-function isBlankHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").trim() === ""
-}
-
 function draftFromBrand(brand: AdminSignatureBrand): BrandDraft {
   return {
     name: brand.name,
@@ -103,11 +100,15 @@ function draftFromBrand(brand: AdminSignatureBrand): BrandDraft {
   }
 }
 
-/** A cleared rich-text field can serialize to `<p></p>` — treat every blank form as equal so it doesn't read as a change. */
+/**
+ * Rich-text fields compare as the editor renders them: every blank form is equal, and the editor's
+ * own normalisation of stored HTML (`color:rgb(…)` re-serialised as `color: rgb(…);`, a <p>
+ * wrapper) is not a change.
+ */
 function sameValue(key: DraftKey, a: string, b: string): boolean {
   if (a === b) return true
   if (key === "name") return false
-  return isBlankHtml(a) && isBlankHtml(b)
+  return isEquivalentEditorHtml(a, b)
 }
 
 interface SavedBrandFields {
@@ -156,7 +157,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
       let changed = false
       const next = { ...current }
       for (const key of DRAFT_KEYS) {
-        if (current[key] === previous[key] && saved[key] !== previous[key]) {
+        if (sameValue(key, current[key], previous[key]) && saved[key] !== previous[key]) {
           next[key] = saved[key]
           changed = true
         }
@@ -306,8 +307,10 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="space-y-5">
+    // Fields get the width. Beside them the preview squeezed the fields to ~250px at 1280 (toolbars
+    // wrapping to three rows), so it only sits alongside on very wide screens and below otherwise.
+    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="min-w-0 space-y-5">
         {canEdit && (
           <div
             className={cn(
@@ -318,7 +321,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
             <p className="text-sm" role="status" aria-live="polite">
               {saving ? "Saving changes…" : isDirty ? "Unsaved changes" : "All changes saved"}
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
@@ -466,7 +469,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
         ))}
       </div>
 
-      <div className="space-y-3">
+      <div className="min-w-0 space-y-3">
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <Label>Live preview</Label>
@@ -484,7 +487,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
             ) : null}
           </div>
           {/* Angora background + email font, matching the container the signature sits in when sent. */}
-          <div className="h-[420px] overflow-auto rounded-md border bg-[#e8e5df]">
+          <div className="h-[420px] max-w-2xl overflow-auto rounded-md border bg-[#e8e5df] 2xl:max-w-none">
             {previewHtml === null ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 Rendering…
