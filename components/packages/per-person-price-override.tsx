@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState, type Ref } from "react"
 import { Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,8 +25,21 @@ export interface PriceOverrideField {
   label: string
   value: number | null | undefined
   onValueChange: (next: number | null) => void
-  /** Shown as the input's placeholder so the consultant sees what they are replacing. */
+  /** Shown as the input's placeholder ("Card: 8 775,00") so the consultant sees what they are
+   *  replacing. */
   cardPrice: number | null
+  /** Replaces the card-price placeholder when a blank field falls back to something other than
+   *  the card's own fare for this kind (e.g. a child priced as the overridden adult). */
+  placeholder?: string
+}
+
+/** An amount as a placeholder shows it: the en-ZA grouping the rate card is read in. */
+export function formatOverridePlaceholderAmount(amount: number): string {
+  return amount.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function cardPricePlaceholder(cardPrice: number | null): string {
+  return cardPrice !== null ? `Card: ${formatOverridePlaceholderAmount(cardPrice)}` : "Rate card price"
 }
 
 interface PriceOverrideFieldsProps {
@@ -43,6 +56,8 @@ interface PriceOverrideFieldsProps {
    *  callback rather than one onValueChange(null) per field. */
   onRevert: () => void
   disabled?: boolean
+  /** Attached to the first input, so a caller can move focus there when the panel opens. */
+  firstInputRef?: Ref<HTMLInputElement>
 }
 
 /**
@@ -58,10 +73,11 @@ export function PriceOverrideFields({
   inlineEndSuffix,
   onRevert,
   disabled = false,
+  firstInputRef,
 }: PriceOverrideFieldsProps) {
   return (
     <div className="flex flex-col gap-2">
-      {fields.map((field) => (
+      {fields.map((field, index) => (
         <div key={field.key} className="flex flex-wrap items-center gap-2">
           {showKindLabels ? <span className="w-14 shrink-0 text-xs text-muted-foreground">{field.label}</span> : null}
           <InputGroup className="w-full sm:w-64">
@@ -73,14 +89,19 @@ export function PriceOverrideFields({
               step="0.01"
               nullable
               disabled={disabled}
+              ref={index === 0 ? firstInputRef : undefined}
               data-slot="input-group-control"
-              className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              placeholder={
-                field.cardPrice !== null
-                  ? field.cardPrice.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                  : "Rate card price"
+              // The placeholder is the fallback, not a value: kept visibly lighter than typed text
+              // and prefixed, so a card fare is never mistaken for one already entered.
+              className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              placeholder={field.placeholder ?? cardPricePlaceholder(field.cardPrice)}
+              // A single flat field (a per-vehicle transfer, a rental) has no passenger kind, so
+              // it isn't announced as the adult price.
+              aria-label={
+                showKindLabels
+                  ? `${field.label} price override for ${subject}`
+                  : `Price override for ${subject}`
               }
-              aria-label={`${field.label} price override for ${subject}`}
               value={field.value ?? null}
               onValueChange={field.onValueChange}
             />
@@ -181,9 +202,31 @@ export function PerPersonPriceOverride({
   const [requested, setRequested] = useState(false)
   const expanded = requested || overridden
 
+  // Opening the panel from the link (click or Enter) lands the keyboard in the first fare, rather
+  // than leaving focus on a button that has just unmounted. A saved override that opens expanded
+  // on first paint doesn't steal focus -- only an explicit request does.
+  const firstInputRef = useRef<HTMLInputElement>(null)
+  const focusOnExpand = useRef(false)
+  useEffect(() => {
+    if (!expanded || !focusOnExpand.current) return
+    focusOnExpand.current = false
+    firstInputRef.current?.focus()
+  }, [expanded])
+
   const cardFares = card ? rateCardFares(card) : null
   const cardFareFor = (key: "adultCount" | "childCount" | "infantCount"): number | null =>
     cardFares?.find((fare) => fare.key === key)?.unitPrice ?? null
+
+  // A blank child with no child price on the card isn't priced off the card's child fare -- it
+  // follows the adult fare actually in force, typed or carded (overriddenFares). Say so, live, so
+  // typing an adult fare visibly moves what a blank child will cost.
+  const childFollowsAdult = card?.childPrice === null || card?.childPrice === undefined
+  const resolvedAdultFare = values.adult ?? card?.pricePerPerson ?? null
+  const childPlaceholder = childFollowsAdult
+    ? resolvedAdultFare !== null
+      ? `Same as adult: ${formatOverridePlaceholderAmount(resolvedAdultFare)}`
+      : "Same as adult"
+    : undefined
 
   const total = perPersonOverrideTotal(card, values, pax)
   const convertedTotal = formatInQuoteCurrency(total, currency)
@@ -216,7 +259,10 @@ export function PerPersonPriceOverride({
           className="h-auto p-0 text-xs"
           disabled={disabled}
           aria-label={`Override price for ${subject}`}
-          onClick={() => setRequested(true)}
+          onClick={() => {
+            focusOnExpand.current = true
+            setRequested(true)
+          }}
         >
           Override price
         </Button>
@@ -269,6 +315,7 @@ export function PerPersonPriceOverride({
             value: values.child,
             onValueChange: (next) => onChange({ child: next }),
             cardPrice: cardFareFor("childCount"),
+            placeholder: childPlaceholder,
           },
           {
             key: "infant",
@@ -282,6 +329,7 @@ export function PerPersonPriceOverride({
         showKindLabels
         subject={subject}
         disabled={disabled}
+        firstInputRef={firstInputRef}
         onRevert={() => {
           setRequested(false)
           onRevert()

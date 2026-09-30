@@ -53,6 +53,7 @@ interface MockState {
   /** Stored rooms, read back to carry a room override's provenance across the replace-set. */
   existingUnits?: Array<{
     id: string
+    service_id?: string
     manual_room_price?: number | null
     manual_room_price_set_at?: string | null
     manual_room_price_set_by?: string | null
@@ -898,6 +899,86 @@ describe("PATCH /api/jobs/[id]/services", () => {
       fare_override_set_at: null,
       fare_override_set_by: null,
     })
+  })
+
+  // Build Booking prices the quote (POST /services/apply) right after this save, sending the unit
+  // ids it holds so the server can look up who set each override. A fresh id per save left that
+  // lookup empty -- the "set by X on date" note never rendered on the quote.
+  it("keeps a stored unit's id across the replace-set, and only for that unit's own service", async () => {
+    const UNIT_C = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"
+    const built = mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "train_operator" },
+      existingUnits: [
+        {
+          id: UNIT_A,
+          service_id: SERVICE_A,
+          fare_override_adult: 9000,
+          fare_override_child: null,
+          fare_override_infant: null,
+          fare_override_set_at: "2026-09-01T08:00:00.000Z",
+        },
+        // Stored against a different service -- never adopted onto this one.
+        { id: UNIT_B, service_id: SERVICE_B },
+      ],
+    })
+
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [
+                { id: UNIT_A, suiteTypeId: SUITE_A, adultCount: 1, fareOverrideAdult: 9000 },
+                { id: UNIT_B, suiteTypeId: SUITE_A, adultCount: 1 },
+                // Not a stored unit at all (stale id from an earlier session).
+                { id: UNIT_C, suiteTypeId: SUITE_A, childCount: 1 },
+              ],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    const [kept, foreign, stale] = built.unitInserts
+    expect(kept.id).toBe(UNIT_A)
+    expect(kept.fare_override_set_at).toBe("2026-09-01T08:00:00.000Z")
+    expect(foreign).not.toHaveProperty("id")
+    expect(stale).not.toHaveProperty("id")
+  })
+
+  it("reuses a stored unit's id only once when the payload repeats it", async () => {
+    const built = mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "train_operator" },
+      existingUnits: [{ id: UNIT_A, service_id: SERVICE_A }],
+    })
+
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [
+                { id: UNIT_A, suiteTypeId: SUITE_A, adultCount: 2 },
+                { id: UNIT_A, suiteTypeId: SUITE_A, childCount: 1 },
+              ],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.unitInserts[0].id).toBe(UNIT_A)
+    expect(built.unitInserts[1]).not.toHaveProperty("id")
   })
 
   it("updates leg-level fields directly on booking_services, tagged origin: consultant", async () => {

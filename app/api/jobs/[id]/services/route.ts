@@ -711,11 +711,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     string,
     { adult: number | null; child: number | null; infant: number | null; setAt: string | null; setBy: string | null }
   >()
+  // Which service each stored unit belongs to. A unit re-sent with its own id keeps that id across
+  // the delete/insert (see unitRows below), so the id Build Booking holds stays valid for POST
+  // /services/apply's provenance lookup -- a fresh id on every save left that lookup empty and the
+  // quote's "set by X on date" note never rendered.
+  const existingUnitServiceId = new Map<string, string>()
   if (servicesWithUnits.length > 0) {
     const { data: existingUnits, error: existingUnitsError } = await supabase
       .from("booking_service_units")
       .select(
-        "id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by, manual_tour_price, manual_tour_price_set_at, manual_tour_price_set_by, fare_override_adult, fare_override_child, fare_override_infant, fare_override_set_at, fare_override_set_by",
+        "id, service_id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by, manual_tour_price, manual_tour_price_set_at, manual_tour_price_set_by, fare_override_adult, fare_override_child, fare_override_infant, fare_override_set_at, fare_override_set_by",
       )
       .in(
         "service_id",
@@ -725,6 +730,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (existingUnitsError) return safeSupabaseError("services:load-units", existingUnitsError)
 
     for (const unit of existingUnits ?? []) {
+      if (unit.service_id) existingUnitServiceId.set(unit.id, unit.service_id)
       existingUnitProvenance.set(unit.id, {
         price: unit.manual_room_price,
         setAt: unit.manual_room_price_set_at,
@@ -762,8 +768,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (deleteUnitsError) return safeSupabaseError("services:clear-units", deleteUnitsError)
   }
 
+  // An id is reused only when it was one of this very service's stored units, and only once --
+  // anything else (an id from another service, a stale id, a duplicate) gets a fresh one.
+  const reusedUnitIds = new Set<string>()
   const unitRows: BookingServiceUnitInsert[] = servicesWithUnits.flatMap((selection) =>
     (selection.units ?? []).map((unit, index) => {
+      const reusedId =
+        unit.id && existingUnitServiceId.get(unit.id) === selection.packageLegId && !reusedUnitIds.has(unit.id)
+          ? unit.id
+          : undefined
+      if (reusedId) reusedUnitIds.add(reusedId)
       const roomPrice = unit.manualRoomPrice ?? null
       const previous = unit.id ? existingUnitProvenance.get(unit.id) : undefined
       const unchanged = roomPrice !== null && previous?.price === roomPrice
@@ -782,6 +796,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         previousFare.child === fareChild &&
         previousFare.infant === fareInfant
       return {
+        ...(reusedId ? { id: reusedId } : {}),
         service_id: selection.packageLegId,
         suite_type_id: unit.suiteTypeId,
         bedroom_type_id: unit.bedroomTypeId ?? null,

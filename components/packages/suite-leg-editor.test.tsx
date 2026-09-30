@@ -367,10 +367,41 @@ describe("SuiteLegEditor train fare override", () => {
     const adult = screen.getByLabelText(/adult price override for suite 1/i)
     const child = screen.getByLabelText(/child price override for suite 1/i)
     const infant = screen.getByLabelText(/infant price override for suite 1/i)
-    expect(adult).toHaveAttribute("placeholder", expect.stringMatching(/10[\s,]?000/))
-    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/5[\s,]?000/))
+    // Prefixed so a card fare never reads as a value already typed.
+    expect(adult).toHaveAttribute("placeholder", expect.stringMatching(/^Card: 10[\s ,]?000/))
+    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/^Card: 5[\s ,]?000/))
     // No infant price on the card means infants travel free (rateCardFares), so 0 is what it replaces.
-    expect(infant).toHaveAttribute("placeholder", expect.stringMatching(/^0[.,]00$/))
+    expect(infant).toHaveAttribute("placeholder", expect.stringMatching(/^Card: 0[.,]00$/))
+  })
+
+  it("moves focus to the adult fare when the override is opened", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState()} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+    expect(screen.getByLabelText(/adult price override for suite 1/i)).toHaveFocus()
+  })
+
+  it("doesn't steal focus when a saved override opens expanded", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState({ fareOverrideAdult: 9000 })} onChange={vi.fn()} />)
+
+    expect(screen.getByLabelText(/adult price override for suite 1/i)).not.toHaveFocus()
+  })
+
+  // overriddenFares: with no child price on the card, a blank child pays the adult fare in force --
+  // the typed one once there is one. The placeholder has to say that, not the card's adult price.
+  it("shows a blank child following the live adult fare when the card has no child price", () => {
+    const noChildCardLeg: PackageLeg = {
+      ...trainLeg,
+      rateCards: trainLeg.rateCards.map((rateCard) => ({ ...rateCard, childPrice: null })),
+    }
+    render(<Harness initial={trainState()} legOverride={noChildCardLeg} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+    const child = screen.getByLabelText(/child price override for suite 1/i)
+    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/^Same as adult: 10[\s ,]?000/))
+
+    fireEvent.change(screen.getByLabelText(/adult price override for suite 1/i), { target: { value: "9000" } })
+    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/^Same as adult: 9[\s ,]?000/))
   })
 
   it("updates the live total as the adult fare is typed, keeping the blank child on the card", () => {

@@ -1214,6 +1214,43 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
   }
 }
 
+/** The slice of PATCH /api/jobs/[id]/services' reload response adoptSavedServiceRows reads. */
+export interface SavedServiceRowVersion {
+  package_leg_id: string
+  updated_at?: string | null
+  units?: Array<{ id: string; sort_order: number }> | null
+}
+
+/**
+ * Folds a PATCH /services response back into the dialog's leg states: each leg's new row version
+ * (so a second save doesn't 409 against the stamp this one moved on) and each unit's stored id.
+ *
+ * The ids matter because POST /services/apply looks up who set each override by unit id, and a
+ * unit added since the last save only has a draft id until now. The PATCH writes units in the
+ * order it was sent them (sort_order = index), so the reloaded units line up with the state's by
+ * position; a leg whose unit count doesn't match (a response this state didn't produce) is left
+ * alone rather than guessed at.
+ */
+export function adoptSavedServiceRows(
+  states: ApplyLegState[],
+  rows: readonly SavedServiceRowVersion[],
+): ApplyLegState[] {
+  const rowByLegId = new Map(rows.map((row) => [row.package_leg_id, row]))
+  return states.map((state) => {
+    const row = rowByLegId.get(state.legId)
+    if (!row) return state
+    const updatedAt = row.updated_at ?? null
+    if (state.kind === "transport") return { ...state, updatedAt }
+
+    const savedUnits = (row.units ?? []).slice().sort((a, b) => a.sort_order - b.sort_order)
+    const units =
+      savedUnits.length === state.units.length
+        ? state.units.map((unit, index) => ({ ...unit, id: savedUnits[index]?.id ?? unit.id }))
+        : state.units
+    return { ...state, updatedAt, units }
+  })
+}
+
 /** PUT /api/jobs/[id]/transport-requests body. */
 export interface TransportRequestsPutBody {
   transportRequests: Array<{

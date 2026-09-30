@@ -53,6 +53,7 @@ import type { AgeBuckets } from "@/lib/pricing/age-buckets"
 import { deriveTripDateRangeFromStates, dateOnly } from "@/lib/packages/trip-date-range"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
 import {
+  adoptSavedServiceRows,
   applyAnchoredDates,
   buildDefaultLegStates,
   hydrateFromSaved,
@@ -72,6 +73,7 @@ import {
   type HotelAnchorContext,
   type SavedPackageState,
   type SavedSelectionRow,
+  type SavedServiceRowVersion,
   type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -1020,21 +1022,18 @@ export function BuildBookingDialog({
         return
       }
       // Adopt the row versions the save produced, so a second save in the same session doesn't
-      // 409 against stamps this very request moved on.
+      // 409 against stamps this very request moved on -- and the stored unit ids, which the
+      // pricing call below sends so the server can say who set each price override. A room added
+      // since the last save only had a draft id until now.
       const patchBody = (await patchRes.json().catch(() => null)) as
-        | { selections?: Array<{ package_leg_id: string; updated_at?: string | null }> }
+        | { selections?: SavedServiceRowVersion[] }
         | null
+      const savedLegStates = patchBody?.selections
+        ? adoptSavedServiceRows(legStates, patchBody.selections)
+        : legStates
       if (patchBody?.selections) {
-        const versionByLegId = new Map(
-          patchBody.selections.map((row) => [row.package_leg_id, row.updated_at ?? null]),
-        )
-        setLegStates((prev) =>
-          prev.map((state) =>
-            versionByLegId.has(state.legId)
-              ? { ...state, updatedAt: versionByLegId.get(state.legId) ?? null }
-              : state,
-          ),
-        )
+        const savedSelections = patchBody.selections
+        setLegStates((prev) => adoptSavedServiceRows(prev, savedSelections))
       }
 
       // 2. Persist transport requests — pricing reads them from the DB in the next step.
@@ -1065,7 +1064,7 @@ export function BuildBookingDialog({
           jobId,
           quoteId,
           travelDate: derivedRange.start,
-          selections: toApplySelections(legStates),
+          selections: toApplySelections(savedLegStates),
           // Send the rates that were on screen so a hand-nudged rate prices the quote, rather
           // than the server silently re-deriving a different one from its cache.
           fxRates,

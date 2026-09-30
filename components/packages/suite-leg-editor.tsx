@@ -989,8 +989,9 @@ export function SuiteLegEditor({
             })
           }}
         >
-          <SelectTrigger id={`route-${leg.id}`}>
-            <SelectValue placeholder={routePlaceholder} />
+          {/* Shrinks and truncates a long route name on a phone instead of widening the dialog. */}
+          <SelectTrigger id={`route-${leg.id}`} className="min-w-0 max-w-full">
+            <SelectValue className="truncate" placeholder={routePlaceholder} />
           </SelectTrigger>
           <SelectContent>
             {routeOptions.map((route) => (
@@ -1049,6 +1050,7 @@ export function SuiteLegEditor({
         value={value.rateTypeId}
         onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
         id={`rate-type-${leg.id}`}
+        triggerClassName="max-w-full"
         inheritLabel={
           leg.inheritedRateTypeName
             ? `Supplier default (${leg.inheritedRateTypeName})`
@@ -1072,7 +1074,9 @@ export function SuiteLegEditor({
   // Tours show the rate type inside the tour-type card (see the units.map below) and the itinerary
   // at the bottom instead of here — everything else keeps the original single grid up top.
   const legFields = pricesByTypeOnly ? null : (
-    <div className="grid gap-3 md:grid-cols-2">
+    // grid-cols-1 (minmax(0, 1fr)) rather than the implicit auto column, which grows to fit a long
+    // unwrappable select value and pushes the whole dialog wider than a phone screen.
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {routeOrItineraryField}
 
       {isHotel ? (
@@ -1622,7 +1626,7 @@ export function SuiteLegEditor({
             // so it's obvious this is optional. It sits beside the headcount it prices, not among
             // the fittings, so the card reads "what suite" then "who, at what rate".
             const unitRateBlock = showUnitRateType ? (
-              <div className="w-full space-y-1.5 sm:w-72">
+              <div className="w-full min-w-0 space-y-1.5 sm:w-72">
                 <RateTypeSelect
                   rateTypes={rateTypes}
                   allowedRateTypeIds={leg.applicableRateTypeIds}
@@ -1659,7 +1663,7 @@ export function SuiteLegEditor({
             ) : null
 
             return (
-              <div key={unit.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
+              <div key={unit.id} className="grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
                 {/* Several tours stacked under one supplier otherwise look identical at a glance --
                     this index is the only thing that says which card is the next one to fill in. */}
                 {pricesByTypeOnly ? (
@@ -1966,8 +1970,11 @@ export function SuiteLegEditor({
                   </div>
                 ) : null}
 
+                {/* Spans the whole card so it always lands bottom-right. As a single grid cell it
+                    fell into column 1 of a fresh row after any full-width override row (hotel,
+                    tour, train fare), stranding it mid-left on its own. */}
                 {value.units.length > 1 ? (
-                  <div className="flex items-end justify-end">
+                  <div className="flex items-end justify-end md:col-span-2 xl:col-span-3">
                     <Button
                       type="button"
                       variant="outline"
