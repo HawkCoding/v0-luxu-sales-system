@@ -2772,7 +2772,68 @@ describe("buildPackageQuoteLineItems", () => {
 
       // A card with no child price means "child pays the adult fare" -- and the adult fare is now
       // the typed one. Same chain transfers use.
-      expect(lineItems.find((li) => li.description.endsWith("- Child"))?.unitPrice).toBe(9000)
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine?.unitPrice).toBe(9000)
+      // The inherited fare is still the consultant's typed number, so the line carries its
+      // provenance -- the card would have charged the child the card's adult fare.
+      expect(childLine?.pricingSnapshot).toMatchObject({
+        manualTrainFare: 9000,
+        manualTrainFareBase: 10000,
+        manualTrainFareInheritedFrom: "adult",
+      })
+    })
+
+    it("marks a child that inherited a typed R0 adult fare as comped, not unpriced", async () => {
+      const noChildRateLeg = {
+        ...trainLeg,
+        rateCards: [rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 })],
+      }
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([noChildRateLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 0 },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.endsWith("- Adult"))
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(adultLine).toMatchObject({ unitPrice: 0, total: 0 })
+      expect(childLine).toMatchObject({ unitPrice: 0, total: 0 })
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBe(0)
+      expect(lineItems.some(isMissingPricing)).toBe(false)
+    })
+
+    it("does not stamp inherited provenance on a child the card prices on its own", async () => {
+      // The card sets a child price, so a blank child fare prices off the card, not the typed adult.
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 0 },
+            ],
+          },
+        ],
+      })
+
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine?.unitPrice).toBe(5000)
+      expect(childLine?.pricingSnapshot?.manualTrainFareInheritedFrom).toBeUndefined()
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBeUndefined()
     })
 
     it("does not add the single supplement on top of a typed fare -- the typed fare is final", async () => {

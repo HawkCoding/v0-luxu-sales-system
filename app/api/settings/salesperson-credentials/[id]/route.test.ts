@@ -171,6 +171,68 @@ describe("PATCH /api/settings/salesperson-credentials/[id]", () => {
     )
   })
 
+  it("lets a consultant save every signature field on their own row, touching no mailbox column", async () => {
+    const mock = makeSupabase({ ownerProfileId: "consultant-1" })
+    signIn("consultant", "consultant-1", mock.supabase)
+
+    const res = await PATCH(
+      patchRequest({
+        full_name: "Carmen",
+        job_title: "Consultant",
+        tel: "021",
+        cell: "081",
+        fax: "086",
+        email: "carmen@example.com",
+        website: "www.example.com",
+      }),
+      { params: params() },
+    )
+
+    expect(res.status).toBe(200)
+    expect(mock.signatureUpsert).toHaveBeenCalled()
+    // Only the timestamp reaches the credential row.
+    expect(mock.credentialUpdate).toHaveBeenCalledWith({ updated_at: expect.any(String) })
+  })
+
+  it.each([
+    ["smtp_host", { smtp_host: "smtp.attacker.example" }],
+    ["imap_host", { imap_host: "imap.attacker.example" }],
+    ["smtp_port", { smtp_port: 2525 }],
+    ["smtp_encryption", { smtp_encryption: "none" }],
+    ["imap_port", { imap_port: 143 }],
+    ["imap_encryption", { imap_encryption: "none" }],
+    ["imap_sent_folder", { imap_sent_folder: "Elsewhere" }],
+    ["email_address", { email_address: "other@example.com" }],
+    ["password", { password: "new-secret" }],
+  ])("403s a consultant changing %s on their own row, writing nothing", async (field, body) => {
+    const mock = makeSupabase({ ownerProfileId: "consultant-1" })
+    signIn("consultant", "consultant-1", mock.supabase)
+
+    const res = await PATCH(patchRequest({ full_name: "Carmen", ...body }), { params: params() })
+
+    expect(res.status).toBe(403)
+    const payload = await res.json()
+    expect(payload.error).toMatch(/admin or manager/)
+    expect(payload.details.fields).toEqual([field])
+    expect(mock.credentialUpdate).not.toHaveBeenCalled()
+    expect(mock.signatureUpsert).not.toHaveBeenCalled()
+  })
+
+  it("lets an admin redirect a mailbox's hosts", async () => {
+    const mock = makeSupabase({ ownerProfileId: "consultant-1" })
+    signIn("admin", "admin-1", mock.supabase)
+
+    const res = await PATCH(
+      patchRequest({ smtp_host: "smtp.new.example", imap_host: "imap.new.example", smtp_port: 587 }),
+      { params: params() },
+    )
+
+    expect(res.status).toBe(200)
+    expect(mock.credentialUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ smtp_host: "smtp.new.example", imap_host: "imap.new.example", smtp_port: 587 }),
+    )
+  })
+
   it("403s a consultant editing someone else's row", async () => {
     const mock = makeSupabase({ ownerProfileId: "someone-else" })
     signIn("consultant", "consultant-1", mock.supabase)

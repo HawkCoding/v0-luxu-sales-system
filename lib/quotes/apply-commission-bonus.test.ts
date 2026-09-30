@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   applyCommissionBonus,
   getCommissionBonus,
+  quoteBuiltWithoutCommission,
   readQuoteCommissionSetting,
 } from "@/lib/quotes/apply-commission-bonus"
 import type { CommissionBreakdown, PricingSnapshot, QuoteLineItem } from "@/lib/types"
@@ -234,5 +235,22 @@ describe("readQuoteCommissionSetting", () => {
   it("returns null for a malformed stored commission", () => {
     expect(readQuoteCommissionSetting([{ commission: { type: "bogus", value: 5 } }])).toBeNull()
     expect(readQuoteCommissionSetting([{ commission: { type: "percent", value: -1 } }])).toBeNull()
+  })
+})
+
+describe("quoteBuiltWithoutCommission", () => {
+  it("is true for a built quote (leg lines) with no Commission line", () => {
+    expect(quoteBuiltWithoutCommission([{ legId: "leg-1", commission: null }, { legId: "leg-2" }])).toBe(true)
+  })
+
+  it("is false once the quote carries a Commission line", () => {
+    expect(
+      quoteBuiltWithoutCommission([{ legId: "leg-1" }, { legId: null, commission: { type: "percent", value: 10 } }]),
+    ).toBe(false)
+  })
+
+  it("is false for a fresh quote: no lines, or only extras and manual lines with no leg", () => {
+    expect(quoteBuiltWithoutCommission([])).toBe(false)
+    expect(quoteBuiltWithoutCommission([null, { isExtra: true, legId: null }])).toBe(false)
   })
 })

@@ -170,6 +170,58 @@ describe("HtmlBodyEditor", () => {
     await waitFor(() => expect(editable).toHaveTextContent("Server copy"))
   })
 
+  describe("HTML source mode", () => {
+    function renderInSource(initial: string, onChange: (html: string) => void = () => {}) {
+      const view = render(<HtmlBodyEditor value={initial} onChange={onChange} />)
+      fireEvent.click(screen.getByLabelText("Toggle HTML source"))
+      return view
+    }
+
+    it("adopts an external value (a Discard, a save adopting the server copy) while not focused", () => {
+      const { rerender } = renderInSource("<p>Draft</p>")
+      rerender(<HtmlBodyEditor value="<p>Saved</p>" onChange={() => {}} />)
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("<p>Saved</p>")
+    })
+
+    it("does not re-emit the discarded HTML when switching back to rich", () => {
+      const onChange = vi.fn()
+      const { rerender } = renderInSource("<p>Draft</p>", onChange)
+      rerender(<HtmlBodyEditor value="<p>Saved</p>" onChange={onChange} />)
+      onChange.mockClear()
+
+      fireEvent.click(screen.getByLabelText("Toggle HTML source"))
+
+      expect(onChange).toHaveBeenCalledWith("<p>Saved</p>")
+      expect(onChange).not.toHaveBeenCalledWith("<p>Draft</p>")
+    })
+
+    it("does not replace the textarea under an active caret; applies the change on blur", () => {
+      const { rerender } = renderInSource("<p>Draft</p>")
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement
+      textarea.focus()
+      expect(document.activeElement).toBe(textarea)
+
+      rerender(<HtmlBodyEditor value="<p>Saved</p>" onChange={() => {}} />)
+      expect(textarea.value).toBe("<p>Draft</p>")
+
+      fireEvent.blur(textarea)
+      textarea.blur()
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("<p>Saved</p>")
+    })
+
+    it("keeps what the user typed when they type after a parked external change", () => {
+      const { rerender } = renderInSource("<p>Draft</p>")
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement
+      textarea.focus()
+      rerender(<HtmlBodyEditor value="<p>Saved</p>" onChange={() => {}} />)
+
+      fireEvent.change(textarea, { target: { value: "<p>Typed</p>" } })
+      fireEvent.blur(textarea)
+
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("<p>Typed</p>")
+    })
+  })
+
   it("calls onBlur when the editable area loses focus", () => {
     const onBlur = vi.fn()
     render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} onBlur={onBlur} />)

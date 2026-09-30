@@ -38,4 +38,21 @@ describe("TrainOverrideNote", () => {
     )
     expect(container).toHaveTextContent(/no rate card covered this suite/)
   })
+
+  it("says an inherited child fare follows the typed adult fare rather than calling it a manual child fare", () => {
+    const { container } = render(
+      <TrainOverrideNote
+        snapshot={snapshot({
+          passengerKind: "child",
+          manualTrainFare: 0,
+          manualTrainFareBase: 10000,
+          manualTrainFareInheritedFrom: "adult",
+        })}
+        quoteCurrency="ZAR"
+      />,
+    )
+    expect(container).toHaveTextContent(/Child fare follows the manual adult fare/)
+    expect(container).not.toHaveTextContent(/Manual child fare/)
+    expect(container).toHaveTextContent(/replacing R\s?10[\s,]?000/)
+  })
 })

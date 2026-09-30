@@ -180,6 +180,38 @@ export function HtmlBodyEditor({
     applyExternal(value)
   }, [value, editor, mode, applyExternal])
 
+  // Source mode's textarea is bound to sourceDraft, not to value, so the rich-mode sync above never
+  // reached it: a Discard or a save adopting the server copy left the textarea showing the old
+  // HTML, and switching back to rich re-emitted it. Same rule as rich mode — never under an
+  // active caret; a change arriving mid-edit is parked and applied on blur unless the user types
+  // first (emit clears it).
+  const sourceRef = useRef<HTMLTextAreaElement>(null)
+
+  const applyExternalSource = useCallback((next: string) => {
+    lastEmitted.current = next
+    setSourceDraft(next)
+  }, [])
+
+  useEffect(() => {
+    if (mode !== "source") return
+    if (value === lastEmitted.current) {
+      deferredValue.current = null
+      return
+    }
+    if (sourceRef.current !== null && sourceRef.current === document.activeElement) {
+      deferredValue.current = value
+      return
+    }
+    deferredValue.current = null
+    applyExternalSource(value)
+  }, [value, mode, applyExternalSource])
+
+  function handleSourceBlur() {
+    const next = deferredValue.current
+    deferredValue.current = null
+    if (next !== null && next !== lastEmitted.current) applyExternalSource(next)
+  }
+
   useEffect(() => {
     if (!editor) return
     const handleBlur = () => {
@@ -259,9 +291,11 @@ export function HtmlBodyEditor({
         <EditorContent editor={editor} id={id} />
       ) : (
         <Textarea
+          ref={sourceRef}
           id={id}
           value={sourceDraft}
           onChange={(event) => handleSourceChange(event.target.value)}
+          onBlur={handleSourceBlur}
           disabled={disabled}
           className="border-0 font-mono text-xs focus-visible:ring-0"
           style={{ minHeight: resolvedMinHeight }}

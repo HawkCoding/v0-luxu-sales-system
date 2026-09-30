@@ -9,8 +9,7 @@ import type { Quote } from "@/lib/types"
 import {
   describeQtyBasis,
   hasComplimentaryNight,
-  isComplimentaryRoom,
-  isComplimentaryTransport,
+  isComplimentaryLine,
   isDeliberateZeroCommission,
   isMissingPricing,
   stayNights,
@@ -311,7 +310,7 @@ export function JobQuotesTab({
                       // in this table — see components/quotes/quote-adjustments-ledger.tsx.
                       if (i === findCommissionLineIndex(q.lineItems)) return null
                       const isExtra = li.pricingSnapshot?.isExtra === true
-                      const isComplimentary = isComplimentaryRoom(li) || isComplimentaryTransport(li)
+                      const isComplimentary = isComplimentaryLine(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
                         <td className="py-2 text-xs text-foreground break-words">

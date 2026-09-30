@@ -39,9 +39,16 @@ export function TrainOverrideNote({ snapshot, quoteCurrency }: TrainOverrideNote
     .filter(Boolean)
     .join(" ")
 
+  // A blank child fare that followed the typed adult fare (card had no child price) is not a
+  // child fare anyone typed — say where it came from rather than claim a manual child fare.
+  const heading =
+    snapshot.manualTrainFareInheritedFrom === "adult"
+      ? `${kind === "child" ? "Child" : "Infant"} fare follows the manual adult fare`
+      : `Manual ${kind} fare`
+
   return (
     <div className="text-[11px] text-amber-600 dark:text-amber-500">
-      ⚑ Manual {kind} fare — {formatMoney(snapshot.manualTrainFare, currency)} pp
+      ⚑ {heading} — {formatMoney(snapshot.manualTrainFare, currency)} pp
       {base === null || base === undefined
         ? ", no rate card covered this suite"
         : `, replacing ${formatMoney(base, currency)}`}

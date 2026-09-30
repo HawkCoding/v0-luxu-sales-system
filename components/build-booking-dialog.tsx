@@ -1056,8 +1056,8 @@ export function BuildBookingDialog({
 
       // 3. Price the quote from the persisted configuration. Commission is no longer decided
       // here — the server keeps the quote's current commission type + value (set on the Quotes
-      // tab), or the house default when it has none, and re-prices the amount (see
-      // services/apply/route.ts).
+      // tab), or the house default when the quote has never been built, and re-prices the amount
+      // (see services/apply/route.ts). A commission cleared on the ledger stays cleared.
       const res = await fetch(`/api/jobs/${jobId}/services/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

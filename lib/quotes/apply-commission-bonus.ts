@@ -31,6 +31,25 @@ export function readQuoteCommissionSetting(
 }
 
 /**
+ * True when the quote has already been priced by Build Booking (it carries lines stamped with a
+ * leg) yet carries no Commission line — i.e. commission was deliberately cleared on the ledger
+ * (PATCH /api/quotes/[id]/adjustments drops the line), or set to 0 there (a 0 re-prices to no
+ * line). A rebuild must keep that "no commission" rather than re-adding the house default.
+ *
+ * A fresh quote has no leg lines at all (only, at most, ad-hoc extras, which carry no legId), so
+ * its first Build Booking still falls back to the house default.
+ */
+export function quoteBuiltWithoutCommission(pricingSnapshots: readonly unknown[]): boolean {
+  let hasBuiltLeg = false
+  for (const raw of pricingSnapshots) {
+    const snapshot = raw as PricingSnapshot | null
+    if (snapshot?.commission != null) return false
+    if (snapshot?.legId) hasBuiltLeg = true
+  }
+  return hasBuiltLeg
+}
+
+/**
  * The rand amount a salesperson manually added on top of the calculated commission,
  * as recorded on the line itself. Used to render the split without re-reading the quote.
  */

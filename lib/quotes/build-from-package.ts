@@ -565,6 +565,9 @@ export async function buildPackageQuoteLineItems({
       basePrice: number | null
       setAt: string | null
       setByName: string | null
+      /** Set when this kind was left blank and took another kind's typed fare (a child on a card
+       * with no child price inherits the adult fare). */
+      inheritedFrom?: "adult" | null
     } | null
     /** Hotels only: nights of this room's stay the hotel gifted, and the stay they were taken
      * from. `qty` is already the charged nights; these are carried so the quote view, the
@@ -744,6 +747,9 @@ export async function buildPackageQuoteLineItems({
               manualTrainFareBase: trainFareOverride.basePrice,
               manualTrainFareSetAt: trainFareOverride.setAt,
               manualTrainFareSetByName: trainFareOverride.setByName,
+              ...(trainFareOverride.inheritedFrom
+                ? { manualTrainFareInheritedFrom: trainFareOverride.inheritedFrom }
+                : {}),
             }
           : {}),
         ...(isComplimentaryTransport
@@ -1679,7 +1685,7 @@ export async function buildPackageQuoteLineItems({
             // per passenger kind, not per suite -- a suite overriding only its child/infant fares
             // still prices its adult off the card, and since the override never touched the adult
             // fare the card's single supplement still applies to a lone adult there.
-            const kindOverride =
+            const ownKindOverride =
               trainOverride === null
                 ? null
                 : key === "adultCount"
@@ -1687,6 +1693,18 @@ export async function buildPackageQuoteLineItems({
                   : key === "childCount"
                     ? trainOverride.child
                     : trainOverride.infant
+            // A blank child on a card with no child price inherits the typed adult fare through
+            // overriddenFares. That price is still the consultant's typed number, so the line has
+            // to carry the override's provenance: without it a typed R0 adult fare left the child
+            // line looking unpriced (isMissingPricing) and blocked sending the quote.
+            const inheritsAdultOverride =
+              ownKindOverride === null &&
+              key === "childCount" &&
+              trainOverride !== null &&
+              trainOverride.adult !== null &&
+              activeRateCard !== null &&
+              activeRateCard.childPrice === null
+            const kindOverride = inheritsAdultOverride ? unitPrice : ownKindOverride
             const kindCardFare = trainCardFares?.find((fare) => fare.key === key)?.unitPrice ?? null
             // A unit occupied by exactly one traveller (of any age) pays the single supplement —
             // it's a solo room, not specifically a solo adult. Solo-room travellers can't merge
@@ -1762,6 +1780,7 @@ export async function buildPackageQuoteLineItems({
                           basePrice: kindCardFare,
                           setAt: groupUnits[0].fareOverrideSetAt ?? null,
                           setByName: groupUnits[0].fareOverrideSetByName ?? null,
+                          inheritedFrom: inheritsAdultOverride ? "adult" : null,
                         },
                       }
                     : {}),

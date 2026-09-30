@@ -1033,6 +1033,10 @@ export interface PricingSnapshot {
   manualTrainFareBase?: number | null
   manualTrainFareSetAt?: string | null
   manualTrainFareSetByName?: string | null
+  /** Set when this line's own kind was left blank and it took another kind's typed fare instead —
+   *  a child on a card with no child price follows the typed adult fare (see overriddenFares). The
+   *  fare is still the consultant's number, so the line carries manualTrainFare like a typed one. */
+  manualTrainFareInheritedFrom?: "adult" | null
   /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
   unit?: string | null
   /** Hotel per-person legs only: how the line's qty was arrived at. The qty on such a line is

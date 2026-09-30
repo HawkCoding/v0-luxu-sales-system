@@ -568,6 +568,31 @@ describe("POST /api/jobs/[id]/services/apply", () => {
 
       expect(commissionLine).toMatchObject({ qty: 1, total: 200 })
     })
+
+    it("still gives a fresh quote carrying only an ad-hoc extra the house default", async () => {
+      // Extras carry no legId -- they don't mean the quote has been through Build Booking.
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [{ isExtra: true, legId: null, commission: null }],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      expect(commissionLine).toMatchObject({ qty: 1, total: 200 })
+    })
+
+    it("keeps a commission cleared on the ledger cleared, instead of re-adding the house default", async () => {
+      // Already built (its train line carries a legId), and the Commission line was since dropped
+      // by the ledger's clear.
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [{ legId: TRAIN_SERVICE_ID, commission: null }],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      expect(commissionLine).toBeUndefined()
+    })
   })
 
   it("returns 400 with the engine's message when a required suite type is missing", async () => {

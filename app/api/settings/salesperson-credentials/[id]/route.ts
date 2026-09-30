@@ -28,6 +28,24 @@ const updateSchema = z
   })
   .merge(signatureFieldsSchema)
 
+/**
+ * The mailbox half of the payload — where mail goes and how it authenticates. Only a settings
+ * writer may touch these. A consultant editing their own row is limited to the signature: letting
+ * them change a host/port without also re-entering the password would point the admin-provisioned
+ * stored password at a server of their choosing, which then receives it on the next send.
+ */
+const MAILBOX_FIELD_KEYS = [
+  "email_address",
+  "smtp_host",
+  "smtp_port",
+  "smtp_encryption",
+  "imap_host",
+  "imap_port",
+  "imap_encryption",
+  "imap_sent_folder",
+  "password",
+] as const
+
 const SAFE_COLUMNS =
   "id, profile_id, email_address, smtp_host, smtp_port, smtp_encryption, imap_host, imap_port, imap_encryption, imap_sent_folder, created_at, updated_at"
 
@@ -77,7 +95,9 @@ export async function PATCH(
   if (!auth.ok) return auth.response
   const { supabase, user, profile } = auth.value
 
-  if (!isSettingsWriter(profile.clearanceLevel)) {
+  const isWriter = isSettingsWriter(profile.clearanceLevel)
+
+  if (!isWriter) {
     const { data: existing, error: existingError } = await supabase
       .from("salesperson_credentials")
       .select("profile_id")
@@ -94,6 +114,21 @@ export async function PATCH(
     raw = await request.json()
   } catch {
     return jsonError("Invalid JSON body", 400)
+  }
+
+  // Permission before validation: a consultant sending any mailbox key is refused outright, even
+  // one that would fail validation anyway, so the refusal names the real problem.
+  if (!isWriter && raw !== null && typeof raw === "object") {
+    const blocked = MAILBOX_FIELD_KEYS.filter((key) => Object.hasOwn(raw as object, key))
+    if (blocked.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Only an admin or manager can change mailbox settings. You can edit your own signature.",
+          details: { fields: blocked },
+        },
+        { status: 403 },
+      )
+    }
   }
 
   const result = updateSchema.safeParse(raw)
