@@ -42,6 +42,7 @@ import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { RoomOverrideNote } from "@/components/quotes/room-override-note"
 import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { TourOverrideNote } from "@/components/quotes/tour-override-note"
+import { TrainOverrideNote } from "@/components/quotes/train-override-note"
 import { useFxRates } from "@/lib/fx/use-fx-rates"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -52,6 +53,7 @@ import type { AgeBuckets } from "@/lib/pricing/age-buckets"
 import { deriveTripDateRangeFromStates, dateOnly } from "@/lib/packages/trip-date-range"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
 import {
+  adoptSavedServiceRows,
   applyAnchoredDates,
   buildDefaultLegStates,
   hydrateFromSaved,
@@ -71,6 +73,7 @@ import {
   type HotelAnchorContext,
   type SavedPackageState,
   type SavedSelectionRow,
+  type SavedServiceRowVersion,
   type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -1019,21 +1022,18 @@ export function BuildBookingDialog({
         return
       }
       // Adopt the row versions the save produced, so a second save in the same session doesn't
-      // 409 against stamps this very request moved on.
+      // 409 against stamps this very request moved on -- and the stored unit ids, which the
+      // pricing call below sends so the server can say who set each price override. A room added
+      // since the last save only had a draft id until now.
       const patchBody = (await patchRes.json().catch(() => null)) as
-        | { selections?: Array<{ package_leg_id: string; updated_at?: string | null }> }
+        | { selections?: SavedServiceRowVersion[] }
         | null
+      const savedLegStates = patchBody?.selections
+        ? adoptSavedServiceRows(legStates, patchBody.selections)
+        : legStates
       if (patchBody?.selections) {
-        const versionByLegId = new Map(
-          patchBody.selections.map((row) => [row.package_leg_id, row.updated_at ?? null]),
-        )
-        setLegStates((prev) =>
-          prev.map((state) =>
-            versionByLegId.has(state.legId)
-              ? { ...state, updatedAt: versionByLegId.get(state.legId) ?? null }
-              : state,
-          ),
-        )
+        const savedSelections = patchBody.selections
+        setLegStates((prev) => adoptSavedServiceRows(prev, savedSelections))
       }
 
       // 2. Persist transport requests — pricing reads them from the DB in the next step.
@@ -1054,8 +1054,9 @@ export function BuildBookingDialog({
       if (savedTransportRows) setExistingTransportRequests(savedTransportRows)
 
       // 3. Price the quote from the persisted configuration. Commission is no longer decided
-      // here — the server prices the Commission line off the house default (see
-      // buildPackageQuoteLineItems), editable afterward on the Job Quotes tab.
+      // here — the server keeps the quote's current commission type + value (set on the Quotes
+      // tab), or the house default when the quote has never been built, and re-prices the amount
+      // (see services/apply/route.ts). A commission cleared on the ledger stays cleared.
       const res = await fetch(`/api/jobs/${jobId}/services/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1063,7 +1064,7 @@ export function BuildBookingDialog({
           jobId,
           quoteId,
           travelDate: derivedRange.start,
-          selections: toApplySelections(legStates),
+          selections: toApplySelections(savedLegStates),
           // Send the rates that were on screen so a hand-nudged rate prices the quote, rather
           // than the server silently re-deriving a different one from its cache.
           fxRates,
@@ -1135,7 +1136,10 @@ export function BuildBookingDialog({
           Edit Quote
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl" {...closeGuard.contentProps}>
+      <DialogContent
+        className="max-h-[92vh] grid-cols-1 overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl [&>*]:min-w-0"
+        {...closeGuard.contentProps}
+      >
         <DiscardChangesDialog
           open={closeGuard.confirming}
           onKeepEditing={closeGuard.cancelDiscard}
@@ -1532,7 +1536,7 @@ export function BuildBookingDialog({
               </div>
             )}
 
-            <div className="rounded-md border">
+            <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
@@ -1569,6 +1573,7 @@ export function BuildBookingDialog({
                         <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <TourOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
+                        <TrainOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <CommissionBadge
                           commission={li.pricingSnapshot?.commission ?? null}
                           currency={quoteCurrency}

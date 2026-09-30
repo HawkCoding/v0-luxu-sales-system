@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest"
-import { manualFares, overriddenFares, rateCardFares } from "./passenger-fares"
+import { manualFares, overriddenFares, overridesCoverEveryPresentKind, rateCardFares } from "./passenger-fares"
+
+describe("overridesCoverEveryPresentKind", () => {
+  const counts = { adultCount: 2, childCount: 1, infantCount: 0 }
+
+  it("is true when every kind with travellers has a typed fare, ignoring empty kinds", () => {
+    expect(overridesCoverEveryPresentKind({ adult: 9000, child: 4000, infant: null }, counts)).toBe(true)
+  })
+
+  it("is false when a kind with travellers is blank", () => {
+    expect(overridesCoverEveryPresentKind({ adult: 9000, child: null, infant: null }, counts)).toBe(false)
+  })
+
+  it("treats 0 as a real typed fare, not a blank", () => {
+    expect(overridesCoverEveryPresentKind({ adult: 0, child: 0, infant: null }, counts)).toBe(true)
+  })
+})
 
 describe("rateCardFares", () => {
   it("uses each column's own price when all three are set", () => {

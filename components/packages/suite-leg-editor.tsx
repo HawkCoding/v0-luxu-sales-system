@@ -38,6 +38,7 @@ import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { anchorPresetLabels } from "@/lib/packages/anchor-labels"
 import { formatPrimaryProductDuration } from "@/lib/enquiry/primary-product"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
+import { PerPersonPriceOverride } from "@/components/packages/per-person-price-override"
 // TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
 // import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import {
@@ -660,6 +661,7 @@ export function SuiteLegEditor({
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
   const isTour = leg.supplierKind === "tour_operator"
+  const isTrain = leg.supplierKind === "train_operator"
   const isAirline = leg.supplierKind === "airline"
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = !isCoreBookingLeg(leg, primarySupplierId)
@@ -914,7 +916,9 @@ export function SuiteLegEditor({
    * correctly — the server resolves the real card when it stamps the snapshot.
    */
   function resolveRoomRateCard(suiteTypeId: string | null, unitRateTypeId?: string | null) {
-    if (!(isHotel || isTour) || !suiteTypeId || !value.serviceDate) return null
+    // Train suites read it too: a typed per-person fare override shows the card's fares as its
+    // placeholders and takes the card's currency.
+    if (!(isHotel || isTour || isTrain) || !suiteTypeId || !value.serviceDate) return null
     const candidates = findRateCardCandidates(
       leg.rateCards,
       value.routeId ?? "",
@@ -923,7 +927,8 @@ export function SuiteLegEditor({
     )
     const selected = selectRateCard(
       candidates,
-      // Hotel rooms and tours can resolve their own rate type; unset falls back to the leg's.
+      // Hotel rooms, tours and train suites can resolve their own rate type; unset falls back to
+      // the leg's.
       unitRateTypeId ?? value.rateTypeId,
       leg.quoteRateTypeId,
       leg.baseRateTypeId,
@@ -984,8 +989,9 @@ export function SuiteLegEditor({
             })
           }}
         >
-          <SelectTrigger id={`route-${leg.id}`}>
-            <SelectValue placeholder={routePlaceholder} />
+          {/* Shrinks and truncates a long route name on a phone instead of widening the dialog. */}
+          <SelectTrigger id={`route-${leg.id}`} className="min-w-0 max-w-full">
+            <SelectValue className="truncate" placeholder={routePlaceholder} />
           </SelectTrigger>
           <SelectContent>
             {routeOptions.map((route) => (
@@ -1044,6 +1050,7 @@ export function SuiteLegEditor({
         value={value.rateTypeId}
         onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
         id={`rate-type-${leg.id}`}
+        triggerClassName="max-w-full"
         inheritLabel={
           leg.inheritedRateTypeName
             ? `Supplier default (${leg.inheritedRateTypeName})`
@@ -1067,7 +1074,9 @@ export function SuiteLegEditor({
   // Tours show the rate type inside the tour-type card (see the units.map below) and the itinerary
   // at the bottom instead of here — everything else keeps the original single grid up top.
   const legFields = pricesByTypeOnly ? null : (
-    <div className="grid gap-3 md:grid-cols-2">
+    // grid-cols-1 (minmax(0, 1fr)) rather than the implicit auto column, which grows to fit a long
+    // unwrappable select value and pushes the whole dialog wider than a phone screen.
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {routeOrItineraryField}
 
       {isHotel ? (
@@ -1617,7 +1626,7 @@ export function SuiteLegEditor({
             // so it's obvious this is optional. It sits beside the headcount it prices, not among
             // the fittings, so the card reads "what suite" then "who, at what rate".
             const unitRateBlock = showUnitRateType ? (
-              <div className="w-full space-y-1.5 sm:w-72">
+              <div className="w-full min-w-0 space-y-1.5 sm:w-72">
                 <RateTypeSelect
                   rateTypes={rateTypes}
                   allowedRateTypeIds={leg.applicableRateTypeIds}
@@ -1654,7 +1663,7 @@ export function SuiteLegEditor({
             ) : null
 
             return (
-              <div key={unit.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
+              <div key={unit.id} className="grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
                 {/* Several tours stacked under one supplier otherwise look identical at a glance --
                     this index is the only thing that says which card is the next one to fill in. */}
                 {pricesByTypeOnly ? (
@@ -1865,6 +1874,48 @@ export function SuiteLegEditor({
                   />
                 ) : null}
 
+                {/* Train suites on a rate card can type their own per-person fares. A manual-
+                    pricing train already types every fare below, so it gets no override. */}
+                {isTrain && leg.pricingMode !== "manual" ? (
+                  <PerPersonPriceOverride
+                    values={{
+                      adult: unit.fareOverrideAdult ?? null,
+                      child: unit.fareOverrideChild ?? null,
+                      infant: unit.fareOverrideInfant ?? null,
+                    }}
+                    onChange={(patch) =>
+                      updateUnit(unit.id, {
+                        ...(patch.adult !== undefined ? { fareOverrideAdult: patch.adult } : {}),
+                        ...(patch.child !== undefined ? { fareOverrideChild: patch.child } : {}),
+                        ...(patch.infant !== undefined ? { fareOverrideInfant: patch.infant } : {}),
+                      })
+                    }
+                    onRevert={() =>
+                      updateUnit(unit.id, {
+                        fareOverrideAdult: null,
+                        fareOverrideChild: null,
+                        fareOverrideInfant: null,
+                      })
+                    }
+                    card={resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)}
+                    noCardMessage={
+                      unit.suiteTypeId
+                        ? "No rate card price for this suite yet"
+                        : `Pick a ${vocab.suiteType.toLowerCase()} to see its rate card`
+                    }
+                    fallbackCurrency={value.priceCurrency}
+                    formatInQuoteCurrency={formatInQuoteCurrency}
+                    pax={{
+                      adultCount: unit.adultCount,
+                      childCount: unit.childCount,
+                      infantCount: unit.infantCount,
+                    }}
+                    subject={`${vocab.unitNoun} ${index + 1}`}
+                    note="A typed fare is final: the single supplement is not added on top of it."
+                    setAt={unit.fareOverrideSetAt ?? null}
+                  />
+                ) : null}
+
                 {leg.pricingMode === "manual" ? (
                   <div className="flex flex-wrap items-end gap-3 md:col-span-2 xl:col-span-3">
                     <div className="space-y-1.5">
@@ -1919,8 +1970,11 @@ export function SuiteLegEditor({
                   </div>
                 ) : null}
 
+                {/* Spans the whole card so it always lands bottom-right. As a single grid cell it
+                    fell into column 1 of a fresh row after any full-width override row (hotel,
+                    tour, train fare), stranding it mid-left on its own. */}
                 {value.units.length > 1 ? (
-                  <div className="flex items-end justify-end">
+                  <div className="flex items-end justify-end md:col-span-2 xl:col-span-3">
                     <Button
                       type="button"
                       variant="outline"

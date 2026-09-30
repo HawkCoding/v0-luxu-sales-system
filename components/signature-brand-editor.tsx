@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
+import { Loader2, RotateCcw, Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,6 +19,8 @@ import {
 } from "@/lib/email/email-chrome"
 import type { SignatureBadge } from "@/lib/email/signature-brands"
 import { SENDER_LAYOUT_TOKENS } from "@/lib/email/sender-layout"
+import { isEquivalentEditorHtml } from "@/lib/templates/rich-text/equivalent-html"
+import { cn } from "@/lib/utils"
 
 export interface AdminSignatureBrand {
   id: string
@@ -38,10 +41,14 @@ export interface AdminSignatureBrand {
 }
 
 interface SignatureBrandEditorProps {
+  /** The saved copy of the brand. Never changed by typing — only by a successful save or upload. */
   brand: AdminSignatureBrand
   defaults: EmailSignatureSettings | undefined
   canEdit: boolean
-  onUpdated: (brand: AdminSignatureBrand) => void
+  /** Merge saved fields into the parent's copy of brand `id` (functional merge — never a stale whole-brand replace). */
+  onUpdated: (id: string, patch: Partial<AdminSignatureBrand>) => void
+  /** Reports whether the editor holds unsaved changes, so the page can guard brand switches and navigation. */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type TextKey =
@@ -52,6 +59,10 @@ type TextKey =
   | "confidentiality"
   | "officeAddress"
 
+type DraftKey = "name" | "senderLayout" | TextKey
+
+type BrandDraft = Record<DraftKey, string>
+
 const TEXT_FIELDS: { key: TextKey; label: string; defaultKey: keyof EmailSignatureSettings }[] = [
   { key: "companyLine", label: "Company line", defaultKey: "signature_company_line" },
   { key: "registrationLine", label: "Registration line", defaultKey: "signature_registration_line" },
@@ -61,23 +72,65 @@ const TEXT_FIELDS: { key: TextKey; label: string; defaultKey: keyof EmailSignatu
   { key: "officeAddress", label: "Office address", defaultKey: "signature_office_address" },
 ]
 
+const DRAFT_KEYS: DraftKey[] = ["name", "senderLayout", ...TEXT_FIELDS.map((field) => field.key)]
+
+/** Rich-text fields sent to the preview as draft overrides (the brand name never renders). */
+const PREVIEW_KEYS: Exclude<DraftKey, "name">[] = ["senderLayout", ...TEXT_FIELDS.map((field) => field.key)]
+
 const INSERT_TOKENS = SENDER_LAYOUT_TOKENS
 
-// Preview re-renders on every keystroke in a rich-text field; debounce so a
-// fast typist doesn't fire a request per character.
-const PREVIEW_DEBOUNCE_MS = 400
+// Preview renders the draft; debounce so a fast typist doesn't fire a request per character.
+const PREVIEW_DEBOUNCE_MS = 500
 
 /** Strips tags down to plain text for the "inherits ..." helper line — the placeholder itself is never rendered as HTML. */
 function toPlainText(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
 }
 
-/** Fixed-slot form for one signature brand — name, banner, badges, the sender name/contact layout, and six optional text overrides (blank inherits the shared default). */
-export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: SignatureBrandEditorProps) {
-  const [name, setName] = useState(brand.name)
+function draftFromBrand(brand: AdminSignatureBrand): BrandDraft {
+  return {
+    name: brand.name,
+    senderLayout: brand.senderLayout ?? "",
+    companyLine: brand.companyLine ?? "",
+    registrationLine: brand.registrationLine ?? "",
+    tradingHours: brand.tradingHours ?? "",
+    divisionsLine: brand.divisionsLine ?? "",
+    confidentiality: brand.confidentiality ?? "",
+    officeAddress: brand.officeAddress ?? "",
+  }
+}
+
+/**
+ * Rich-text fields compare as the editor renders them: every blank form is equal, and the editor's
+ * own normalisation of stored HTML (`color:rgb(…)` re-serialised as `color: rgb(…);`, a <p>
+ * wrapper) is not a change.
+ */
+function sameValue(key: DraftKey, a: string, b: string): boolean {
+  if (a === b) return true
+  if (key === "name") return false
+  return isEquivalentEditorHtml(a, b)
+}
+
+interface SavedBrandFields {
+  name: string
+  senderLayout: string | null
+  companyLine: string | null
+  registrationLine: string | null
+  tradingHours: string | null
+  divisionsLine: string | null
+  confidentiality: string | null
+  officeAddress: string | null
+}
+
+/** Fixed-slot form for one signature brand — name, banner, badges, the sender name/contact layout, and six optional text overrides (blank inherits the shared default). Text edits are held in a local draft until "Save changes". */
+export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDirtyChange }: SignatureBrandEditorProps) {
+  const saved = useMemo(() => draftFromBrand(brand), [brand])
+  const [draft, setDraft] = useState<BrandDraft>(saved)
+  const [saving, setSaving] = useState(false)
   const [uploadingBanner, setUploadingBanner] = useState(false)
-  const [previewHtml, setPreviewHtml] = useState("")
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
+  const [previewFailed, setPreviewFailed] = useState(false)
   const [previewProfileId, setPreviewProfileId] = useState<string | undefined>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -88,34 +141,101 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
   const previewFontFamily = toEmailFontFamily(emailAppearance?.email_font_family)
   const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
 
-  useEffect(() => setName(brand.name), [brand.id, brand.name])
+  const dirtyKeys = DRAFT_KEYS.filter((key) => !sameValue(key, draft[key], saved[key]))
+  const isDirty = dirtyKeys.length > 0
+  const nameInvalid = draft.name.trim() === ""
+
+  // When the parent's saved copy changes underneath us (a reload after a
+  // toggle/reorder, another tab's save), untouched fields follow it; fields
+  // the user has edited keep their draft.
+  const previousSaved = useRef(saved)
+  useEffect(() => {
+    const previous = previousSaved.current
+    previousSaved.current = saved
+    if (previous === saved) return
+    setDraft((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const key of DRAFT_KEYS) {
+        if (sameValue(key, current[key], previous[key]) && saved[key] !== previous[key]) {
+          next[key] = saved[key]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [saved])
+
+  const onDirtyChangeRef = useRef(onDirtyChange)
+  useEffect(() => {
+    onDirtyChangeRef.current = onDirtyChange
+  }, [onDirtyChange])
+  useEffect(() => {
+    onDirtyChangeRef.current?.(isDirty)
+  }, [isDirty])
+  useEffect(() => () => onDirtyChangeRef.current?.(false), [])
+
+  // Stable key for the preview effect: only the rendered draft fields, the
+  // saved chrome (banner/badges) and the previewed salesperson matter.
+  const previewDraftJson = JSON.stringify(Object.fromEntries(PREVIEW_KEYS.map((key) => [key, draft[key]])))
+  const badgesJson = JSON.stringify(brand.badges)
 
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
     const timer = setTimeout(() => {
       setLoadingPreview(true)
       fetch("/api/email-signature/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandId: brand.id, profileId: previewProfileId ?? null }),
+        body: JSON.stringify({
+          brandId: brand.id,
+          profileId: previewProfileId ?? null,
+          draft: JSON.parse(previewDraftJson) as Record<string, string>,
+        }),
+        signal: controller.signal,
       })
-        .then((r) => r.json())
-        .then((d: { html?: string }) => {
-          if (!cancelled) setPreviewHtml(d.html ?? "")
+        .then(async (r) => {
+          if (!r.ok) throw new Error("preview failed")
+          return (await r.json()) as { html?: string }
         })
-        .catch(() => {})
+        .then((d) => {
+          if (controller.signal.aborted) return
+          setPreviewHtml(d.html ?? "")
+          setPreviewFailed(false)
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setPreviewFailed(true)
+        })
         .finally(() => {
-          if (!cancelled) setLoadingPreview(false)
+          if (!controller.signal.aborted) setLoadingPreview(false)
         })
-      // Re-render whenever any brand field or the previewed salesperson changes, so the preview stays byte-identical to production.
     }, PREVIEW_DEBOUNCE_MS)
     return () => {
-      cancelled = true
+      controller.abort()
       clearTimeout(timer)
     }
-  }, [brand, previewProfileId])
+  }, [brand.id, brand.bannerUrl, badgesJson, previewDraftJson, previewProfileId])
 
-  async function patch(body: Record<string, unknown>, successLabel?: string) {
+  function setField(key: DraftKey, value: string) {
+    setDraft((current) => (current[key] === value ? current : { ...current, [key]: value }))
+  }
+
+  function handleDiscard() {
+    setDraft(saved)
+  }
+
+  async function handleSave() {
+    if (!isDirty || saving || nameInvalid) return
+    const keys = dirtyKeys
+    // What was sent, per field — a response only replaces fields the user hasn't touched since.
+    const snapshot: Partial<BrandDraft> = {}
+    const body: Record<string, string> = {}
+    for (const key of keys) {
+      snapshot[key] = draft[key]
+      body[key] = key === "name" ? draft.name.trim() : draft[key]
+    }
+
+    setSaving(true)
     try {
       const res = await fetch(`/api/settings/signature-brands/${brand.id}`, {
         method: "PATCH",
@@ -123,28 +243,36 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
         body: JSON.stringify(body),
       })
       if (!res.ok) {
-        const detail = await res.json().catch(() => null)
+        const detail = (await res.json().catch(() => null)) as { error?: string } | null
         toast.error(detail?.error ?? "Failed to save")
         return
       }
-      const updated = (await res.json()) as {
-        id: string
-        name: string
-        sortOrder: number
-        enabled: boolean
-        bannerUrl: string | null
-        companyLine: string | null
-        registrationLine: string | null
-        tradingHours: string | null
-        divisionsLine: string | null
-        confidentiality: string | null
-        officeAddress: string | null
-        senderLayout: string | null
+      const updated = (await res.json()) as SavedBrandFields
+      const serverValues: Partial<BrandDraft> = {}
+      const patch: Partial<AdminSignatureBrand> = {}
+      for (const key of keys) {
+        if (key === "name") {
+          serverValues.name = updated.name
+          patch.name = updated.name
+        } else {
+          serverValues[key] = updated[key] ?? ""
+          patch[key] = updated[key]
+        }
       }
-      onUpdated({ ...brand, ...updated })
-      if (successLabel) toast.success(successLabel)
+      setDraft((current) => {
+        const next = { ...current }
+        for (const key of keys) {
+          const serverValue = serverValues[key]
+          if (serverValue !== undefined && current[key] === snapshot[key]) next[key] = serverValue
+        }
+        return next
+      })
+      onUpdated(brand.id, patch)
+      toast.success("Brand saved")
     } catch {
       toast.error("Failed to save")
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -159,13 +287,12 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
       body.append("file", file)
       const res = await fetch(`/api/settings/signature-brands/${brand.id}/banner`, { method: "POST", body })
       if (!res.ok) {
-        const detail = await res.json().catch(() => null)
+        const detail = (await res.json().catch(() => null)) as { error?: string } | null
         toast.error(detail?.error ?? "Failed to upload banner")
         return
       }
       const payload = (await res.json()) as { bannerUrl: string; bannerWidth: number; bannerHeight: number }
-      onUpdated({
-        ...brand,
+      onUpdated(brand.id, {
         bannerUrl: payload.bannerUrl,
         bannerWidth: payload.bannerWidth,
         bannerHeight: payload.bannerHeight,
@@ -180,17 +307,64 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="space-y-5">
+    // Fields get the width. Beside them the preview squeezed the fields to ~250px at 1280 (toolbars
+    // wrapping to three rows), so it only sits alongside on very wide screens and below otherwise.
+    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="min-w-0 space-y-5">
+        {canEdit && (
+          <div
+            className={cn(
+              "sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2",
+              isDirty ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950" : "bg-card",
+            )}
+          >
+            <p className="text-sm" role="status" aria-live="polite">
+              {saving ? "Saving changes…" : isDirty ? "Unsaved changes" : "All changes saved"}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleDiscard}
+                disabled={!isDirty || saving}
+              >
+                <RotateCcw className="mr-1 h-3.5 w-3.5" aria-hidden />
+                Discard
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleSave()}
+                disabled={!isDirty || saving || nameInvalid}
+              >
+                {saving ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <Save className="mr-1 h-3.5 w-3.5" aria-hidden />
+                )}
+                {saving ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="brand-name">Name</Label>
           <Input
             id="brand-name"
-            value={name}
+            value={draft.name}
             disabled={!canEdit}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => name.trim() && name !== brand.name && patch({ name: name.trim() }, "Name saved")}
+            maxLength={120}
+            aria-invalid={nameInvalid || undefined}
+            aria-describedby={nameInvalid ? "brand-name-error" : undefined}
+            onChange={(e) => setField("name", e.target.value)}
           />
+          {nameInvalid && (
+            <p id="brand-name-error" className="text-xs text-destructive">
+              Name is required.
+            </p>
+          )}
         </div>
 
         <div className="space-y-1.5">
@@ -239,7 +413,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
               </>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">Transparent PNG.</p>
+          <p className="text-xs text-muted-foreground">Transparent PNG. Uploads save straight away.</p>
         </div>
 
         <div className="space-y-1.5">
@@ -248,7 +422,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
             brandId={brand.id}
             badges={brand.badges}
             canEdit={canEdit}
-            onChange={(badges) => onUpdated({ ...brand, badges })}
+            onChange={(badges) => onUpdated(brand.id, { badges })}
           />
         </div>
 
@@ -266,11 +440,10 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
           <HtmlBodyEditor
             id="brand-sender-layout"
             variant="compact"
-            value={brand.senderLayout ?? ""}
+            value={draft.senderLayout}
             insertTokens={INSERT_TOKENS}
             disabled={!canEdit}
-            onChange={(html) => onUpdated({ ...brand, senderLayout: html })}
-            onBlur={() => patch({ senderLayout: brand.senderLayout ?? "" })}
+            onChange={(html) => setField("senderLayout", html)}
           />
           <p className="text-xs text-muted-foreground">
             Blank inherits the shared default
@@ -284,10 +457,9 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
             <HtmlBodyEditor
               id={`brand-${key}`}
               variant="compact"
-              value={brand[key] ?? ""}
+              value={draft[key]}
               disabled={!canEdit}
-              onChange={(html) => onUpdated({ ...brand, [key]: html })}
-              onBlur={() => patch({ [key]: brand[key] ?? "" })}
+              onChange={(html) => setField(key, html)}
             />
             <p className="text-xs text-muted-foreground">
               Blank inherits the shared default
@@ -297,12 +469,26 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated }: Si
         ))}
       </div>
 
-      <div className="space-y-3">
+      <div className="min-w-0 space-y-3">
         <div className="space-y-1.5">
-          <Label>Live preview</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label>Live preview</Label>
+            {loadingPreview && previewHtml !== null ? (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                Updating preview…
+              </span>
+            ) : previewFailed ? (
+              <span className="text-xs text-destructive" role="status">
+                Preview couldn&apos;t update
+              </span>
+            ) : isDirty ? (
+              <span className="text-xs text-muted-foreground">Showing unsaved changes</span>
+            ) : null}
+          </div>
           {/* Angora background + email font, matching the container the signature sits in when sent. */}
-          <div className="h-[420px] overflow-auto rounded-md border bg-[#e8e5df]">
-            {loadingPreview ? (
+          <div className="h-[420px] max-w-2xl overflow-auto rounded-md border bg-[#e8e5df] 2xl:max-w-none">
+            {previewHtml === null ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 Rendering…
               </div>

@@ -98,10 +98,13 @@ export function HtmlBodyEditor({
   const [mode, setMode] = useState<Mode>(richSafe ? "rich" : "source")
   const [sourceDraft, setSourceDraft] = useState(value)
   const lastEmitted = useRef(value)
+  // An external value that arrived while the editor had focus, waiting for blur.
+  const deferredValue = useRef<string | null>(null)
 
   const emit = useCallback(
     (html: string) => {
       lastEmitted.current = html
+      deferredValue.current = null
       onChange(html)
     },
     [onChange],
@@ -126,13 +129,19 @@ export function HtmlBodyEditor({
           }
         : undefined,
     },
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
+      // Only a real document change is the user's edit. Tiptap also fires "update" with an empty
+      // transaction (setEditable does by default), which used to emit the editor's normalised
+      // copy of an untouched value on mount — marking signature forms dirty on load, and letting
+      // a Save write "" over fields nobody had touched.
+      if (!transaction.docChanged) return
       emit(fromEditorHtml(editor.getHTML()))
     },
   })
 
   useEffect(() => {
-    editor?.setEditable(!disabled)
+    // false: toggling editability is not an edit, so it must not emit an update.
+    editor?.setEditable(!disabled, false)
   }, [editor, disabled])
 
   // baseFontSize can arrive after the editor mounts (an SWR fetch resolving),
@@ -142,18 +151,114 @@ export function HtmlBodyEditor({
     editor.view.dom.style.fontSize = baseFontSize ?? ""
   }, [editor, baseFontSize])
 
-  // Sync external value changes (e.g. an async preview load resolving) into the
-  // editor without bouncing our own edits back through it.
+  // Sync external value changes (e.g. an async preview load resolving, a
+  // discarded draft, or a save adopting the server's sanitized HTML) into the
+  // editor without bouncing our own edits back through it. Never replaces the
+  // document while the editor has focus — that resets the caret mid-typing,
+  // and the user's next keystroke re-emits the editor's own content anyway.
+  // A change that arrives while focused is parked and applied on blur instead,
+  // unless the user types first (emit clears it — their content wins).
+  const applyExternal = useCallback(
+    (next: string) => {
+      if (!editor) return
+      // Deferred to a microtask: Tiptap's internal flushSync can't run while
+      // React is still mid-commit from the state update that triggered this effect.
+      queueMicrotask(() => {
+        if (editor.isDestroyed) return
+        // Programmatic, so it neither emits nor lands in undo history (undo must not step the
+        // field back to what it held before a load/discard/save-adopt).
+        editor
+          .chain()
+          .setMeta("addToHistory", false)
+          .setContent(toEditorHtml(next, blockTokens).html, { emitUpdate: false })
+          .run()
+        lastEmitted.current = next
+      })
+    },
+    [editor, blockTokens],
+  )
+
   useEffect(() => {
     if (!editor || mode !== "rich") return
-    if (value === lastEmitted.current) return
-    // Deferred to a microtask: Tiptap's internal flushSync can't run while
-    // React is still mid-commit from the state update that triggered this effect.
-    queueMicrotask(() => {
-      editor.commands.setContent(toEditorHtml(value, blockTokens).html, { emitUpdate: false })
-      lastEmitted.current = value
-    })
-  }, [value, editor, mode, blockTokens])
+    if (value === lastEmitted.current) {
+      deferredValue.current = null
+      return
+    }
+    if (editor.isFocused) {
+      deferredValue.current = value
+      return
+    }
+    deferredValue.current = null
+    applyExternal(value)
+  }, [value, editor, mode, applyExternal])
+
+  // A <label for={id}> can't focus the rich editor natively — the id sits on a wrapper div, and a
+  // contenteditable isn't a labelable element. So the label is wired up by hand: clicking it
+  // focuses the editor, and its text becomes the editable area's accessible name. (Source mode's
+  // textarea carries the id itself, so the label works there without help.)
+  useEffect(() => {
+    if (!editor || !id || mode !== "rich") return
+    const dom = editor.view.dom
+    const label = Array.from(document.querySelectorAll("label")).find((candidate) => candidate.htmlFor === id)
+    const labelText = label?.textContent?.trim()
+    dom.setAttribute("role", "textbox")
+    dom.setAttribute("aria-multiline", "true")
+    if (labelText) dom.setAttribute("aria-label", labelText)
+    const handleLabelClick = (event: MouseEvent) => {
+      const clicked = event.target instanceof Element ? event.target.closest("label") : null
+      // No scrollIntoView: the label sits right above the editor, so it's already on screen.
+      if (clicked && clicked.htmlFor === id && !editor.isDestroyed) {
+        editor.commands.focus(null, { scrollIntoView: false })
+      }
+    }
+    document.addEventListener("click", handleLabelClick)
+    return () => document.removeEventListener("click", handleLabelClick)
+  }, [editor, id, mode])
+
+  // Source mode's textarea is bound to sourceDraft, not to value, so the rich-mode sync above never
+  // reached it: a Discard or a save adopting the server copy left the textarea showing the old
+  // HTML, and switching back to rich re-emitted it. Same rule as rich mode — never under an
+  // active caret; a change arriving mid-edit is parked and applied on blur unless the user types
+  // first (emit clears it).
+  const sourceRef = useRef<HTMLTextAreaElement>(null)
+
+  const applyExternalSource = useCallback((next: string) => {
+    lastEmitted.current = next
+    setSourceDraft(next)
+  }, [])
+
+  useEffect(() => {
+    if (mode !== "source") return
+    if (value === lastEmitted.current) {
+      deferredValue.current = null
+      return
+    }
+    if (sourceRef.current !== null && sourceRef.current === document.activeElement) {
+      deferredValue.current = value
+      return
+    }
+    deferredValue.current = null
+    applyExternalSource(value)
+  }, [value, mode, applyExternalSource])
+
+  function handleSourceBlur() {
+    const next = deferredValue.current
+    deferredValue.current = null
+    if (next !== null && next !== lastEmitted.current) applyExternalSource(next)
+  }
+
+  useEffect(() => {
+    if (!editor) return
+    const handleBlur = () => {
+      const next = deferredValue.current
+      deferredValue.current = null
+      if (next !== null && next !== lastEmitted.current) applyExternal(next)
+    }
+    editor.on("blur", handleBlur)
+    return () => {
+      editor.off("blur", handleBlur)
+    }
+  }, [editor, applyExternal])
 
   function switchToSource() {
     setSourceDraft(value)
@@ -221,9 +326,11 @@ export function HtmlBodyEditor({
         <EditorContent editor={editor} id={id} />
       ) : (
         <Textarea
+          ref={sourceRef}
           id={id}
           value={sourceDraft}
           onChange={(event) => handleSourceChange(event.target.value)}
+          onBlur={handleSourceBlur}
           disabled={disabled}
           className="border-0 font-mono text-xs focus-visible:ring-0"
           style={{ minHeight: resolvedMinHeight }}
@@ -381,7 +488,7 @@ function RichToolbar({
       </Select>
 
       <Select value={activeFontSize} onValueChange={applyFontSize} disabled={disabled}>
-        <SelectTrigger size="sm" className="h-8 w-[4.5rem] px-2 text-xs" aria-label="Font size">
+        <SelectTrigger size="sm" className="h-8 w-[5.5rem] px-2 text-xs" aria-label="Font size">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

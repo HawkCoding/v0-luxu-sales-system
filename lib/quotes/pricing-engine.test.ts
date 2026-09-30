@@ -5,6 +5,7 @@ import {
   complimentaryNights,
   describeQtyBasis,
   hasComplimentaryNight,
+  isComplimentaryLine,
   isComplimentaryTransport,
   isFreeHotelOccupant,
   isMissingPricing,
@@ -118,6 +119,64 @@ describe("isMissingPricing", () => {
       pricingSnapshot: { commission: null } as QuoteLineItem["pricingSnapshot"],
     })
     expect(isMissingPricing(unconfigured)).toBe(true)
+  })
+
+  it("does not flag a train fare deliberately typed as R0 (a comped fare)", () => {
+    const comped = line({
+      unitPrice: 0,
+      pricingSnapshot: {
+        pricingMode: "rate_card",
+        passengerKind: "adult",
+        manualTrainFare: 0,
+        manualTrainFareBase: 10000,
+      } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(comped)).toBe(false)
+  })
+
+  it("does not flag a child line that inherited a typed R0 adult fare", () => {
+    const inherited = line({
+      unitPrice: 0,
+      pricingSnapshot: {
+        pricingMode: "rate_card",
+        passengerKind: "child",
+        manualTrainFare: 0,
+        manualTrainFareBase: 10000,
+        manualTrainFareInheritedFrom: "adult",
+      } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(inherited)).toBe(false)
+  })
+
+  it("still flags a train line priced at 0 by a rate card, with no typed fare", () => {
+    const unpriced = line({
+      unitPrice: 0,
+      pricingSnapshot: { pricingMode: "rate_card", passengerKind: "adult" } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(unpriced)).toBe(true)
+  })
+})
+
+describe("isComplimentaryLine", () => {
+  const line = (snapshot: Record<string, unknown>): QuoteLineItem => ({
+    description: "Line",
+    qty: 1,
+    unitPrice: 0,
+    total: 0,
+    pricingSnapshot: snapshot as unknown as QuoteLineItem["pricingSnapshot"],
+  })
+
+  it("recognises every deliberate comp kind", () => {
+    expect(isComplimentaryLine(line({ manualRoomPrice: 0 }))).toBe(true)
+    expect(isComplimentaryLine(line({ manualTourPrice: 0 }))).toBe(true)
+    expect(isComplimentaryLine(line({ manualTrainFare: 0 }))).toBe(true)
+    expect(isComplimentaryLine(line({ isComplimentaryTransport: true }))).toBe(true)
+  })
+
+  it("is false for a non-zero override or no override at all", () => {
+    expect(isComplimentaryLine(line({ manualTrainFare: 9000 }))).toBe(false)
+    expect(isComplimentaryLine(line({ manualTrainFare: null }))).toBe(false)
+    expect(isComplimentaryLine(line({}))).toBe(false)
   })
 })
 

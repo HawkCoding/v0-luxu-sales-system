@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useRole } from "@/lib/role-context"
 
 interface SignatureRow {
   full_name: string | null
@@ -114,6 +115,10 @@ interface TestResult {
 }
 
 export function SalespersonCredentialsSettings() {
+  // Client-side mirror of the PATCH route's rule: only a settings writer may change where a
+  // mailbox sends from or how it authenticates. The route is the real gate.
+  const { can } = useRole()
+  const canEditMailbox = can("edit:settings")
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [users, setUsers] = useState<AppUser[]>([])
   const [loading, setLoading] = useState(true)
@@ -196,16 +201,7 @@ export function SalespersonCredentialsSettings() {
 
     setSaving(true)
     try {
-      const body: Record<string, unknown> = {
-        profile_id: form.profile_id,
-        email_address: form.email_address,
-        smtp_host: form.smtp_host,
-        smtp_port: Number(form.smtp_port),
-        smtp_encryption: form.smtp_encryption,
-        imap_host: form.imap_host,
-        imap_port: Number(form.imap_port),
-        imap_encryption: form.imap_encryption,
-        imap_sent_folder: form.imap_sent_folder,
+      const signatureFields = {
         full_name: form.full_name,
         job_title: form.job_title,
         tel: form.tel,
@@ -214,7 +210,23 @@ export function SalespersonCredentialsSettings() {
         email: form.signature_email,
         website: form.website,
       }
-      if (form.password) body.password = form.password
+      // A consultant editing their own row may only change the signature — the API refuses any
+      // mailbox field from them (see the PATCH route), so sending the unchanged ones would 403.
+      const body: Record<string, unknown> = canEditMailbox
+        ? {
+            profile_id: form.profile_id,
+            email_address: form.email_address,
+            smtp_host: form.smtp_host,
+            smtp_port: Number(form.smtp_port),
+            smtp_encryption: form.smtp_encryption,
+            imap_host: form.imap_host,
+            imap_port: Number(form.imap_port),
+            imap_encryption: form.imap_encryption,
+            imap_sent_folder: form.imap_sent_folder,
+            ...signatureFields,
+          }
+        : signatureFields
+      if (canEditMailbox && form.password) body.password = form.password
 
       const url = editTarget
         ? `/api/settings/salesperson-credentials/${editTarget.id}`
@@ -292,10 +304,12 @@ export function SalespersonCredentialsSettings() {
                 rest and never returned to the browser.
               </CardDescription>
             </div>
-            <Button size="sm" className="gap-1.5" onClick={openAdd}>
-              <Plus className="h-4 w-4" />
-              Add mailbox
-            </Button>
+            {canEditMailbox && (
+              <Button size="sm" className="gap-1.5" onClick={openAdd}>
+                <Plus className="h-4 w-4" />
+                Add mailbox
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -313,7 +327,8 @@ export function SalespersonCredentialsSettings() {
                 return (
                   <li
                     key={cred.id}
-                    className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                    // Stacks on a phone: the SMTP badge ran into the Test button side by side.
+                    className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium truncate">{cred.email_address}</p>
@@ -321,8 +336,14 @@ export function SalespersonCredentialsSettings() {
                         <p className="text-xs text-muted-foreground">{linkedUser.name || linkedUser.email}</p>
                       )}
                       <div className="mt-1 flex flex-wrap gap-1.5">
-                        <Badge variant="outline" className="text-xs font-mono">
-                          SMTP {cred.smtp_host}:{cred.smtp_port}
+                        <Badge
+                          variant="outline"
+                          className="max-w-full text-xs font-mono"
+                          title={`SMTP ${cred.smtp_host}:${cred.smtp_port}`}
+                        >
+                          <span className="min-w-0 truncate">
+                            SMTP {cred.smtp_host}:{cred.smtp_port}
+                          </span>
                         </Badge>
                         {result && (
                           <>
@@ -332,7 +353,7 @@ export function SalespersonCredentialsSettings() {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <Button
                         size="sm"
                         variant="outline"
@@ -356,14 +377,16 @@ export function SalespersonCredentialsSettings() {
                       >
                         <Settings2 className="h-4 w-4" />
                       </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setDeleteTarget(cred)}
-                        aria-label="Delete mailbox"
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      {canEditMailbox && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setDeleteTarget(cred)}
+                          aria-label="Delete mailbox"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
                     </div>
                   </li>
                 )
@@ -378,7 +401,9 @@ export function SalespersonCredentialsSettings() {
           <DialogHeader>
             <DialogTitle>{editTarget ? "Edit mailbox" : "Add mailbox"}</DialogTitle>
             <DialogDescription>
-              {editTarget
+              {editTarget && !canEditMailbox
+                ? "Update your email signature."
+                : editTarget
                 ? "Update the SMTP/IMAP settings. Leave password blank to keep the existing password."
                 : "Configure the salesperson's outbound SMTP and IMAP Sent-folder settings."}
             </DialogDescription>
@@ -404,101 +429,115 @@ export function SalespersonCredentialsSettings() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="sc-email">Salesperson email address</Label>
-              <Input
-                id="sc-email"
-                type="email"
-                value={form.email_address}
-                onChange={(e) => setForm((p) => ({ ...p, email_address: e.target.value }))}
-                placeholder="reservations@sa-rail.co.za"
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2 space-y-2">
-                <Label htmlFor="sc-smtp-host">SMTP host</Label>
-                <Input
-                  id="sc-smtp-host"
-                  value={form.smtp_host}
-                  onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
-                />
-              </div>
+            {/* Read-only for a consultant: the mailbox itself is admin-provisioned. */}
+            <fieldset
+              disabled={!canEditMailbox}
+              aria-describedby={canEditMailbox ? undefined : "sc-mailbox-readonly"}
+              className="space-y-4 disabled:opacity-70"
+            >
+              {!canEditMailbox && (
+                <p id="sc-mailbox-readonly" className="text-xs text-muted-foreground">
+                  Mailbox settings are managed by an admin or manager. You can edit your signature below.
+                </p>
+              )}
               <div className="space-y-2">
-                <Label htmlFor="sc-smtp-port">Port</Label>
+                <Label htmlFor="sc-email">Salesperson email address</Label>
                 <Input
-                  id="sc-smtp-port"
-                  type="number"
-                  value={form.smtp_port}
-                  onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                  id="sc-email"
+                  type="email"
+                  value={form.email_address}
+                  onChange={(e) => setForm((p) => ({ ...p, email_address: e.target.value }))}
+                  placeholder="reservations@sa-rail.co.za"
                 />
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="sc-smtp-enc">SMTP encryption</Label>
-              <Select
-                value={form.smtp_encryption}
-                onValueChange={(v) => setForm((p) => ({ ...p, smtp_encryption: v }))}
-              >
-                <SelectTrigger id="sc-smtp-enc" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ssl">SSL/TLS (recommended)</SelectItem>
-                  <SelectItem value="starttls">STARTTLS</SelectItem>
-                  <SelectItem value="none">None</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2 space-y-2">
-                <Label htmlFor="sc-imap-host">IMAP host</Label>
-                <Input
-                  id="sc-imap-host"
-                  value={form.imap_host}
-                  onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
-                />
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2 space-y-2">
+                  <Label htmlFor="sc-smtp-host">SMTP host</Label>
+                  <Input
+                    id="sc-smtp-host"
+                    value={form.smtp_host}
+                    onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sc-smtp-port">Port</Label>
+                  <Input
+                    id="sc-smtp-port"
+                    type="number"
+                    value={form.smtp_port}
+                    onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
+                  />
+                </div>
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="sc-imap-port">Port</Label>
-                <Input
-                  id="sc-imap-port"
-                  type="number"
-                  value={form.imap_port}
-                  onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-2">
-                <Label htmlFor="sc-imap-enc">IMAP encryption</Label>
+                <Label htmlFor="sc-smtp-enc">SMTP encryption</Label>
                 <Select
-                  value={form.imap_encryption}
-                  onValueChange={(v) => setForm((p) => ({ ...p, imap_encryption: v }))}
+                  value={form.smtp_encryption}
+                  onValueChange={(v) => setForm((p) => ({ ...p, smtp_encryption: v }))}
+                  disabled={!canEditMailbox}
                 >
-                  <SelectTrigger id="sc-imap-enc" className="w-full">
+                  <SelectTrigger id="sc-smtp-enc" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ssl">SSL/TLS</SelectItem>
+                    <SelectItem value="ssl">SSL/TLS (recommended)</SelectItem>
                     <SelectItem value="starttls">STARTTLS</SelectItem>
                     <SelectItem value="none">None</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="sc-imap-sent">Sent folder</Label>
-                <Input
-                  id="sc-imap-sent"
-                  value={form.imap_sent_folder}
-                  onChange={(e) => setForm((p) => ({ ...p, imap_sent_folder: e.target.value }))}
-                  placeholder="Sent"
-                />
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2 space-y-2">
+                  <Label htmlFor="sc-imap-host">IMAP host</Label>
+                  <Input
+                    id="sc-imap-host"
+                    value={form.imap_host}
+                    onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sc-imap-port">Port</Label>
+                  <Input
+                    id="sc-imap-port"
+                    type="number"
+                    value={form.imap_port}
+                    onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
+                  />
+                </div>
               </div>
-            </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-2">
+                  <Label htmlFor="sc-imap-enc">IMAP encryption</Label>
+                  <Select
+                    value={form.imap_encryption}
+                    onValueChange={(v) => setForm((p) => ({ ...p, imap_encryption: v }))}
+                    disabled={!canEditMailbox}
+                  >
+                    <SelectTrigger id="sc-imap-enc" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ssl">SSL/TLS</SelectItem>
+                      <SelectItem value="starttls">STARTTLS</SelectItem>
+                      <SelectItem value="none">None</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sc-imap-sent">Sent folder</Label>
+                  <Input
+                    id="sc-imap-sent"
+                    value={form.imap_sent_folder}
+                    onChange={(e) => setForm((p) => ({ ...p, imap_sent_folder: e.target.value }))}
+                    placeholder="Sent"
+                  />
+                </div>
+              </div>
+            </fieldset>
 
             <div className="space-y-2 border-t pt-4">
               <p className="text-sm font-medium">Signature</p>
@@ -508,7 +547,7 @@ export function SalespersonCredentialsSettings() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="sc-sig-name">Name on signature</Label>
                 <Input
@@ -529,7 +568,8 @@ export function SalespersonCredentialsSettings() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            {/* One column on a phone, two from sm up: three across truncated the phone numbers. */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="sc-sig-tel">Tel</Label>
                 <Input
@@ -559,7 +599,7 @@ export function SalespersonCredentialsSettings() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="sc-sig-email">Signature email</Label>
                 <Input
@@ -581,19 +621,21 @@ export function SalespersonCredentialsSettings() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="sc-password">
-                {editTarget ? "New password (leave blank to keep existing)" : "Password"}
-              </Label>
-              <Input
-                id="sc-password"
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                placeholder={editTarget ? "••••••••" : "SMTP/IMAP password"}
-                autoComplete="new-password"
-              />
-            </div>
+            {canEditMailbox && (
+              <div className="space-y-2">
+                <Label htmlFor="sc-password">
+                  {editTarget ? "New password (leave blank to keep existing)" : "Password"}
+                </Label>
+                <Input
+                  id="sc-password"
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+                  placeholder={editTarget ? "••••••••" : "SMTP/IMAP password"}
+                  autoComplete="new-password"
+                />
+              </div>
+            )}
 
             {formError && <p className="text-sm text-destructive">{formError}</p>}
 

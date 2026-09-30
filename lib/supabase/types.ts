@@ -484,6 +484,11 @@ export type Database = {
           child_count: number
           complimentary_first_night: boolean
           created_at: string
+          fare_override_adult: number | null
+          fare_override_child: number | null
+          fare_override_infant: number | null
+          fare_override_set_at: string | null
+          fare_override_set_by: string | null
           id: string
           infant_count: number
           manual_adult_price: number | null
@@ -510,6 +515,11 @@ export type Database = {
           child_count?: number
           complimentary_first_night?: boolean
           created_at?: string
+          fare_override_adult?: number | null
+          fare_override_child?: number | null
+          fare_override_infant?: number | null
+          fare_override_set_at?: string | null
+          fare_override_set_by?: string | null
           id?: string
           infant_count?: number
           manual_adult_price?: number | null
@@ -536,6 +546,11 @@ export type Database = {
           child_count?: number
           complimentary_first_night?: boolean
           created_at?: string
+          fare_override_adult?: number | null
+          fare_override_child?: number | null
+          fare_override_infant?: number | null
+          fare_override_set_at?: string | null
+          fare_override_set_by?: string | null
           id?: string
           infant_count?: number
           manual_adult_price?: number | null

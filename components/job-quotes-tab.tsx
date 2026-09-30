@@ -9,8 +9,7 @@ import type { Quote } from "@/lib/types"
 import {
   describeQtyBasis,
   hasComplimentaryNight,
-  isComplimentaryRoom,
-  isComplimentaryTransport,
+  isComplimentaryLine,
   isDeliberateZeroCommission,
   isMissingPricing,
   stayNights,
@@ -23,6 +22,7 @@ import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { RoomOverrideNote } from "@/components/quotes/room-override-note"
 import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { TourOverrideNote } from "@/components/quotes/tour-override-note"
+import { TrainOverrideNote } from "@/components/quotes/train-override-note"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
@@ -58,6 +58,9 @@ interface JobQuotesTabProps {
   bookingNumber: string
   travelDate: string | null
   customerName: string
+  /** The booking's current headcount (adults + children, infants excluded) — what a per-person
+   *  Commission/Discount on the adjustments ledger is multiplied by. */
+  bookingHeadcount: number
   emailImportNeedsReview?: boolean
   mutate: () => void
   autoOpenBuildBookingQuoteId?: string | null
@@ -70,6 +73,7 @@ export function JobQuotesTab({
   bookingNumber,
   travelDate,
   customerName,
+  bookingHeadcount,
   emailImportNeedsReview = false,
   mutate,
   autoOpenBuildBookingQuoteId: externalAutoOpenBuildBookingQuoteId = null,
@@ -306,7 +310,7 @@ export function JobQuotesTab({
                       // in this table — see components/quotes/quote-adjustments-ledger.tsx.
                       if (i === findCommissionLineIndex(q.lineItems)) return null
                       const isExtra = li.pricingSnapshot?.isExtra === true
-                      const isComplimentary = isComplimentaryRoom(li) || isComplimentaryTransport(li)
+                      const isComplimentary = isComplimentaryLine(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
                         <td className="py-2 text-xs text-foreground break-words">
@@ -321,6 +325,7 @@ export function JobQuotesTab({
                           <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                           <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                           <TourOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
+                          <TrainOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                         </td>
                         <td className="py-2 pl-4 text-xs text-right text-muted-foreground">
                           <div>{li.qty}</div>
@@ -378,7 +383,12 @@ export function JobQuotesTab({
                 </table>
               </div>
               <div className="mt-3">
-                <QuoteAdjustmentsLedger quote={q} editable={canEditLines} onSaved={mutate} />
+                <QuoteAdjustmentsLedger
+                  quote={q}
+                  editable={canEditLines}
+                  bookingHeadcount={bookingHeadcount}
+                  onSaved={mutate}
+                />
               </div>
               {q.overrideReason && (
                 <div className="mt-3 p-2 bg-payment-yellow/10 rounded-md">

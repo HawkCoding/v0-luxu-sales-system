@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NumericInput } from "@/components/ui/numeric-input"
-import { InputGroup, InputGroupAddon, InputGroupText } from "@/components/ui/input-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -29,6 +28,7 @@ import {
 import { anchorPresetLabels } from "@/lib/packages/anchor-labels"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
+import { perPersonOverrideTotal, PriceOverrideFields } from "@/components/packages/per-person-price-override"
 // TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
 // import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import { dateOnly } from "@/lib/packages/trip-date-range"
@@ -142,12 +142,16 @@ function RequestPriceOverride({
   const billableDays = isRental
     ? getBillableRentalDays(request.pickupAt, request.rentalDetails?.returnAt ?? null)
     : 1
-  const adultPrice = request.priceOverride ?? baseRateCard?.pricePerPerson ?? 0
-  const childPrice = request.priceOverrideChild ?? baseRateCard?.childPrice ?? adultPrice
-  const infantPrice = request.priceOverrideInfant ?? baseRateCard?.infantPrice ?? 0
   const total = isPerPerson
-    ? Math.round((adultPrice * pax.adultCount + childPrice * pax.childCount + infantPrice * pax.infantCount) * 100) /
-      100
+    ? perPersonOverrideTotal(
+        baseRateCard,
+        {
+          adult: request.priceOverride ?? null,
+          child: request.priceOverrideChild ?? null,
+          infant: request.priceOverrideInfant ?? null,
+        },
+        pax,
+      )
     : Math.round((request.priceOverride ?? 0) * billableDays * 100) / 100
   const convertedTotal = formatInQuoteCurrency(total, currency)
   const dayLabel = `${billableDays} ${billableDays === 1 ? "day" : "days"}`
@@ -256,74 +260,43 @@ function RequestPriceOverride({
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {(
-          [
-            { key: "adult", label: "Adult", value: request.priceOverride, onValueChange: onChange, cardPrice: baseRateCard?.pricePerPerson ?? null },
-            ...(isPerPerson
-              ? [
-                  {
-                    key: "child",
-                    label: "Child",
-                    value: request.priceOverrideChild,
-                    onValueChange: onChangeChild,
-                    cardPrice: baseRateCard?.childPrice ?? baseRateCard?.pricePerPerson ?? null,
-                  },
-                  {
-                    key: "infant",
-                    label: "Infant",
-                    value: request.priceOverrideInfant,
-                    onValueChange: onChangeInfant,
-                    cardPrice: baseRateCard?.infantPrice ?? null,
-                  },
-                ]
-              : []),
-          ] as const
-        ).map((field) => (
-          <div key={field.key} className="flex flex-wrap items-center gap-2">
-            {isPerPerson ? <span className="w-14 shrink-0 text-xs text-muted-foreground">{field.label}</span> : null}
-            <InputGroup className="w-full sm:w-64">
-              <InputGroupAddon align="inline-start">
-                <InputGroupText className="text-xs font-medium">{currency}</InputGroupText>
-              </InputGroupAddon>
-              <NumericInput
-                min="0"
-                step="0.01"
-                nullable
-                data-slot="input-group-control"
-                className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                placeholder={
-                  field.cardPrice !== null
-                    ? field.cardPrice.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                    : "Rate card price"
-                }
-                aria-label={`${field.label} price override for ${tripNoun} ${index + 1}`}
-                value={field.value ?? null}
-                onValueChange={field.onValueChange}
-              />
-              {isRental ? (
-                <InputGroupAddon align="inline-end">
-                  <InputGroupText className="text-xs">/ day</InputGroupText>
-                </InputGroupAddon>
-              ) : null}
-            </InputGroup>
-          </div>
-        ))}
-        <div>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-8 px-2 text-xs"
-            onClick={() => {
-              setRequested(false)
-              onRevert()
-            }}
-          >
-            Revert
-          </Button>
-        </div>
-      </div>
+      <PriceOverrideFields
+        fields={[
+          {
+            key: "adult",
+            label: "Adult",
+            value: request.priceOverride,
+            onValueChange: onChange,
+            cardPrice: baseRateCard?.pricePerPerson ?? null,
+          },
+          ...(isPerPerson
+            ? [
+                {
+                  key: "child" as const,
+                  label: "Child",
+                  value: request.priceOverrideChild,
+                  onValueChange: onChangeChild,
+                  cardPrice: baseRateCard?.childPrice ?? baseRateCard?.pricePerPerson ?? null,
+                },
+                {
+                  key: "infant" as const,
+                  label: "Infant",
+                  value: request.priceOverrideInfant,
+                  onValueChange: onChangeInfant,
+                  cardPrice: baseRateCard?.infantPrice ?? null,
+                },
+              ]
+            : []),
+        ]}
+        currency={currency}
+        showKindLabels={isPerPerson}
+        subject={`${tripNoun} ${index + 1}`}
+        inlineEndSuffix={isRental ? "/ day" : null}
+        onRevert={() => {
+          setRequested(false)
+          onRevert()
+        }}
+      />
 
       {overridden ? (
         <div className="space-y-1">

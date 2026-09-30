@@ -2692,6 +2692,370 @@ describe("buildPackageQuoteLineItems", () => {
     expect(reversedAdult?.total).toBe(forwardAdult?.total)
   })
 
+  describe("train per-person fare override", () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({
+          id: "rc-train",
+          routeId: "route-cpt",
+          suiteTypeId: "suite-dlx",
+          pricePerPerson: 10000,
+          childPrice: 5000,
+        }),
+      ],
+    })
+    function bookingFor(adults: number, children: number) {
+      return {
+        id: JOB_ID,
+        no_of_adults: adults,
+        no_of_children: children,
+        no_of_suites: 1,
+        child_ages: Array.from({ length: children }, () => 8),
+        departure_date: "2026-09-01",
+      }
+    }
+
+    it("prices the adult at the typed fare and leaves the blank child on the card", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 9000 },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.endsWith("- Adult"))
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(adultLine).toMatchObject({ qty: 2, unitPrice: 9000, total: 18000 })
+      expect(adultLine?.pricingSnapshot?.manualTrainFare).toBe(9000)
+      expect(adultLine?.pricingSnapshot?.manualTrainFareBase).toBe(10000)
+      // Still a rate-card line: the override replaces one number, not the pricing mode.
+      expect(adultLine?.pricingSnapshot?.pricingMode).toBe("rate_card")
+      expect(childLine).toMatchObject({ qty: 1, unitPrice: 5000, total: 5000 })
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBeUndefined()
+      // Client-facing description is unchanged by an override — no "manual"/"override" wording.
+      expect(adultLine?.description).toBe("Supplier leg-train - CPT-PTA — Deluxe - Adult")
+    })
+
+    it("falls a blank child back through the typed adult fare when the card sets no child price (overriddenFares)", async () => {
+      const noChildRateLeg = {
+        ...trainLeg,
+        rateCards: [rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 })],
+      }
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([noChildRateLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 9000 },
+            ],
+          },
+        ],
+      })
+
+      // A card with no child price means "child pays the adult fare" -- and the adult fare is now
+      // the typed one. Same chain transfers use.
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine?.unitPrice).toBe(9000)
+      // The inherited fare is still the consultant's typed number, so the line carries its
+      // provenance -- the card would have charged the child the card's adult fare.
+      expect(childLine?.pricingSnapshot).toMatchObject({
+        manualTrainFare: 9000,
+        manualTrainFareBase: 10000,
+        manualTrainFareInheritedFrom: "adult",
+      })
+    })
+
+    it("marks a child that inherited a typed R0 adult fare as comped, not unpriced", async () => {
+      const noChildRateLeg = {
+        ...trainLeg,
+        rateCards: [rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 })],
+      }
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([noChildRateLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 0 },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.endsWith("- Adult"))
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(adultLine).toMatchObject({ unitPrice: 0, total: 0 })
+      expect(childLine).toMatchObject({ unitPrice: 0, total: 0 })
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBe(0)
+      expect(lineItems.some(isMissingPricing)).toBe(false)
+    })
+
+    it("does not stamp inherited provenance on a child the card prices on its own", async () => {
+      // The card sets a child price, so a blank child fare prices off the card, not the typed adult.
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 0 },
+            ],
+          },
+        ],
+      })
+
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine?.unitPrice).toBe(5000)
+      expect(childLine?.pricingSnapshot?.manualTrainFareInheritedFrom).toBeUndefined()
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBeUndefined()
+    })
+
+    it("does not add the single supplement on top of a typed fare -- the typed fare is final", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(1, 0) }),
+        packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [{ suiteTypeId: "suite-dlx", adultCount: 1, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 }],
+          },
+        ],
+      })
+
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0]).toMatchObject({ qty: 1, unitPrice: 9000, total: 9000 })
+      expect(lineItems[0].description).not.toContain("single supplement")
+      expect(lineItems[0].pricingSnapshot?.singleSupplementPct).toBeNull()
+    })
+
+    it("keeps the card's single supplement for an adult when only child/infant fares were typed", async () => {
+      // Two solo suites sharing one override triple (child 4000 only): the lone adult was never
+      // touched by the override, so it still pays card + supplement; the lone child pays exactly
+      // the typed fare, no supplement.
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: { ...bookingFor(1, 1), no_of_suites: 2 } }),
+        packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 1, childCount: 0, infantCount: 0, fareOverrideChild: 4000 },
+              { suiteTypeId: "suite-dlx", adultCount: 0, childCount: 1, infantCount: 0, fareOverrideChild: 4000 },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.endsWith("- Adult"))
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(adultLine).toMatchObject({ qty: 1, unitPrice: 12500 })
+      expect(adultLine?.description).toContain("(25% single supplement included)")
+      expect(adultLine?.pricingSnapshot?.manualTrainFare).toBeUndefined()
+      expect(childLine).toMatchObject({ qty: 1, unitPrice: 4000 })
+      expect(childLine?.description).not.toContain("single supplement")
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBe(4000)
+      expect(childLine?.pricingSnapshot?.manualTrainFareBase).toBe(5000)
+    })
+
+    it("never merges two suites of the same type at different overrides (or one overridden, one on the card)", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: { ...bookingFor(6, 0), no_of_suites: 3 } }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 },
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 8000 },
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0 },
+            ],
+          },
+        ],
+      })
+
+      const adultPrices = lineItems
+        .filter((li) => li.description.endsWith("- Adult"))
+        .map((li) => [li.qty, li.unitPrice])
+        .sort((a, b) => a[1] - b[1])
+      expect(adultPrices).toEqual([
+        [2, 8000],
+        [2, 9000],
+        [2, 10000],
+      ])
+    })
+
+    it("merges two suites typed identically into one line", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: { ...bookingFor(4, 0), no_of_suites: 2 } }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 },
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0]).toMatchObject({ qty: 4, unitPrice: 9000, total: 36000 })
+    })
+
+    it("stamps who set the override, and when, on the overridden line's snapshot", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 0) }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                adultCount: 2,
+                childCount: 0,
+                infantCount: 0,
+                fareOverrideAdult: 9000,
+                fareOverrideSetAt: "2026-09-29T08:00:00Z",
+                fareOverrideSetByName: "Carmen Consultant",
+              },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems[0].pricingSnapshot).toMatchObject({
+        manualTrainFare: 9000,
+        manualTrainFareBase: 10000,
+        manualTrainFareSetAt: "2026-09-29T08:00:00Z",
+        manualTrainFareSetByName: "Carmen Consultant",
+      })
+    })
+
+    it("prices without a rate card when every passenger kind present has a typed fare", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([{ ...trainLeg, rateCards: [] }]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            priceCurrency: "ZAR",
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                adultCount: 2,
+                childCount: 1,
+                infantCount: 0,
+                fareOverrideAdult: 9000,
+                fareOverrideChild: 4000,
+              },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems.find((li) => li.description.endsWith("- Adult"))).toMatchObject({ unitPrice: 9000 })
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine).toMatchObject({ unitPrice: 4000 })
+      expect(childLine?.pricingSnapshot?.manualTrainFareBase).toBeNull()
+    })
+
+    it("still fails on a missing rate card when a present passenger kind is left blank", async () => {
+      await expect(
+        buildPackageQuoteLineItems({
+          supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+          packageDetail: detail([{ ...trainLeg, rateCards: [] }]),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [
+            {
+              legId: "leg-train",
+              selected: true,
+              units: [
+                { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 9000 },
+              ],
+            },
+          ],
+        }),
+      ).rejects.toThrow(/No rate card/)
+    })
+
+    it("ignores a fare override on a manual-pricing train leg (its fares are already typed)", async () => {
+      const manualTrain = { ...trainLeg, pricingMode: "manual" as const, rateCards: [] }
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 0) }),
+        packageDetail: detail([manualTrain]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            priceCurrency: "ZAR",
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                adultCount: 2,
+                childCount: 0,
+                infantCount: 0,
+                manualAdultPrice: 7000,
+                fareOverrideAdult: 9000,
+              },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems[0]).toMatchObject({ unitPrice: 7000 })
+      expect(lineItems[0].pricingSnapshot?.manualTrainFare).toBeUndefined()
+    })
+  })
+
   describe("manual pricing (e.g. airlines)", () => {
     const manualLeg = leg({
       id: "leg-flight",

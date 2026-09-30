@@ -250,4 +250,32 @@ describe("resolveEmailSignature", () => {
     const signature = await resolveEmailSignature("profile-1")
     expect(signature?.brandId).toBe("brand-sa-rail")
   })
+
+  it("layers draft overrides over the requested brand's stored row", async () => {
+    serviceClientMocks.createServiceClient.mockReturnValue(
+      makeSupabase({
+        email_signatures: { full_name: "Leonie Burke" },
+        signature_brands: [SA_RAIL_BRAND, LUXUS_BRAND],
+      }),
+    )
+
+    const signature = await resolveEmailSignature("profile-1", "brand-luxus", { company_line: "<p>Draft line</p>" })
+    expect(signature?.brandId).toBe("brand-luxus")
+    expect(signature?.brand.companyLine).toBe("<p>Draft line</p>")
+    // Untouched fields still inherit the shared default.
+    expect(signature?.brand.tradingHours).toBe(GLOBAL_DEFAULTS.signature_trading_hours)
+  })
+
+  it("never applies draft overrides to the fallback brand", async () => {
+    serviceClientMocks.createServiceClient.mockReturnValue(
+      makeSupabase({
+        email_signatures: { full_name: "Leonie Burke" },
+        signature_brands: [SA_RAIL_BRAND, LUXUS_BRAND],
+      }),
+    )
+
+    const signature = await resolveEmailSignature("profile-1", "does-not-exist", { company_line: "<p>Draft</p>" })
+    expect(signature?.brandId).toBe("brand-sa-rail")
+    expect(signature?.brand.companyLine).toBe(GLOBAL_DEFAULTS.signature_company_line)
+  })
 })

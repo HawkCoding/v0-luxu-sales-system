@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
+import { quoteBuiltWithoutCommission, readQuoteCommissionSetting } from "@/lib/quotes/apply-commission-bonus"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
-import { loadRoomOverrideProvenance, loadTourOverrideProvenance } from "@/lib/quotes/room-override-provenance"
+import {
+  loadRoomOverrideProvenance,
+  loadTourOverrideProvenance,
+  loadTrainFareOverrideProvenance,
+} from "@/lib/quotes/room-override-provenance"
 import { describeValidationIssue } from "@/lib/api/describe-zod-issue"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { getCachedRates } from "@/lib/fx/rates"
@@ -65,6 +70,11 @@ const unitSelectionSchema = z.object({
   complimentaryFirstNight: z.boolean().optional(),
   /** Tour legs only: the typed flat price that replaces this unit's rate-card-computed total. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
+  /** Train rate-card legs only: per-person fares replacing the rate card's for each passenger kind
+   * (blank kinds stay on the card). The pricing engine ignores them on any other kind. */
+  fareOverrideAdult: z.number().nonnegative().nullable().optional(),
+  fareOverrideChild: z.number().nonnegative().nullable().optional(),
+  fareOverrideInfant: z.number().nonnegative().nullable().optional(),
   /** Train, hotel, cruise and tour legs (supportsUnitRateType): this unit's own rate type,
    * overriding the leg-level rateTypeId below. The pricing engine ignores it on any other kind. */
   rateTypeId: z.string().uuid().nullable().optional(),
@@ -215,9 +225,10 @@ export async function POST(req: Request, { params }: RouteParams) {
   const unitIds = parsed.selections.flatMap((selection) =>
     (selection.units ?? []).map((unit) => unit.unitId).filter((unitId): unitId is string => Boolean(unitId)),
   )
-  const [roomOverrideProvenance, tourOverrideProvenance] = await Promise.all([
+  const [roomOverrideProvenance, tourOverrideProvenance, trainFareOverrideProvenance] = await Promise.all([
     loadRoomOverrideProvenance(supabase, unitIds),
     loadTourOverrideProvenance(supabase, unitIds),
+    loadTrainFareOverrideProvenance(supabase, unitIds),
   ])
 
   const selections = parsed.selections.map((selection) => ({
@@ -225,22 +236,40 @@ export async function POST(req: Request, { params }: RouteParams) {
     units: selection.units?.map((unit) => {
       const roomProvenance = unit.unitId ? roomOverrideProvenance.get(unit.unitId) : undefined
       const tourProvenance = unit.unitId ? tourOverrideProvenance.get(unit.unitId) : undefined
+      const fareProvenance = unit.unitId ? trainFareOverrideProvenance.get(unit.unitId) : undefined
       return {
         ...unit,
         manualRoomPriceSetAt: roomProvenance?.setAt ?? null,
         manualRoomPriceSetByName: roomProvenance?.setByName ?? null,
         manualTourPriceSetAt: tourProvenance?.setAt ?? null,
         manualTourPriceSetByName: tourProvenance?.setByName ?? null,
+        fareOverrideSetAt: fareProvenance?.setAt ?? null,
+        fareOverrideSetByName: fareProvenance?.setByName ?? null,
       }
     }),
   }))
 
+  // Commission is no longer decided in Build Booking, and no leg carries an override. A rebuild
+  // keeps the commission type + value the quote already carries (set on the Quotes-tab ledger,
+  // PATCH /api/quotes/[id]/adjustments) -- it used to be replaced by the house default, silently
+  // discarding the salesperson's choice. Only the amount is re-priced, against the new subtotal
+  // and the booking's current headcount. A quote that has never been built falls back to the
+  // house default from Settings, so Apply still prices one unattended.
+  const { data: quoteLineRows, error: quoteLinesError } = await supabase
+    .from("quote_line_items")
+    .select("pricing_snapshot")
+    .eq("quote_id", parsed.quoteId)
+    .order("sort_order")
+  if (quoteLinesError) return safeSupabaseError("services-apply:load-quote-commission", quoteLinesError)
+  const quoteLineSnapshots = (quoteLineRows ?? []).map((row) => row.pricing_snapshot)
+  const quoteCommission = readQuoteCommissionSetting(quoteLineSnapshots)
+  // A quote Build Booking already priced, with its Commission cleared on the ledger since, keeps
+  // no commission — the house default is only for a quote that has never been built.
+  const commissionCleared = quoteBuiltWithoutCommission(quoteLineSnapshots)
+
   try {
-    // Commission is no longer decided in Build Booking -- a leg that carries no override (every
-    // leg, now that the UI never sets one) falls back to the house default from Settings, so
-    // Apply still prices a Commission line unattended. It stays fully editable afterward on the
-    // Job Quotes tab (PATCH /api/quotes/[id]/commission).
-    const defaultCommission = await getDefaultCommission(supabase)
+    const defaultCommission =
+      quoteCommission ?? (commissionCleared ? null : await getDefaultCommission(supabase))
 
     const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
       supabase,

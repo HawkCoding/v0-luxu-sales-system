@@ -20,6 +20,8 @@ interface QuoteFixture {
   discount_value?: number
   discount_amount?: number
   updated_at?: string
+  adults?: number
+  children?: number
 }
 
 interface Captured {
@@ -58,7 +60,7 @@ function buildSupabase(quote: QuoteFixture, captured: Captured) {
                   discount_amount: quote.discount_amount ?? 0,
                   discount_visible: true,
                   updated_at: quote.updated_at ?? NOW,
-                  booking: { no_of_adults: 2, no_of_children: 0 },
+                  booking: { no_of_adults: quote.adults ?? 2, no_of_children: quote.children ?? 0 },
                 },
                 error: null,
               }),
@@ -206,6 +208,39 @@ describe("PATCH /api/quotes/[id]/adjustments", () => {
       discount: { type: "fixed", value: 100_000, visible: true },
     })
     expect(response.status).toBe(400)
+    expect(captured.rpc).toBeUndefined()
+  })
+
+  it("multiplies a per-person Commission and Discount by adults + children", async () => {
+    const captured: Captured = {}
+    authorise({ adults: 4, children: 1 }, captured)
+
+    const response = await patch({
+      ...BASE_BODY,
+      commission: { type: "per_person", value: 5000 },
+      discount: { type: "per_person", value: 1000, visible: true },
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    // 5 000 × 5 people = 25 000 commission; 1 000 × 5 people = 5 000 discount.
+    expect(payload.subtotal).toBe(275_000)
+    expect(payload.discountAmount).toBe(5000)
+    const lines = captured.rpc?.p_line_items as { description: string; qty: number; total: number }[]
+    const commissionLine = lines.find((li) => li.description === "Commission")
+    expect(commissionLine?.qty).toBe(5)
+    expect(commissionLine?.total).toBe(25_000)
+  })
+
+  it("400s a per-person Commission when the booking has no travellers", async () => {
+    const captured: Captured = {}
+    authorise({ adults: 0, children: 0 }, captured)
+
+    const response = await patch({ ...BASE_BODY, commission: { type: "per_person", value: 5000 } })
+    const payload = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toMatch(/number of travellers/)
     expect(captured.rpc).toBeUndefined()
   })
 
