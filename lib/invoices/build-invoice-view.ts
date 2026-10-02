@@ -5,6 +5,9 @@ import { INVOICE_PRODUCT_LABEL, invoiceRowsForBlock } from "@/lib/invoices/depar
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
 import { foldCommissionLines } from "@/lib/invoices/fold-commission-line"
+import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
+import { loadQuoteConfig } from "@/lib/quotes/load-quote-config"
+import type { PerPersonLine } from "@/lib/invoices/per-person-totals"
 import { logError } from "@/lib/error-log"
 import { primaryProductDurationCount, primaryProductOf } from "@/lib/enquiry/primary-product"
 import { nightsBetween } from "@/lib/packages/trip-date-range"
@@ -26,6 +29,10 @@ export interface InvoiceView {
   billing: InvoiceBillingParty
   departure: InvoiceDeparture | null
   items: InvoiceItem[]
+  /** Adults and paying children (resolvePayingPax) — the divisor of the "Total per Adult/Child" rows. */
+  pax: { adults: number; children: number }
+  /** The accepted quote's raw priced lines (commission unfolded), for derivePerPersonTotals. */
+  pricedLines: PerPersonLine[]
 }
 
 type CustomerRow = Pick<Database["public"]["Tables"]["customers"]["Row"], "phone" | "email">
@@ -46,6 +53,9 @@ type BillingDetailsRow = Pick<
  * The billing party is job-level, not customer-level: Company, VAT and address
  * come only from booking_reservation_details, with no fallback to the customer
  * profile. Phone and e-mail are the exception and still read the customer.
+ *
+ * The postal code is part of the address, on its own line under the town/province and above the
+ * country, as a South African postal address is written — not a separate "Code" field.
  */
 export function buildBillingParty(
   details: BillingDetailsRow | null | undefined,
@@ -55,6 +65,7 @@ export function buildBillingParty(
     details?.billing_address_line1,
     details?.billing_address_line2,
     [details?.billing_city, details?.billing_province].filter(Boolean).join(", "),
+    details?.billing_postal_code,
     details?.billing_country,
   ]
     .map((line) => line?.trim() ?? "")
@@ -63,7 +74,6 @@ export function buildBillingParty(
   return {
     companyName: details?.billing_company_name ?? null,
     addressLines,
-    postalCode: details?.billing_postal_code ?? null,
     phone: customer?.phone ?? null,
     email: customer?.email ?? null,
     vatNumber: details?.billing_vat_number ?? null,
@@ -292,11 +302,11 @@ export async function buildInvoiceView(
   supabase: SupabaseClient<Database>,
   { bookingId, quoteId, journeyHeading, primarySupplierKind }: BuildInvoiceViewOptions,
 ): Promise<InvoiceView> {
-  const [{ data: booking }, { data: travellers }, { data: billingDetails }] = await Promise.all([
+  const [{ data: booking, error: bookingError }, { data: travellers }, { data: billingDetails }] = await Promise.all([
     supabase
       .from("bookings")
       .select(
-        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, primary_supplier_id, customer:customers(phone, email), route:routes(name)",
+        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, child_ages, no_of_suites, duration_nights, trip_start_date, trip_end_date, primary_supplier_id, customer:customers(phone, email), route:routes(name)",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -313,6 +323,15 @@ export async function buildInvoiceView(
       .eq("booking_id", bookingId)
       .maybeSingle(),
   ])
+
+  if (bookingError) {
+    void logError({
+      severity: "Warning",
+      source: "invoice-pdf",
+      message: "Invoice booking details could not be loaded",
+      details: { bookingId, error: bookingError.message },
+    })
+  }
 
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
   const route = Array.isArray(booking?.route) ? booking.route[0] : booking?.route
@@ -387,11 +406,38 @@ export async function buildInvoiceView(
       })
     : null
 
+  // Infants and over-age children projected out, bucketed by the same supplier the quote PDF uses
+  // (the quote's resolved primary supplier, else the booking's) so both divide by the same people.
+  let quotePrimarySupplierId: string | null = null
+  if (lineItemRows.length > 0) {
+    try {
+      const quoteConfig = await loadQuoteConfig(supabase, {
+        lineItems: lineItemRows.map((row) => ({ pricingSnapshot: row.pricing_snapshot as PricingSnapshot | null })),
+        bookingPrimarySupplierId: booking?.primary_supplier_id ?? null,
+      })
+      quotePrimarySupplierId = quoteConfig.primarySupplierId
+    } catch (err) {
+      void logError({
+        severity: "Warning",
+        source: "invoice-pdf",
+        message: "Invoice quote primary supplier could not be resolved",
+        details: { bookingId, quoteId, error: err instanceof Error ? err.message : String(err) },
+      })
+    }
+  }
+  const pax = await resolvePayingPax(
+    supabase,
+    booking,
+    payingPaxSupplierId(quotePrimarySupplierId, booking?.primary_supplier_id),
+  )
+
   return {
     consultant: resolvedConsultant?.key ?? null,
     guestNames,
     billing: buildBillingParty(billingDetails, customer),
     departure,
     items,
+    pax,
+    pricedLines: lineItemRows,
   }
 }

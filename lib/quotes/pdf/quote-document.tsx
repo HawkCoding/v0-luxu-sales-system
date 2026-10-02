@@ -43,7 +43,10 @@ import {
   formatJourneyRange,
   formatPaxLabel,
   formatPreparedForContact,
+  formatQuoteGrandTotalLabel,
+  type QuoteSummaryItem,
 } from "@/lib/quotes/quote-presentation"
+import type { PerPersonTotals } from "@/lib/invoices/per-person-totals"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 export interface QuotePdfData {
@@ -53,18 +56,25 @@ export interface QuotePdfData {
   customerPhone?: string | null
   /** Printed under "Client details"; blank omits the row. */
   customerEmail?: string | null
-  /** The client's postal address, one printed line each; empty omits the row. */
-  customerAddressLines?: string[]
   quoteDate: string
   validUntil: string | null
   journeyStart: string | null
   journeyEnd: string | null
+  /** The booking's own counts (bookings.no_of_adults / no_of_children, infants included) — the
+   *  "Guests:" row, as the quote e-mail, invoice and voucher print them. */
   adults: number
   children: number
+  /** Adults and paying children as the supplier's age buckets price them (resolvePayingPax: infants
+   *  out, over-age children as adults) — the grand-total label and the per-person rows, so the label
+   *  counts the people the per-person figures divide by. Absent falls back to adults/children. */
+  payingPax?: { adults: number; children: number } | null
   /** The booking's main product for the "Train Journey details" box; null omits its product rows. */
   journeyDetails?: QuoteJourneyDetails | null
   /** VAT-inclusive grand total (quotes.total) — already net of agentCommission. */
   total: number
+  /** "Total per Adult" / "Total per Child" — the invoice's own figures (derivePerPersonTotals in
+   *  lib/invoices/per-person-totals.ts); a null side omits its line, absent prints neither. */
+  perPersonTotals?: PerPersonTotals | null
   /** Gross travel price before the agency discount (quotes.subtotal). Only shown when a
    *  commission or visible discount is deducted from it. */
   subtotal?: number
@@ -127,6 +137,8 @@ const LEFT_LABEL = 100.4
 const RIGHT_LABEL = 79.7
 /** Date / title column of both package tables (51.7 → 187.5). */
 const DATE_COLUMN = 135.8
+/** The pricing box starts where the includes list's bullets do (187.5). */
+const TOTALS_LEFT = SECTION_LEFT + DATE_COLUMN
 const SMALL_LINE = 10.65 / 8
 const RIGHT_LINE = 9.9 / 8
 /** The details page runs x 48.5 → 547. */
@@ -173,7 +185,6 @@ const styles = StyleSheet.create({
   // The journey column sets its rows a little tighter (9.9pt) than the client column, as drawn.
   rightLabel: { ...BOLD, fontSize: 8, lineHeight: RIGHT_LINE, width: RIGHT_LABEL },
   rightValue: { fontSize: 8, lineHeight: RIGHT_LINE, flex: 1 },
-  addressLine: { fontSize: 8, lineHeight: SMALL_LINE },
   smallValue: { fontSize: 8, lineHeight: SMALL_LINE, flex: 1 },
 
   section: {
@@ -207,7 +218,9 @@ const styles = StyleSheet.create({
 
   totals: {
     marginTop: 20.9,
-    marginLeft: 287.9,
+    // Lined up with the includes list's bullet column (was 287.9, under "Prepared for"), so the
+    // grand-total label "Total for 4 Adults & 1 Child incl. VAT" fits on one line.
+    marginLeft: TOTALS_LEFT,
     marginRight: SECTION_RIGHT,
     paddingBottom: 4.65,
     rowGap: 5.65,
@@ -219,8 +232,8 @@ const styles = StyleSheet.create({
     paddingLeft: 6.3,
     paddingRight: 4.8,
   },
-  totalsLabel: { fontSize: 10, width: 140 },
-  totalsValue: { fontSize: 10, flex: 1, textAlign: "right" },
+  totalsLabel: { fontSize: 10, flex: 1, paddingRight: 8 },
+  totalsValue: { fontSize: 10, textAlign: "right" },
 
   disclaimer: {
     fontSize: 10,
@@ -252,6 +265,21 @@ function BoxRow({ label, value, right = false }: { label: string; value: string;
   )
 }
 
+/** Text inset of the includes list, past its bullet. */
+const SUMMARY_TEXT_LEFT = 10.2
+
+/** One service of the includes list: a single bullet, its extra lines indented beneath it unbulleted. */
+function SummaryService({ item }: { item: QuoteSummaryItem }) {
+  return (
+    <>
+      <BulletRow text={item.text} bulletLeft={0} textLeft={SUMMARY_TEXT_LEFT} />
+      {item.details.map((detail, index) => (
+        <BulletRow key={index} text={detail} plain bulletLeft={0} textLeft={SUMMARY_TEXT_LEFT} />
+      ))}
+    </>
+  )
+}
+
 function TotalsRow({ label, value, bold = false }: { label: string; value: string; bold?: boolean }) {
   return (
     <View style={styles.totalsRow}>
@@ -266,15 +294,16 @@ export function QuoteDocument({
   customerName,
   customerPhone,
   customerEmail,
-  customerAddressLines,
   quoteDate,
   validUntil,
   journeyStart,
   journeyEnd,
   adults,
   children,
+  payingPax,
   journeyDetails,
   total,
+  perPersonTotals,
   subtotal,
   agentCommission = 0,
   discount = 0,
@@ -303,10 +332,10 @@ export function QuoteDocument({
   const money = (value: number) => formatMoney(value, currency)
 
   const paxLabel = formatPaxLabel({ adults, children })
+  const paying = payingPax ?? { adults, children }
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
   const [phone, email] = [customerPhone?.trim() || null, customerEmail?.trim() || null]
   const hasContact = formatPreparedForContact({ phone, email }).length > 0
-  const addressLines = (customerAddressLines ?? []).map((line) => line.trim()).filter(Boolean)
   const hasAgentCommission = agentCommission > 0
   const hasVisibleDiscount = discountVisible && discount > 0
   const hasDeduction = hasAgentCommission || hasVisibleDiscount
@@ -396,19 +425,8 @@ export function QuoteDocument({
             <Text style={styles.boxHeading}>Client details:</Text>
             {phone ? <BoxRow label="Phone:" value={phone} /> : null}
             {email ? <BoxRow label="E-mail:" value={email} /> : null}
-            {addressLines.length > 0 ? (
-              <View style={styles.row}>
-                <Text style={styles.leftLabel}>Address:</Text>
-                <View style={{ flex: 1 }}>
-                  {addressLines.map((line, index) => (
-                    <Text key={index} style={styles.addressLine}>
-                      {line}
-                    </Text>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-            {!hasContact && addressLines.length === 0 ? <BoxRow label="Phone:" value="–" /> : null}
+            {/* The client's postal address is deliberately not printed (client markup, 2026-09-29). */}
+            {!hasContact ? <BoxRow label="Phone:" value="–" /> : null}
           </View>
           <View style={styles.boxRight}>
             <Text style={styles.boxHeading}>{quoteJourneyHeading(journeyDetails?.serviceType)}</Text>
@@ -431,7 +449,7 @@ export function QuoteDocument({
                   </Text>
                   <View style={styles.dayItems}>
                     {day.items.map((item, itemIndex) => (
-                      <BulletRow key={itemIndex} text={item} bulletLeft={0} textLeft={10.2} />
+                      <SummaryService key={itemIndex} item={item} />
                     ))}
                   </View>
                 </View>
@@ -444,7 +462,7 @@ export function QuoteDocument({
             page reads as a separate document. */}
         <View style={styles.totals} wrap={false}>
           {hasDeduction ? (
-            <TotalsRow label="Sub Total incl VAT:" value={money(subtotal ?? total)} bold />
+            <TotalsRow label="Sub Total incl. VAT:" value={money(subtotal ?? total)} bold />
           ) : null}
           {hasAgentCommission ? (
             <TotalsRow
@@ -455,7 +473,14 @@ export function QuoteDocument({
           {hasVisibleDiscount ? (
             <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(discount, money)} />
           ) : null}
-          <TotalsRow label="Total incl VAT:" value={money(total)} bold />
+          <TotalsRow label={withColon(formatQuoteGrandTotalLabel(paying))} value={money(total)} bold />
+          {/* Under the total, as the invoice places them (invoice-document.tsx). */}
+          {perPersonTotals?.perAdult != null ? (
+            <TotalsRow label="Total per Adult:" value={money(perPersonTotals.perAdult)} />
+          ) : null}
+          {perPersonTotals?.perChild != null && paying.children > 0 ? (
+            <TotalsRow label="Total per Child:" value={money(perPersonTotals.perChild)} />
+          ) : null}
         </View>
 
         {hasDetails ? (

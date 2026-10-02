@@ -37,9 +37,9 @@ import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/s
 /** The invoice recipient. A full tax invoice must name and address them. */
 export interface InvoiceBillingParty {
   companyName?: string | null
-  /** Street/suburb lines, already ordered for display. Empty renders no address rows. */
+  /** Street / estate / town, province / postal code / country, already ordered for display — the
+   *  postal code is one of these lines (see buildBillingParty). Empty renders a dash. */
   addressLines?: string[]
-  postalCode?: string | null
   phone?: string | null
   email?: string | null
   vatNumber?: string | null
@@ -108,6 +108,17 @@ export interface InvoiceTotals {
   outstanding: number
   /** True when the client owes the full amount in one payment (no deposit split). */
   fullPayment?: boolean
+  /** "Total per Adult" / "Total per Child" under the total (derivePerPersonTotals). Null/absent omits
+   *  the row — no adults or no total (perAdult), no paying children (perChild). */
+  perAdult?: number | null
+  perChild?: number | null
+}
+
+/** The figure the "Total incl. VAT:" row prints: net of any printed deduction, else the subtotal. */
+export function printedTotalInclVat(totals: InvoiceTotals): number {
+  const hasDeduction =
+    Boolean(totals.agentCommission) || ((totals.discountVisible ?? true) && Boolean(totals.discount))
+  return hasDeduction ? (totals.totalInclVat ?? totals.subtotalInclVat) : totals.subtotalInclVat
 }
 
 export interface InvoicePdfData {
@@ -143,12 +154,17 @@ function formatDate(value: string | null | undefined): string {
   return formatDisplayDate(value?.slice(0, 10)) || "To be confirmed"
 }
 
-/** "16 March 2027 12h00" — the description table's date column. Blank when the line has no date. */
-export function formatInvoiceItemWhen(date: string | null | undefined, time: string | null | undefined): string {
-  const day = date ? formatDisplayDateLong(date.slice(0, 10)) : ""
-  if (!day) return ""
+/** "16 March 2027" — the description table's date column. Blank when the line has no date. */
+export function formatInvoiceItemDate(date: string | null | undefined): string {
+  return date ? formatDisplayDateLong(date.slice(0, 10)) : ""
+}
+
+/** "12h00" — the description table's time column, its own column between the date and the
+ *  description. Blank when the line has no date or no captured start time. */
+export function formatInvoiceItemTime(date: string | null | undefined, time: string | null | undefined): string {
+  if (!formatInvoiceItemDate(date)) return ""
   const [hours, minutes] = (time ?? "").split(":")
-  return hours && minutes ? `${day} ${hours}h${minutes.slice(0, 2)}` : day
+  return hours && minutes ? `${hours}h${minutes.slice(0, 2)}` : ""
 }
 
 /** Empty cells print as an en dash so a blank never reads as missing data. */
@@ -296,7 +312,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     paddingLeft: 1,
   },
-  tableWhen: { fontSize: 10, width: 152.8 },
+  // Date, time and description as three columns. The description keeps the template's x (152.8pt
+  // in); the date column fits the longest date ("30 September 2026", 91pt), and the time is
+  // centred in the gap a typical date leaves before the description.
+  tableDate: { fontSize: 10, width: 96 },
+  tableTime: { fontSize: 10, width: 44, marginRight: 12.8, textAlign: "center" },
   tableDescription: { fontSize: 10, flex: 1 },
 
   totals: {
@@ -441,20 +461,9 @@ function DepartureLegBlock({
   )
 }
 
-function SmallRow({
-  label,
-  value,
-  right = false,
-  nudge = 0,
-}: {
-  label: string
-  value: string
-  right?: boolean
-  /** Extra space above the row — keeps the right column's rows level with the left's. */
-  nudge?: number
-}) {
+function SmallRow({ label, value, right = false }: { label: string; value: string; right?: boolean }) {
   return (
-    <View style={nudge ? [styles.row, { marginTop: nudge }] : styles.row}>
+    <View style={styles.row}>
       <Text style={right ? styles.smallLabelRight : styles.smallLabel}>{withColon(label)}</Text>
       <Text style={styles.smallValue}>{value}</Text>
     </View>
@@ -588,11 +597,16 @@ export function InvoiceDocument({
                 <Text style={styles.guestLabelRight}>Guest 2:</Text>
                 <Text style={styles.guestValue}>{guest2 ?? EMPTY}</Text>
               </View>
+              {/* Guest 3, Guest 4, … one per row straight under Guest 2, set like it, so the VAT row
+                  below the last guest never reads as one guest's own. However many travellers the
+                  booking holds, the column just grows, and the box with it. */}
+              {extraGuests.map((name, index) => (
+                <View key={index} style={styles.row}>
+                  <Text style={styles.guestLabelRight}>{`Guest ${index + 3}:`}</Text>
+                  <Text style={styles.guestValue}>{name}</Text>
+                </View>
+              ))}
               <SmallRow label="VAT" value={orDash(billing?.vatNumber)} right />
-              <SmallRow label="Code" value={orDash(billing?.postalCode)} right nudge={1.4} />
-              {extraGuests.length > 0 ? (
-                <SmallRow label="Guests" value={extraGuests.join(", ")} right />
-              ) : null}
             </View>
           </View>
 
@@ -613,7 +627,8 @@ export function InvoiceDocument({
           <View style={styles.tableBody}>
             {items.map((item, index) => (
               <View key={index} style={styles.tableRow} wrap={false}>
-                <Text style={styles.tableWhen}>{formatInvoiceItemWhen(item.date, item.time)}</Text>
+                <Text style={styles.tableDate}>{formatInvoiceItemDate(item.date)}</Text>
+                <Text style={styles.tableTime}>{formatInvoiceItemTime(item.date, item.time)}</Text>
                 <Text style={styles.tableDescription}>{item.description}</Text>
               </View>
             ))}
@@ -624,7 +639,7 @@ export function InvoiceDocument({
         <View style={styles.totals} wrap={false}>
           <View style={styles.totalsGroup}>
             {hasDeduction ? (
-              <TotalsRow label="Sub Total incl VAT:" value={money(totals.subtotalInclVat)} bold />
+              <TotalsRow label="Sub Total incl. VAT:" value={money(totals.subtotalInclVat)} bold />
             ) : null}
             {hasAgentCommission ? (
               <TotalsRow
@@ -635,11 +650,13 @@ export function InvoiceDocument({
             {hasVisibleDiscount ? (
               <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(totals.discount ?? 0, money)} />
             ) : null}
-            <TotalsRow
-              label="Total incl VAT:"
-              value={money(hasDeduction ? (totals.totalInclVat ?? totals.subtotalInclVat) : totals.subtotalInclVat)}
-              bold
-            />
+            <TotalsRow label="Total incl. VAT:" value={money(printedTotalInclVat(totals))} bold />
+            {totals.perAdult != null ? (
+              <TotalsRow label={withColon("Total per Adult")} value={money(totals.perAdult)} />
+            ) : null}
+            {totals.perChild != null ? (
+              <TotalsRow label={withColon("Total per Child")} value={money(totals.perChild)} />
+            ) : null}
           </View>
           <View style={styles.paymentsGroup}>
             {hasDeposit ? (

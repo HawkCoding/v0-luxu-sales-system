@@ -719,6 +719,8 @@ describe("buildVoucherServiceBlocks", () => {
     // Two units, same suite name, de-duplicated for display; count reflects both rooms.
     expect(blocks[0].serviceData.suiteType).toBe("Deluxe Suite")
     expect(blocks[0].serviceData.numberOfSuites).toBe(2)
+    // The quote sentence's per-kind count ("in 2 Deluxe Suites").
+    expect(blocks[0].serviceData.itinerarySuiteCounts).toEqual([{ label: "Deluxe Suite", count: 2 }])
   })
 
   it("composes each train unit's bed/bathroom configuration into its suite label", async () => {
@@ -1016,6 +1018,10 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks).toHaveLength(1)
     expect(blocks[0].serviceData.roomType).toBe("Standard Room, Deluxe Room")
     expect(blocks[0].serviceData.numberOfSuites).toBe(2)
+    expect(blocks[0].serviceData.itinerarySuiteCounts).toEqual([
+      { label: "Standard Room", count: 1 },
+      { label: "Deluxe Room", count: 1 },
+    ])
   })
 
   it("scopes selections (and their leg-scoped transport requests) to legIds when given, so a leg left selected on the job but not priced into this quote is excluded", async () => {

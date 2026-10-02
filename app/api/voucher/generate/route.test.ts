@@ -97,7 +97,7 @@ interface BookingOpts {
   noOfAdults?: number
   noOfChildren?: number
   /** Guest roster rows, for the roster-vs-pax warning. */
-  travellers?: Array<{ prefix: string | null; first_name: string; last_name: string }>
+  travellers?: Array<{ prefix: string | null; first_name: string; last_name: string; room_with?: string | null }>
   /** The enquiry's "Briefly explain additional services" free text, stored on the booking. */
   additionalServicesDetails?: string | null
   /** The hand-typed voucher field — must stay independent of additionalServicesDetails. */
@@ -467,6 +467,50 @@ describe("POST /api/voucher/generate", () => {
       readinessWarnings: Array<{ code: string }>
     }
     expect(empty.readinessWarnings.some((w) => w.code === "guest_count_mismatch")).toBe(false)
+  })
+
+  it("prints guest names one line per room from the roster's Room with field", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      noOfAdults: 4,
+      travellers: [
+        { prefix: "Mrs", first_name: "Carmen", last_name: "De Jongh", room_with: "Lourens De Jongh" },
+        { prefix: "Mr", first_name: "Lourens", last_name: "De Jongh" },
+        { prefix: "Mr", first_name: "Steyn", last_name: "van Coller", room_with: "June van Coller" },
+        { prefix: "Mrs", first_name: "June", last_name: "van Coller" },
+      ],
+    })
+    vi.mocked(renderVoucherPdf).mockClear()
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    const data = vi.mocked(renderVoucherPdf).mock.calls[0]?.[0].data
+    expect(data?.guestNameLines).toEqual([
+      "Mrs Carmen De Jongh and Mr Lourens De Jongh",
+      "Mr Steyn van Coller and Mrs June van Coller",
+    ])
+    // The single-line form stays for every other consumer.
+    expect(data?.guestNames).toBe("Mrs Carmen De Jongh, Mr Lourens De Jongh, Mr Steyn van Coller, Mrs June van Coller")
+  })
+
+  it("leaves guest names on one line when no Room with was recorded", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      noOfAdults: 2,
+      travellers: [
+        { prefix: "Ms", first_name: "Jacomien", last_name: "Lombard" },
+        { prefix: "Mr", first_name: "Pieter", last_name: "Lombard" },
+      ],
+    })
+    vi.mocked(renderVoucherPdf).mockClear()
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(vi.mocked(renderVoucherPdf).mock.calls[0]?.[0].data.guestNameLines).toBeNull()
   })
 
   it("keeps an already-sent voucher document sent when it is regenerated", async () => {

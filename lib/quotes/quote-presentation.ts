@@ -86,6 +86,18 @@ export function formatTotalLabel(pax: QuotePax): string {
 }
 
 /**
+ * The quote PDF's grand-total label: "Total for 4 Adults & 1 Child incl. VAT" | "Total for 2 Adults
+ * incl. VAT" | "Total incl. VAT" when pax is unknown. Distinct from formatTotalLabel (the email's
+ * upper-case "TOTAL for 2 Adults + 1 Child"), which the client never asked to change.
+ */
+export function formatQuoteGrandTotalLabel({ adults, children }: QuotePax): string {
+  const parts: string[] = []
+  if (adults > 0) parts.push(`${adults} ${adults === 1 ? "Adult" : "Adults"}`)
+  if (children > 0) parts.push(`${children} ${children === 1 ? "Child" : "Children"}`)
+  return parts.length > 0 ? `Total for ${parts.join(" & ")} incl. VAT` : "Total incl. VAT"
+}
+
+/**
  * Suffix asserting a client-facing amount already includes VAT. Single source
  * so the quote PDF, the quote email block, the invoice PDF and the template
  * editor's token preview can never drift apart.
@@ -356,6 +368,87 @@ function flightTimesPhrase(start: string | null, end: string | null): string | n
   return null
 }
 
+/** The accommodation nouns a suite/room type ends in — formatSuitePhrase's own (lib/templates/
+ *  suite-description.ts) plus the unit kinds suppliers type themselves ("Luxury Tent", "Garden
+ *  Villa"). Never the "suite" of an en-suite / En Suite bathroom. Every one pluralises with "s".
+ *  "Berth" only counts as the type's last word: "8 Berth Cabin" is a Cabin. */
+const SUITE_NOUN_PATTERN =
+  /(?<!\ben[-\s]?)\b(Suite|Room|Cabin|Tent|Villa|Chalet|Cottage|Apartment|Bungalow|Lodge|Unit|Compartment|Berth)(s?)\b/gi
+
+/** Where a label's suite/room type ends and its configuration begins: "Twin Room| with en-suite
+ *  bathroom", "Deluxe Suite|, Lengthways", "Classic Room| - Garden view". */
+const CONFIGURATION_START = /\s+with\s|,|\s-\s/i
+
+/** "Deluxe Suite" → "Deluxe Suites", "Twin bedded Deluxe Suite with a shower" → "Twin bedded Deluxe
+ *  Suites with a shower" — the type's own noun (the last one before any configuration) takes the
+ *  plural. Null when the type carries none to pluralise. */
+function pluralSuiteLabel(label: string): string | null {
+  const configurationAt = label.search(CONFIGURATION_START)
+  const type = configurationAt >= 0 ? label.slice(0, configurationAt) : label
+  const matches = Array.from(type.matchAll(SUITE_NOUN_PATTERN)).filter(
+    (match) =>
+      match[1].toLowerCase() !== "berth" ||
+      type.slice((match.index ?? 0) + match[0].length).trim() === "",
+  )
+  const last = matches[matches.length - 1]
+  if (!last || last.index === undefined) return null
+  if (last[2]) return label
+  const end = last.index + last[1].length
+  return `${label.slice(0, end)}s${label.slice(end)}`
+}
+
+/** True when a number is said starting with a vowel sound: 8, 11, 18, 80–89, 800–899, 1100–1199
+ *  ("eleven hundred"), 1800–1899, 8 000–8 999, … — read off its leading spoken group. */
+function numberTakesAn(value: number): boolean {
+  if ((value >= 1100 && value <= 1199) || (value >= 1800 && value <= 1899)) return true
+  let lead = value
+  while (lead >= 1000) lead = Math.floor(lead / 1000)
+  if (lead >= 100) lead = Math.floor(lead / 100)
+  return lead === 8 || lead === 11 || lead === 18 || (lead >= 80 && lead <= 89)
+}
+
+/** "an" before a vowel sound: "an Executive Room", "an 8 Berth Cabin", but "a One-bedroom Suite",
+ *  "a Unique Suite", "a 2 Berth Compartment". */
+function indefiniteArticle(label: string): "a" | "an" {
+  const leadingNumber = /^\d+/.exec(label)
+  if (leadingNumber) return numberTakesAn(Number(leadingNumber[0])) ? "an" : "a"
+  if (!/^[aeiou]/i.test(label)) return "a"
+  return /^(one\b|one-|once\b|uni|use|usu|uti|ura|ure|uro|eu|ewe|u-)/i.test(label) ? "a" : "an"
+}
+
+/** "a Classic Room" | "2 Classic Rooms" | "3 × Presidential" when the label has no noun to pluralise. */
+function countedSuiteLabel(label: string, count: number): string {
+  if (count <= 1) return `${indefiniteArticle(label)} ${label}`
+  const plural = pluralSuiteLabel(label)
+  return plural ? `${count} ${plural}` : `${count} × ${label}`
+}
+
+/** "a" | "a and b" | "a, b and c". */
+function joinNaturally(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? ""
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`
+}
+
+/**
+ * The suites/rooms a train or hotel leg books, as its itinerary sentence names them: "a Classic
+ * Room", "2 Deluxe Suites", "a Deluxe Suite and 2 Royal Suites". Read off the leg's per-unit counts
+ * (itinerarySuiteCounts); a block built before those existed falls back to its single label and
+ * numberOfSuites, counted only when the label names one kind of unit. Null when nothing is named.
+ */
+function suitePhrase(
+  label: string | null | undefined,
+  counts: VoucherServiceBlock["serviceData"]["itinerarySuiteCounts"],
+  numberOfSuites: number | null | undefined,
+): string | null {
+  const named = (counts ?? []).filter((entry) => entry.label.trim() && entry.count > 0)
+  if (named.length > 0) return joinNaturally(named.map((entry) => countedSuiteLabel(entry.label.trim(), entry.count)))
+  const trimmed = label?.trim()
+  if (!trimmed) return null
+  // A joined "Deluxe Suite, Royal Suite" can't say how many of each there are.
+  const count = numberOfSuites && numberOfSuites > 1 && !trimmed.includes(",") ? numberOfSuites : 1
+  return countedSuiteLabel(trimmed, count)
+}
+
 /** "Cape Town Station" → "the Cape Town Station" — skipped when the text already carries an
  * article, so supplier-entered strings like "the hotel" never double up. */
 function withLeadingThe(value: string): string {
@@ -407,10 +500,11 @@ function describeBlockSentence(block: VoucherServiceBlock): Sentence {
     case "hotel": {
       const stay = d.nights && d.nights > 0 ? formatNights(d.nights) : "Stay"
       const at = [supplier, location].filter(Boolean).join(", ")
+      const rooms = suitePhrase(d.roomType, d.itinerarySuiteCounts, d.numberOfSuites)
       return sentence(
         [
           `${stay} at ${at ? withLeadingThe(at) : "the hotel"}`,
-          d.roomType ? `in a ${d.roomType}` : null,
+          rooms ? `in ${rooms}` : null,
           d.mealPlan ? `incl. ${d.mealPlan}` : null,
         ],
         [
@@ -429,7 +523,7 @@ function describeBlockSentence(block: VoucherServiceBlock): Sentence {
       // itinerarySuiteType is the supplier's chosen quote wording (type name alone, by default);
       // suiteType (the full configuration) is the fallback for blocks built before that field
       // existed. The voucher/invoice keep reading suiteType directly, unaffected by this.
-      const suiteLabel = d.itinerarySuiteType ?? d.suiteType
+      const suites = suitePhrase(d.itinerarySuiteType ?? d.suiteType, d.itinerarySuiteCounts, d.numberOfSuites)
       // withLeadingThe already skips a supplier name that types its own article ("The Blue
       // Train") -- reused here rather than a bare template literal, which produced "the The Blue
       // Train" on every quote (F-P3-8).
@@ -441,7 +535,7 @@ function describeBlockSentence(block: VoucherServiceBlock): Sentence {
       return sentence(
         [
           `${onBoard} ${supplier ? withLeadingThe(supplier) : "the train"}`,
-          suiteLabel ? `in a ${suiteLabel}` : null,
+          suites ? `in ${suites}` : null,
           "on an all-inclusive basis",
           d.route ? `— ${toProseRoute(d.route)}` : null,
         ],
@@ -652,48 +746,63 @@ export function collectQuoteExclusions(
   return exclusions
 }
 
-/** One date of the quote PDF's "Travel Package Includes" list: each entry prints as its own bullet. */
+/**
+ * One service on a date of the quote PDF's "Travel Package Includes" list: its sentence prints as
+ * one bullet, and each of its `details` ("Check in from 14h00", the flight fare cap) as an unbulleted
+ * line indented beneath it — one bullet per service, never per line.
+ */
+export interface QuoteSummaryItem {
+  text: string
+  details: string[]
+}
+
+/** One date of the quote PDF's "Travel Package Includes" list. */
 export interface QuoteSummaryDay {
   dateISO: string | null
-  items: string[]
+  items: QuoteSummaryItem[]
 }
 
 /**
- * The quote PDF's first-page summary: what happens on each date, as short bullets, with the
+ * The quote PDF's first-page summary: what happens on each date, one bullet per service, with the
  * supplier inclusions and hotel descriptions left for the separate "Travel Package Details" page
  * (see lib/quotes/pdf/quote-details.ts). Same sentences and ordering as buildQuoteItineraryLines —
  * the email keeps that one untouched — but a stay's or journey's trailing fact ("Check in from
- * 14h00", "Check in at 10h00 - Train departs at 12h00") becomes its own bullet, and a train's
- * arrival caveat joins its arrival line, as the approved template sets them.
+ * 14h00", "Check in at 10h00 - Train departs at 12h00") sits on its own line under the service, a
+ * flight's or tour's time runs on in its sentence without the " | " break, and a train's arrival caveat joins
+ * its arrival line, as the approved template sets them.
  */
 export function buildQuoteSummaryDays(
   blocks: VoucherServiceBlock[],
   flightCapBullet?: string | null,
 ): QuoteSummaryDay[] {
-  const lines: Array<{ dateISO: string | null; items: string[] }> = []
+  const lines: Array<{ dateISO: string | null; items: QuoteSummaryItem[] }> = []
   let flightCapAttached = false
 
   blocks.forEach((block) => {
     const d = block.serviceData
     const described = describeBlockSentence(block)
     const splitsTail = block.serviceType === "hotel" || block.serviceType === "train"
-    const items = splitsTail ? [described.main, ...described.tail] : [renderSentence(described)]
+    // Every other service runs its trailing fact on in the sentence ("… in Economy departing at
+    // 10h00", "… Sundowner Cruise at 17h00") — the PDF never prints the email's " | " break.
+    const item: QuoteSummaryItem = splitsTail
+      ? { text: described.main, details: [...described.tail] }
+      : { text: renderSentence({ ...described, separator: " " }), details: [] }
 
     if (block.serviceType === "train") {
       const times = trainScheduleTimes(d.startTime, d.checkInOffsetMinutes)
-      if (times) items.push(`Check in at ${times.checkIn} - Train departs at ${times.departure}`)
+      if (times) item.details.push(`Check in at ${times.checkIn} - Train departs at ${times.departure}`)
     }
     if (flightCapBullet && !flightCapAttached && block.serviceType === "airline") {
-      items.push(flightCapBullet)
+      item.details.push(flightCapBullet)
       flightCapAttached = true
     }
-    lines.push({ dateISO: d.departureDate ?? null, items })
+    lines.push({ dateISO: d.departureDate ?? null, items: [item] })
 
     const endLine = describeEndLine(block)
     if (endLine) {
       const [headline, ...notes] = endLine.text.split(" | ")
       const warnings = endLine.bullets.filter((bullet) => bullet.kind === "warning").map((bullet) => bullet.text)
-      lines.push({ dateISO: endLine.dateISO, items: [[headline, ...warnings].join(" - "), ...notes] })
+      lines.push({ dateISO: endLine.dateISO, items: [{ text: [headline, ...warnings].join(" - "), details: notes }] })
     }
   })
 
@@ -712,7 +821,7 @@ export function buildQuoteSummaryDays(
   const seen = new Set<string>()
   for (const line of sorted) {
     // Same backstop as buildQuoteItineraryLines: two stays ending the same day never print twice.
-    const key = `${line.dateISO ?? ""} ${line.items.join("")}`
+    const key = `${line.dateISO ?? ""} ${line.items.map((item) => [item.text, ...item.details].join("")).join("")}`
     if (seen.has(key)) continue
     seen.add(key)
     const last = days[days.length - 1]

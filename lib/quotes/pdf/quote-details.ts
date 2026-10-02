@@ -5,7 +5,7 @@ import { displayRouteName } from "@/lib/routes/route-name"
 /** One line of the "Travel Package Details" page (see nestBulletLines for the levels). */
 export type QuoteDetailBullet = NestedBulletLine
 
-/** One supplier's row on the details page: its name (and tour/route) left, its bullets right. */
+/** One supplier's row on the details page: its name (and tour type) left, its bullets right. */
 export interface QuoteDetailSection {
   title: string[]
   bullets: QuoteDetailBullet[]
@@ -33,12 +33,11 @@ function sectionFor(block: VoucherServiceBlock): QuoteDetailSection | null {
       const bullets = description.length > 0 ? description : inclusions
       return supplier && bullets.length > 0 ? { title: [supplier], bullets } : null
     }
-    case "train": {
-      const route = displayRouteName(d.route)
-      return supplier && inclusions.length > 0
-        ? { title: [supplier, ...(route ? [route] : [])], bullets: inclusions }
-        : null
-    }
+    case "train":
+      // "Rovos Rail Includes:" — the route already heads the first page's journey box, so the
+      // details page names the operator alone (client markup, 2026-09-29), unless the operator has
+      // two different lists to tell apart (see buildQuoteDetailSections).
+      return supplier && inclusions.length > 0 ? { title: [`${supplier} Includes:`], bullets: inclusions } : null
     case "tour": {
       const tourType = d.suiteType?.trim() || null
       const bullets = [...paragraphBullets(d.itineraryDescription), ...inclusions]
@@ -60,7 +59,7 @@ function sectionFor(block: VoucherServiceBlock): QuoteDetailSection | null {
  * route) prints once.
  */
 export function buildQuoteDetailSections(blocks: VoucherServiceBlock[]): QuoteDetailSection[] {
-  const sections: QuoteDetailSection[] = []
+  const sections: Array<{ section: QuoteDetailSection; trainRoute: string | null }> = []
   const seen = new Set<string>()
   for (const block of blocks) {
     const section = sectionFor(block)
@@ -68,7 +67,19 @@ export function buildQuoteDetailSections(blocks: VoucherServiceBlock[]): QuoteDe
     const key = `${section.title.join("|")}#${section.bullets.map((bullet) => bullet.text).join("|")}`
     if (seen.has(key)) continue
     seen.add(key)
-    sections.push(section)
+    sections.push({ section, trainRoute: block.serviceType === "train" ? displayRouteName(block.serviceData.route) : null })
   }
-  return sections
+
+  // One operator with two different inclusion lists (e.g. a short and a long journey) would print
+  // two identical "Rovos Rail Includes:" headings; only then does each name its route beneath.
+  const headingCounts = new Map<string, number>()
+  for (const { section } of sections) {
+    const heading = section.title[0]
+    headingCounts.set(heading, (headingCounts.get(heading) ?? 0) + 1)
+  }
+  return sections.map(({ section, trainRoute }) =>
+    trainRoute && (headingCounts.get(section.title[0]) ?? 0) > 1
+      ? { ...section, title: [...section.title, trainRoute] }
+      : section,
+  )
 }

@@ -50,10 +50,10 @@ describe("buildQuoteDetailSections", () => {
     expect(section.bullets).toEqual([{ text: "24-hour front desk", level: 1, bold: false }])
   })
 
-  it("heads a train with its route and nests items under each subheading", () => {
+  it("heads a train with its name and \"Includes:\" — never its route — and nests items under each subheading", () => {
     const [section] = buildQuoteDetailSections([train])
 
-    expect(section.title).toEqual(["Rovos Rail", "Golf Safari"])
+    expect(section.title).toEqual(["Rovos Rail Includes:"])
     expect(section.bullets).toEqual([
       { text: "Welcome drink", level: 1, bold: false },
       { text: "Onboard:", level: 1, bold: true },
@@ -66,6 +66,28 @@ describe("buildQuoteDetailSections", () => {
   it("skips a service with nothing to describe and prints a repeated one once", () => {
     const sections = buildQuoteDetailSections([transfer, hotel, train, { ...hotel, displayOrder: 5 }])
 
-    expect(sections.map((section) => section.title[0])).toEqual(["Ivory Manor Boutique Hotel", "Rovos Rail"])
+    expect(sections.map((section) => section.title[0])).toEqual(["Ivory Manor Boutique Hotel", "Rovos Rail Includes:"])
+  })
+
+  it("prints an outbound and a return train on different routes once when their inclusions match", () => {
+    const sections = buildQuoteDetailSections([train, { ...train, displayOrder: 6, serviceData: { ...train.serviceData, route: "Pretoria → Cape Town" } }])
+
+    expect(sections).toHaveLength(1)
+    expect(sections[0].title).toEqual(["Rovos Rail Includes:"])
+  })
+
+  it("names the route under the heading only when one operator has two different inclusion lists", () => {
+    const longJourney = {
+      ...train,
+      displayOrder: 6,
+      serviceData: { route: "Pretoria → Dar es Salaam", inclusions: ["Guided excursions"] },
+    }
+    const sections = buildQuoteDetailSections([train, longJourney, hotel])
+
+    expect(sections.map((section) => section.title)).toEqual([
+      ["Rovos Rail Includes:", "Golf Safari"],
+      ["Rovos Rail Includes:", "Pretoria → Dar es Salaam"],
+      ["Ivory Manor Boutique Hotel"],
+    ])
   })
 })

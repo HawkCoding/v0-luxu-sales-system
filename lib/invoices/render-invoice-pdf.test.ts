@@ -121,18 +121,50 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(text).toContain("LB")
   })
 
-  it("renders every billing address line alongside the phone and e-mail rows", async () => {
+  it("renders a densely filled real invoice — full address, six guests, journey, per-person rows — on one page", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "LTT-2026-0001-INV",
       bookingNumber: "LTT-2026-0001",
       customerName: "Rachel O'Brien",
-      guestNames: ["Mrs Rachel O'Brien"],
+      guestNames: [
+        "Mrs Rachel O'Brien",
+        "Mr Sean O'Brien",
+        "Mr Steyn van Coller",
+        "Mrs June van Coller",
+        "Miss Anna van Coller",
+        "Master Jan van Coller",
+      ],
       issueDate: "2026-07-12",
       dueDate: "2026-07-19",
-      departure: null,
-      items,
-      totals: depositTotals,
+      departure: { ...departure, adults: "4", children: "2" },
+      // A real booking's six dated lines: flight, transfer, hotel, transfer, train, transfer.
+      items: [
+        { ...items[0], description: "FlySafair — Cape Town INT Airport → OR Tambo INT Airport", date: "2026-07-18", time: "09:40" },
+        { ...items[0], description: "Transfer JHB - APT PHTL", date: "2026-07-18", time: "11:50" },
+        { ...items[0], description: "Irene Country Hotel — Breakfast", date: "2026-07-18", time: "14:00" },
+        { ...items[0], description: "Transfer PTY - STA PHTL", date: "2026-07-20", time: "11:00" },
+        { ...items[0], description: "Blue Train — Pretoria → Cape Town", date: "2026-07-20", time: "13:00" },
+        { ...items[0], description: "Transfer CPT STA - V&A Waterfront", date: "2026-07-22", time: "18:30" },
+      ],
+      // The client's own invoice shape (deposit due, nothing received yet) with both per-person rows.
+      // A page-one invoice has ~10pt to spare here; a Sub Total + Discount pair and a dated "Amount
+      // received, thank you …" line on top of all this push the Terms block onto page two.
+      totals: {
+        subtotalInclVat: 62_600,
+        depositPercentage: 25,
+        depositAmount: 15_650,
+        finalAmount: 46_950,
+        finalDueDate: "2026-07-19",
+        amountReceived: 0,
+        amountReceivedAt: null,
+        outstanding: 62_600,
+        perAdult: 12_520,
+        perChild: 6_260,
+      },
       banking,
+      bankChargesNote: "Amounts transferred should exclude all bank charges.",
+      paymentNote:
+        "Email proof of payment directly to your consultant. Reservations can only be confirmed once payment has been received.",
       billing: {
         companyName: "JPS",
         // Deliberately long first line so it soft-wraps inside the value column.
@@ -140,9 +172,9 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
           "7 Fulmar Close, Sandgebaan Estate, Western Cape Province",
           "Sandgebaan",
           "Cape Town, WC",
+          "7535",
           "South Africa",
         ],
-        postalCode: "7535",
         phone: "+353871234567",
         email: "rachel.obrien@eircom.ie",
         vatNumber: "112223456",
@@ -159,8 +191,14 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(text).toContain("rachel.obrien@eircom.ie")
     expect(text).toContain("112223456")
     expect(text).toContain("7535")
+    // The postal code sits in the address block — no separate "Code:" row any more.
+    expect(text).not.toContain("Code:")
+    expect(text).toContain("Guest 6:")
+    expect(text).toContain("Total per Adult:")
+    expect(text).toContain("Total per Child:")
     // The taller header (brand block + meta strip stacked, vs. the old side-by-side
-    // layout) must not push this densely-filled invoice onto a second page.
+    // layout), the guest rows, the time column and the per-person rows must not push this
+    // densely-filled invoice onto a second page.
     expect((await extractPdfPageTexts(buffer)).length).toBe(1)
   })
 
@@ -236,7 +274,9 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
     const text = await extractPdfText(buffer)
     expect(text).toContain("Agent Commission")
-    expect(text).toContain("Total incl VAT:")
+    expect(text).toContain("Sub Total incl. VAT:")
+    expect(text).toContain("Total incl. VAT:")
+    expect(text).not.toContain("incl VAT")
   })
 
   it("renders a visible Discount row independently of Agent Commission", async () => {
@@ -267,7 +307,7 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
     const text = await extractPdfText(buffer)
     expect(text).toContain("Discount")
-    expect(text).toContain("Total incl VAT:")
+    expect(text).toContain("Total incl. VAT:")
   })
 
   it("hides the Discount row when discountVisible is false", async () => {
@@ -324,5 +364,106 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     })
 
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+  })
+
+  it("prints every guest past the second as its own Guest N row, one name per row", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "39023",
+      bookingNumber: "LTT-26-0001",
+      customerName: "Carmen De Jongh",
+      guestNames: [
+        "Mrs Carmen De Jongh",
+        "Mr Lourens De Jongh",
+        "Mr Steyn van Coller",
+        "Mrs June van Coller",
+        "Miss Anna van Coller",
+        "Master Jan van Coller",
+      ],
+      issueDate: "2026-09-29",
+      dueDate: null,
+      departure,
+      items,
+      totals: depositTotals,
+      banking,
+    })
+
+    const text = await extractPdfText(buffer)
+    expect(text).toContain("Guest 3:")
+    expect(text).toContain("Guest 6:")
+    expect(text).toContain("Master Jan van Coller")
+    expect(text).not.toContain("Guests:")
+    // Each name on its own line, never comma-joined.
+    expect(text).not.toContain("Mr Steyn van Coller, Mrs June van Coller")
+    expect((await extractPdfPageTexts(buffer)).length).toBe(1)
+  })
+
+  it("prints Total per Adult and Total per Child under the total only when given", async () => {
+    const withPerPerson = await renderInvoicePdf({
+      invoiceNumber: "39023",
+      bookingNumber: "LTT-26-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-09-29",
+      dueDate: null,
+      departure: null,
+      items,
+      totals: { ...depositTotals, perAdult: 25000, perChild: 4450 },
+      banking,
+    })
+    const text = await extractPdfText(withPerPerson)
+    expect(text).toContain("Total per Adult")
+    expect(text).toContain("Total per Child")
+
+    const without = await renderInvoicePdf({
+      invoiceNumber: "39023",
+      bookingNumber: "LTT-26-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-09-29",
+      dueDate: null,
+      departure: null,
+      items,
+      totals: { ...depositTotals, perAdult: null },
+      banking,
+    })
+    expect(await extractPdfText(without)).not.toContain("Total per")
+  })
+
+  it("prints the item's time in its own column, apart from the date", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "39023",
+      bookingNumber: "LTT-26-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-09-29",
+      dueDate: null,
+      departure: null,
+      items: [{ ...items[0], date: "2026-10-24", time: "09:40" }],
+      totals: depositTotals,
+      banking,
+    })
+    const text = await extractPdfText(buffer)
+    expect(text).toContain("24 October 2026")
+    expect(text).toContain("09h40")
+  })
+
+  it("prints the Terms bullets in the client's wording", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "39023",
+      bookingNumber: "LTT-26-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-09-29",
+      dueDate: null,
+      departure: null,
+      items,
+      totals: depositTotals,
+      banking,
+      bankChargesNote: "Amounts transferred should exclude all bank charges.",
+      paymentNote:
+        "Email proof of payment directly to your consultant. Reservations can only be confirmed once payment has been received.",
+    })
+    const text = (await extractPdfText(buffer)).replace(/\s+/g, " ")
+    expect(text).toContain("Amounts transferred should exclude all bank charges.")
+    expect(text).toContain("Please use reference 39023 when making payment.")
+    expect(text).toContain("Email proof of payment directly to your consultant.")
+    expect(text).toContain("Reservations can only be confirmed once payment has been received.")
+    expect(text).not.toContain("Please note that the")
   })
 })

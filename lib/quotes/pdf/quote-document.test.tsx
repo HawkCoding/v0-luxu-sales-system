@@ -83,7 +83,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     expect(first).toContain("Client details:")
     expect(first).toContain("+27 82 555 0100")
     expect(first).toContain("sample.guest@example.com")
-    expect(first).toContain("14 Kensington Road, London, SW7 2AB")
+    expect(first).not.toContain("Address:")
     expect(first).toContain("Train Journey details:")
     expect(first).toContain("Travel dates:")
     expect(first).toContain("The Blue Train")
@@ -112,13 +112,26 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(text).not.toContain("Gluten Free Meals Mrs Adams")
     })
 
-    it("sets each day's short facts as bullets on the first page", async () => {
+    it("sets each day's short facts on the first page", async () => {
       const [first] = await pages({ itineraryBlocks })
 
       expect(first).toContain("Check in from 14h00")
       expect(first).toContain("Check in at 10h00 - Train departs at 12h00")
       expect(first).toContain("Arrival at Pretoria station at 10h00 - Train arrival times cannot be guaranteed")
       expect(first).not.toContain("Departure time:")
+    })
+
+    it("runs a flight's times on in its sentence, without a ' | '", async () => {
+      const [first] = await pages()
+
+      expect(first).toContain("in Economy departing at 10h00 for arrival at 12h15")
+      expect(first).not.toContain("Economy |")
+    })
+
+    it("heads a train's details with its name and \"Includes:\", not its route", async () => {
+      const [, second] = await pages({ itineraryBlocks })
+
+      expect(second).toContain("Rovos Rail Includes:")
     })
 
     it("starts the package details on a new page, with the hotel description in place of its facilities", async () => {
@@ -147,10 +160,12 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     it("shows the subtotal and both deductions above the net total", async () => {
       const [first] = await pages()
 
-      expect(first).toContain("Sub Total incl VAT:")
+      expect(first).toContain("Sub Total incl. VAT:")
       expect(first).toContain("Agent Commission:")
       expect(first).toContain("Discount:")
-      expect(first).toContain("Total incl VAT:")
+      expect(first).toContain("Total for 2 Adults incl. VAT:")
+      // One spelling across the whole box.
+      expect(first).not.toContain("incl VAT")
     })
 
     it("renders only the total when there is no commission or discount", async () => {
@@ -159,7 +174,46 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(text).not.toContain("Sub Total")
       expect(text).not.toContain("Agent Commission")
       expect(text).not.toContain("Discount")
-      expect(text).toContain("Total incl VAT:")
+      expect(text).toContain("Total for 2 Adults incl. VAT")
+      expect(text).not.toContain("Total incl VAT:")
+    })
+
+    it("names the party in the total label, and prints the per-adult and per-child rows when given", async () => {
+      const [first] = await pages({
+        adults: 4,
+        children: 1,
+        perPersonTotals: { perAdult: 60_000, perChild: 25_000 },
+      })
+
+      expect(first).toContain("Total for 4 Adults & 1 Child incl. VAT:")
+      expect(first).toMatch(/Total per Adult: R\s?60[\s ]?000,00/)
+      expect(first).toMatch(/Total per Child: R\s?25[\s ]?000,00/)
+    })
+
+    it("keeps the booking's own counts in the Guests row while the total label counts the paying pax", async () => {
+      // 2 adults + a 1-year-old: the Guests row still names the infant; the label and rows don't.
+      const [first] = await pages({
+        adults: 2,
+        children: 1,
+        payingPax: { adults: 2, children: 0 },
+        perPersonTotals: { perAdult: 42_500, perChild: null },
+      })
+
+      expect(first).toContain("2 Adults + 1 Child")
+      expect(first).toContain("Total for 2 Adults incl. VAT:")
+      expect(first).not.toContain("Total per Child")
+    })
+
+    it("prints no per-person rows when none can be stated, and no child row on an adults-only booking", async () => {
+      const without = (await pages({ perPersonTotals: null })).join(" ")
+      expect(without).not.toContain("Total per")
+
+      // The Settings preview sample carries its own adults-only figure.
+      expect((await pages()).join(" ")).toMatch(/Total per Adult: R\s?42[\s ]?500,00/)
+
+      const adultsOnly = (await pages({ perPersonTotals: { perAdult: 42_500, perChild: null } })).join(" ")
+      expect(adultsOnly).toContain("Total per Adult")
+      expect(adultsOnly).not.toContain("Total per Child")
     })
 
     it("hides the Discount row when discountVisible is false", async () => {

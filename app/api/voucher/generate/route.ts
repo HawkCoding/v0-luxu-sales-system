@@ -13,6 +13,7 @@ import {
 import { projectPassengerTotals, resolveSupplierAgeBuckets } from "@/lib/packages/passenger-totals"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness, type ReadinessWarning } from "@/lib/voucher/check-readiness"
+import { guestNameLinesByRoom } from "@/lib/voucher/guest-rooms"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -170,7 +171,7 @@ export async function POST(req: Request) {
       .order("suite_number"),
     supabase
       .from("travellers")
-      .select("prefix, first_name, last_name, is_child, sort_order")
+      .select("prefix, first_name, last_name, is_child, sort_order, room_with")
       .eq("booking_id", parsed.data.jobId)
       .order("sort_order"),
     supabase
@@ -336,6 +337,7 @@ export async function POST(req: Request) {
   const voucherData: VoucherData = {
     voucherNumber: voucherReference,
     guestNames: buildGuestNames(customer, allTravellers),
+    guestNameLines: guestNameLinesByRoom(allTravellers),
     consultantName: consultant?.name ?? "",
     supplierName: supplier,
     supplierDescription,
