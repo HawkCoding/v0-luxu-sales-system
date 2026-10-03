@@ -177,6 +177,28 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
         ]
       })
     const familyTotal = familyLines.reduce((sum, row) => sum + row.total, 0)
+    // The family's train, as buildVoucherServiceBlocks builds it for three units — two Double
+    // Deluxe Suites and a Twin Royal Suite — so the Suite Type row prints one counted line per type
+    // beside QTY 3. Matches the Deluxe ×2 + Royal ×1 of the family quote below.
+    const familyTrain = {
+      ...blocks[2],
+      serviceData: {
+        ...blocks[2].serviceData,
+        suiteType:
+          "Double bedded Deluxe Suite with a shower, Lengthways, Twin bedded Royal Suite with a shower and bath, Lengthways",
+        itinerarySuiteType: "Deluxe Suite, Royal Suite",
+        itinerarySuiteCounts: [
+          { label: "Deluxe Suite", count: 2 },
+          { label: "Royal Suite", count: 1 },
+        ],
+        invoiceSuiteCounts: [
+          { label: "Double Deluxe Suite", count: 2 },
+          { label: "Twin Royal Suite", count: 1 },
+        ],
+        numberOfSuites: 3,
+        guestBreakdown: { adults: 4, children: 2, infants: 0 },
+      },
+    }
     const familyInvoice = await renderInvoicePdf({
       invoiceNumber: SAMPLE_INVOICE_NUMBER,
       bookingNumber: SAMPLE_BOOKING_NUMBER,
@@ -190,7 +212,7 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
         phone: SAMPLE_CUSTOMER.phone,
         email: SAMPLE_CUSTOMER.email,
       },
-      departure: buildDeparture([blocks[2]], invoiceJourneyHeading(DESIGN_SETTINGS.journeyHeading, "train_operator"), {
+      departure: buildDeparture([familyTrain], invoiceJourneyHeading(DESIGN_SETTINGS.journeyHeading, "train_operator"), {
         tourName: "Golf Safari",
         durationNights: 9,
         durationUnit: null,

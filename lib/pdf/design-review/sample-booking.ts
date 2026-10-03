@@ -161,6 +161,9 @@ export function sampleServiceBlocks(): VoucherServiceBlock[] {
         checkInOffsetMinutes: 120,
         suiteType: "Double bedded Deluxe Suite with a shower, Lengthways",
         itinerarySuiteType: "Deluxe Suite",
+        // What buildVoucherServiceBlocks sets for this unit (Double bed, Deluxe Suite): the invoice's
+        // short wording. The voucher and quote never read it, so their output is unchanged.
+        invoiceSuiteCounts: [{ label: "Double Deluxe Suite", count: 1 }],
         numberOfSuites: 1,
         guestBreakdown: { adults: 2, children: 0, infants: 0 },
         requestsLine: "Nonsmoking",

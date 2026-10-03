@@ -137,6 +137,8 @@ const LEFT_LABEL = 100.4
 const RIGHT_LABEL = 79.7
 /** Date / title column of both package tables (51.7 → 187.5). */
 const DATE_COLUMN = 135.8
+/** Minimum gap a details title keeps before the bullet column; a longer title wraps instead. */
+const DETAIL_TITLE_GAP = 10
 /** The pricing box starts where the includes list's bullets do (187.5). */
 const TOTALS_LEFT = SECTION_LEFT + DATE_COLUMN
 const SMALL_LINE = 10.65 / 8
@@ -214,7 +216,9 @@ const styles = StyleSheet.create({
   },
   dayItems: { flex: 1 },
   detailTitle: { width: DATE_COLUMN },
-  detailTitleLine: { fontSize: 10, width: 95 },
+  // Titles wrap at 125.8pt (was the designer's 95), so "Ivory Manor Boutique Hotel" (124.1pt at
+  // 10pt Manrope) and "Your Package Excludes:" (107.8pt) each set on one line (client markup).
+  detailTitleLine: { fontSize: 10, width: DATE_COLUMN - DETAIL_TITLE_GAP },
 
   totals: {
     marginTop: 20.9,
@@ -461,6 +465,13 @@ export function QuoteDocument({
         {/* Pricing closes section one. Never split across a page: a total stranded on its own
             page reads as a separate document. */}
         <View style={styles.totals} wrap={false}>
+          {/* The per-person rows head the block, above Sub Total or the grand total (client markup). */}
+          {perPersonTotals?.perAdult != null ? (
+            <TotalsRow label="Total per Adult:" value={money(perPersonTotals.perAdult)} />
+          ) : null}
+          {perPersonTotals?.perChild != null && paying.children > 0 ? (
+            <TotalsRow label="Total per Child:" value={money(perPersonTotals.perChild)} />
+          ) : null}
           {hasDeduction ? (
             <TotalsRow label="Sub Total incl. VAT:" value={money(subtotal ?? total)} bold />
           ) : null}
@@ -474,13 +485,6 @@ export function QuoteDocument({
             <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(discount, money)} />
           ) : null}
           <TotalsRow label={withColon(formatQuoteGrandTotalLabel(paying))} value={money(total)} bold />
-          {/* Under the total, as the invoice places them (invoice-document.tsx). */}
-          {perPersonTotals?.perAdult != null ? (
-            <TotalsRow label="Total per Adult:" value={money(perPersonTotals.perAdult)} />
-          ) : null}
-          {perPersonTotals?.perChild != null && paying.children > 0 ? (
-            <TotalsRow label="Total per Child:" value={money(perPersonTotals.perChild)} />
-          ) : null}
         </View>
 
         {hasDetails ? (

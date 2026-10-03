@@ -108,8 +108,9 @@ export interface InvoiceTotals {
   outstanding: number
   /** True when the client owes the full amount in one payment (no deposit split). */
   fullPayment?: boolean
-  /** "Total per Adult" / "Total per Child" under the total (derivePerPersonTotals). Null/absent omits
-   *  the row — no adults or no total (perAdult), no paying children (perChild). */
+  /** "Total per Adult" / "Total per Child" at the top of the totals, above the (Sub) Total rows
+   *  (derivePerPersonTotals). Null/absent omits the row — no adults or no total (perAdult), no
+   *  paying children (perChild). */
   perAdult?: number | null
   perChild?: number | null
 }
@@ -174,16 +175,53 @@ function orDash(value: string | null | undefined): string {
   return value?.trim() || EMPTY
 }
 
+interface GuestCell {
+  label: string
+  name: string
+}
+
+/** The guests as box rows, two to a row: Guest 1 | Guest 2, Guest 3 | Guest 4, … Guest 1 falls back
+ *  to the customer and Guest 2 always prints (a dash when missing); an odd last guest gets an empty
+ *  right cell. */
+function guestRows(guestNames: string[] | undefined, customerName: string): Array<[GuestCell, GuestCell | null]> {
+  const guests = (guestNames ?? []).map((name) => name.trim()).filter(Boolean)
+  const names = [guests[0] ?? customerName ?? "Valued Guest", guests[1] ?? EMPTY, ...guests.slice(2)]
+  const rows: Array<[GuestCell, GuestCell | null]> = []
+  for (let index = 0; index < names.length; index += 2) {
+    const right = names[index + 1]
+    rows.push([
+      { label: `Guest ${index + 1}:`, name: names[index] },
+      right === undefined ? null : { label: `Guest ${index + 2}:`, name: right },
+    ])
+  }
+  return rows
+}
+
+/** How the billing rows share the box's two columns under the guest grid. */
+type BillingLayout = "standard" | "address-alone" | "contacts-right"
+
+/**
+ * - "standard" (1–2 guests): Company, Address, Phone, E-mail | VAT — the original block.
+ * Each guest row past the first adds height, so from 3 guests the block rebalances to stay on one page:
+ * - "address-alone" (a 3+ line address): Address | Company, VAT, Phone, E-mail.
+ * - "contacts-right" (a 0–2 line address, or none): Company, Address | VAT, Phone, E-mail.
+ */
+function billingLayout(guestRowCount: number, addressLineCount: number): BillingLayout {
+  if (guestRowCount <= 1) return "standard"
+  return addressLineCount >= 3 ? "address-alone" : "contacts-right"
+}
+
 /**
  * "25% Deposit due now" reads as a fresh demand once the deposit has actually
- * been paid — swap to a receipted label instead. A cent of rounding slack
- * covers float drift between the stored deposit amount and payments received.
+ * been paid — drop the "due now" and print just "25% Deposit" instead. A cent
+ * of rounding slack covers float drift between the stored deposit amount and
+ * payments received.
  */
 function depositRowLabel(totals: InvoiceTotals): string {
   const pctPrefix = totals.depositPercentage ? `${totals.depositPercentage}% Deposit` : "Deposit"
   const depositAmount = totals.depositAmount ?? 0
   const isPaid = depositAmount > 0 && totals.amountReceived >= depositAmount - 0.01
-  return isPaid ? `${pctPrefix} — received` : `${pctPrefix} due now`
+  return isPaid ? pctPrefix : `${pctPrefix} due now`
 }
 
 function finalRowLabel(totals: InvoiceTotals): string {
@@ -508,11 +546,11 @@ export function InvoiceDocument({
   const showBrand = brandPosition !== "hidden"
 
   const bankingRows = BANKING_ROWS.filter(({ key }) => banking[key])
-  const guests = (guestNames ?? []).map((name) => name.trim()).filter(Boolean)
-  const guest1 = guests[0] ?? customerName ?? "Valued Guest"
-  const guest2 = guests[1] ?? null
-  const extraGuests = guests.slice(2)
+  const guests = guestRows(guestNames, customerName)
   const addressLines = billing?.addressLines?.filter((line) => line.trim()) ?? []
+  const layout = billingLayout(guests.length, addressLines.length)
+  const companyLeft = layout !== "address-alone"
+  const contactsLeft = layout === "standard"
 
   const money = (value: number) => formatMoney(value, currency)
   const hasAgentCommission = Boolean(totals.agentCommission)
@@ -570,14 +608,31 @@ export function InvoiceDocument({
         </View>
 
         <View style={styles.box}>
+          {/* Guests two to a row across the box's columns — Guest 1 | Guest 2, Guest 3 | Guest 4, … —
+              each pair its own row, so a name that wraps carries its partner down with it and the
+              billing rows below always start level. However many travellers the booking holds, the
+              rows just grow, and the box with them. */}
+          {guests.map(([left, right], index) => (
+            <View key={index} style={styles.row}>
+              <View style={[styles.row, styles.boxLeftColumn]}>
+                <Text style={styles.guestLabel}>{left.label}</Text>
+                <Text style={styles.guestValue}>{left.name}</Text>
+              </View>
+              <View style={[styles.row, styles.boxRightColumn]}>
+                {right ? (
+                  <>
+                    <Text style={styles.guestLabelRight}>{right.label}</Text>
+                    <Text style={styles.guestValue}>{right.name}</Text>
+                  </>
+                ) : null}
+              </View>
+            </View>
+          ))}
           <View style={styles.boxColumns}>
             <View style={styles.boxLeftColumn}>
-              <View style={styles.row}>
-                <Text style={styles.guestLabel}>Guest 1:</Text>
-                <Text style={styles.guestValue}>{guest1}</Text>
-              </View>
-              <SmallRow label="Company" value={orDash(billing?.companyName)} />
-              <View style={[styles.row, { marginTop: 1.4 }]}>
+              {companyLeft ? <SmallRow label="Company" value={orDash(billing?.companyName)} /> : null}
+              {/* No gap past one guest row, so each Address line sits on a right-hand row's baseline. */}
+              <View style={[styles.row, { marginTop: layout === "standard" ? 1.4 : 0 }]}>
                 <Text style={styles.smallLabel}>Address:</Text>
                 {/* Column of lines with no flex on the children, so the stack grows to every line
                     instead of sharing one line's height and painting over the Phone row. */}
@@ -589,24 +644,22 @@ export function InvoiceDocument({
                   ))}
                 </View>
               </View>
-              <SmallRow label="Phone" value={orDash(billing?.phone)} />
-              <SmallRow label="E-mail" value={orDash(billing?.email)} />
+              {contactsLeft ? (
+                <>
+                  <SmallRow label="Phone" value={orDash(billing?.phone)} />
+                  <SmallRow label="E-mail" value={orDash(billing?.email)} />
+                </>
+              ) : null}
             </View>
             <View style={styles.boxRightColumn}>
-              <View style={styles.row}>
-                <Text style={styles.guestLabelRight}>Guest 2:</Text>
-                <Text style={styles.guestValue}>{guest2 ?? EMPTY}</Text>
-              </View>
-              {/* Guest 3, Guest 4, … one per row straight under Guest 2, set like it, so the VAT row
-                  below the last guest never reads as one guest's own. However many travellers the
-                  booking holds, the column just grows, and the box with it. */}
-              {extraGuests.map((name, index) => (
-                <View key={index} style={styles.row}>
-                  <Text style={styles.guestLabelRight}>{`Guest ${index + 3}:`}</Text>
-                  <Text style={styles.guestValue}>{name}</Text>
-                </View>
-              ))}
+              {companyLeft ? null : <SmallRow label="Company" value={orDash(billing?.companyName)} right />}
               <SmallRow label="VAT" value={orDash(billing?.vatNumber)} right />
+              {contactsLeft ? null : (
+                <>
+                  <SmallRow label="Phone" value={orDash(billing?.phone)} right />
+                  <SmallRow label="E-mail" value={orDash(billing?.email)} right />
+                </>
+              )}
             </View>
           </View>
 
@@ -638,6 +691,13 @@ export function InvoiceDocument({
         {/* VAT-inclusive amounts only — the sales team's invoices never break out VAT. */}
         <View style={styles.totals} wrap={false}>
           <View style={styles.totalsGroup}>
+            {/* The per-person rows head the ladder, above the Sub Total / Total incl. VAT rows. */}
+            {totals.perAdult != null ? (
+              <TotalsRow label={withColon("Total per Adult")} value={money(totals.perAdult)} />
+            ) : null}
+            {totals.perChild != null ? (
+              <TotalsRow label={withColon("Total per Child")} value={money(totals.perChild)} />
+            ) : null}
             {hasDeduction ? (
               <TotalsRow label="Sub Total incl. VAT:" value={money(totals.subtotalInclVat)} bold />
             ) : null}
@@ -651,24 +711,15 @@ export function InvoiceDocument({
               <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(totals.discount ?? 0, money)} />
             ) : null}
             <TotalsRow label="Total incl. VAT:" value={money(printedTotalInclVat(totals))} bold />
-            {totals.perAdult != null ? (
-              <TotalsRow label={withColon("Total per Adult")} value={money(totals.perAdult)} />
-            ) : null}
-            {totals.perChild != null ? (
-              <TotalsRow label={withColon("Total per Child")} value={money(totals.perChild)} />
-            ) : null}
           </View>
           <View style={styles.paymentsGroup}>
             {hasDeposit ? (
               <TotalsRow label={depositRowLabel(totals)} value={money(totals.depositAmount ?? 0)} />
             ) : null}
             <TotalsRow label={finalRowLabel(totals)} value={money(totals.finalAmount)} />
+            {/* No payment date — a received payment just reads "thank you". */}
             <TotalsRow
-              label={
-                totals.amountReceivedAt
-                  ? `Amount received, thank you ${formatDate(totals.amountReceivedAt)}`
-                  : "Amount received"
-              }
+              label={totals.amountReceivedAt ? "Amount received, thank you" : "Amount received"}
               value={money(totals.amountReceived)}
             />
           </View>

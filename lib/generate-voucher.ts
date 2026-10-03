@@ -69,6 +69,12 @@ export interface VoucherServiceBlockData {
    *  Rooms". Absent on blocks built before this field existed, in which case callers fall back to
    *  `numberOfSuites`. */
   itinerarySuiteCounts?: Array<{ label: string; count: number }> | null
+  /** Train-only: the invoice's short suite wording, bed type + suite type and nothing more
+   *  ("Double Deluxe Suite", "Twin Royal Suite"), with how many units carry each, in unit order --
+   *  so the invoice's Suite Type row fits one line per type beside "QTY:" where the full phrase
+   *  (`suiteType`, still what the voucher prints) wrapped. Absent on blocks built before this field
+   *  existed, in which case the invoice falls back to `suiteType`. */
+  invoiceSuiteCounts?: Array<{ label: string; count: number }> | null
   numberOfSuites?: number | null
   roomType?: string | null
   nights?: number | null
