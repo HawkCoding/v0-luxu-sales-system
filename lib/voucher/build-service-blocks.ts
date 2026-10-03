@@ -405,24 +405,41 @@ function composeUnitSuiteLabel(
  * see lib/quotes/quote-presentation.ts). Computed in the same pass so a supplier's setting can be
  * read without a second query. `phrasePattern` (suppliers.suite_phrase_pattern) is applied only to
  * the full-configuration branch, never to typeOnlyNames — the quote sentence keeps the default
- * grammar's plain type name regardless of a supplier's custom wording. */
+ * grammar's plain type name regardless of a supplier's custom wording.
+ *
+ * `compactNameCounts` is the invoice's shorter wording ("Double Deluxe Suite", see
+ * composeCompactSuiteLabel), counted the same way. Like typeOnlyNames it ignores the supplier's
+ * phrase pattern and quote_suite_detail. */
 function resolveLegSuiteNames(
   row: SelectionJoinRow,
   includeConfig: boolean,
   nounKind: SupplierKind | null,
   phrasePattern: string | null,
-): { names: string[]; typeOnlyNames: string[]; unitCount: number } {
+): {
+  names: string[]
+  typeOnlyNames: string[]
+  unitCount: number
+  /** `names` / `typeOnlyNames` with how many units carry each, in first-seen order. */
+  nameCounts: SuiteLabelCount[]
+  typeOnlyNameCounts: SuiteLabelCount[]
+  compactNameCounts: SuiteLabelCount[]
+} {
   const unitRows = [...(row.units ?? [])].sort((a, b) => a.sort_order - b.sort_order)
   const unitLabels: string[] = []
   const typeOnlyLabels: string[] = []
+  const compactLabels: string[] = []
   for (const unit of unitRows) {
     const suiteTypeName = firstRecord(unit.suite_types)?.name
+    const bedroomType = firstRecord(unit.bedroom_types)?.name
     const typeOnlyLabel = composeUnitSuiteLabel({ suiteTypeName, supplierKind: nounKind })
-    if (typeOnlyLabel) typeOnlyLabels.push(typeOnlyLabel)
+    if (typeOnlyLabel) {
+      typeOnlyLabels.push(typeOnlyLabel)
+      compactLabels.push(composeCompactSuiteLabel(typeOnlyLabel, bedroomType))
+    }
     const fullLabel = includeConfig
       ? composeUnitSuiteLabel({
           suiteTypeName,
-          bedroomType: firstRecord(unit.bedroom_types)?.name,
+          bedroomType,
           bedroomLayout: firstRecord(unit.bedroom_layouts)?.name,
           bathroomType: firstRecord(unit.bathroom_types)?.name,
           supplierKind: nounKind,
@@ -436,17 +453,46 @@ function resolveLegSuiteNames(
       names: Array.from(new Set(unitLabels)),
       typeOnlyNames: Array.from(new Set(typeOnlyLabels)),
       unitCount: unitRows.length,
+      nameCounts: countSuiteLabels(unitLabels),
+      typeOnlyNameCounts: countSuiteLabels(typeOnlyLabels),
+      compactNameCounts: countSuiteLabels(compactLabels),
     }
   }
   const legacyName = composeUnitSuiteLabel({
     suiteTypeName: firstRecord(row.suite_types)?.name,
     supplierKind: nounKind,
   })
+  const legacyCounts = legacyName ? [{ label: legacyName, count: 1 }] : []
   return {
     names: legacyName ? [legacyName] : [],
     typeOnlyNames: legacyName ? [legacyName] : [],
     unitCount: legacyName ? 1 : 0,
+    nameCounts: legacyCounts,
+    typeOnlyNameCounts: legacyCounts,
+    // A legacy leg-level row carries no bed type to lead with, so the type name stands alone.
+    compactNameCounts: legacyCounts,
   }
+}
+
+/** "Double" + "Deluxe Suite" → "Double Deluxe Suite" — the invoice's one-line suite label: the
+ * unit's bed type ahead of its type-only name, with none of the full phrase's "bedded", bathroom
+ * or layout wording (client request: the full phrase wrapped onto two lines beside "QTY:"). No bed
+ * type leaves the type-only name alone, and a type name that already names the bed ("Twin Deluxe
+ * Suite") isn't given it a second time. */
+function composeCompactSuiteLabel(typeOnlyLabel: string, bedroomType: string | null | undefined): string {
+  const bed = bedroomType?.trim()
+  if (!bed) return typeOnlyLabel
+  const escaped = bed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i").test(typeOnlyLabel) ? typeOnlyLabel : `${bed} ${typeOnlyLabel}`
+}
+
+type SuiteLabelCount = { label: string; count: number }
+
+/** ["Deluxe Suite", "Royal Suite", "Deluxe Suite"] → Deluxe Suite × 2, Royal Suite × 1. */
+function countSuiteLabels(labels: string[]): SuiteLabelCount[] {
+  const counts = new Map<string, number>()
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1)
+  return Array.from(counts, ([label, count]) => ({ label, count }))
 }
 
 /** Adults/children/infants captured across a leg's suite/room units — null when the leg has no
@@ -935,7 +981,7 @@ export async function buildVoucherServiceBlocks(
       supplier?.kind && SUITE_NOUN_KINDS.has(supplier.kind as SupplierKind)
         ? (supplier.kind as SupplierKind)
         : null
-    const { names: suiteNames, typeOnlyNames, unitCount } = resolveLegSuiteNames(
+    const { names: suiteNames, typeOnlyNames, unitCount, nameCounts, typeOnlyNameCounts, compactNameCounts } = resolveLegSuiteNames(
       row,
       serviceType === "train",
       nounKind,
@@ -952,6 +998,16 @@ export async function buildVoucherServiceBlocks(
         ? suiteName
         : suiteTypeOnlyName
       : null
+    // The same wording, unit by unit, so the quote sentence can count them ("in 2 Deluxe Suites").
+    // A hotel's room names never carry configuration (includeConfig is train-only), so its two
+    // lists are identical.
+    const itinerarySuiteCounts = isTrain
+      ? supplier?.quote_suite_detail === "full"
+        ? nameCounts
+        : typeOnlyNameCounts
+      : isHotel
+        ? nameCounts
+        : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,
       arrivalStation,
@@ -960,6 +1016,9 @@ export async function buildVoucherServiceBlocks(
       mealPlan: isHotel ? route?.name ?? null : null,
       suiteType: suiteName,
       itinerarySuiteType,
+      itinerarySuiteCounts: itinerarySuiteCounts && itinerarySuiteCounts.length > 0 ? itinerarySuiteCounts : null,
+      // Train only: a hotel's "Room Type" row already prints the room name alone.
+      invoiceSuiteCounts: isTrain && compactNameCounts.length > 0 ? compactNameCounts : null,
       numberOfSuites: unitCount > 0 ? unitCount : null,
       roomType: isHotel ? suiteName : null,
       isComplimentary: isHotel ? context.complimentaryLegIds?.has(row.package_leg_id) ?? false : null,

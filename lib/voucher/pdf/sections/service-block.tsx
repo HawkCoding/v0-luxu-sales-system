@@ -18,6 +18,10 @@ interface ServiceBlockProps {
    * includes was already sold on the quote and the itinerary; the voucher only needs what was
    * booked and where to be. */
   showInclusions?: boolean
+  /** Run the Suite Type / Room Type name across two columns so it prints on one line, with "QTY"
+   * moved over to line up with "Infants". The voucher turns this on; the itinerary keeps the
+   * narrower one-column name. */
+  wideSuiteName?: boolean
 }
 
 /** Kinds whose inclusions print — the same two the single-line "Included" row covered. */
@@ -26,6 +30,8 @@ const INCLUSION_KINDS = new Set<VoucherServiceBlock["serviceType"]>(["train", "h
 interface BlockContent {
   title: string
   rows: VoucherRow[]
+  /** Whether cells honour their `span` (see ServiceBlockProps.wideSuiteName). */
+  wideSuiteName: boolean
   inclusions: NestedBulletLine[]
   name: string
   contactLine: string | null
@@ -33,12 +39,18 @@ interface BlockContent {
   footnote: string | null
 }
 
-function blockContent(block: VoucherServiceBlock, showDescription: boolean, showInclusions: boolean): BlockContent {
+function blockContent(
+  block: VoucherServiceBlock,
+  showDescription: boolean,
+  showInclusions: boolean,
+  wideSuiteName: boolean,
+): BlockContent {
   const description = showDescription ? block.contactDetails.description?.trim() || null : null
   return {
     title: block.title || voucherServiceTypeLabel(block.serviceType),
     // Inclusions print as a bullet list below the rows rather than as one run-on "Included" value.
     rows: voucherRowsForBlock(block, { showInclusions: false }),
+    wideSuiteName,
     inclusions:
       showInclusions && INCLUSION_KINDS.has(block.serviceType)
         ? nestBulletLines(parseBulletLines(block.serviceData.inclusions))
@@ -57,7 +69,7 @@ const KEEP_WHOLE_LIMIT = PAGE_BODY_HEIGHT - 40
 
 /** Characters per line at each text size, over each column's width — rounded down so a line
  * count is never short. */
-const CHARS = { rowValue: 86, cellValue: 27, contact: 150, paragraph: 110, bullet: 80, footnote: 110 }
+const CHARS = { rowValue: 86, cellValue: 27, wideCellValue: 58, contact: 150, paragraph: 110, bullet: 80, footnote: 110 }
 
 /** Printed lines of a value: each typed line break starts a new line, and each segment wraps. */
 function lines(text: string | number | null | undefined, perLine: number): number {
@@ -76,9 +88,10 @@ export function estimatedBlockHeight(content: BlockContent): number {
   if (content.contactLine) height += 3.5 + 8.2 * lines(content.contactLine, CHARS.contact)
   for (const paragraph of content.paragraphs) height += 8 + 10.7 * lines(paragraph, CHARS.paragraph)
   height += 8.7 // gap above the rows
+  const nameChars = content.wideSuiteName ? CHARS.wideCellValue : CHARS.cellValue
   for (const row of content.rows) {
     const rowLines = row.cells
-      ? Math.max(...row.cells.map((cell) => lines(cell.value, cell.label === row.label ? CHARS.cellValue : CHARS.rowValue)))
+      ? Math.max(...row.cells.map((cell) => lines(cell.value, cell.label === row.label ? nameChars : CHARS.rowValue)))
       : lines(row.value, CHARS.rowValue)
     height += 11.1 * rowLines
   }
@@ -94,10 +107,13 @@ export function estimatedBlockHeight(content: BlockContent): number {
  */
 export function serviceBlockFitsOnOnePage(
   block: VoucherServiceBlock,
-  { showDescription = true, showInclusions = true }: Omit<ServiceBlockProps, "block" | "styles"> = {},
+  { showDescription = true, showInclusions = true, wideSuiteName = false }: Omit<ServiceBlockProps, "block" | "styles"> = {},
   followedBy = 0,
 ): boolean {
-  return estimatedBlockHeight(blockContent(block, showDescription, showInclusions)) + followedBy <= KEEP_WHOLE_LIMIT
+  return (
+    estimatedBlockHeight(blockContent(block, showDescription, showInclusions, wideSuiteName)) + followedBy <=
+    KEEP_WHOLE_LIMIT
+  )
 }
 
 /**
@@ -105,8 +121,14 @@ export function serviceBlockFitsOnOnePage(
  * its rows. The template's rule is that a block always stays together — it moves whole to the next
  * page rather than splitting — so the box only breaks when it is taller than a page on its own.
  */
-export function ServiceBlock({ block, styles, showDescription = true, showInclusions = true }: ServiceBlockProps) {
-  const content = blockContent(block, showDescription, showInclusions)
+export function ServiceBlock({
+  block,
+  styles,
+  showDescription = true,
+  showInclusions = true,
+  wideSuiteName = false,
+}: ServiceBlockProps) {
+  const content = blockContent(block, showDescription, showInclusions, wideSuiteName)
   const { title, rows, inclusions, name, contactLine, paragraphs, footnote } = content
   const keepWhole = estimatedBlockHeight(content) <= KEEP_WHOLE_LIMIT
 
@@ -125,7 +147,13 @@ export function ServiceBlock({ block, styles, showDescription = true, showInclus
       <View style={styles.rows}>
         {rows.map((row, idx) =>
           row.cells ? (
-            <CellRow key={`${block.serviceType}-${idx}`} label={row.label} cells={row.cells} styles={styles} />
+            <CellRow
+              key={`${block.serviceType}-${idx}`}
+              label={row.label}
+              cells={row.cells}
+              styles={styles}
+              honourSpans={wideSuiteName}
+            />
           ) : (
             <InfoRow key={`${block.serviceType}-${idx}`} label={row.label} value={row.value ?? ""} styles={styles} />
           ),

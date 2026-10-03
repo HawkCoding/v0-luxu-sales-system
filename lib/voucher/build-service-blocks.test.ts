@@ -719,6 +719,8 @@ describe("buildVoucherServiceBlocks", () => {
     // Two units, same suite name, de-duplicated for display; count reflects both rooms.
     expect(blocks[0].serviceData.suiteType).toBe("Deluxe Suite")
     expect(blocks[0].serviceData.numberOfSuites).toBe(2)
+    // The quote sentence's per-kind count ("in 2 Deluxe Suites").
+    expect(blocks[0].serviceData.itinerarySuiteCounts).toEqual([{ label: "Deluxe Suite", count: 2 }])
   })
 
   it("composes each train unit's bed/bathroom configuration into its suite label", async () => {
@@ -1016,6 +1018,10 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks).toHaveLength(1)
     expect(blocks[0].serviceData.roomType).toBe("Standard Room, Deluxe Room")
     expect(blocks[0].serviceData.numberOfSuites).toBe(2)
+    expect(blocks[0].serviceData.itinerarySuiteCounts).toEqual([
+      { label: "Standard Room", count: 1 },
+      { label: "Deluxe Room", count: 1 },
+    ])
   })
 
   it("scopes selections (and their leg-scoped transport requests) to legIds when given, so a leg left selected on the job but not priced into this quote is excluded", async () => {
@@ -2021,5 +2027,138 @@ describe("buildVoucherServiceBlocks", () => {
     )
 
     expect(blocks[0].supplierContactName).toBe("Pierre")
+  })
+})
+
+describe("buildVoucherServiceBlocks — invoice suite wording", () => {
+  function unit(sortOrder: number, suiteType: string, bedroomType: string | null) {
+    return {
+      suite_type_id: `suite-${sortOrder}`,
+      sort_order: sortOrder,
+      suite_types: { name: suiteType },
+      bedroom_types: bedroomType ? { name: bedroomType } : null,
+      bedroom_layouts: { name: "Lengthways" },
+      bathroom_types: { name: "Shower" },
+    }
+  }
+
+  function trainLeg(units: unknown[] | undefined, partial: Record<string, unknown> = {}) {
+    return {
+      id: "leg-train",
+      selected: true,
+      supplier_id: "supplier-train",
+      route_id: "route-train",
+      suite_type_id: null,
+      service_date: "2026-09-01",
+      nights: null,
+      notes: null,
+      sort_order: 0,
+      label: "Rovos Rail",
+      suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
+      routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+      suite_types: null,
+      units,
+      ...partial,
+    }
+  }
+
+  async function build(selection: unknown) {
+    const { blocks } = await buildVoucherServiceBlocks(buildSupabase({ selections: [selection] }), {
+      bookingId: BOOKING_ID,
+    })
+    return blocks[0].serviceData
+  }
+
+  it("names a single suite type by bed + class only, while the voucher keeps the full phrase", async () => {
+    const data = await build(trainLeg([unit(0, "Deluxe Suite", "Double"), unit(1, "Deluxe Suite", "Double")]))
+
+    expect(data.invoiceSuiteCounts).toEqual([{ label: "Double Deluxe Suite", count: 2 }])
+    expect(data.suiteType).toBe("Double bedded Deluxe Suite with a shower, Lengthways")
+    expect(data.itinerarySuiteCounts).toEqual([{ label: "Deluxe Suite", count: 2 }])
+    expect(data.numberOfSuites).toBe(2)
+  })
+
+  it("counts mixed suite types separately, in unit order", async () => {
+    const data = await build(
+      trainLeg([unit(0, "Deluxe Suite", "Double"), unit(1, "Royal Suite", "Twin"), unit(2, "Deluxe Suite", "Double")]),
+    )
+
+    expect(data.invoiceSuiteCounts).toEqual([
+      { label: "Double Deluxe Suite", count: 2 },
+      { label: "Twin Royal Suite", count: 1 },
+    ])
+    expect(data.numberOfSuites).toBe(3)
+  })
+
+  it("splits the same class by bed type", async () => {
+    const data = await build(trainLeg([unit(0, "Pullman Suite", "Double"), unit(1, "Pullman Suite", "Twin")]))
+
+    expect(data.invoiceSuiteCounts).toEqual([
+      { label: "Double Pullman Suite", count: 1 },
+      { label: "Twin Pullman Suite", count: 1 },
+    ])
+  })
+
+  it("appends the Suite noun to an un-nouned class name, as the type-only label does", async () => {
+    const data = await build(trainLeg([unit(0, "Luxury", "Twin")], { suppliers: supplier({ kind: "train_operator", name: "Blue Train" }) }))
+
+    expect(data.invoiceSuiteCounts).toEqual([{ label: "Twin Luxury Suite", count: 1 }])
+  })
+
+  it("leaves the class alone when the unit has no bed type", async () => {
+    const data = await build(trainLeg([unit(0, "Royal Suite", null)]))
+
+    expect(data.invoiceSuiteCounts).toEqual([{ label: "Royal Suite", count: 1 }])
+  })
+
+  it("does not repeat a bed word the class name already carries", async () => {
+    const data = await build(trainLeg([unit(0, "Twin Deluxe", "Twin"), unit(1, "Deluxe Double Suite", "double")]))
+
+    expect(data.invoiceSuiteCounts).toEqual([
+      { label: "Twin Deluxe Suite", count: 1 },
+      { label: "Deluxe Double Suite", count: 1 },
+    ])
+  })
+
+  it("ignores the supplier's phrase pattern and quote suite detail", async () => {
+    const data = await build(
+      trainLeg([unit(0, "Deluxe Suite", "Double")], {
+        suppliers: supplier({
+          kind: "train_operator",
+          name: "Rovos Rail",
+          suite_phrase_pattern: "[{bedroom}] [{layout}] {type}",
+          quote_suite_detail: "full",
+        }),
+      }),
+    )
+
+    expect(data.suiteType).toBe("Double Lengthways Deluxe Suite")
+    expect(data.invoiceSuiteCounts).toEqual([{ label: "Double Deluxe Suite", count: 1 }])
+  })
+
+  it("falls back to the legacy leg-level suite name when the leg has no unit rows", async () => {
+    const data = await build(trainLeg(undefined, { suite_type_id: "suite-royal", suite_types: { name: "Royal Suite" } }))
+
+    expect(data.invoiceSuiteCounts).toEqual([{ label: "Royal Suite", count: 1 }])
+    expect(data.numberOfSuites).toBe(1)
+  })
+
+  it("is null for a leg with no suite at all", async () => {
+    const data = await build(trainLeg(undefined))
+
+    expect(data.invoiceSuiteCounts).toBeNull()
+  })
+
+  it("is null on a hotel block — its Room Type row is unchanged", async () => {
+    const data = await build(
+      trainLeg([unit(0, "Deluxe Room", "Twin")], {
+        suppliers: supplier({ kind: "hotel_property", name: "Irene Country Lodge" }),
+        routes: { name: "Full Board", duration_days: null },
+        nights: 2,
+      }),
+    )
+
+    expect(data.roomType).toBe("Deluxe Room")
+    expect(data.invoiceSuiteCounts).toBeNull()
   })
 })

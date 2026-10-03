@@ -16,6 +16,7 @@ import {
   formatJourneyRange,
   formatPaxLabel,
   formatPreparedForContact,
+  formatQuoteGrandTotalLabel,
   formatTimeOfDay,
   formatTotalLabel,
   TRAVEL_DATES_LABEL,
@@ -994,47 +995,228 @@ describe("buildQuoteItineraryLines — Rovos-style journey/rate tagged inclusion
 })
 
 describe("buildQuoteSummaryDays", () => {
-  it("groups each date's short facts, splitting a stay's check-in time into its own bullet", () => {
+  it("gives each service one entry per date, its trailing facts as lines under it", () => {
     const days = buildQuoteSummaryDays([hotelBlock, trainBlock])
 
     expect(days).toEqual([
       {
         dateISO: "2026-07-18",
         items: [
-          "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast",
-          "Check in from 14h00",
+          {
+            text: "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast",
+            details: ["Check in from 14h00"],
+          },
         ],
       },
       {
         dateISO: "2026-07-20",
         items: [
-          "Check out at 10h00",
-          "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town",
-          "Departs at 12h00",
+          { text: "Check out at 10h00", details: [] },
+          {
+            text: "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town",
+            details: ["Departs at 12h00"],
+          },
         ],
       },
       {
         dateISO: "2026-07-22",
-        items: ["Arrival at Cape Town station at 18h00 - Train arrival times cannot be guaranteed"],
+        items: [{ text: "Arrival at Cape Town station at 18h00 - Train arrival times cannot be guaranteed", details: [] }],
       },
     ])
   })
 
-  it("states a train's check-in and departure as one bullet, and leaves its inclusions to the details page", () => {
+  it("states a train's check-in and departure as one line under the journey, and leaves its inclusions to the details page", () => {
     const [day] = buildQuoteSummaryDays([{ ...trainBlock, serviceData: { ...trainBlock.serviceData, checkInOffsetMinutes: 120 } }])
 
     expect(day.items).toEqual([
-      "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town",
-      "Check in at 10h00 - Train departs at 12h00",
+      {
+        text: "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town",
+        details: ["Check in at 10h00 - Train departs at 12h00"],
+      },
     ])
   })
 
-  it("keeps a flight's times in its sentence and adds the fare cap under the first flight", () => {
+  it("runs a flight's times on in its sentence without a ' | ', with the fare cap under the first flight", () => {
     const [day] = buildQuoteSummaryDays([flightBlock], "Flights are capped at R2 000pp — incl. baggage & fees")
 
     expect(day.items).toEqual([
-      "Flight with SA Airways SA123 — Johannesburg to Cape Town in Economy | departing at 08h00",
-      "Flights are capped at R2 000pp — incl. baggage & fees",
+      {
+        text: "Flight with SA Airways SA123 — Johannesburg to Cape Town in Economy departing at 08h00",
+        details: ["Flights are capped at R2 000pp — incl. baggage & fees"],
+      },
     ])
+  })
+
+  it("runs a tour's start time on in its sentence without a ' | ' (the email keeps its break)", () => {
+    const tour: VoucherServiceBlock = {
+      serviceType: "tour",
+      title: "Wild Horizons - Tours",
+      contactDetails: { name: "Wild Horizons - Tours", location: "Victoria Falls" },
+      serviceData: { departureDate: "2026-09-14", startTime: "17:00", suiteType: "Sundowner Cruise - Zimbabwe" },
+      displayOrder: 1,
+    }
+    const [day] = buildQuoteSummaryDays([tour])
+
+    expect(day.items).toEqual([
+      { text: "Wild Horizons - Tours in Victoria Falls — Sundowner Cruise - Zimbabwe at 17h00", details: [] },
+    ])
+    expect(buildQuoteItineraryLines([tour])[0].text).toContain("Zimbabwe | at 17h00")
+  })
+
+  it("keeps a hotel check-out's luggage note under its own check-out entry", () => {
+    const [, checkOutDay] = buildQuoteSummaryDays([
+      { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, hasLuggageStorage: true } },
+    ])
+
+    expect(checkOutDay.items).toEqual([
+      { text: "Check out at 10h00", details: ["Guests can store their luggage at reception."] },
+    ])
+  })
+
+  it("counts the rooms and suites a leg books", () => {
+    const days = buildQuoteSummaryDays([
+      { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, roomType: "Classic Room", itinerarySuiteCounts: [{ label: "Classic Room", count: 2 }] } },
+      { ...trainBlock, serviceData: { ...trainBlock.serviceData, itinerarySuiteCounts: [{ label: "Deluxe Suite", count: 2 }] } },
+    ])
+
+    expect(days[0].items[0].text).toBe("Two nights at the Irene Country Lodge, Pretoria in 2 Classic Rooms incl. breakfast")
+    expect(days[1].items[1].text).toBe(
+      "Two nights on the Blue Train in 2 Deluxe Suites on an all-inclusive basis — Pretoria to Cape Town",
+    )
+  })
+})
+
+describe("room and suite counts in the itinerary sentence", () => {
+  const sentenceOf = (block: VoucherServiceBlock) => buildQuoteItineraryLines([block])[0].text
+
+  it("keeps 'a' for a single room or suite", () => {
+    expect(
+      sentenceOf({ ...hotelBlock, serviceData: { ...hotelBlock.serviceData, roomType: "Classic Room", itinerarySuiteCounts: [{ label: "Classic Room", count: 1 }] } }),
+    ).toContain("in a Classic Room incl.")
+    expect(sentenceOf({ ...trainBlock, serviceData: { ...trainBlock.serviceData, numberOfSuites: 1 } })).toContain("in a Deluxe Suite on")
+  })
+
+  it("names each kind of suite with its own count", () => {
+    expect(
+      sentenceOf({
+        ...trainBlock,
+        serviceData: {
+          ...trainBlock.serviceData,
+          itinerarySuiteCounts: [
+            { label: "Deluxe Suite", count: 2 },
+            { label: "Royal Suite", count: 1 },
+          ],
+        },
+      }),
+    ).toContain("in 2 Deluxe Suites and a Royal Suite on")
+  })
+
+  it("pluralises the noun inside a full configuration phrase", () => {
+    expect(
+      sentenceOf({
+        ...trainBlock,
+        serviceData: {
+          ...trainBlock.serviceData,
+          itinerarySuiteCounts: [{ label: "Twin bedded Deluxe Suite with a shower", count: 3 }],
+        },
+      }),
+    ).toContain("in 3 Twin bedded Deluxe Suites with a shower on")
+  })
+
+  it("pluralises the room type's noun, never an en-suite bathroom's", () => {
+    expect(
+      sentenceOf({
+        ...hotelBlock,
+        serviceData: { ...hotelBlock.serviceData, itinerarySuiteCounts: [{ label: "Twin Room with en-suite bathroom", count: 2 }] },
+      }),
+    ).toContain("in 2 Twin Rooms with en-suite bathroom incl.")
+    expect(
+      sentenceOf({
+        ...trainBlock,
+        serviceData: {
+          ...trainBlock.serviceData,
+          itinerarySuiteCounts: [{ label: "Double bedded Deluxe Suite with an En Suite Shower", count: 2 }],
+        },
+      }),
+    ).toContain("in 2 Double bedded Deluxe Suites with an En Suite Shower on")
+    expect(
+      sentenceOf({
+        ...trainBlock,
+        serviceData: {
+          ...trainBlock.serviceData,
+          itinerarySuiteCounts: [{ label: "Double bedded Deluxe Suite with a shower, Lengthways", count: 2 }],
+        },
+      }),
+    ).toContain("in 2 Double bedded Deluxe Suites with a shower, Lengthways on")
+  })
+
+  it("uses 'a' before a vowel letter with a consonant sound", () => {
+    const single = (label: string) =>
+      sentenceOf({ ...trainBlock, serviceData: { ...trainBlock.serviceData, itinerarySuiteCounts: [{ label, count: 1 }] } })
+    expect(single("One-bedroom Suite")).toContain("in a One-bedroom Suite on")
+    expect(single("Unique Suite")).toContain("in a Unique Suite on")
+    expect(single("European Suite")).toContain("in a European Suite on")
+    expect(single("Owner's Suite")).toContain("in an Owner's Suite on")
+  })
+
+  it("picks the article for a label that starts with a number by how the number is said", () => {
+    const single = (label: string) =>
+      sentenceOf({ ...trainBlock, serviceData: { ...trainBlock.serviceData, itinerarySuiteCounts: [{ label, count: 1 }] } })
+    for (const n of ["8", "11", "18", "80", "86", "800", "850", "1100", "1800", "8000"]) {
+      expect(single(`${n} Berth Cabin`)).toContain(`in an ${n} Berth Cabin on`)
+    }
+    for (const n of ["2", "1", "10", "12", "28", "100", "180", "1000", "2800"]) {
+      expect(single(`${n} Berth Cabin`)).toContain(`in a ${n} Berth Cabin on`)
+    }
+  })
+
+  it("pluralises the other unit kinds suppliers name", () => {
+    const counted = (label: string) =>
+      sentenceOf({ ...hotelBlock, serviceData: { ...hotelBlock.serviceData, itinerarySuiteCounts: [{ label, count: 2 }] } })
+    const cases: Array<[string, string]> = [
+      ["Luxury Tent", "2 Luxury Tents"],
+      ["Garden Villa", "2 Garden Villas"],
+      ["Mountain Chalet", "2 Mountain Chalets"],
+      ["Family Cottage", "2 Family Cottages"],
+      ["Two-bedroom Apartment", "2 Two-bedroom Apartments"],
+      ["River Bungalow", "2 River Bungalows"],
+      ["Safari Lodge", "2 Safari Lodges"],
+      ["Self-catering Unit", "2 Self-catering Units"],
+      ["Sleeper Compartment", "2 Sleeper Compartments"],
+      ["Sleeper Berth", "2 Sleeper Berths"],
+      ["8 Berth Cabin", "2 8 Berth Cabins"],
+      ["Luxury Tent with en-suite bathroom", "2 Luxury Tents with en-suite bathroom"],
+    ]
+    for (const [label, expected] of cases) expect(counted(label)).toContain(`in ${expected} incl.`)
+    // "Berth" mid-type is not the noun, so a type with no other noun keeps the × fallback.
+    expect(counted("8 Berth Deluxe")).toContain("in 2 × 8 Berth Deluxe incl.")
+  })
+
+  it("falls back to numberOfSuites on a block built before the per-unit counts existed", () => {
+    expect(sentenceOf({ ...trainBlock, serviceData: { ...trainBlock.serviceData, numberOfSuites: 2 } })).toContain(
+      "in 2 Deluxe Suites on",
+    )
+    // A joined "Deluxe Suite, Royal Suite" can't say how many of each.
+    expect(
+      sentenceOf({ ...trainBlock, serviceData: { ...trainBlock.serviceData, suiteType: "Deluxe Suite, Royal Suite", numberOfSuites: 3 } }),
+    ).toContain("in a Deluxe Suite, Royal Suite on")
+  })
+
+  it("uses 'an' before a vowel and counts a label with no noun to pluralise", () => {
+    expect(
+      sentenceOf({ ...hotelBlock, serviceData: { ...hotelBlock.serviceData, itinerarySuiteCounts: [{ label: "Executive Room", count: 1 }] } }),
+    ).toContain("in an Executive Room incl.")
+    expect(
+      sentenceOf({ ...hotelBlock, serviceData: { ...hotelBlock.serviceData, itinerarySuiteCounts: [{ label: "Presidential", count: 2 }] } }),
+    ).toContain("in 2 × Presidential incl.")
+  })
+})
+
+describe("formatQuoteGrandTotalLabel", () => {
+  it("names the party, singular and plural, children only when there are any", () => {
+    expect(formatQuoteGrandTotalLabel({ adults: 4, children: 1 })).toBe("Total for 4 Adults & 1 Child incl. VAT")
+    expect(formatQuoteGrandTotalLabel({ adults: 1, children: 2 })).toBe("Total for 1 Adult & 2 Children incl. VAT")
+    expect(formatQuoteGrandTotalLabel({ adults: 2, children: 0 })).toBe("Total for 2 Adults incl. VAT")
+    expect(formatQuoteGrandTotalLabel({ adults: 0, children: 0 })).toBe("Total incl. VAT")
   })
 })

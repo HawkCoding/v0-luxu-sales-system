@@ -113,33 +113,137 @@ describe("ensureQuotePdf with a pre-rename stored PDF", () => {
   })
 })
 
+describe("ensureQuotePdf headcounts", () => {
+  it("prints the booking's own Guests counts but labels the total and divides per person by the paying pax", async () => {
+    vi.resetModules()
+    const renderQuotePdf = vi.fn(async () => Buffer.from("%PDF-1.4"))
+    const resolveSupplierAgeBuckets = vi.fn(async () => ({ infantMax: 2, childMax: 12 }))
+    vi.doMock("@/lib/quotes/render-quote-pdf", () => ({ renderQuotePdf }))
+    vi.doMock("@/lib/packages/passenger-totals", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@/lib/packages/passenger-totals")>()),
+      resolveSupplierAgeBuckets,
+    }))
+    vi.doMock("@/lib/quotes/load-quote-config", () => ({
+      loadQuoteConfig: vi.fn(async () => ({
+        primarySupplierId: "supplier-quote-primary",
+        unresolved: [],
+        journeyClass: null,
+        rateAudience: "international",
+      })),
+      overridesFromQuoteRow: vi.fn(() => ({})),
+    }))
+    vi.doMock("@/lib/voucher/build-service-blocks", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@/lib/voucher/build-service-blocks")>()),
+      buildVoucherServiceBlocks: vi.fn(async () => ({ blocks: [] })),
+    }))
+    vi.doMock("@/lib/suppliers/load-supplier-kind", () => ({ loadSupplierKind: vi.fn(async () => "train_operator") }))
+    vi.doMock("@/lib/settings-access", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@/lib/settings-access")>()),
+      getDocumentTextSettings: vi.fn(async () => ({})),
+      getDocumentBrandSettings: vi.fn(async () => ({})),
+    }))
+    vi.doMock("@/lib/pdf/brand-logo", () => ({ loadBrandLogo: vi.fn(async () => null) }))
+    vi.doMock("@/lib/pdf/document-footer-company", () => ({ loadDocumentFooterCompany: vi.fn(async () => ({})) }))
+    vi.doMock("@/lib/documents/upsert-generated-document", () => ({
+      upsertGeneratedDocument: vi.fn(async () => ({ id: "doc-1", booking_id: "booking-1", status: "draft", created_at: "" })),
+    }))
+    vi.doMock("@/lib/error-log", () => ({ logError: vi.fn() }))
+
+    const snapshot = (passengerKind: string, unit: string, legId = "leg-train") => ({
+      source: "pricing_engine",
+      pricingMode: "rate_card",
+      legId,
+      passengerKind,
+      unit,
+      commission: null,
+    })
+    const results: Record<string, unknown> = {
+      quotes: {
+        data: {
+          id: "quote-1",
+          booking_id: "booking-1",
+          quote_number: "LTT-26-0001-Q1",
+          total: 107_100,
+          subtotal: 107_100,
+          created_at: "2026-10-02T00:00:00Z",
+          pdf_document_id: null,
+          booking: {
+            id: "booking-1",
+            booking_number: "LTT-26-0001",
+            // 2 adults + children aged 1, 8 and 15: 3 paying adults, 1 child, 1 free infant.
+            no_of_adults: 2,
+            no_of_children: 3,
+            child_ages: [1, 8, 15],
+            primary_supplier_id: "supplier-booking-primary",
+            route: null,
+            customer: null,
+          },
+        },
+        error: null,
+      },
+      quote_line_items: {
+        data: [
+          { total: 90_000, unit_price: 30_000, pricing_snapshot: snapshot("adult", "per person sharing") },
+          { total: 15_000, unit_price: 15_000, pricing_snapshot: snapshot("child", "per person sharing") },
+          { total: 0, unit_price: 0, pricing_snapshot: snapshot("infant", "per person sharing") },
+          { total: 2_100, unit_price: 2_100, pricing_snapshot: snapshot("adult", "per vehicle", "leg-transfer") },
+        ],
+        error: null,
+      },
+    }
+    const supabase = {
+      from: vi.fn((table: string) => {
+        const result = results[table] ?? { data: null, error: null }
+        const chain: Record<string, unknown> = {}
+        for (const method of ["select", "eq", "order", "update", "insert", "in"]) chain[method] = vi.fn(() => chain)
+        chain.single = vi.fn(async () => result)
+        chain.maybeSingle = vi.fn(async () => result)
+        chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve)
+        return chain
+      }),
+      storage: { from: vi.fn(() => ({ upload: vi.fn(async () => ({ error: null })) })) },
+    }
+
+    const { ensureQuotePdf } = await import("./ensure-quote-pdf")
+    await ensureQuotePdf(supabase as never, "quote-1", { actorName: "Test", actorUserId: "user-1", force: true })
+
+    expect(resolveSupplierAgeBuckets).toHaveBeenCalledWith(expect.anything(), "supplier-quote-primary")
+    const [data] = renderQuotePdf.mock.calls[0] as unknown as [
+      {
+        adults: number
+        children: number
+        payingPax: { adults: number; children: number }
+        perPersonTotals: { perAdult: number | null; perChild: number | null }
+      },
+    ]
+    // Guests row: the booking's own counts, infant included, as the e-mail/invoice/voucher print.
+    expect([data.adults, data.children]).toEqual([2, 3])
+    // Total label and per-person rows: the paying projection.
+    expect(data.payingPax).toEqual({ adults: 3, children: 1 })
+    expect(data.perPersonTotals).toEqual({ perAdult: 30_600, perChild: 15_300 })
+
+    for (const path of [
+      "@/lib/quotes/render-quote-pdf",
+      "@/lib/packages/passenger-totals",
+      "@/lib/quotes/load-quote-config",
+      "@/lib/voucher/build-service-blocks",
+      "@/lib/suppliers/load-supplier-kind",
+      "@/lib/settings-access",
+      "@/lib/pdf/brand-logo",
+      "@/lib/pdf/document-footer-company",
+      "@/lib/documents/upsert-generated-document",
+      "@/lib/error-log",
+    ]) {
+      vi.doUnmock(path)
+    }
+    vi.resetModules()
+  })
+})
+
 describe("legacyQuoteObjectPath", () => {
   it("rebuilds the pre-rename lowercase key so older documents rows are re-pointed, not duplicated", async () => {
     const { legacyQuoteObjectPath } = await import("./ensure-quote-pdf")
 
     expect(legacyQuoteObjectPath("LTT-2026-0038-Q1")).toBe("LTT-2026-0038-Q1/quote-LTT-2026-0038-Q1.pdf")
-  })
-})
-
-describe("quoteCustomerAddressLines", () => {
-  it("prints the street, town and code on one line and the country beneath", async () => {
-    const { quoteCustomerAddressLines } = await import("./ensure-quote-pdf")
-
-    expect(
-      quoteCustomerAddressLines({
-        address_line1: "49 Mitchell Ave",
-        address_line2: " ",
-        city: "New Castle-Upon-Tyme",
-        province: null,
-        postal_code: "NE23JY",
-        country: "United Kingdom",
-      }),
-    ).toEqual(["49 Mitchell Ave, New Castle-Upon-Tyme, NE23JY", "United Kingdom"])
-  })
-
-  it("is empty when the client has no address on file", async () => {
-    const { quoteCustomerAddressLines } = await import("./ensure-quote-pdf")
-
-    expect(quoteCustomerAddressLines(null)).toEqual([])
   })
 })

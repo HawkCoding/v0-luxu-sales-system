@@ -25,8 +25,7 @@ export function sampleInvoicePdfData(): Omit<
     consultant: "LB",
     billing: {
       companyName: "Lunn Family Travel",
-      addressLines: ["14 Kensington Road", "London, Greater London", "United Kingdom"],
-      postalCode: "SW7 2AB",
+      addressLines: ["14 Kensington Road", "London, Greater London", "SW7 2AB", "United Kingdom"],
       phone: "+44 7884 495357",
       email: "sample.guest@example.com",
       vatNumber: "GB123456789",
@@ -73,6 +72,7 @@ export function sampleInvoicePdfData(): Omit<
       amountReceived: 0,
       amountReceivedAt: null,
       outstanding: total,
+      perAdult: Math.round((total / 2) * 100) / 100,
     },
     currency: "ZAR",
     statusLabel: "Provisional",

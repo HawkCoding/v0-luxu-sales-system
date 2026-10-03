@@ -102,6 +102,62 @@ describe("invoiceRowsForBlock", () => {
     expect(rows.some((r) => r.left?.label === "Your Reference")).toBe(false)
   })
 
+  it("train block: prints the compact suite label on one line, with the leg's QTY beside it", () => {
+    const train = block({
+      serviceType: "train",
+      serviceData: {
+        suiteType: "Double bedded Deluxe Suite with a shower, Lengthways",
+        invoiceSuiteCounts: [{ label: "Double Deluxe Suite", count: 2 }],
+        numberOfSuites: 2,
+      },
+    })
+    expect(invoiceRowsForBlock(train).find((r) => r.left?.label === "Suite Type")).toEqual({
+      left: { label: "Suite Type", value: "Double Deluxe Suite" },
+      right: { label: "Qty", value: "2" },
+    })
+    // The voucher's own row keeps the full phrase for the service provider.
+    expect(voucherRowsForBlock(train).find((r) => r.label === "Suite Type")?.cells?.[0].value).toBe(
+      "Double bedded Deluxe Suite with a shower, Lengthways",
+    )
+  })
+
+  it("train block: several suite types print one counted line each, QTY stays the total", () => {
+    const rows = invoiceRowsForBlock(
+      block({
+        serviceType: "train",
+        serviceData: {
+          suiteType: "Double bedded Deluxe Suite with a shower, Twin bedded Royal Suite with a bath",
+          invoiceSuiteCounts: [
+            { label: "Double Deluxe Suite", count: 2 },
+            { label: "Twin Royal Suite", count: 1 },
+          ],
+          numberOfSuites: 3,
+        },
+      }),
+    )
+    expect(rows.find((r) => r.left?.label === "Suite Type")).toEqual({
+      left: { label: "Suite Type", value: "2 × Double Deluxe Suite\n1 × Twin Royal Suite" },
+      right: { label: "Qty", value: "3" },
+    })
+  })
+
+  it("train block: keeps the voucher's suite wording when the block predates invoiceSuiteCounts", () => {
+    const withQty = invoiceRowsForBlock(
+      block({ serviceType: "train", serviceData: { suiteType: "Twin bedded Deluxe Suite", numberOfSuites: 1 } }),
+    )
+    expect(withQty.find((r) => r.left?.label === "Suite Type")).toEqual({
+      left: { label: "Suite Type", value: "Twin bedded Deluxe Suite" },
+      right: { label: "Qty", value: "1" },
+    })
+    const withoutQty = invoiceRowsForBlock(
+      block({ serviceType: "train", serviceData: { suiteType: "Deluxe Suite", invoiceSuiteCounts: [] } }),
+    )
+    expect(withoutQty.find((r) => r.left?.label === "Suite Type")).toEqual({
+      left: { label: "Suite Type", value: "Deluxe Suite" },
+      right: null,
+    })
+  })
+
   it("train block: undated arrival keeps the voucher's TBC and prints no time cell", () => {
     const rows = invoiceRowsForBlock(
       block({

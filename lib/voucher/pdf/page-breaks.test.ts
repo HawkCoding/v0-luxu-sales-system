@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Text extraction runs pdf.js, which needs the node environment (jsdom trips the
 // "No PDFJS.workerSrc specified" path).
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
 import { renderVoucherPdf } from "../render-pdf"
 import { extractPdfPageTexts } from "@/lib/pdf/extract-text.fixtures"
 import type { VoucherData, VoucherServiceBlock } from "@/lib/generate-voucher"
@@ -61,9 +61,15 @@ async function pageTexts(buffer: Buffer): Promise<string[]> {
 }
 
 describe("voucher page breaks", () => {
-  it("never splits a service block across pages", async () => {
-    const pages = await pageTexts(await renderVoucherPdf({ data: voucherData }))
+  // The oversized block makes this render slow (~50s on a dev machine, longer on a loaded CI
+  // runner), so render once and share the pages — rendering per test doubled the cost and tipped
+  // CI past its timeout.
+  let pages: string[] = []
+  beforeAll(async () => {
+    pages = await pageTexts(await renderVoucherPdf({ data: voucherData }))
+  }, 240_000)
 
+  it("never splits a service block across pages", () => {
     for (let i = 1; i <= 9; i++) {
       if (i === OVERSIZED_BLOCK) continue // taller than a page: must stay wrappable
       // The voucher hides the eyebrow (`block.title`) and heads the box with the provider name
@@ -73,14 +79,13 @@ describe("voucher page breaks", () => {
       expect(titlePage).toBeGreaterThanOrEqual(0)
       expect(`segment-${i} rows on page ${rowPage}`).toBe(`segment-${i} rows on page ${titlePage}`)
     }
-  }, 60_000)
+  })
 
-  it("still wraps a block too tall to fit on one page", async () => {
-    const pages = await pageTexts(await renderVoucherPdf({ data: voucherData }))
+  it("still wraps a block too tall to fit on one page", () => {
     const titlePage = pages.findIndex((page) => new RegExp(`Provider${OVERSIZED_BLOCK}(?!\\d)`).test(page))
 
     expect(titlePage).toBeGreaterThanOrEqual(0)
     // its notes continue onto the following page rather than being clipped
     expect(pages[titlePage + 1]).toMatch(/X/)
-  }, 60_000)
+  })
 })

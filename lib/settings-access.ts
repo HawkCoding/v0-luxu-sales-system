@@ -203,9 +203,8 @@ const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   invoice_doc_final_title: "FINAL INVOICE",
   invoice_doc_footer_text: "Luxus Travel & Tours — Luxury Rail Journeys",
   invoice_doc_payment_note:
-    "Please email proof of payment. Reservations can only be confirmed once payment has been received.",
-  invoice_doc_bank_charges_note:
-    "Please note that the amounts transferred should be exclusive of all bank charges.",
+    "Email proof of payment directly to your consultant. Reservations can only be confirmed once payment has been received.",
+  invoice_doc_bank_charges_note: "Amounts transferred should exclude all bank charges.",
   itinerary_doc_journey_heading: "Your Journey",
   // Optional paragraph; empty means the itinerary renders without an intro.
   itinerary_doc_intro_text: "",

@@ -123,8 +123,8 @@ describe("buildBillingParty", () => {
     )
     expect(billing.companyName).toBe("Acme Travel")
     expect(billing.vatNumber).toBe("VAT123")
-    expect(billing.postalCode).toBe("8001")
-    expect(billing.addressLines).toEqual(["1 Job St", "Cape Town, Western Cape", "South Africa"])
+    // The postal code is an address line of its own, under the town and above the country.
+    expect(billing.addressLines).toEqual(["1 Job St", "Cape Town, Western Cape", "8001", "South Africa"])
     // Phone and e-mail are the one exception — still sourced from the customer profile.
     expect(billing.phone).toBe("+27 21 555 0000")
     expect(billing.email).toBe("customer@example.com")
@@ -134,7 +134,6 @@ describe("buildBillingParty", () => {
     const billing = buildBillingParty(null, { phone: "+27 21 555 0000", email: "customer@example.com" })
     expect(billing.companyName).toBeNull()
     expect(billing.vatNumber).toBeNull()
-    expect(billing.postalCode).toBeNull()
     expect(billing.addressLines).toEqual([])
     expect(billing.phone).toBe("+27 21 555 0000")
     expect(billing.email).toBe("customer@example.com")

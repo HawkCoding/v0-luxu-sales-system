@@ -17,10 +17,16 @@ export function joinGuestNames(names: string): string {
   return last < 0 ? names : `${names.slice(0, last)} and ${names.slice(last + 2)}`
 }
 
+/** One line per room when the roster records who shares with whom, else the party on one line. */
+export function guestNamesValue(data: Pick<VoucherData, "guestNames" | "guestNameLines">): string {
+  const lines = (data.guestNameLines ?? []).map((line) => line.trim()).filter(Boolean)
+  return lines.length > 0 ? lines.join("\n") : joinGuestNames(data.guestNames)
+}
+
 export function GuestInfo({ data, styles, guidance }: GuestInfoProps) {
   return (
     <View style={[styles.box, styles.guestBox]} wrap={false}>
-      <InfoRow label="Guest Names" value={joinGuestNames(data.guestNames)} styles={styles} />
+      <InfoRow label="Guest Names" value={guestNamesValue(data)} styles={styles} />
       <InfoRow label="Number of Guests" value={formatGuestCountText(data.passengerTotals)} styles={styles} />
       <InfoRow label="Consultant" value={data.consultantName} styles={styles} />
       {data.specialRequests ? (

@@ -905,7 +905,11 @@ export function JobReservationTab({
                           className="sm:col-span-2"
                         />
                       </TooltipTrigger>
-                      <TooltipContent>Shown on the Worksheet PDF</TooltipContent>
+                      <TooltipContent className="max-w-xs">
+                        Groups guests one line per room on the Travel Voucher, and shows on the Worksheet PDF.
+                        Enter the room-mate&apos;s name, or the same room label (e.g. &quot;Room 1&quot;) for
+                        everyone sharing.
+                      </TooltipContent>
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>

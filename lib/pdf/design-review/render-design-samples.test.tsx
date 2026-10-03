@@ -11,6 +11,7 @@ import path from "path"
 import { describe, expect, it } from "vitest"
 import { FOOTER_BRAND_PRODUCT_LINE } from "@/lib/assets/footer-brand"
 import { buildDeparture, buildInvoiceItems, invoiceJourneyHeading } from "@/lib/invoices/build-invoice-view"
+import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
@@ -48,7 +49,10 @@ const DESIGN_SETTINGS = {
   includesHeading: "Travel Package Includes",
   quoteFooterText: "This quotation is subject to availability. Prices are quoted in {{currency}}.",
   journeyHeading: "Your Journey",
-  paymentNote: "Please email proof of payment. Reservations can only be confirmed once payment has been received.",
+  // Invoice Terms wording as migration 20261002090000_invoice_terms_copy sets it.
+  paymentNote:
+    "Email proof of payment directly to your consultant. Reservations can only be confirmed once payment has been received.",
+  bankChargesNote: "Amounts transferred should exclude all bank charges.",
 }
 
 describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () => {
@@ -65,7 +69,6 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       customerName: SAMPLE_CUSTOMER.name,
       customerPhone: SAMPLE_CUSTOMER.phone,
       customerEmail: SAMPLE_CUSTOMER.email,
-      customerAddressLines: SAMPLE_CUSTOMER.addressLines,
       quoteDate: "2026-09-20",
       validUntil: null,
       journeyStart: "2027-03-16",
@@ -74,6 +77,12 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       children: 0,
       journeyDetails: buildQuoteJourneyDetails(blocks[2], "Golf Safari"),
       total: SAMPLE_TOTAL,
+      perPersonTotals: derivePerPersonTotals({
+        lines: sampleQuoteLineItems(),
+        adults: 2,
+        children: 0,
+        total: SAMPLE_TOTAL,
+      }),
       subtotal: SAMPLE_SUBTOTAL,
       discount: SAMPLE_DISCOUNT,
       discountVisible: true,
@@ -101,8 +110,7 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       guestNames: SAMPLE_GUESTS,
       billing: {
         companyName: null,
-        addressLines: ["49 Mitchell Ave", "New Castle-Upon-Tyme", "United Kingdom"],
-        postalCode: null,
+        addressLines: ["49 Mitchell Ave", "New Castle-Upon-Tyme", "NE1 7RU", "United Kingdom"],
         phone: SAMPLE_CUSTOMER.phone,
         email: SAMPLE_CUSTOMER.email,
         vatNumber: null,
@@ -128,18 +136,170 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
         amountReceived: SAMPLE_TOTAL,
         amountReceivedAt: "2026-09-27",
         outstanding: 0,
+        ...derivePerPersonTotals({
+          lines: sampleQuoteLineItems(),
+          adults: 2,
+          children: 0,
+          total: SAMPLE_TOTAL,
+        }),
       },
       currency: "ZAR",
       statusLabel: "Guaranteed",
       banking: sampleBanking(),
       paymentNote: DESIGN_SETTINGS.paymentNote,
-
-      bankChargesNote: "Please note that the amounts transferred should be exclusive of all bank charges.",
+      bankChargesNote: DESIGN_SETTINGS.bankChargesNote,
       brand,
       brandPosition: "top",
       brandLogo,
     })
     writeFileSync(path.join(dir, "Invoice-42752.pdf"), invoice)
+
+    // A family of six: Guest 3–6 rows, and a per-adult/per-child split priced off adult and child
+    // fares, with the per-vehicle airport shuttle shared pro rata to those fares.
+    const familyLines = sampleQuoteLineItems()
+      .filter((row) => {
+        const snapshot = row.pricing_snapshot as unknown as PricingSnapshot
+        return snapshot.supplierKind === "train_operator" || snapshot.routeName === "JHB – APT JHTL"
+      })
+      .flatMap((row) => {
+        if ((row.pricing_snapshot as unknown as PricingSnapshot).supplierKind !== "train_operator") return [row]
+        const snapshot = row.pricing_snapshot as unknown as PricingSnapshot
+        return [
+          { ...row, qty: 4, total: row.unit_price * 4, pricing_snapshot: { ...snapshot, unit: "per person sharing" } as unknown as Json },
+          {
+            ...row,
+            description: `${row.description} - Child`,
+            qty: 2,
+            unit_price: 95974.38,
+            total: 191948.76,
+            pricing_snapshot: { ...snapshot, passengerKind: "child", unit: "per person sharing" } as unknown as Json,
+          },
+        ]
+      })
+    const familyTotal = familyLines.reduce((sum, row) => sum + row.total, 0)
+    // The family's train, as buildVoucherServiceBlocks builds it for three units — two Double
+    // Deluxe Suites and a Twin Royal Suite — so the Suite Type row prints one counted line per type
+    // beside QTY 3. Matches the Deluxe ×2 + Royal ×1 of the family quote below.
+    const familyTrain = {
+      ...blocks[2],
+      serviceData: {
+        ...blocks[2].serviceData,
+        suiteType:
+          "Double bedded Deluxe Suite with a shower, Lengthways, Twin bedded Royal Suite with a shower and bath, Lengthways",
+        itinerarySuiteType: "Deluxe Suite, Royal Suite",
+        itinerarySuiteCounts: [
+          { label: "Deluxe Suite", count: 2 },
+          { label: "Royal Suite", count: 1 },
+        ],
+        invoiceSuiteCounts: [
+          { label: "Double Deluxe Suite", count: 2 },
+          { label: "Twin Royal Suite", count: 1 },
+        ],
+        numberOfSuites: 3,
+        guestBreakdown: { adults: 4, children: 2, infants: 0 },
+      },
+    }
+    const familyInvoice = await renderInvoicePdf({
+      invoiceNumber: SAMPLE_INVOICE_NUMBER,
+      bookingNumber: SAMPLE_BOOKING_NUMBER,
+      customerName: "Mr Hancke le Roux",
+      issueDate: "2026-09-27",
+      dueDate: null,
+      consultant: "CD",
+      guestNames: [...SAMPLE_GUESTS, "Mr Steyn van Coller", "Mrs June van Coller", "Miss Anna van Coller", "Master Jan van Coller"],
+      billing: {
+        addressLines: ["13 Epsom Road", "Long Acres Country Estate", "Langebaan, WC", "7357", "South Africa"],
+        phone: SAMPLE_CUSTOMER.phone,
+        email: SAMPLE_CUSTOMER.email,
+      },
+      departure: buildDeparture([familyTrain], invoiceJourneyHeading(DESIGN_SETTINGS.journeyHeading, "train_operator"), {
+        tourName: "Golf Safari",
+        durationNights: 9,
+        durationUnit: null,
+        suites: 3,
+        adults: 4,
+        children: 2,
+      }),
+      items: buildInvoiceItems(familyLines, blocks),
+      totals: {
+        subtotalInclVat: familyTotal,
+        depositPercentage: 25,
+        depositAmount: Math.round(familyTotal * 0.25 * 100) / 100,
+        finalAmount: Math.round(familyTotal * 0.75 * 100) / 100,
+        finalDueDate: "2027-01-16",
+        amountReceived: 0,
+        outstanding: familyTotal,
+        ...derivePerPersonTotals({ lines: familyLines, adults: 4, children: 2, total: familyTotal }),
+      },
+      banking: sampleBanking(),
+      paymentNote: DESIGN_SETTINGS.paymentNote,
+      bankChargesNote: DESIGN_SETTINGS.bankChargesNote,
+      brand,
+      brandLogo,
+    })
+    writeFileSync(path.join(dir, "Invoice-family.pdf"), familyInvoice)
+
+    // The same family on the quote: two rooms, three suites of two types, a flight with its fare
+    // cap, and the per-adult/per-child rows under "Total for 4 Adults & 2 Children incl. VAT".
+    const familyBlocks = blocks.map((block) =>
+      block.serviceType === "hotel"
+        ? { ...block, serviceData: { ...block.serviceData, itinerarySuiteCounts: [{ label: "Premier Suite Room", count: 2 }] } }
+        : block.serviceType === "train"
+          ? {
+              ...block,
+              serviceData: {
+                ...block.serviceData,
+                itinerarySuiteCounts: [
+                  { label: "Deluxe Suite", count: 2 },
+                  { label: "Royal Suite", count: 1 },
+                ],
+              },
+            }
+          : block,
+    )
+    familyBlocks.unshift({
+      serviceType: "airline",
+      title: "Airlink",
+      displayOrder: -1,
+      clockTime: "10:00",
+      contactDetails: { name: "Airlink" },
+      serviceData: {
+        flightNumber: "4Z492",
+        route: "Cape Town INT Airport → OR Tambo INT Airport",
+        cabin: "Economy",
+        departureDate: "2027-03-15",
+        arrivalDate: "2027-03-15",
+        startTime: "10:00",
+        endTime: "11:45",
+      },
+    })
+    const familyQuote = await renderQuotePdf({
+      quoteNumber: `${SAMPLE_BOOKING_NUMBER}-Q1`,
+      customerName: SAMPLE_CUSTOMER.name,
+      customerPhone: SAMPLE_CUSTOMER.phone,
+      customerEmail: SAMPLE_CUSTOMER.email,
+      quoteDate: "2026-09-20",
+      validUntil: null,
+      journeyStart: "2027-03-15",
+      journeyEnd: "2027-03-25",
+      adults: 4,
+      children: 2,
+      journeyDetails: buildQuoteJourneyDetails(familyBlocks[3], "Golf Safari"),
+      total: familyTotal,
+      subtotal: familyTotal,
+      perPersonTotals: derivePerPersonTotals({ lines: familyLines, adults: 4, children: 2, total: familyTotal }),
+      flightCapPerPerson: 4100,
+      itineraryBlocks: familyBlocks,
+      title: "QUOTATION",
+      footerText: DESIGN_SETTINGS.quoteFooterText,
+      packageIncludesHeading: DESIGN_SETTINGS.includesHeading,
+      packageExcludesHeading: "Your Package Excludes",
+      packageExcludesDefault: "Services not mentioned.",
+      brand,
+      brandLogo,
+      company,
+    })
+    writeFileSync(path.join(dir, "Quote-family.pdf"), familyQuote)
 
     const voucher = await renderVoucherPdf({
       data: sampleVoucherData(),
@@ -207,7 +367,6 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       customerName: SAMPLE_CUSTOMER.name,
       customerPhone: SAMPLE_CUSTOMER.phone,
       customerEmail: SAMPLE_CUSTOMER.email,
-      customerAddressLines: SAMPLE_CUSTOMER.addressLines,
       quoteDate: "2026-09-20",
       validUntil: null,
       journeyStart: "2027-03-16",
@@ -282,7 +441,7 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       },
       banking: sampleBanking(),
       paymentNote: DESIGN_SETTINGS.paymentNote,
-      bankChargesNote: "Please note that the amounts transferred should be exclusive of all bank charges.",
+      bankChargesNote: DESIGN_SETTINGS.bankChargesNote,
       brand,
       brandLogo,
     })
@@ -323,7 +482,6 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       customerName: SAMPLE_CUSTOMER.name,
       customerPhone: SAMPLE_CUSTOMER.phone,
       customerEmail: SAMPLE_CUSTOMER.email,
-      customerAddressLines: SAMPLE_CUSTOMER.addressLines,
       quoteDate: "2026-09-20",
       validUntil: null,
       journeyStart: "2027-03-16",

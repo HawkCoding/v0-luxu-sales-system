@@ -64,6 +64,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
         styles={styles}
         showDescription={false}
         showInclusions={false}
+        wideSuiteName
       />
     )
     // The closing line and the footer's clearance travel with the last block, so the footer never
@@ -71,7 +72,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
     // closing line together would not fit one page, when the block goes on its own (whole, or
     // breaking if it is taller than a page) and the closing line follows it.
     const lastKeptWhole = last
-      ? serviceBlockFitsOnOnePage(last, { showDescription: false, showInclusions: false }, CLOSING_HEIGHT)
+      ? serviceBlockFitsOnOnePage(last, { showDescription: false, showInclusions: false, wideSuiteName: true }, CLOSING_HEIGHT)
       : true
     return (
       <View key={key}>

@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { buildInvoiceView, invoiceJourneyHeading } from "@/lib/invoices/build-invoice-view"
-import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
+import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
+import { printedTotalInclVat, type InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { getPaymentMethod } from "@/lib/payment-methods"
@@ -107,7 +108,16 @@ export async function ensureInvoicePdf(
       billing: view.billing,
       departure: view.departure,
       items: view.items,
-      totals,
+      totals: {
+        ...totals,
+        ...derivePerPersonTotals({
+          lines: view.pricedLines,
+          adults: view.pax.adults,
+          children: view.pax.children,
+          // The figure printed as "Total incl. VAT", so the per-person rows reconcile with it.
+          total: printedTotalInclVat(totals),
+        }),
+      },
       currency: invoice.currency,
       statusLabel,
       banking,

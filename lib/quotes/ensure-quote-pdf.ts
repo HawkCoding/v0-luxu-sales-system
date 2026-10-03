@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
+import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
 import {
   complimentaryLegIdsFromLineItems,
   complimentaryTransportRequestIdsFromLineItems,
@@ -51,31 +53,6 @@ export function legacyQuoteObjectPath(quoteNumber: string): string {
   return `${safeQuoteNumber}/quote-${safeQuoteNumber}.pdf`
 }
 
-/**
- * The client's postal address as the quote's "Client details" prints it: street, suburb, city,
- * province and postal code on one line, the country beneath. Blank parts drop out.
- */
-export function quoteCustomerAddressLines(
-  customer:
-    | {
-        address_line1?: string | null
-        address_line2?: string | null
-        city?: string | null
-        province?: string | null
-        postal_code?: string | null
-        country?: string | null
-      }
-    | null
-    | undefined,
-): string[] {
-  const clean = (value: string | null | undefined) => value?.trim() ?? ""
-  const street = [customer?.address_line1, customer?.address_line2, customer?.city, customer?.province, customer?.postal_code]
-    .map(clean)
-    .filter(Boolean)
-    .join(", ")
-  return [street, clean(customer?.country)].filter(Boolean)
-}
-
 export interface EnsureQuotePdfOptions {
   actorName: string
   actorUserId: string
@@ -117,7 +94,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, primary_supplier_id, route:routes(name), customer:customers(title, first_name, last_name, email, phone, address_line1, address_line2, city, province, postal_code, country))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, child_ages, primary_supplier_id, route:routes(name), customer:customers(title, first_name, last_name, email, phone))",
     )
     .eq("id", quoteId)
     .single()
@@ -237,6 +214,14 @@ export async function ensureQuotePdf(
   const [primaryBlock] = selectPrimaryBlocks(itineraryBlocks, quoteConfig.primarySupplierId, primarySupplierKind)
   const journeyDetails = buildQuoteJourneyDetails(primaryBlock, bookingRoute?.name ?? null)
   const company = await loadDocumentFooterCompany(supabase)
+  // Adults and paying children as the primary supplier's age buckets price them — infants and
+  // over-age children projected out — so the total's label and the per-person rows (and the
+  // invoice's, which resolve the same supplier the same way) all count the same people.
+  const pax = await resolvePayingPax(
+    supabase,
+    booking,
+    payingPaxSupplierId(quoteConfig.primarySupplierId, booking?.primary_supplier_id),
+  )
 
   let pdfBuffer: Buffer
   try {
@@ -250,16 +235,26 @@ export async function ensureQuotePdf(
       customerName,
       customerPhone: customer?.phone ?? null,
       customerEmail: customer?.email ?? null,
-      customerAddressLines: quoteCustomerAddressLines(customer),
       journeyDetails,
       company,
       quoteDate: quote.created_at.slice(0, 10),
       validUntil: quote.validity_until,
       journeyStart: journey.start,
       journeyEnd: journey.end,
+      // The Guests row prints the booking's own counts (infants included), as the e-mail, invoice
+      // and voucher do; only the total's label and the per-person rows use the paying projection.
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,
+      payingPax: pax,
       total: quote.total,
+      // The invoice's own rule (lib/invoices/per-person-totals.ts), so a booking's quote and invoice
+      // can never state different per-person figures.
+      perPersonTotals: derivePerPersonTotals({
+        lines: lineItems ?? [],
+        adults: pax.adults,
+        children: pax.children,
+        total: Number(quote.total),
+      }),
       subtotal: quote.subtotal,
       agentCommission: Number(quote.agent_commission ?? 0),
       discount: Number(quote.discount_amount ?? 0),

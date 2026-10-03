@@ -78,6 +78,22 @@ function splitDateRow(row: VoucherRow, block: VoucherServiceBlock): InvoiceDepar
   }
 }
 
+/**
+ * The train's "Suite Type | Qty" row in the invoice's shorter wording ("Double Deluxe Suite") where
+ * the voucher states the full phrase ("Double bedded Deluxe Suite with a shower, Lengthways") — the
+ * client asked for one line beside "QTY:", which the full phrase never fitted. Several suite types
+ * print one line each with their own count ("2 × Double Deluxe Suite"); QTY stays the leg's total.
+ * Blocks without `invoiceSuiteCounts` (built before it existed) keep the voucher's wording.
+ */
+function compactSuiteRow(row: VoucherRow, block: VoucherServiceBlock): InvoiceDepartureRow | null {
+  const counts = block.serviceData.invoiceSuiteCounts
+  if (row.label !== "Suite Type" || !counts || counts.length === 0) return null
+  const value =
+    counts.length === 1 ? counts[0].label : counts.map(({ label, count }) => `${count} × ${label}`).join("\n")
+  const { right } = toInvoiceRow(row)
+  return { left: { label: row.label, value }, right }
+}
+
 function toInvoiceRow(row: VoucherRow): InvoiceDepartureRow {
   if (row.cells && row.cells.length > 0) {
     const [first, second] = row.cells
@@ -98,5 +114,5 @@ function toInvoiceRow(row: VoucherRow): InvoiceDepartureRow {
 export function invoiceRowsForBlock(block: VoucherServiceBlock): InvoiceDepartureRow[] {
   return voucherRowsForBlock(block, { showInclusions: false })
     .filter((row) => !INVOICE_OMITTED_VOUCHER_ROWS.has(row.label))
-    .map((row) => splitDateRow(row, block) ?? toInvoiceRow(row))
+    .map((row) => splitDateRow(row, block) ?? compactSuiteRow(row, block) ?? toInvoiceRow(row))
 }

@@ -12,7 +12,6 @@ export function sampleQuotePdfData(): Omit<
     customerName: "Mr & Mrs Sample Guest",
     customerPhone: "+27 82 555 0100",
     customerEmail: "sample.guest@example.com",
-    customerAddressLines: ["14 Kensington Road, London, SW7 2AB", "United Kingdom"],
     journeyDetails: {
       serviceType: "train",
       productLabel: "Train",
@@ -33,6 +32,8 @@ export function sampleQuotePdfData(): Omit<
     discount: 1300,
     discountVisible: true,
     total: 85000,
+    // Adults only, so the invoice's rule (lib/invoices/per-person-totals.ts) is the net total ÷ 2.
+    perPersonTotals: { perAdult: 42500, perChild: null },
     itineraryBlocks: [
       {
         // Same-day flight: the arrival folds into the departure sentence as "departing at 10h00

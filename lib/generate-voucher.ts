@@ -63,6 +63,18 @@ export interface VoucherServiceBlockData {
    *  `suiteType` above stays the full phrase for the voucher/invoice/worksheet. Absent on blocks
    *  built before this field existed, in which case callers fall back to `suiteType`. */
   itinerarySuiteType?: string | null
+  /** Train & hotel: how many of the leg's suites/rooms are of each kind, in unit order, worded as
+   *  the quote itinerary sentence names them (itinerarySuiteType's wording for a train, roomType's
+   *  for a hotel) -- so the quote can say "in 2 Deluxe Suites" or "in a Classic Room and 2 Deluxe
+   *  Rooms". Absent on blocks built before this field existed, in which case callers fall back to
+   *  `numberOfSuites`. */
+  itinerarySuiteCounts?: Array<{ label: string; count: number }> | null
+  /** Train-only: the invoice's short suite wording, bed type + suite type and nothing more
+   *  ("Double Deluxe Suite", "Twin Royal Suite"), with how many units carry each, in unit order --
+   *  so the invoice's Suite Type row fits one line per type beside "QTY:" where the full phrase
+   *  (`suiteType`, still what the voucher prints) wrapped. Absent on blocks built before this field
+   *  existed, in which case the invoice falls back to `suiteType`. */
+  invoiceSuiteCounts?: Array<{ label: string; count: number }> | null
   numberOfSuites?: number | null
   roomType?: string | null
   nights?: number | null
@@ -140,6 +152,10 @@ export interface VoucherServiceBlock {
 export interface VoucherData {
   voucherNumber: string
   guestNames: string
+  /** "Guest Names" one line per room ("Mrs A and Mr B"), from the Reservation tab's "Room with"
+   * field (lib/voucher/guest-rooms.ts). Absent when no room arrangement was recorded — the PDF then
+   * prints `guestNames` on one line. */
+  guestNameLines?: string[] | null
   consultantName: string
   supplierName: string
   supplierDescription?: string | null
