@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from "react"
 import {
   EMAIL_APPEARANCE_DEFAULTS,
+  EMAIL_DEFAULT_LINE_HEIGHT,
   type EmailFontFamily,
   type EmailFontSize,
 } from "@/lib/email/appearance"
@@ -16,7 +17,7 @@ import { buildChromeFontCss, CHROME_CLASS_NAME, EMAIL_COLORS } from "@/lib/email
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 import { CONTENT_CLASS_NAME } from "@/lib/templates/content-slot"
 import { SIGNATURE_SLOT_END, SIGNATURE_SLOT_START } from "@/lib/templates/signature-slot"
-import { FooterBrandBlock } from "@/emails/footer-brand-block"
+import { FOOTER_BRAND_RESPONSIVE_CSS, FooterBrandBlock } from "@/emails/footer-brand-block"
 
 interface BaseLayoutProps {
   preview: string
@@ -49,20 +50,22 @@ export function BaseLayout({
   // below targets those elements directly; both values come from an allowlist
   // (lib/email/appearance.ts) and are safe to interpolate here.
   //
-  // font-size is deliberately scoped to block/inline-block containers only —
-  // not span/a — so a per-section size the salesperson sets on a <span> (see
-  // the template editor's font-size toolbar control) isn't immediately
-  // overridden by this rule; span/a inherit the container's size instead.
+  // font-size and line-height are deliberately scoped to block/inline-block
+  // containers only — not span/a — so a per-section size the salesperson sets
+  // on a <span>, or the line spacing they set inline on a <p>/<li> (see the
+  // template editor's toolbar), isn't overridden by this rule; span/a inherit
+  // the container's values instead. (A span keeping its own 1.4 would hold a
+  // "Single"-spaced line open wherever a link or styled run sits.)
   const contentFontCss = `
 .${CONTENT_CLASS_NAME}, .${CONTENT_CLASS_NAME} p, .${CONTENT_CLASS_NAME} li,
 .${CONTENT_CLASS_NAME} td, .${CONTENT_CLASS_NAME} a, .${CONTENT_CLASS_NAME} span,
 .${CONTENT_CLASS_NAME} div {
   font-family: ${fontFamily};
-  line-height: 1.4;
 }
 .${CONTENT_CLASS_NAME}, .${CONTENT_CLASS_NAME} p, .${CONTENT_CLASS_NAME} li,
 .${CONTENT_CLASS_NAME} td, .${CONTENT_CLASS_NAME} div {
   font-size: ${fontSize};
+  line-height: ${EMAIL_DEFAULT_LINE_HEIGHT};
 }
 .${CONTENT_CLASS_NAME} p {
   margin: 0 0 8px;
@@ -82,7 +85,7 @@ export function BaseLayout({
   // font size scales their message, not the chrome), so they get their own
   // family-only rule — without it Outlook drops them back to Times New Roman.
   // The inline fontFamily on each wrapper covers clients that strip <style>.
-  const headCss = `${contentFontCss}\n${buildChromeFontCss(fontFamily)}`
+  const headCss = `${contentFontCss}\n${buildChromeFontCss(fontFamily)}\n${FOOTER_BRAND_RESPONSIVE_CSS}`
 
   return (
     <Html>

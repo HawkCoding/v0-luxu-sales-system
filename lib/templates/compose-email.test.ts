@@ -179,6 +179,39 @@ describe("composeFromTemplate", () => {
     expect(composed.bodyHtml).toContain(styledSpan)
   })
 
+  it("carries toolbar line spacing inline on the sent paragraphs and list items", async () => {
+    const body =
+      '<p style="line-height: 2;">Spaced</p>' +
+      '<ul><li style="line-height: 1.15;">Item</li></ul>' +
+      '<p>Default <span style="font-size: 13px;">sized</span></p>'
+    const composed = await composeFromTemplate({ subject: "Hi", bodyHtml: body }, { tokens: {} })
+
+    expect(extractContentSlot(composed.bodyHtml)).toBe(body)
+    expect(composed.bodyHtml).toContain('<p style="line-height: 2;">Spaced</p>')
+    expect(composed.bodyHtml).toContain('<li style="line-height: 1.15;">Item</li>')
+    expect(composed.bodyHtml).toContain('<span style="font-size: 13px;">sized</span>')
+  })
+
+  it("sets the default line height on content blocks only, so an inline <p>/<li> value wins and spans inherit it", async () => {
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    const rules = composed.bodyHtml.split("</style>")[0]
+    const content = `\\.${CONTENT_CLASS_NAME.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}`
+    const lineHeightRuleFor = (selector: string) =>
+      new RegExp(`${content}[^{]*\\b${selector}\\b[^{]*\\{[^}]*line-height`).test(rules)
+    // The block rule keeps the 1.4 default for unstyled paragraphs...
+    expect(rules).toMatch(new RegExp(`${content} p[^{]*\\{[^}]*line-height: 1\\.4`))
+    expect(lineHeightRuleFor("p")).toBe(true)
+    // ...but never on span/a: a span's own 1.4 would hold a "Single"-spaced line open.
+    expect(lineHeightRuleFor("span")).toBe(false)
+    expect(lineHeightRuleFor("a")).toBe(false)
+    // Nothing forces it with !important, which would beat the inline value.
+    expect(rules).not.toContain("!important")
+  })
+
   it("keeps the font rule when edited content is spliced back into the slot", async () => {
     settingsMocks.getEmailBrandingSettings.mockResolvedValue({
       ...DEFAULT_BRANDING,

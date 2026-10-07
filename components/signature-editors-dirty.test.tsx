@@ -131,7 +131,8 @@ describe("Brand editor with the real rich-text editor", () => {
     renderBrand()
     await waitFor(() => expect(document.querySelectorAll(".ProseMirror").length).toBe(7))
     await settle()
-    expect(screen.getAllByRole("status")[0]).toHaveTextContent("All changes saved")
+    // By text, not position: the save bar now follows the preview, whose own status may render first.
+    expect(screen.getByText("All changes saved")).toHaveAttribute("role", "status")
   })
 
   it("saves only the field that was edited", async () => {

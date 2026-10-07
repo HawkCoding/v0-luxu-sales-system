@@ -11,7 +11,9 @@ import {
   resolveLineTotal,
   roundMoney,
 } from "@/lib/quotes/pricing-engine"
+import { AMEND_NOTE_MAX_LENGTH, amendIneligibilityReason } from "@/lib/quotes/amend-quote"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
+import { syncBookingPaymentState, type BookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 import type { Json } from "@/lib/supabase/types"
 import type { QuoteLineItem } from "@/lib/types"
 
@@ -27,11 +29,19 @@ const lineItemSchema = z.object({
   pricingSnapshot: z.unknown().nullable().optional(),
 })
 
-const patchQuoteSchema = z.object({
-  lineItems: z.array(lineItemSchema).min(1),
-  overrideReason: z.string().trim().min(1).max(500).optional(),
-  ...versionTokenShape,
-})
+const patchQuoteSchema = z
+  .object({
+    lineItems: z.array(lineItemSchema).min(1),
+    overrideReason: z.string().trim().min(1).max(500).optional(),
+    /** Explicit opt-in to change an ACCEPTED quote in place — see lib/quotes/amend-quote.ts. */
+    amend: z.literal(true).optional(),
+    amendNote: z.string().trim().max(AMEND_NOTE_MAX_LENGTH).optional(),
+    ...versionTokenShape,
+  })
+  .refine((body) => body.amendNote === undefined || body.amend === true, {
+    message: "amendNote is only accepted together with amend: true",
+    path: ["amendNote"],
+  })
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -40,8 +50,9 @@ interface RouteParams {
 /**
  * Statuses whose line items are a record rather than a working draft. An accepted quote is what
  * the customer bought — and what the voucher, itinerary and invoice now render from — so editing
- * it in place would silently rewrite the sold scope. `Revise` is the supported path: it
- * supersedes this quote and opens a new version (see lib/quotes/revision-reset.ts).
+ * it in place would silently rewrite the sold scope. `Revise` is the full path: it supersedes this
+ * quote and opens a new version (see lib/quotes/revision-reset.ts). `amend: true` is the explicit,
+ * confirmed exception for an accepted quote only (see lib/quotes/amend-quote.ts).
  *
  * `sent` is deliberately left editable: nothing renders off a quote before it is accepted, so
  * locking it would restrict the salesperson for no integrity gain.
@@ -91,7 +102,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     // primary supplier, or a transfer extra wins the route (see resolvePrimaryRoute). Kept as one
     // string literal — supabase-js infers the row type from the literal and gives up on a concat.
     .select(
-      "id, booking_id, subtotal, total, status, updated_at, override_reason, agent_commission, discount_amount, booking:bookings(primary_supplier_id)",
+      "id, booking_id, subtotal, total, status, updated_at, override_reason, agent_commission, discount_amount, booking:bookings(primary_supplier_id, stage, cancelled_at)",
     )
     .eq("id", id)
     .single()
@@ -104,12 +115,24 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return staleVersionResponse("quote", quote.updated_at)
   }
 
-  if (LOCKED_QUOTE_STATUSES.includes(quote.status)) {
+  const quoteBooking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
+  // Amend is an explicit opt-in that only ever applies to an accepted quote on a live booking. A
+  // plain PATCH (no `amend`) keeps the original lock below, so nothing reaches an accepted quote by
+  // accident; `amend: true` on any other status is refused rather than silently treated as an edit.
+  const isAmend = parsed.amend === true
+  if (isAmend) {
+    const reason = amendIneligibilityReason({
+      quoteStatus: quote.status,
+      bookingStage: quoteBooking?.stage ?? null,
+      bookingCancelledAt: quoteBooking?.cancelled_at ?? null,
+    })
+    if (reason) return NextResponse.json({ error: reason }, { status: 409 })
+  } else if (LOCKED_QUOTE_STATUSES.includes(quote.status)) {
     return NextResponse.json(
       {
         error:
           quote.status === "accepted"
-            ? "An accepted quote cannot be edited. Use Revise to create a new version."
+            ? "An accepted quote cannot be edited. Use Amend to change it in place, or Revise to create a new version."
             : `A ${quote.status} quote cannot be edited.`,
       },
       { status: 409 },
@@ -151,6 +174,29 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   for (const prev of previousLineItems ?? []) {
     const key = lineKey(prev.description, prev.qty, Number(prev.unit_price))
     existingKeys.set(key, (existingKeys.get(key) ?? 0) + 1)
+  }
+
+  // A draft can sit at pricing_incomplete until a fare is typed in; an accepted quote has no such
+  // state to fall back to, and the client is already invoiced off it — so an amendment may not
+  // introduce an unpriced line. An unchanged carry-over (e.g. an old R0 package child leg) is
+  // tolerated: it was already on the quote the client accepted.
+  if (isAmend) {
+    const carriedOver = new Map(existingKeys)
+    const introducesUnpricedLine = normalizedLineItems.some((lineItem) => {
+      const key = lineKey(lineItem.description, lineItem.qty, lineItem.unitPrice)
+      const remaining = carriedOver.get(key) ?? 0
+      if (remaining > 0) {
+        carriedOver.set(key, remaining - 1)
+        return false
+      }
+      return isMissingPricing(lineItem)
+    })
+    if (introducesUnpricedLine) {
+      return NextResponse.json(
+        { error: "Every new line needs a price before an accepted quote can be amended." },
+        { status: 400 },
+      )
+    }
   }
 
   const isManualPricing = normalizedLineItems.some((lineItem) => {
@@ -199,7 +245,6 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Failed to replace line items" }, { status: 500 })
   }
 
-  const quoteBooking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
   const { error: routeSyncError } = await syncBookingRoute(
     supabase,
     quote.booking_id,
@@ -246,25 +291,41 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
+  const amendNote = parsed.amendNote?.trim() || null
+  const auditMeta: Record<string, Json> = {
+    ...(isManualPricing && overrideReason ? { reason: overrideReason } : {}),
+    ...(isAmend
+      ? {
+          amendNote,
+          bookingId: quote.booking_id,
+          bookingStage: quoteBooking?.stage ?? null,
+          emailsSent: false,
+        }
+      : {}),
+  }
   const { error: auditError } = await supabase.from("audit_logs").insert({
     actor: profile.actorName,
     actor_user_id: user.id,
     entity_type: "Quote",
     entity_id: id,
-    action: "quote_edited",
+    // An amendment rewrites what an accepted booking costs, so it is its own action — easy to find
+    // when someone later asks why the invoice total moved without a revision.
+    action: isAmend ? "quote_amended" : "quote_edited",
     before_json: {
       subtotal: quote.subtotal,
       total: quote.total,
+      lineCount: previousLineItems?.length ?? 0,
       lineItems: previousLineItems ?? [],
     } as Json,
     after_json: {
       subtotal,
       total,
+      lineCount: lineItems.length,
       lineItems,
     } as Json,
+    ...(Object.keys(auditMeta).length > 0 ? { meta_json: auditMeta as Json } : {}),
     ...(isManualPricing && overrideReason
       ? {
-          meta_json: { reason: overrideReason } as Json,
           override_reason: overrideReason,
           overridden_by: user.id,
         }
@@ -273,6 +334,25 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   if (auditError) {
     return NextResponse.json({ error: "Failed to write quote edit audit log" }, { status: 500 })
+  }
+
+  // The accepted quote's total is what the booking's balance is measured against, so an amendment
+  // re-derives invoice_balance / overpaid_amount (and the paid flags on the invoice rows) from the
+  // recorded payments. The deposit invoice's amount is deliberately left alone. Nothing here sends
+  // email or voids anything. The lines are already saved, so a failure is reported as a warning
+  // rather than a 500 the client would retry into a stale-version 409.
+  let paymentState: BookingPaymentState | null = null
+  let balanceWarning: string | null = null
+  if (isAmend) {
+    try {
+      paymentState = await syncBookingPaymentState(supabase, quote.booking_id, {
+        actorName: profile.actorName,
+        actorUserId: user.id,
+      })
+    } catch (error) {
+      console.error("quotes:amend:balance-sync", error)
+      balanceWarning = "Quote amended, but the booking balance could not be refreshed. Reload the booking to check it."
+    }
   }
 
   const { data: updatedQuote, error: updatedQuoteError } = await supabase
@@ -291,5 +371,12 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     total,
     lineItems: normalizedLineItems,
     updatedAt: updatedQuote.updated_at,
+    ...(isAmend
+      ? {
+          amended: true,
+          invoiceBalance: paymentState?.invoiceBalance ?? null,
+          ...(balanceWarning ? { warning: balanceWarning } : {}),
+        }
+      : {}),
   })
 }

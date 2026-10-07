@@ -193,7 +193,9 @@ export function EmailSignatureSettingsEditor({ canEdit, onDirtyChange }: EmailSi
   const enabled = values.signature_enabled !== "false"
 
   return (
-    <div className="space-y-5">
+    // scroll-mb on every descendant: tabbing scrolls the focused control clear of the pinned save
+    // bar below instead of underneath it (WCAG 2.4.11) — scoped here, not on the app-wide scroller.
+    <div className="space-y-5 [&_*]:scroll-mb-28">
       <div className="flex items-center justify-between rounded-md border p-3">
         <div>
           <p className="text-sm font-medium">Append signature to outgoing emails</p>
@@ -209,17 +211,33 @@ export function EmailSignatureSettingsEditor({ canEdit, onDirtyChange }: EmailSi
         />
       </div>
 
+      {TEXT_FIELDS.map(({ key, label }) => (
+        <div key={key} className="space-y-1.5">
+          <Label htmlFor={key}>{label}</Label>
+          <HtmlBodyEditor
+            id={key}
+            variant="compact"
+            value={values[key] ?? ""}
+            disabled={!canEdit}
+            insertTokens={key === "signature_sender_layout" ? SENDER_LAYOUT_TOKENS : undefined}
+            onChange={(html) => setValue(key, html)}
+          />
+        </div>
+      ))}
+
+      {/* After the fields and pinned to the bottom of the viewport the whole way down the form —
+          the same place the brand editor's save bar sits below 2xl. At the top it was easy to miss. */}
       {canEdit && (
         <div
           className={cn(
-            "sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2",
+            "sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 shadow-md",
             isDirty ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950" : "bg-card",
           )}
         >
-          <p className="text-sm" role="status" aria-live="polite">
+          <p className={cn("text-sm", isDirty && "font-medium")} role="status" aria-live="polite">
             {saving ? "Saving changes…" : isDirty ? "Unsaved changes" : "All changes saved"}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleDiscard} disabled={!isDirty || saving}>
               <RotateCcw className="mr-1 h-3.5 w-3.5" aria-hidden />
               Discard
@@ -235,20 +253,6 @@ export function EmailSignatureSettingsEditor({ canEdit, onDirtyChange }: EmailSi
           </div>
         </div>
       )}
-
-      {TEXT_FIELDS.map(({ key, label }) => (
-        <div key={key} className="space-y-1.5">
-          <Label htmlFor={key}>{label}</Label>
-          <HtmlBodyEditor
-            id={key}
-            variant="compact"
-            value={values[key] ?? ""}
-            disabled={!canEdit}
-            insertTokens={key === "signature_sender_layout" ? SENDER_LAYOUT_TOKENS : undefined}
-            onChange={(html) => setValue(key, html)}
-          />
-        </div>
-      ))}
     </div>
   )
 }

@@ -580,7 +580,8 @@ export async function buildPackageQuoteLineItems({
      * regardless of transportOverride/the rate card. See booking_transport_requests.complimentary. */
     isComplimentaryTransport?: boolean
     /** Transfers/rentals only: the booking_transport_requests row this line priced, so the voucher
-     * builder can match the complimentary flag back to the specific captured trip. */
+     * builder can match the complimentary flag back to the specific captured trip and the invoice
+     * can name the trip's pick-up/drop-off. */
     transportRequestId?: string | null
     /** Transfers only: which basis this specific row priced under, so a per-person transfer's
      * three lines (and any surviving per-vehicle sibling on the same leg) are explicable in the
@@ -752,12 +753,10 @@ export async function buildPackageQuoteLineItems({
                 : {}),
             }
           : {}),
-        ...(isComplimentaryTransport
-          ? {
-              isComplimentaryTransport: true,
-              transportRequestId: transportRequestId ?? null,
-            }
-          : {}),
+        ...(isComplimentaryTransport ? { isComplimentaryTransport: true } : {}),
+        // Every priced trip, not just a comped one: the invoice names a transfer line by this
+        // trip's own pick-up/drop-off (lib/invoices/transport-line-points.ts).
+        ...(transportRequestId ? { transportRequestId } : {}),
         ...(transferPricingBasis ? { transferPricingBasis } : {}),
         ...(accommodationPricingBasis ? { accommodationPricingBasis } : {}),
         ...(qtyBasis ? { occupantCount: qtyBasis.occupants, chargedNights: qtyBasis.nights } : {}),
@@ -1480,6 +1479,7 @@ export async function buildPackageQuoteLineItems({
             unit,
             hideVariantSuffix: isTransfer,
             sourceCurrency: validRateCard.currency,
+            transportRequestId: transportRequest?.id ?? null,
           })
         }
       } else {

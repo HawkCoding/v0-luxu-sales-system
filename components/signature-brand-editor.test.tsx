@@ -127,6 +127,26 @@ describe("SignatureBrandEditor", () => {
     expect(screen.getByText("All changes saved")).toBeInTheDocument()
   })
 
+  it("puts the save bar after the live preview, not above the Name field", () => {
+    render(<Harness />)
+    const status = screen.getByText("All changes saved")
+    expect(status).toHaveAttribute("role", "status")
+    expect(status).toHaveAttribute("aria-live", "polite")
+    const following = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(following(screen.getByText("Live preview"), status)).toBe(true)
+    expect(following(screen.getByLabelText("Name"), status)).toBe(true)
+    expect(following(saveButton(), screen.getByLabelText("Name"))).toBe(false)
+  })
+
+  it("keeps the save bar pinned at every width and focused controls scrolled clear of it", () => {
+    const { container } = render(<Harness />)
+    const bar = screen.getByText("All changes saved").parentElement
+    expect(bar).toHaveClass("sticky", "bottom-3")
+    // A static bar from 2xl sat below the fold on wide, short screens.
+    expect(bar?.className).not.toContain("2xl:static")
+    expect(container.firstElementChild).toHaveClass("[&_*]:scroll-mb-28")
+  })
+
   it("never saves while typing — not on change, not on blur", () => {
     render(<Harness />)
 

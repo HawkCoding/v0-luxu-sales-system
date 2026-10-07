@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Boxes, Check, ChevronDown, ChevronUp, TriangleAlert } from "lucide-react"
+import { Boxes, Check, ChevronDown, ChevronUp, Pencil, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,7 +29,10 @@ import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
-import { isMissingPricing } from "@/lib/quotes/pricing-engine"
+import { calculateQuoteTotals, isMissingPricing, resolveLineTotal } from "@/lib/quotes/pricing-engine"
+import { AmendQuoteConfirmDialog } from "@/components/quotes/amend-quote-confirm-dialog"
+import { createAmendServicesTracker } from "@/lib/quotes/amend-quote"
+import { findChangedExistingLines, rebuildAcceptedQuoteFxRates } from "@/lib/quotes/amend-pricing"
 import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
@@ -92,10 +95,27 @@ interface BuildBookingDialogProps {
   /** Opens the dialog immediately on mount — used to skip the extra click right after a quote is created. */
   autoOpen?: boolean
   onAutoOpenHandled?: () => void
+  /** Present only for an ACCEPTED quote: the dialog runs in "Amend" mode — same build flow, but the
+   *  save is confirmed first and sent as `amend: true` (see lib/quotes/amend-quote.ts). */
+  amend?: AmendQuoteContext
+}
+
+/** The accepted quote's current money, so the amend confirmation can show old vs new total. */
+const AMEND_UNFINISHED_TOAST_ID = "amend-services-unfinished"
+
+export interface AmendQuoteContext {
+  currentTotal: number
+  /** The booking's pipeline stage — the confirmation warns when a higher total lands after the
+   *  voucher has gone out. */
+  bookingStage?: string | null
+  agentCommission: number
+  discountAmount: number
 }
 
 interface QuotePatchPayload {
   lineItems: QuoteLineItem[]
+  amend?: true
+  amendNote?: string
 }
 
 interface QuotePatchResponse {
@@ -104,6 +124,8 @@ interface QuotePatchResponse {
   total: number
   lineItems: QuoteLineItem[]
   updatedAt: string
+  amended?: boolean
+  warning?: string
 }
 
 export interface ServiceRow {
@@ -340,7 +362,21 @@ export function BuildBookingDialog({
   onApplied,
   autoOpen = false,
   onAutoOpenHandled,
+  amend,
 }: BuildBookingDialogProps) {
+  const isAmend = amend !== undefined
+  const [amendConfirmOpen, setAmendConfirmOpen] = useState(false)
+  /** Reused by "Save anyway" after a version conflict, so the note typed in the confirmation isn't lost. */
+  const lastAmendNoteRef = useRef<string | undefined>(undefined)
+  /** servicesWritten tracking for amend mode: Build (step 1) and Next (step 2) write to the booking's
+   *  services before the amendment is confirmed, so walking away afterwards leaves the booking and
+   *  the accepted quote disagreeing. The warning toast is persistent on purpose. */
+  const amendServicesRef = useRef(
+    createAmendServicesTracker({
+      warn: (message) => toast.warning(message, { id: AMEND_UNFINISHED_TOAST_ID, duration: Infinity }),
+      clearWarning: () => toast.dismiss(AMEND_UNFINISHED_TOAST_ID),
+    }),
+  )
   const { data: suppliers = [] } = useActiveSuppliers()
   const { data: rateTypesData } = useRateTypes()
   const rateTypes = useMemo(
@@ -373,6 +409,32 @@ export function BuildBookingDialog({
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const { rates: fxRates, asOf: fxAsOf, stale: fxStale, refresh: refreshFxRates, setRate: setFxRate } =
     useFxRates(open)
+  // Amend: the rates the accepted quote was priced at are PREFILLED over today's, so by default the
+  // existing lines keep their price. Every rate stays editable: a typed rate replaces its prefill,
+  // and the refresh button drops the prefill altogether (today's rates, as on a normal build). The
+  // hook's own load can't overwrite a prefill — it sits on top until one of those two happens. A
+  // currency only a new line uses was never prefilled and starts at today's rate.
+  const [typedFxCurrencies, setTypedFxCurrencies] = useState<string[]>([])
+  const [fxPrefillDropped, setFxPrefillDropped] = useState(false)
+  const acceptedFx = useMemo(
+    () => (isAmend ? rebuildAcceptedQuoteFxRates(existingLineItems, quoteCurrency, fxRates) : null),
+    [isAmend, existingLineItems, quoteCurrency, fxRates],
+  )
+  const pricingFxRates = useMemo(() => {
+    if (!acceptedFx || fxPrefillDropped) return fxRates
+    const prefill = Object.fromEntries(
+      Object.entries(acceptedFx.rates).filter(([code]) => !typedFxCurrencies.includes(code)),
+    )
+    return { ...fxRates, ...prefill }
+  }, [acceptedFx, fxPrefillDropped, fxRates, typedFxCurrencies])
+  function handleFxRateChange(currency: string, rate: number) {
+    setFxRate(currency, rate)
+    if (isAmend) setTypedFxCurrencies((prev) => (prev.includes(currency) ? prev : [...prev, currency]))
+  }
+  function handleFxRefresh() {
+    if (isAmend) setFxPrefillDropped(true)
+    return refreshFxRates()
+  }
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
@@ -421,6 +483,8 @@ export function BuildBookingDialog({
   const closeGuard = useDirtyCloseGuard({
     isDirty: quoteDraftDirty,
     onConfirmedClose: () => {
+      // Closing without a successful amend after a Next step already wrote the services.
+      if (isAmend) amendServicesRef.current.abandon()
       discardQuoteDraft()
       setOpen(false)
       reset()
@@ -672,6 +736,10 @@ export function BuildBookingDialog({
     setEditingTravellers(false)
     setTravellerDraft(null)
     clearQuoteConflict()
+    setAmendConfirmOpen(false)
+    amendServicesRef.current.reset()
+    setTypedFxCurrencies([])
+    setFxPrefillDropped(false)
   }
 
   // The Add-service picker opens on whatever this booking is actually for. Defaulting to Train was
@@ -738,6 +806,8 @@ export function BuildBookingDialog({
         return
       }
       const built = payload as BuildBookingResponse
+      // POST /build-booking adds/removes booking_services rows — a write, even before step 2.
+      if (isAmend) amendServicesRef.current.markWritten()
       setPackageDetail(built.packageDetail)
       // Rows added here start with no `legId` (addService can't know one yet). Without adopting the
       // ids the build just minted, a second Next -- Back, or adding another service -- would send
@@ -1028,6 +1098,7 @@ export function BuildBookingDialog({
       const patchBody = (await patchRes.json().catch(() => null)) as
         | { selections?: SavedServiceRowVersion[] }
         | null
+      if (isAmend) amendServicesRef.current.markWritten()
       const savedLegStates = patchBody?.selections
         ? adoptSavedServiceRows(legStates, patchBody.selections)
         : legStates
@@ -1066,8 +1137,12 @@ export function BuildBookingDialog({
           travelDate: derivedRange.start,
           selections: toApplySelections(savedLegStates),
           // Send the rates that were on screen so a hand-nudged rate prices the quote, rather
-          // than the server silently re-deriving a different one from its cache.
-          fxRates,
+          // than the server silently re-deriving a different one from its cache. On an amend these
+          // are the on-screen values — the accepted quote's prefilled rates plus anything typed.
+          fxRates: pricingFxRates,
+          // Amend: the server rebuilds the accepted quote's rates as defaults under these, so an
+          // untouched prefill prices exactly as accepted and a typed rate wins.
+          ...(isAmend ? { amend: true } : {}),
         }),
       })
       const payload = await res.json()
@@ -1090,7 +1165,7 @@ export function BuildBookingDialog({
     }
   }
 
-  async function applyToQuote(options?: { ignoreExpectedUpdatedAt: boolean }) {
+  async function applyToQuote(options?: { ignoreExpectedUpdatedAt?: boolean; amendNote?: string }) {
     if (previewLineItems.length === 0) return
     // The preview deliberately prices what it can; saving a quote that silently omits a leg is a
     // different matter. Guarded here as well as by the disabled button.
@@ -1099,7 +1174,12 @@ export function BuildBookingDialog({
       return
     }
     try {
-      await saveQuote({ lineItems: lineItemsToSave }, options)
+      const payload: QuotePatchPayload = isAmend
+        ? { lineItems: lineItemsToSave, amend: true, ...(options?.amendNote ? { amendNote: options.amendNote } : {}) }
+        : { lineItems: lineItemsToSave }
+      const saved = await saveQuote(payload, { ignoreExpectedUpdatedAt: options?.ignoreExpectedUpdatedAt })
+      setAmendConfirmOpen(false)
+      if (isAmend) amendServicesRef.current.complete()
       // Applying is the acceptance — stamp it rather than asking for a
       // separate click that gated nothing. Deliberately not gated on
       // `hasAutoFilledServices`: editing a field already flips that leg to
@@ -1107,17 +1187,36 @@ export function BuildBookingDialog({
       // there is usually nothing left marked auto. Only the first apply
       // stamps, so the record keeps whoever actually accepted the build.
       if (!confirmedStamp) await stampServicesConfirmed()
-      toast.success("Booking services applied to quote")
+      if (isAmend) {
+        toast.success(`Quote amended. New total ${formatMoney(saved.total, quoteCurrency)}. No emails were sent.`)
+        if (saved.warning) toast.warning(saved.warning)
+      } else {
+        toast.success("Booking services applied to quote")
+      }
       discardQuoteDraft()
       setOpen(false)
       reset()
       onApplied()
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to apply booking services"
+      setAmendConfirmOpen(false)
       setBuildError(message)
       toast.error(message)
     }
   }
+
+  // The figure the amend confirmation shows. The server recomputes it the same way (resolveLineTotal
+  // per line, then commission and discount off the subtotal), so this is a preview, not the record.
+  const amendedTotal = amend
+    ? calculateQuoteTotals(
+        lineItemsToSave.map((li) => ({ ...li, total: resolveLineTotal(li) })),
+        amend.agentCommission,
+        amend.discountAmount,
+      ).total
+    : 0
+  // With the FX lock in place, an existing line can only move if a supplier rate card was edited
+  // since the quote was accepted — listed on the confirmation rather than silently reverted.
+  const changedExistingLines = amend ? findChangedExistingLines(existingLineItems, lineItemsToSave) : []
 
   return (
     <Dialog
@@ -1131,10 +1230,17 @@ export function BuildBookingDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Boxes className="mr-2 h-4 w-4" />
-          Edit Quote
-        </Button>
+        {isAmend ? (
+          <Button variant="outline" size="sm" title="Change the services on this accepted quote without rewinding the booking">
+            <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            Amend
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">
+            <Boxes className="mr-2 h-4 w-4" />
+            Edit Quote
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent
         className="max-h-[92vh] grid-cols-1 overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl [&>*]:min-w-0"
@@ -1178,11 +1284,23 @@ export function BuildBookingDialog({
             </div>
           </div>
         )}
+        {isAmend && (
+          <div
+            role="note"
+            className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+          >
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
+            <span>
+              You are amending an accepted booking. Service details are saved to the booking when you
+              click Next; the quote price only changes after you confirm the amendment on the last step.
+            </span>
+          </div>
+        )}
         {step === "services" && (
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                Build this booking&apos;s services
+                {isAmend ? "Amend this booking's services" : <>Build this booking&apos;s services</>}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
@@ -1305,11 +1423,11 @@ export function BuildBookingDialog({
             <FxRateBanner
               foreignCurrencies={foreignCurrencies}
               quoteCurrency={quoteCurrency}
-              rates={fxRates}
+              rates={pricingFxRates}
               asOf={fxAsOf}
               stale={fxStale}
-              onRefresh={refreshFxRates}
-              onRateChange={setFxRate}
+              onRefresh={handleFxRefresh}
+              onRateChange={handleFxRateChange}
             />
 
             {!hasAutoFilledServices && confirmedStamp && (
@@ -1335,7 +1453,7 @@ export function BuildBookingDialog({
                         anchorContext={transferAnchorContext(leg.id)}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
-                        fxRates={fxRates}
+                        fxRates={pricingFxRates}
                         travelDate={travelDate}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                       />
@@ -1351,7 +1469,7 @@ export function BuildBookingDialog({
                         primarySupplierId={savedState?.primarySupplierId ?? null}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
-                        fxRates={fxRates}
+                        fxRates={pricingFxRates}
                       />
                     )}
                   </div>
@@ -1362,11 +1480,11 @@ export function BuildBookingDialog({
             <FxRateBanner
               foreignCurrencies={foreignCurrencies}
               quoteCurrency={quoteCurrency}
-              rates={fxRates}
+              rates={pricingFxRates}
               asOf={fxAsOf}
               stale={fxStale}
-              onRefresh={refreshFxRates}
-              onRateChange={setFxRate}
+              onRefresh={handleFxRefresh}
+              onRateChange={handleFxRateChange}
             />
 
             {validationErrors.length > 0 && (
@@ -1481,7 +1599,7 @@ export function BuildBookingDialog({
               <DialogTitle className="flex items-center gap-2">
                 {/* Nothing is being replaced on a first build — the old title
                     contradicted the body copy right below it. */}
-                {existingLineItemCount > 0 ? "Confirm replacement" : "Review quote lines"}
+                {isAmend ? "Review amendment" : existingLineItemCount > 0 ? "Confirm replacement" : "Review quote lines"}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
@@ -1606,16 +1724,44 @@ export function BuildBookingDialog({
               {quoteConflict && (
                 <Button
                   variant="outline"
-                  onClick={() => applyToQuote({ ignoreExpectedUpdatedAt: true })}
+                  onClick={() =>
+                    applyToQuote({ ignoreExpectedUpdatedAt: true, amendNote: lastAmendNoteRef.current })
+                  }
                   disabled={applying || incompleteLegs.length > 0}
                 >
                   Save anyway
                 </Button>
               )}
-              <Button onClick={() => applyToQuote()} disabled={applying || incompleteLegs.length > 0}>
-                {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
-              </Button>
+              {isAmend ? (
+                <Button onClick={() => setAmendConfirmOpen(true)} disabled={applying || incompleteLegs.length > 0}>
+                  {applying ? "Amending…" : "Amend quote…"}
+                </Button>
+              ) : (
+                <Button onClick={() => applyToQuote()} disabled={applying || incompleteLegs.length > 0}>
+                  {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
+                </Button>
+              )}
             </DialogFooter>
+            {amend && (
+              <AmendQuoteConfirmDialog
+                open={amendConfirmOpen}
+                onOpenChange={(next) => {
+                  setAmendConfirmOpen(next)
+                  // Cancel / Escape on the confirmation: the services are saved, the price is not.
+                  if (!next) amendServicesRef.current.abandon()
+                }}
+                currentTotal={amend.currentTotal}
+                bookingStage={amend.bookingStage ?? null}
+                changedLines={changedExistingLines}
+                newTotal={amendedTotal}
+                currency={quoteCurrency}
+                saving={applying}
+                onConfirm={(note) => {
+                  lastAmendNoteRef.current = note
+                  void applyToQuote({ amendNote: note })
+                }}
+              />
+            )}
           </>
         )}
       </DialogContent>

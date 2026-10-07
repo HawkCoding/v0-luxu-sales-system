@@ -2,16 +2,42 @@ import { displayRouteName } from "@/lib/routes/route-name"
 import type { PricingSnapshot } from "@/lib/types"
 
 /**
+ * The typed pick-up and drop-off of the captured trip a transfer/rental line priced
+ * (booking_transport_requests.pickup_point / dropoff_point) — see resolveTransportLinePoints.
+ */
+export interface InvoiceTransportPoints {
+  pickup: string
+  dropoff: string
+}
+
+/**
+ * "Sandton Hotel to Pretoria Station" — the places a guest recognises, never the route record's
+ * short code ("PTY - PHTL STA"). A trip that starts and ends at the same place (a rental collected
+ * and returned at one depot) names it once. Null when either end is blank.
+ */
+export function transportPointsLabel(points: InvoiceTransportPoints | null | undefined): string | null {
+  const pickup = points?.pickup.trim()
+  const dropoff = points?.dropoff.trim()
+  if (!pickup || !dropoff) return null
+  return pickup.toLowerCase() === dropoff.toLowerCase() ? pickup : `${pickup} to ${dropoff}`
+}
+
+/**
  * The invoice's "Travel Package Description" column reads better as
  * "Supplier — Route direction" than the verbose line description the pricing
  * engine stores on the quote (which carries suite type, variant vocabulary
  * and "- Adult"/"- Child" suffixes for the quote's own presentation). Derived
  * at render time from the line's pricing snapshot; the stored quote line
  * description is never rewritten.
+ *
+ * A comp is never spelled out here, matching the quote: the gifted night is already missing from
+ * the line's qty and a comped trip already totals R0. The voucher (which goes to the supplier)
+ * keeps its COMPLIMENTARY callouts.
  */
 export function describeInvoiceLine(
   storedDescription: string,
   snapshot: PricingSnapshot | null | undefined,
+  transportPoints?: InvoiceTransportPoints | null,
 ): string {
   // Transfer/car-rental supplier identity is never shown to the client — always generic.
   const isGenericService = snapshot?.serviceType === "transfer" || snapshot?.serviceType === "rental"
@@ -30,26 +56,17 @@ export function describeInvoiceLine(
   if (supplier) {
     base = detail ? `${supplier} — ${detail}` : supplier
   } else if (isGenericService) {
-    // Category word only, never the supplier — "Transfer <route>" / "Rental <route>".
+    // Category word only, never the supplier — "Transfer <pick-up> to <drop-off>". The route's own
+    // name is an internal short code, so it is only the fallback for a trip with no typed points.
     const categoryLabel = snapshot?.serviceType === "rental" ? "Rental" : "Transfer"
-    base = detail ? `${categoryLabel} ${detail}` : categoryLabel
+    const where = transportPointsLabel(transportPoints) ?? detail
+    base = where ? `${categoryLabel} ${where}` : categoryLabel
   } else {
     return storedDescription
   }
 
   if (snapshot?.passengerKind === "child") return `${base} (Child)`
   if (snapshot?.passengerKind === "infant") return `${base} (Infant)`
-
-  // A gifted night is missing from the line's qty, so the invoice says why rather than leaving a
-  // four-night stay billed as three nights unexplained.
-  const gifted = snapshot?.complimentaryNights ?? 0
-  if (gifted > 0) {
-    return `${base} (${gifted === 1 ? "first night complimentary" : `${gifted} nights complimentary`})`
-  }
-
-  if (snapshot?.isComplimentaryTransport === true) {
-    return `${base} (complimentary)`
-  }
 
   return base
 }

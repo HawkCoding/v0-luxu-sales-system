@@ -17,6 +17,8 @@ import { getDefaultCommission } from "@/lib/pricing/default-commission"
 import { BASE_CURRENCY, formatMoney, isSupportedCurrency, normaliseCurrency } from "@/lib/money"
 import { MissingFxRateError, roundFxRate } from "@/lib/pricing/convert-currency"
 import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
+import { mergeAmendFxRates, rebuildAcceptedQuoteFxRates } from "@/lib/quotes/amend-pricing"
+import type { PricingSnapshot } from "@/lib/types"
 
 /**
  * Build Booking's equivalent of POST /api/packages/[slug]/apply: prices booking_services instead
@@ -121,6 +123,13 @@ const applyServicesSchema = z.object({
    * cache already has a fallback for, not something worth blocking a save over.
    */
   fxRates: z.record(z.string(), z.number()).optional(),
+  /**
+   * Amend mode (an ACCEPTED quote changed in place — lib/quotes/amend-quote.ts): the rates the
+   * accepted quote was priced at, rebuilt server-side from its own line snapshots, become the
+   * defaults over the cache; `fxRates` (what the salesperson typed) still wins over them. A currency
+   * only a new line uses takes the current rate.
+   */
+  amend: z.literal(true).optional(),
 })
 
 interface RouteParams {
@@ -164,9 +173,13 @@ export async function POST(req: Request, { params }: RouteParams) {
   // and so foreign supplier rates convert into the currency this quote is already denominated in.
   const { data: quoteRow } = await supabase
     .from("quotes")
-    .select("commission_bonus, currency")
+    .select("commission_bonus, currency, status")
     .eq("id", parsed.quoteId)
     .maybeSingle()
+
+  if (parsed.amend && quoteRow?.status !== "accepted") {
+    return NextResponse.json({ error: "Only an accepted quote can be amended." }, { status: 409 })
+  }
 
   const quoteCurrency = normaliseCurrency(quoteRow?.currency)
   const commissionBonus = Number(quoteRow?.commission_bonus ?? 0)
@@ -196,9 +209,30 @@ export async function POST(req: Request, { params }: RouteParams) {
       ([currency, rate]) => isSupportedCurrency(currency) && Number.isFinite(rate) && rate > 0 && rate <= 10_000,
     ).map(([currency, rate]) => [currency, roundFxRate(rate)]),
   )
+  // Read once: amend mode rebuilds the accepted quote's FX rates from these snapshots, and the
+  // commission carry-over below reads the same rows.
+  const { data: quoteLineRows, error: quoteLinesError } = await supabase
+    .from("quote_line_items")
+    .select("pricing_snapshot")
+    .eq("quote_id", parsed.quoteId)
+    .order("sort_order")
+  if (quoteLinesError) return safeSupabaseError("services-apply:load-quote-lines", quoteLinesError)
+  const quoteLineSnapshots = (quoteLineRows ?? []).map((row) => row.pricing_snapshot)
+
   // What the salesperson saw wins over the cache, so the preview they approved is the price that
-  // gets saved. The base currency is pinned to 1 regardless of what the client sent.
-  const effectiveRates = { ...fx.rates, ...clientRates, [BASE_CURRENCY]: 1 }
+  // gets saved. On an amend the accepted quote's own rates are the defaults between the two: an
+  // untouched prefill prices existing lines exactly as accepted, and a typed rate still wins. The
+  // base currency is pinned to 1 regardless of what was sent.
+  const acceptedFx = parsed.amend
+    ? rebuildAcceptedQuoteFxRates(
+        quoteLineSnapshots.map((snapshot) => ({ pricingSnapshot: snapshot as PricingSnapshot | null })),
+        quoteCurrency,
+        { ...fx.rates, ...clientRates },
+      )
+    : null
+  const effectiveRates = acceptedFx
+    ? mergeAmendFxRates({ cachedRates: fx.rates, accepted: acceptedFx.rates, clientRates })
+    : { ...fx.rates, ...clientRates, [BASE_CURRENCY]: 1 }
 
   // Building the quote is the moment the legs are put in date order: every service is dated and
   // saved by now (the dialog's PATCH /services and PUT /transport-requests land first), and the
@@ -255,13 +289,6 @@ export async function POST(req: Request, { params }: RouteParams) {
   // discarding the salesperson's choice. Only the amount is re-priced, against the new subtotal
   // and the booking's current headcount. A quote that has never been built falls back to the
   // house default from Settings, so Apply still prices one unattended.
-  const { data: quoteLineRows, error: quoteLinesError } = await supabase
-    .from("quote_line_items")
-    .select("pricing_snapshot")
-    .eq("quote_id", parsed.quoteId)
-    .order("sort_order")
-  if (quoteLinesError) return safeSupabaseError("services-apply:load-quote-commission", quoteLinesError)
-  const quoteLineSnapshots = (quoteLineRows ?? []).map((row) => row.pricing_snapshot)
   const quoteCommission = readQuoteCommissionSetting(quoteLineSnapshots)
   // A quote Build Booking already priced, with its Commission cleared on the ledger since, keeps
   // no commission — the house default is only for a quote that has never been built.
@@ -320,7 +347,13 @@ export async function POST(req: Request, { params }: RouteParams) {
       incompleteLegs,
       currency: quoteCurrency,
       // Let the dialog render its mixed-currency banner without a second round trip.
-      fx: { rates: effectiveRates, asOf: fx.rows[0]?.asOf ?? null, stale: fx.stale },
+      fx: {
+        rates: effectiveRates,
+        asOf: fx.rows[0]?.asOf ?? null,
+        stale: fx.stale,
+        // Amend only: currencies whose default rate came from the accepted quote, not today's.
+        ...(acceptedFx ? { prefilledCurrencies: acceptedFx.prefilledCurrencies } : {}),
+      },
       legOrderChanged,
     })
   } catch (error) {

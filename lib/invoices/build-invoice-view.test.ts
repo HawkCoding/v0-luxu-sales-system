@@ -3,6 +3,7 @@ import {
   buildBillingParty,
   buildDaysLabel,
   buildDeparture,
+  buildInvoiceItems,
   invoiceItemSchedule,
   invoiceJourneyHeading,
   resolveDurationNights,
@@ -358,6 +359,98 @@ describe("invoiceItemSchedule", () => {
 
   it("leaves a line without a travel date undated", () => {
     expect(invoiceItemSchedule(null, [])).toEqual({ date: null, time: null })
+  })
+})
+
+describe("buildInvoiceItems", () => {
+  const base = {
+    source: "pricing_engine",
+    pricingMode: "rate_card",
+    packageId: "package-1",
+    packageName: "Booking",
+    routeId: "route-1",
+    suiteTypeId: null,
+    suiteTypeName: null,
+    rateCardId: null,
+    passengerKind: "adult",
+    baseUnitPrice: 0,
+    markupPct: 0,
+    singleSupplementPct: null,
+  } as const
+
+  // The two rows from the client's screenshot: a hotel with its first night gifted, and a comped
+  // transfer whose route record is named by a short code.
+  const hotelLine = {
+    description: "DaVinci Hotel & Suites - Bed & Breakfast — Deluxe Room",
+    qty: 2,
+    unit_price: 3_500,
+    total: 7_000,
+    pricing_snapshot: {
+      ...base,
+      legId: "service-hotel",
+      legLabel: "DaVinci Hotel & Suites",
+      supplierId: "supplier-hotel",
+      supplierName: "DaVinci Hotel & Suites",
+      supplierKind: "hotel_property",
+      routeName: "Bed & Breakfast",
+      travelDate: "2027-11-20",
+      serviceType: null,
+      complimentaryNights: 1,
+      stayNights: 3,
+    },
+  }
+  const transferLine = (snapshot: Pick<Partial<PricingSnapshot>, "isComplimentaryTransport" | "transportRequestId"> = {}) => ({
+    description: "Ulysses Tours & Transfers - Transfer",
+    qty: 1,
+    unit_price: 950,
+    total: 0,
+    pricing_snapshot: {
+      ...base,
+      legId: "service-transfer",
+      legLabel: "Ulysses Tours & Transfers",
+      supplierId: "supplier-transfers",
+      supplierName: "Ulysses Tours & Transfers",
+      supplierKind: "transfers",
+      routeName: "PTY - PHTL STA",
+      travelDate: "2027-11-22",
+      serviceType: "transfer",
+      isComplimentaryTransport: true,
+      transportRequestId: "request-1",
+      ...snapshot,
+    },
+  })
+  const tripRequest = {
+    id: "request-1",
+    service_id: "service-transfer",
+    service_type: "transfer",
+    suite_type_id: null,
+    pickup_point: "Sandton Hotel",
+    dropoff_point: "Pretoria Station",
+    pickup_at: "2027-11-22T09:00:00+00:00",
+  }
+
+  it("prints neither comp suffix, and names the transfer by its pick-up and drop-off", () => {
+    const items = buildInvoiceItems([hotelLine, transferLine()], [], [tripRequest])
+    expect(items.map((item) => item.description)).toEqual([
+      "DaVinci Hotel & Suites — Bed & Breakfast",
+      "Transfer Sandton Hotel to Pretoria Station",
+    ])
+    // Wording only: the qty and money columns are untouched.
+    expect(items.map(({ pax, unitPrice, total }) => ({ pax, unitPrice, total }))).toEqual([
+      { pax: 2, unitPrice: 3_500, total: 7_000 },
+      { pax: 1, unitPrice: 950, total: 0 },
+    ])
+  })
+
+  it("names an older charged transfer line (no request id stamped) by its service's trip", () => {
+    const line = transferLine({ isComplimentaryTransport: undefined, transportRequestId: undefined })
+    expect(buildInvoiceItems([line], [], [tripRequest])[0].description).toBe(
+      "Transfer Sandton Hotel to Pretoria Station",
+    )
+  })
+
+  it("falls back to the route name when no trip is supplied", () => {
+    expect(buildInvoiceItems([transferLine()])[0].description).toBe("Transfer PTY - PHTL STA")
   })
 })
 

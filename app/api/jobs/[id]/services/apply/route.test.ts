@@ -154,6 +154,10 @@ function createSupabaseMock(
     quoteLineSnapshots?: unknown[]
     /** app_settings rows (the house default commission lives here). */
     appSettings?: { key: string; value: string }[]
+    /** The quote's status — amend mode only prices an accepted quote. */
+    quoteStatus?: string
+    /** Cached fx_rates rows, base ZAR: { USD: 18 } reads "1 USD = 18 ZAR". */
+    cachedRates?: Record<string, number>
   } = {},
 ) {
   return {
@@ -238,7 +242,7 @@ function createSupabaseMock(
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { commission_bonus: commissionBonus, currency: "ZAR" },
+                data: { commission_bonus: commissionBonus, currency: "ZAR", status: options.quoteStatus ?? "draft" },
                 error: null,
               })),
             })),
@@ -248,7 +252,15 @@ function createSupabaseMock(
       // The route reads the FX cache before pricing so a foreign supplier rate can be converted
       // into the quote's currency. Empty is the all-ZAR case, which needs no rate at all.
       if (table === "fx_rates") {
-        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
+        const rows = Object.entries(options.cachedRates ?? {}).map(([code, rate]) => ({
+          base_currency: "ZAR",
+          quote_currency: code,
+          rate,
+          as_of: "2026-10-07",
+          source: "frankfurter",
+          fetched_at: new Date().toISOString(),
+        }))
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: rows, error: null })) })) }
       }
       throw new Error(`Unexpected table ${table}`)
     }),
@@ -592,6 +604,135 @@ describe("POST /api/jobs/[id]/services/apply", () => {
       const commissionLine = await commissionLineAfterRebuild()
 
       expect(commissionLine).toBeUndefined()
+    })
+  })
+
+  // Amend (accepted quote changed in place): the rates stamped on the accepted quote's own lines are
+  // the defaults (prefilled in the dialog), so existing lines keep their price unless the
+  // salesperson types a different rate — which then wins.
+  describe("amend: exchange rates from the accepted quote", () => {
+    const TRAIN_SELECTION = {
+      legId: TRAIN_SERVICE_ID,
+      selected: true,
+      units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+    }
+    const ACCEPTED_USD_LINE = {
+      source: "pricing_engine",
+      legId: TRAIN_SERVICE_ID,
+      sourceCurrency: "USD",
+      sourceUnitPrice: 100,
+      fxRate: 17.25,
+      fxRateAsOf: "2026-08-01",
+    }
+
+    function withCardCurrency(currency: string) {
+      const detail = buildDetail()
+      detail.legs[0] = {
+        ...detail.legs[0],
+        rateCards: detail.legs[0].rateCards.map((card) => ({ ...card, currency, pricePerPerson: 100 })),
+      }
+      helperMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+        detail,
+        services: [{ id: TRAIN_SERVICE_ID }],
+        units: [],
+      })
+    }
+
+    function useSupabase(options: Parameters<typeof createSupabaseMock>[2]) {
+      helperMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase: createSupabaseMock(true, 0, options),
+          user: { id: "abababab-abab-4aba-8aba-abababababab", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane Doe", name: "Jane", surname: "Doe", email: "u@example.com" },
+        },
+      })
+    }
+
+    async function adultLine(body: Record<string, unknown>) {
+      const response = await postApply({
+        jobId: JOB_ID,
+        quoteId: QUOTE_ID,
+        travelDate: "2026-06-01",
+        selections: [TRAIN_SELECTION],
+        ...body,
+      })
+      const payload = (await response.json()) as {
+        lineItems: { description: string; unitPrice: number; pricingSnapshot?: { fxRate?: number } }[]
+        fx: { prefilledCurrencies?: string[] }
+      }
+      return {
+        status: response.status,
+        line: payload.lineItems?.find((li) => li.description.endsWith("Adult")),
+        fx: payload.fx,
+      }
+    }
+
+    it("defaults an existing currency to the accepted quote's rate over the cache", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "accepted", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { status, line, fx } = await adultLine({ amend: true })
+
+      expect(status).toBe(200)
+      expect(line?.unitPrice).toBe(1725)
+      expect(line?.pricingSnapshot?.fxRate).toBe(17.25)
+      expect(fx.prefilledCurrencies).toEqual(["USD"])
+    })
+
+    it("prices identically when the dialog sends the prefilled rate back untouched", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "accepted", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { line } = await adultLine({ amend: true, fxRates: { USD: 17.25 } })
+
+      expect(line?.unitPrice).toBe(1725)
+      expect(line?.pricingSnapshot?.fxRate).toBe(17.25)
+    })
+
+    it("lets a rate the salesperson typed override the accepted-quote default", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "accepted", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { status, line } = await adultLine({ amend: true, fxRates: { USD: 19 } })
+
+      expect(status).toBe(200)
+      expect(line?.unitPrice).toBe(1900)
+    })
+
+    it("still uses today's rate for a currency only a new line uses", async () => {
+      withCardCurrency("EUR")
+      useSupabase({
+        quoteStatus: "accepted",
+        cachedRates: { USD: 18, EUR: 20 },
+        quoteLineSnapshots: [ACCEPTED_USD_LINE],
+      })
+
+      const { status, line } = await adultLine({ amend: true })
+
+      expect(status).toBe(200)
+      expect(line?.unitPrice).toBe(2000)
+    })
+
+    it("leaves a normal Build Booking on current rates (client rate over cache)", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "draft", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const cached = await adultLine({})
+      expect(cached.line?.unitPrice).toBe(1800)
+      expect(cached.fx.prefilledCurrencies).toBeUndefined()
+
+      const nudged = await adultLine({ fxRates: { USD: 19 } })
+      expect(nudged.line?.unitPrice).toBe(1900)
+    })
+
+    it("refuses amend pricing on a quote that isn't accepted", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "sent", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { status } = await adultLine({ amend: true })
+
+      expect(status).toBe(409)
     })
   })
 

@@ -20,6 +20,7 @@ import {
   isEmailTextColor,
   isEmailHighlightColor,
   isEmailInlineFontFamily,
+  isEmailLineHeight,
 } from "@/lib/email/appearance"
 
 // Tags the editor schema represents faithfully. An element is left as-is only
@@ -78,27 +79,43 @@ function describeElement(el: Element): string {
   return TAG_FALLBACK_LABELS[el.tagName] ?? humanizeToken(el.tagName.toLowerCase())
 }
 
+type StyleValidators = Record<string, (value: string) => boolean>
+
 // Per-declaration validators for the styled-span allowlist below. Each
 // property may appear at most once; every declaration present must pass its
 // validator for the span to stay rich.
-const STYLED_SPAN_VALIDATORS: Record<string, (value: string) => boolean> = {
+const STYLED_SPAN_VALIDATORS: StyleValidators = {
   "font-size": isEmailInlineFontSize,
   "color": isEmailTextColor,
   "background-color": isEmailHighlightColor,
   "font-family": isEmailInlineFontFamily,
 }
 
+// Same idea for the block tags the toolbar's line spacing control styles
+// (lib/templates/rich-text/line-height.ts): a <p> or <li> stays rich only
+// when its style is exactly an allowlisted line-height.
+const STYLED_BLOCK_VALIDATORS: StyleValidators = {
+  "line-height": isEmailLineHeight,
+}
+
+const STYLE_VALIDATORS_BY_TAG: Record<string, StyleValidators> = {
+  SPAN: STYLED_SPAN_VALIDATORS,
+  P: STYLED_BLOCK_VALIDATORS,
+  LI: STYLED_BLOCK_VALIDATORS,
+}
+
 /**
- * True for a <span> whose only attribute is a `style` holding some subset of
- * `font-size` / `color` / `background-color` / `font-family` (each at most
- * once), every value allowlisted — the styled shapes the editor schema
- * (TextStyle + FontSize/Color/BackgroundColor/FontFamily) represents
- * faithfully, including any combination of the four on the same run. Anything else (an unrecognised
- * property, a duplicate, an off-list value, a class) is left opaque so it
- * can't be silently dropped or mixed up with an unrelated style.
+ * True for an element whose only attribute is a `style` holding some subset of
+ * the properties `validators` knows (each at most once), every value
+ * allowlisted. For a <span> that's `font-size` / `color` / `background-color`
+ * / `font-family` — the styled shapes the editor schema (TextStyle +
+ * FontSize/Color/BackgroundColor/FontFamily) represents faithfully, including
+ * any combination of the four on the same run; for a <p>/<li> it's
+ * `line-height` (BlockLineHeight). Anything else (an unrecognised property, a
+ * duplicate, an off-list value, a class) is left opaque so it can't be
+ * silently dropped or mixed up with an unrelated style.
  */
-function isAllowedStyledSpan(el: Element): boolean {
-  if (el.tagName !== "SPAN") return false
+function hasOnlyAllowedStyle(el: Element, validators: StyleValidators): boolean {
   const attrNames = el.getAttributeNames()
   if (attrNames.length !== 1 || attrNames[0] !== "style") return false
   const declarations = (el.getAttribute("style") ?? "")
@@ -114,17 +131,21 @@ function isAllowedStyledSpan(el: Element): boolean {
     const value = match[2].trim()
     if (seen.has(property)) return false
     seen.add(property)
-    const validate = STYLED_SPAN_VALIDATORS[property]
+    const validate = validators[property]
     if (!validate || !validate(value)) return false
   }
   return true
 }
 
-/** True when an element and every descendant are representable rich tags with no style/class. */
+/**
+ * True when an element and every descendant are representable rich tags with
+ * no class and no style beyond the allowlisted shapes above.
+ */
 function isPlainRich(el: Element): boolean {
   if (!RICH_TAGS.has(el.tagName)) return false
-  if (el.tagName === "SPAN" && el.hasAttribute("style")) {
-    if (!isAllowedStyledSpan(el)) return false
+  const styleValidators = STYLE_VALIDATORS_BY_TAG[el.tagName]
+  if (styleValidators && el.hasAttribute("style")) {
+    if (!hasOnlyAllowedStyle(el, styleValidators)) return false
   } else if (el.hasAttribute("style") || el.hasAttribute("class")) {
     return false
   }
@@ -242,21 +263,27 @@ export function fromEditorHtml(editorHtml: string): string {
   }
 
   let result = parts.join("")
-  // Drop a single trailing empty paragraph artefact the editor appends.
-  result = result.replace(/<p><\/p>\s*$/, "")
+  // Drop a single trailing empty paragraph artefact the editor appends — also
+  // when a select-all line spacing change has styled it.
+  result = result.replace(/<p(?: style="[^"]*")?><\/p>\s*$/, "")
   return result
 }
 
 /**
  * Collapse `<li><p>x</p></li>` to `<li>x</li>`. The editor's listItem content is
  * `paragraph block*`, so bullets serialize with an inner <p> that renders extra
- * margin in email clients.
+ * margin in email clients. A style on the inner <p> (only ever an allowlisted
+ * line-height — the editor schema renders nothing else there) moves to the
+ * <li> so it isn't lost with the <p>.
  */
 function unwrapListItemParagraphs(el: Element): string {
   if (el.tagName !== "UL" && el.tagName !== "OL") return el.outerHTML
   for (const li of Array.from(el.querySelectorAll("li"))) {
-    if (li.children.length === 1 && li.firstElementChild?.tagName === "P") {
-      li.innerHTML = li.firstElementChild.innerHTML
+    const paragraph = li.firstElementChild
+    if (li.children.length === 1 && paragraph?.tagName === "P") {
+      const paragraphStyle = paragraph.getAttribute("style")
+      if (paragraphStyle) li.setAttribute("style", paragraphStyle)
+      li.innerHTML = paragraph.innerHTML
     }
   }
   return el.outerHTML

@@ -45,6 +45,13 @@ describe("toEditorHtml", () => {
     expect(warnings).toEqual([])
   })
 
+  it.each(["11px", "13px", "15px"])("leaves an in-between %s font-size span as rich content", (size) => {
+    const src = `<p>Hi <span style="font-size: ${size}">sized</span> text</p>`
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+    expect(canRoundTrip(src, BLOCK_TOKENS)).toBe(true)
+  })
+
   it("lifts an off-allowlist font-size span into an opaque placeholder", () => {
     const src = '<p>Hi <span style="font-size: 72px">huge</span></p>'
     const { html } = toEditorHtml(src, BLOCK_TOKENS)
@@ -132,6 +139,41 @@ describe("toEditorHtml", () => {
     expect(html).toContain("data-preserved-block")
   })
 
+  it.each(["1", "1.15", "1.5", "2"])("leaves a paragraph with an allowlisted line-height of %s as rich content", (value) => {
+    const src = `<p style="line-height: ${value};">Spaced</p><p>Plain</p>`
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+    expect(html).not.toContain("data-preserved-block")
+  })
+
+  it("leaves list items with an allowlisted line-height as rich content", () => {
+    const src = '<ul><li style="line-height: 1.5;">One</li><li>Two</li></ul>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+    expect(canRoundTrip(src, BLOCK_TOKENS)).toBe(true)
+  })
+
+  it.each([
+    ["an off-allowlist number", "line-height: 1.4"],
+    ["a px value", "line-height: 24px"],
+    ["a CSS injection attempt", "line-height: 1.5; background: url(evil)"],
+    ["a property the toolbar never sets on a block", "margin: 0"],
+    ["a duplicate line-height", "line-height: 1.5; line-height: 2"],
+  ])("lifts a paragraph styled with %s into an opaque placeholder", (_label, style) => {
+    const { html } = toEditorHtml(`<p style="${style}">x</p>`, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a list whose item carries an off-allowlist line-height into an opaque placeholder", () => {
+    const { html } = toEditorHtml('<ul><li style="line-height: 3">x</li></ul>', BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a line-height paragraph that also carries a class into an opaque placeholder", () => {
+    const { html } = toEditorHtml('<p class="foo" style="line-height: 1.5">x</p>', BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
   it("does not treat a non-block token as a block", () => {
     const src = "<p>Hello {{customerName}}</p>"
     const { html } = toEditorHtml(src, BLOCK_TOKENS)
@@ -172,8 +214,19 @@ describe("fromEditorHtml", () => {
     expect(fromEditorHtml(editorHtml)).toBe("<ul><li>one</li><li>two</li></ul>")
   })
 
+  it("moves a line-height on a list item's inner <p> to the <li> when unwrapping", () => {
+    const editorHtml = '<ul><li><p style="line-height: 1.5;">one</p></li><li style="line-height: 2;"><p>two</p></li></ul>'
+    expect(fromEditorHtml(editorHtml)).toBe(
+      '<ul><li style="line-height: 1.5;">one</li><li style="line-height: 2;">two</li></ul>',
+    )
+  })
+
   it("strips a single trailing empty paragraph", () => {
     expect(fromEditorHtml("<p>body</p><p></p>")).toBe("<p>body</p>")
+  })
+
+  it("strips a trailing empty paragraph that a select-all line spacing change styled", () => {
+    expect(fromEditorHtml('<p>body</p><p style="line-height: 2;"></p>')).toBe("<p>body</p>")
   })
 })
 

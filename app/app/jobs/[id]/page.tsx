@@ -1034,6 +1034,8 @@ export default function JobDetailPage() {
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
             bookingHeadcount={(enquiry?.noOfAdults ?? 0) + (enquiry?.noOfChildren ?? 0)}
             emailImportNeedsReview={emailReviewBlocking}
+            bookingStage={job.stage}
+            bookingCancelledAt={job.cancelledAt ?? null}
             mutate={mutate}
             autoOpenBuildBookingQuoteId={autoOpenBuildBookingQuoteId}
             onAutoOpenBuildBookingHandled={() => setAutoOpenBuildBookingQuoteId(null)}
