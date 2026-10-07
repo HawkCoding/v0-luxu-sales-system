@@ -11,6 +11,43 @@ export interface QuoteDetailSection {
   bullets: QuoteDetailBullet[]
 }
 
+/**
+ * The details page sets every line without a closing colon (client markup, 2026-10-06): a
+ * supplier's own "# Onboard:" subheading prints "Onboard". Only a colon ending the line goes; one
+ * inside it ("Check-in 14:00", "Note: smart casual") is part of the sentence and stays.
+ */
+export function withoutTrailingColon(text: string): string {
+  return text.trim().replace(/(?:\s*:)+$/, "")
+}
+
+/**
+ * Plain detail lines (the exclusions) without their closing colons, de-duplicated afterwards: the
+ * colon is what told "Visas" and "Visas:" apart, so a match is only visible once it is gone.
+ * Case-insensitive, first spelling wins, blank lines drop out.
+ */
+export function uniqueDetailLines(lines: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const line of lines) {
+    const text = withoutTrailingColon(line)
+    const key = text.replace(/\s+/g, " ").toLowerCase()
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    out.push(text)
+  }
+  return out
+}
+
+/** The section with every title line and bullet passed through withoutTrailingColon; a line left
+ * empty (a bare ":") drops out, and so does a section left with no title or no bullets. */
+function withoutLabelColons(section: QuoteDetailSection): QuoteDetailSection | null {
+  const title = section.title.map(withoutTrailingColon).filter(Boolean)
+  const bullets = section.bullets
+    .map((bullet) => ({ ...bullet, text: withoutTrailingColon(bullet.text) }))
+    .filter((bullet) => bullet.text.length > 0)
+  return title.length > 0 && bullets.length > 0 ? { title, bullets } : null
+}
+
 /** A hotel's own description, one bullet per paragraph (the supplier form's line breaks). */
 function paragraphBullets(text: string | null | undefined): QuoteDetailBullet[] {
   return (text ?? "")
@@ -22,7 +59,9 @@ function paragraphBullets(text: string | null | undefined): QuoteDetailBullet[] 
 
 function sectionFor(block: VoucherServiceBlock): QuoteDetailSection | null {
   const d = block.serviceData
-  const supplier = block.contactDetails.name?.trim() || block.title?.trim() || null
+  // Stripped here too, so a name typed "Rovos Rail:" never reads "Rovos Rail: Inclusions".
+  const supplier =
+    withoutTrailingColon(block.contactDetails.name ?? "") || withoutTrailingColon(block.title ?? "") || null
   const inclusions = nestBulletLines(parseBulletLines(d.inclusions))
 
   switch (block.serviceType) {
@@ -34,10 +73,11 @@ function sectionFor(block: VoucherServiceBlock): QuoteDetailSection | null {
       return supplier && bullets.length > 0 ? { title: [supplier], bullets } : null
     }
     case "train":
-      // "Rovos Rail Includes:" — the route already heads the first page's journey box, so the
-      // details page names the operator alone (client markup, 2026-09-29), unless the operator has
-      // two different lists to tell apart (see buildQuoteDetailSections).
-      return supplier && inclusions.length > 0 ? { title: [`${supplier} Includes:`], bullets: inclusions } : null
+      // "Rovos Rail Inclusions" — the route already heads the first page's journey box, so the
+      // details page names the operator alone (client markup, 2026-09-29; "Inclusions", no colon,
+      // 2026-10-06), unless the operator has two different lists to tell apart (see
+      // buildQuoteDetailSections).
+      return supplier && inclusions.length > 0 ? { title: [`${supplier} Inclusions`], bullets: inclusions } : null
     case "tour": {
       const tourType = d.suiteType?.trim() || null
       const bullets = [...paragraphBullets(d.itineraryDescription), ...inclusions]
@@ -62,16 +102,18 @@ export function buildQuoteDetailSections(blocks: VoucherServiceBlock[]): QuoteDe
   const sections: Array<{ section: QuoteDetailSection; trainRoute: string | null }> = []
   const seen = new Set<string>()
   for (const block of blocks) {
-    const section = sectionFor(block)
+    const draft = sectionFor(block)
+    const section = draft ? withoutLabelColons(draft) : null
     if (!section) continue
     const key = `${section.title.join("|")}#${section.bullets.map((bullet) => bullet.text).join("|")}`
     if (seen.has(key)) continue
     seen.add(key)
-    sections.push({ section, trainRoute: block.serviceType === "train" ? displayRouteName(block.serviceData.route) : null })
+    const trainRoute = block.serviceType === "train" ? withoutTrailingColon(displayRouteName(block.serviceData.route) ?? "") : ""
+    sections.push({ section, trainRoute: trainRoute || null })
   }
 
   // One operator with two different inclusion lists (e.g. a short and a long journey) would print
-  // two identical "Rovos Rail Includes:" headings; only then does each name its route beneath.
+  // two identical "Rovos Rail Inclusions" headings; only then does each name its route beneath.
   const headingCounts = new Map<string, number>()
   for (const { section } of sections) {
     const heading = section.title[0]

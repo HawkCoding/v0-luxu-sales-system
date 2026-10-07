@@ -1,7 +1,7 @@
 import { Hr, Img, Link, Section, Text } from "@react-email/components"
 import type { CSSProperties } from "react"
 import { EMAIL_COLORS, SIGNATURE_BANNER_MAX_WIDTH, signatureBannerSize } from "@/lib/email/email-chrome"
-import { renderSenderLayout } from "@/lib/email/sender-layout"
+import { renderSenderLayout, SIGNATURE_TEXT_COLOR, styleSignatureLinks } from "@/lib/email/sender-layout"
 import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
 interface EmailSignatureProps {
@@ -9,6 +9,9 @@ interface EmailSignatureProps {
 }
 
 const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" | ")
+
+/** Links in the small-print lines take the small-print colour, not a client's default blue. */
+const mutedLinks = (html: string) => styleSignatureLinks(html, EMAIL_COLORS.mutedText)
 
 /**
  * Per-sender signature (name/title/contact) plus the picked division's
@@ -24,10 +27,15 @@ const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter
  * lib/email/sender-layout.ts), so they're injected via dangerouslySetInnerHTML
  * rather than built from JSX — the source of truth for their markup is
  * already-sanitized HTML, not React children.
+ *
+ * Every link in that HTML gets an inline colour matching its line (the
+ * sender block's dark text, the small print's muted tone) and no underline
+ * — see styleSignatureLinks. Badge links keep their own style below.
  */
 export function EmailSignature({ signature }: EmailSignatureProps) {
   const { fullName, jobTitle, tel, cell, fax, email, website, brand } = signature
 
+  // renderSenderLayout already styles its links in SIGNATURE_TEXT_COLOR.
   const senderHtml = renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website })
   const smallPrintLine = joinParts([brand.registrationLine, brand.tradingHours])
   const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
@@ -41,20 +49,22 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
       ) : null}
 
       {brand.officeAddress ? (
-        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.officeAddress }} />
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.officeAddress) }} />
       ) : null}
 
       <Hr style={hr} />
 
       {brand.companyLine ? (
-        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.companyLine }} />
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.companyLine) }} />
       ) : null}
-      {smallPrintLine ? <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: smallPrintLine }} /> : null}
+      {smallPrintLine ? (
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(smallPrintLine) }} />
+      ) : null}
       {brand.divisionsLine ? (
-        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.divisionsLine }} />
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.divisionsLine) }} />
       ) : null}
       {brand.confidentiality ? (
-        <Text style={confidentiality} dangerouslySetInnerHTML={{ __html: brand.confidentiality }} />
+        <Text style={confidentiality} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.confidentiality) }} />
       ) : null}
 
       {brand.badges.length > 0 ? (
@@ -105,7 +115,7 @@ const senderLines = {
   fontSize: "13px",
   lineHeight: "16px",
   msoLineHeightRule: "exactly",
-  color: "#3d3831",
+  color: SIGNATURE_TEXT_COLOR,
 } as CSSProperties
 
 // Fluid-hybrid image: the width/height attributes (signatureBannerSize) size

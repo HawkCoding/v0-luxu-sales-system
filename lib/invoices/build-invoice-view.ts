@@ -5,6 +5,11 @@ import { INVOICE_PRODUCT_LABEL, invoiceRowsForBlock } from "@/lib/invoices/depar
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
 import { foldCommissionLines } from "@/lib/invoices/fold-commission-line"
+import {
+  INVOICE_TRANSPORT_REQUEST_COLUMNS,
+  resolveTransportLinePoints,
+  type InvoiceTransportRequest,
+} from "@/lib/invoices/transport-line-points"
 import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
 import { loadQuoteConfig } from "@/lib/quotes/load-quote-config"
 import type { PerPersonLine } from "@/lib/invoices/per-person-totals"
@@ -249,14 +254,19 @@ export function buildInvoiceItems(
     >
   >,
   blocks: readonly VoucherServiceBlock[] = [],
+  /** The booking's captured trips, so a transfer/rental line names its pick-up and drop-off. */
+  transportRequests: readonly InvoiceTransportRequest[] = [],
 ): InvoiceItem[] {
   // Commission is an internal figure, never a client-facing line. Fold it into the largest
   // travel line rather than dropping it, so the printed items still sum to the subtotal.
-  return foldCommissionLines(lineItems).map((item) => {
-    const snapshot = (item.pricing_snapshot as PricingSnapshot | null) ?? null
+  const folded = foldCommissionLines(lineItems)
+  const snapshots = folded.map((item) => (item.pricing_snapshot as PricingSnapshot | null) ?? null)
+  const transportPoints = resolveTransportLinePoints(snapshots, transportRequests)
+  return folded.map((item, index) => {
+    const snapshot = snapshots[index]
     return {
       pax: Number(item.qty ?? 0),
-      description: describeInvoiceLine(item.description, snapshot),
+      description: describeInvoiceLine(item.description, snapshot, transportPoints[index]),
       unitPrice: Number(item.unit_price ?? 0),
       total: Number(item.total ?? 0),
       ...invoiceItemSchedule(snapshot, blocks),
@@ -282,6 +292,39 @@ const STOCK_JOURNEY_HEADING = "Your Journey"
 export function invoiceJourneyHeading(setting: string | null | undefined, primarySupplierKind: SupplierKind | null): string {
   const heading = setting?.trim() || STOCK_JOURNEY_HEADING
   return heading === STOCK_JOURNEY_HEADING && primarySupplierKind === "train_operator" ? "Your Train Journey" : heading
+}
+
+/**
+ * The booking's captured trips, read only when the quote priced a transfer or rental. A failed read
+ * degrades to none — the lines then name the route, as they did before trips were read here.
+ */
+async function loadInvoiceTransportRequests(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  lineItems: Parameters<typeof buildInvoiceItems>[0],
+): Promise<InvoiceTransportRequest[]> {
+  const pricesTransport = lineItems.some((item) => {
+    const serviceType = (item.pricing_snapshot as PricingSnapshot | null)?.serviceType
+    return serviceType === "transfer" || serviceType === "rental"
+  })
+  if (!pricesTransport) return []
+
+  const { data, error } = await supabase
+    .from("booking_transport_requests")
+    .select(INVOICE_TRANSPORT_REQUEST_COLUMNS)
+    .eq("booking_id", bookingId)
+    .order("sort_order", { ascending: true })
+
+  if (error) {
+    void logError({
+      severity: "Warning",
+      source: "invoice-pdf",
+      message: "Invoice transfer pick-up/drop-off points could not be loaded",
+      details: { bookingId, error: error.message },
+    })
+    return []
+  }
+  return data ?? []
 }
 
 export interface BuildInvoiceViewOptions {
@@ -391,7 +434,11 @@ export async function buildInvoiceView(
     })
   }
 
-  const items = buildInvoiceItems(lineItemRows, blocks)
+  const items = buildInvoiceItems(
+    lineItemRows,
+    blocks,
+    await loadInvoiceTransportRequests(supabase, bookingId, lineItemRows),
+  )
 
   const guestNames = (travellers ?? [])
     .map((traveller) =>

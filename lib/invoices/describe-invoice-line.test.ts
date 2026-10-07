@@ -193,15 +193,114 @@ describe("describeInvoiceLine", () => {
     expect(describeInvoiceLine("line", snapshot)).toBe("Wild Horizons - Tours — Sundowner Cruise - Zimbabwe (Child)")
   })
 
-  it("explains a hotel line billed for fewer nights than the stay", () => {
-    const snapshot = makeSnapshot({
-      supplierName: "Table Bay Hotel",
-      routeName: "Bed & Breakfast",
-      complimentaryNights: 1,
-      stayNights: 4,
+  describe("complimentary wording (never shown to the client, matching the quote)", () => {
+    it("drops the first-night-complimentary suffix from a hotel line", () => {
+      const snapshot = makeSnapshot({
+        supplierName: "DaVinci Hotel & Suites",
+        routeName: "Bed & Breakfast",
+        complimentaryNights: 1,
+        stayNights: 2,
+      })
+      expect(describeInvoiceLine("DaVinci Hotel & Suites - Bed & Breakfast — Deluxe Room", snapshot)).toBe(
+        "DaVinci Hotel & Suites — Bed & Breakfast",
+      )
     })
-    expect(describeInvoiceLine("Table Bay Hotel - Bed & Breakfast — Deluxe Room", snapshot)).toBe(
-      "Table Bay Hotel — Bed & Breakfast (first night complimentary)",
-    )
+
+    it("drops the N-nights-complimentary suffix from a hotel line", () => {
+      const snapshot = makeSnapshot({
+        supplierName: "Table Bay Hotel",
+        routeName: "Bed & Breakfast",
+        complimentaryNights: 2,
+        stayNights: 4,
+      })
+      expect(describeInvoiceLine("line", snapshot)).toBe("Table Bay Hotel — Bed & Breakfast")
+    })
+
+    it("drops the complimentary suffix from a comped transfer line", () => {
+      const snapshot = makeSnapshot({
+        supplierName: "Ulysses Tours & Transfers",
+        routeName: "PTY - PHTL STA",
+        serviceType: "transfer",
+        isComplimentaryTransport: true,
+        transportRequestId: "request-1",
+      })
+      expect(describeInvoiceLine("line", snapshot)).toBe("Transfer PTY - PHTL STA")
+      expect(describeInvoiceLine("line", snapshot, { pickup: "Sandton Hotel", dropoff: "Pretoria Station" })).toBe(
+        "Transfer Sandton Hotel to Pretoria Station",
+      )
+    })
+
+    it("still appends (Child) on a hotel line with a gifted night", () => {
+      const snapshot = makeSnapshot({
+        supplierName: "Table Bay Hotel",
+        routeName: "Bed & Breakfast",
+        complimentaryNights: 1,
+        passengerKind: "child",
+      })
+      expect(describeInvoiceLine("line", snapshot)).toBe("Table Bay Hotel — Bed & Breakfast (Child)")
+    })
+  })
+
+  describe("transfer/rental pick-up and drop-off", () => {
+    const transferSnapshot = (overrides: Partial<PricingSnapshot> = {}) =>
+      makeSnapshot({
+        supplierName: "Ulysses Tours & Transfers",
+        legLabel: "Ulysses Tours & Transfers",
+        routeName: "PTY - PHTL STA",
+        serviceType: "transfer",
+        ...overrides,
+      })
+
+    it("names the trip by its full pick-up and drop-off, not the route's short code", () => {
+      expect(
+        describeInvoiceLine("line", transferSnapshot(), { pickup: "Sandton Hotel", dropoff: "Pretoria Station" }),
+      ).toBe("Transfer Sandton Hotel to Pretoria Station")
+    })
+
+    it("never names the transfer supplier", () => {
+      const text = describeInvoiceLine("line", transferSnapshot(), { pickup: "A", dropoff: "B" })
+      expect(text).not.toContain("Ulysses")
+    })
+
+    it("falls back to the route name when the trip has no points", () => {
+      expect(describeInvoiceLine("line", transferSnapshot(), null)).toBe("Transfer PTY - PHTL STA")
+      expect(describeInvoiceLine("line", transferSnapshot(), { pickup: "Sandton Hotel", dropoff: "  " })).toBe(
+        "Transfer PTY - PHTL STA",
+      )
+    })
+
+    it("uses the category word alone with neither points nor a route", () => {
+      expect(describeInvoiceLine("line", transferSnapshot({ routeName: null }), null)).toBe("Transfer")
+    })
+
+    it("names a rental by its pick-up and drop-off", () => {
+      const snapshot = transferSnapshot({ supplierName: "Avis", routeName: "CPT APT", serviceType: "rental" })
+      expect(
+        describeInvoiceLine("line", snapshot, { pickup: "Cape Town Airport", dropoff: "V&A Waterfront" }),
+      ).toBe("Rental Cape Town Airport to V&A Waterfront")
+    })
+
+    it("names a rental collected and returned at one place once", () => {
+      const snapshot = transferSnapshot({ supplierName: "Avis", routeName: "CPT APT", serviceType: "rental" })
+      expect(
+        describeInvoiceLine("line", snapshot, { pickup: "Cape Town Airport", dropoff: "cape town airport" }),
+      ).toBe("Rental Cape Town Airport")
+    })
+
+    it("still appends (Child)/(Infant) to a per-person transfer named by its points", () => {
+      const points = { pickup: "Sandton Hotel", dropoff: "Pretoria Station" }
+      expect(describeInvoiceLine("line", transferSnapshot({ passengerKind: "child" }), points)).toBe(
+        "Transfer Sandton Hotel to Pretoria Station (Child)",
+      )
+      expect(describeInvoiceLine("line", transferSnapshot({ passengerKind: "infant" }), points)).toBe(
+        "Transfer Sandton Hotel to Pretoria Station (Infant)",
+      )
+    })
+
+    it("ignores points on a line that is not a transfer or rental", () => {
+      expect(describeInvoiceLine("line", makeSnapshot(), { pickup: "A", dropoff: "B" })).toBe(
+        "Rovos Rail — Pretoria to Cape Town",
+      )
+    })
   })
 })

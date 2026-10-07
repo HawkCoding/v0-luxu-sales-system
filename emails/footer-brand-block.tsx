@@ -27,11 +27,18 @@ export function FooterBrandBlock({ brand }: FooterBrandBlockProps) {
         <tbody>
           <tr>
             {logoUrl ? (
-              <td style={sealCell}>
-                <Img alt={FOOTER_BRAND_ALT} height="72" src={logoUrl} style={seal} width="72" />
+              <td className={BRAND_SEAL_CELL_CLASS} style={sealCell} width={SEAL_CELL_WIDTH}>
+                <Img
+                  alt={FOOTER_BRAND_ALT}
+                  className={BRAND_SEAL_CLASS}
+                  height="72"
+                  src={logoUrl}
+                  style={seal}
+                  width="72"
+                />
               </td>
             ) : null}
-            <td style={textCell}>
+            <td className={BRAND_TEXT_CELL_CLASS} style={textCell}>
               <Text style={divisionLine}>{heading}</Text>
               <Text style={productLine}>{subheading}</Text>
             </td>
@@ -50,13 +57,48 @@ const table = {
   margin: "0 auto",
 }
 
+const SEAL_SIZE = 72
+const SEAL_GAP = 18
+const SEAL_CELL_WIDTH = SEAL_SIZE + SEAL_GAP
+const HEADING_FONT_SIZE = 16
+
+const BRAND_SEAL_CELL_CLASS = "luxus-brand-seal-cell"
+const BRAND_SEAL_CLASS = "luxus-brand-seal"
+const BRAND_TEXT_CELL_CLASS = "luxus-brand-text-cell"
+
+/**
+ * Head rule for BaseLayout: on a phone the seal stacks above the brand text so the heading gets
+ * the strip's full width instead of the ~240px left beside the seal. Both cells turn into blocks
+ * (a lone block cell would still sit beside the other one); the seal keeps its fixed 72px width
+ * and is centred by margin. No `!important` (it would beat inline styles the head rules must not
+ * touch): rather than cancel the inline right-hand gap, the rule mirrors it on the left so the
+ * seal stays centred. Clients that ignore media queries (Outlook desktop, some webmail) keep the
+ * side-by-side desktop layout, where the text cell simply wraps beside the full-size seal.
+ */
+export const FOOTER_BRAND_RESPONSIVE_CSS = `
+@media only screen and (max-width: 480px) {
+  .${BRAND_SEAL_CELL_CLASS}, .${BRAND_TEXT_CELL_CLASS} { display: block; }
+  .${BRAND_SEAL_CELL_CLASS} { margin: 0 auto; padding-left: ${SEAL_GAP}px; padding-bottom: 10px; }
+  .${BRAND_SEAL_CLASS} { margin: 0 auto; }
+}`.trim()
+
+// On a phone the long product line claims the row and the auto table layout squeezed the seal's
+// cell — mail apps add `max-width: 100%` to images, so the seal shrank with it to a speck (client
+// WhatsApp screenshots, 2026-10-07). A fixed cell width (attribute for Outlook, CSS for the rest)
+// plus a min-width on the image keeps the seal at full size; the text cell wraps instead.
 const sealCell = {
-  paddingRight: "18px",
+  // CSS width is the content box (the padding adds the gap); the attribute is the whole cell.
+  width: `${SEAL_SIZE}px`,
+  minWidth: `${SEAL_SIZE}px`,
+  paddingRight: `${SEAL_GAP}px`,
   verticalAlign: "middle" as const,
 }
 
 const seal = {
   display: "block",
+  width: `${SEAL_SIZE}px`,
+  minWidth: `${SEAL_SIZE}px`,
+  height: `${SEAL_SIZE}px`,
   objectFit: "contain" as const,
 }
 
@@ -65,11 +107,17 @@ const textCell = {
   textAlign: "center" as const,
 }
 
+// The default 44-character heading wrapped "...KRUGER / SHALATI" at 19px (client, 2026-10-07).
+// Room beside the seal on a desktop: 640px container - 2 x 24px strip padding - 90px seal cell =
+// 502px. The heading's advance width is ~20.1em in Calibri, ~24.8em in Arial/Helvetica and ~26.1em
+// in Verdana (the widest family on the allowlist), so at 16px it is ~321 / ~396 / ~418px — one line
+// with 80px+ to spare in every family. No `nowrap`: a narrow pane or a phone must still wrap it.
 const divisionLine = {
   margin: "0",
   color: "#3d3831",
-  fontSize: "19px",
-  lineHeight: "26px",
+  fontSize: `${HEADING_FONT_SIZE}px`,
+  lineHeight: "22px",
+  letterSpacing: "0",
 }
 
 const productLine = {

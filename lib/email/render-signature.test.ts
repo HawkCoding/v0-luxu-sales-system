@@ -192,6 +192,48 @@ describe("renderSignatureFragment", () => {
     expect(senderBlock.match(/<br/g)?.length).toBe(1)
   })
 
+  it("renders the email and website links in the sender text colour with no underline", async () => {
+    const html = await renderSignatureFragment(BASE)
+    const email = html.match(/<a[^>]*href="mailto:reservations2@sa-rail\.co\.za"[^>]*>/)?.[0] ?? ""
+    const website = html.match(/<a[^>]*href="https:\/\/www\.sa-rail\.co\.za"[^>]*>/)?.[0] ?? ""
+    for (const anchor of [email, website]) {
+      expect(anchor).toMatch(/style="color:#3d3831;text-decoration:none"/)
+    }
+  })
+
+  it("renders links authored in the brand's text fields in the small-print colour", async () => {
+    const html = await renderSignatureFragment({
+      ...BASE,
+      brand: {
+        ...BASE.brand,
+        divisionsLine: 'Divisions: <a href="https://www.rovos.example">Rovos</a> | <a href="https://www.blue.example">Blue Train</a>',
+        confidentiality: 'Questions? <a href="mailto:legal@sa-rail.co.za">legal@sa-rail.co.za</a>',
+        officeAddress: '<span style="color:#44505a"><a href="https://maps.example/office">Pretoria</a></span>',
+      },
+    })
+    expect(html).toContain('<a href="https://www.rovos.example" style="color:#6b6258;text-decoration:none">Rovos</a>')
+    expect(html).toContain('<a href="https://www.blue.example" style="color:#6b6258;text-decoration:none">Blue Train</a>')
+    expect(html).toContain('<a href="mailto:legal@sa-rail.co.za" style="color:#6b6258;text-decoration:none">')
+    // A link the author coloured keeps that colour.
+    expect(html).toContain('<a href="https://maps.example/office" style="color:#44505a;text-decoration:none">')
+  })
+
+  it("leaves no unstyled link outside the badge row", async () => {
+    const html = await renderSignatureFragment({
+      ...BASE,
+      brand: {
+        ...BASE.brand,
+        companyLine: 'SA-Rail is a division of <a href="https://luxus.example">Luxus Travel &amp; Tours</a>.',
+        badges: [{ url: "https://cdn.example.com/badge.png", alt: "IATA", href: "https://iata.org", width: 60, height: 30 }],
+      },
+    })
+    const anchors = html.match(/<a\b[^>]*>/g) ?? []
+    expect(anchors.length).toBe(4) // email, website, company line, badge
+    for (const anchor of anchors) expect(anchor).toMatch(/text-decoration:none/)
+    const textLinks = anchors.filter((anchor) => !anchor.includes("iata.org"))
+    for (const anchor of textLinks) expect(anchor).toMatch(/style="color:#(3d3831|6b6258);text-decoration:none"/)
+  })
+
   it("renders zero <br> for a name-only signature", async () => {
     const html = await renderSignatureFragment({
       ...BASE,

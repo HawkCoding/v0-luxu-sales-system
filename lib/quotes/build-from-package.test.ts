@@ -340,6 +340,8 @@ describe("buildPackageQuoteLineItems", () => {
     expect(isMissingPricing(comped)).toBe(false)
     expect(charged.unitPrice).toBe(500)
     expect(charged.pricingSnapshot?.isComplimentaryTransport).toBeUndefined()
+    // A charged trip carries its request id too, so the invoice can name its pick-up/drop-off.
+    expect(charged.pricingSnapshot?.transportRequestId).toBe("request-charged")
   })
 
   it("prices a complimentary transfer at 0 with no rate card at all, unlike a plain unpriced request", async () => {

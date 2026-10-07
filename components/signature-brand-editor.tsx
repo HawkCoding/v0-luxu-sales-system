@@ -309,46 +309,12 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
   return (
     // Fields get the width. Beside them the preview squeezed the fields to ~250px at 1280 (toolbars
     // wrapping to three rows), so it only sits alongside on very wide screens and below otherwise.
-    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_360px]">
+    // A flex column (not a one-column grid) below 2xl: the save bar is then a flex item of the whole
+    // editor, so its sticky bottom holds for the full length of the form — in a grid it would be
+    // pinned inside its own one-row cell. scroll-mb on every descendant: tabbing scrolls the focused
+    // control clear of the pinned save bar instead of underneath it (WCAG 2.4.11).
+    <div className="flex flex-col gap-6 [&_*]:scroll-mb-28 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="min-w-0 space-y-5">
-        {canEdit && (
-          <div
-            className={cn(
-              "sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2",
-              isDirty ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950" : "bg-card",
-            )}
-          >
-            <p className="text-sm" role="status" aria-live="polite">
-              {saving ? "Saving changes…" : isDirty ? "Unsaved changes" : "All changes saved"}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleDiscard}
-                disabled={!isDirty || saving}
-              >
-                <RotateCcw className="mr-1 h-3.5 w-3.5" aria-hidden />
-                Discard
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => void handleSave()}
-                disabled={!isDirty || saving || nameInvalid}
-              >
-                {saving ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : (
-                  <Save className="mr-1 h-3.5 w-3.5" aria-hidden />
-                )}
-                {saving ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          </div>
-        )}
-
         <div className="space-y-1.5">
           <Label htmlFor="brand-name">Name</Label>
           <Input
@@ -469,58 +435,107 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
         ))}
       </div>
 
-      <div className="min-w-0 space-y-3">
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <Label>Live preview</Label>
-            {loadingPreview && previewHtml !== null ? (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
-                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                Updating preview…
-              </span>
-            ) : previewFailed ? (
-              <span className="text-xs text-destructive" role="status">
-                Preview couldn&apos;t update
-              </span>
-            ) : isDirty ? (
-              <span className="text-xs text-muted-foreground">Showing unsaved changes</span>
-            ) : null}
-          </div>
-          {/* Angora background + email font, matching the container the signature sits in when sent. */}
-          <div className="h-[420px] max-w-2xl overflow-auto rounded-md border bg-[#e8e5df] 2xl:max-w-none">
-            {previewHtml === null ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Rendering…
-              </div>
-            ) : (
-              <iframe
-                title="Signature preview"
-                className="h-full w-full"
-                sandbox=""
-                srcDoc={buildSignaturePreviewDocument(previewHtml, previewFontFamily)}
-              />
-            )}
-          </div>
-        </div>
-        {users.length > 0 && (
+      {/* From 2xl this column is one sticky block — preview, "Preview as" and the save bar stay in
+          view while the long form scrolls beside it. Below 2xl it is `contents`, so its children join
+          the editor's flex column: the preview follows the fields and the save bar pins to the
+          bottom of the viewport the whole way down, landing under the preview at the end. */}
+      <div className="contents 2xl:sticky 2xl:top-4 2xl:block 2xl:min-w-0 2xl:space-y-3 2xl:self-start">
+        <div className="min-w-0 space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="preview-salesperson">Preview as</Label>
-            <Select
-              value={previewProfileId ?? "__self__"}
-              onValueChange={(value) => setPreviewProfileId(value === "__self__" ? undefined : value)}
-            >
-              <SelectTrigger id="preview-salesperson" size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__self__">Me</SelectItem>
-                {users.map((u) => (
-                  <SelectItem key={u.userId} value={u.userId}>
-                    {u.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Live preview</Label>
+              {loadingPreview && previewHtml !== null ? (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                  Updating preview…
+                </span>
+              ) : previewFailed ? (
+                <span className="text-xs text-destructive" role="status">
+                  Preview couldn&apos;t update
+                </span>
+              ) : isDirty ? (
+                <span className="text-xs text-muted-foreground">Showing unsaved changes</span>
+              ) : null}
+            </div>
+            {/* Angora background + email font, matching the container the signature sits in when sent.
+                Beside the fields (2xl) it gives up height on a short screen, so the sticky column —
+                save bar included — always fits in the viewport. */}
+            <div className="h-[420px] max-w-2xl overflow-auto rounded-md border bg-[#e8e5df] 2xl:h-[min(420px,calc(100svh_-_20rem))] 2xl:min-h-[200px] 2xl:max-w-none">
+              {previewHtml === null ? (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Rendering…
+                </div>
+              ) : (
+                <iframe
+                  title="Signature preview"
+                  className="h-full w-full"
+                  sandbox=""
+                  srcDoc={buildSignaturePreviewDocument(previewHtml, previewFontFamily)}
+                />
+              )}
+            </div>
+          </div>
+          {users.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="preview-salesperson">Preview as</Label>
+              <Select
+                value={previewProfileId ?? "__self__"}
+                onValueChange={(value) => setPreviewProfileId(value === "__self__" ? undefined : value)}
+              >
+                <SelectTrigger id="preview-salesperson" size="sm" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__self__">Me</SelectItem>
+                  {users.map((u) => (
+                    <SelectItem key={u.userId} value={u.userId}>
+                      {u.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+
+        {canEdit && (
+          <div
+            className={cn(
+              // Pinned to the bottom of the viewport. Below 2xl that holds the whole way down the form;
+              // from 2xl it holds inside the sticky column, overlaying the preview's foot when the
+              // column starts low on a short screen rather than sitting below the fold.
+              "sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 shadow-md",
+              isDirty ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950" : "bg-card",
+            )}
+          >
+            <p className={cn("text-sm", isDirty && "font-medium")} role="status" aria-live="polite">
+              {saving ? "Saving changes…" : isDirty ? "Unsaved changes" : "All changes saved"}
+            </p>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleDiscard}
+                disabled={!isDirty || saving}
+              >
+                <RotateCcw className="mr-1 h-3.5 w-3.5" aria-hidden />
+                Discard
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleSave()}
+                disabled={!isDirty || saving || nameInvalid}
+              >
+                {saving ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <Save className="mr-1 h-3.5 w-3.5" aria-hidden />
+                )}
+                {saving ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
           </div>
         )}
       </div>

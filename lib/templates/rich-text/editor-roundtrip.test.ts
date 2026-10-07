@@ -82,6 +82,31 @@ describe("editor round-trip", () => {
     expect(normalizeForCompare(result)).toBe(normalizeForCompare(source))
   })
 
+  it.each(["11px", "13px", "15px"])("preserves an in-between %s font-size span (save -> reload shows the same size)", (size) => {
+    const source = `<p>Dear <span style="font-size: ${size};">Sofia</span>,</p>`
+    const saved = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(normalizeForCompare(saved)).toBe(normalizeForCompare(source))
+    // A second load of what was saved is stable too.
+    expect(normalizeForCompare(roundTripThroughEditor(saved, BLOCK_TOKENS))).toBe(normalizeForCompare(source))
+  })
+
+  it("preserves line spacing on paragraphs and list items (save -> reload is stable)", () => {
+    const source =
+      '<p style="line-height: 1.5;">Dear Sofia,</p>' +
+      '<ul><li style="line-height: 2;">Two nights</li><li>Breakfast</li></ul>' +
+      '<p style="line-height: 1;">Kind regards,<br>Luxus</p>'
+    const saved = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(normalizeForCompare(saved)).toBe(normalizeForCompare(source))
+    expect(normalizeForCompare(roundTripThroughEditor(saved, BLOCK_TOKENS))).toBe(normalizeForCompare(source))
+  })
+
+  it("preserves line spacing alongside a sized span and a block token", () => {
+    const source =
+      '<p style="line-height: 1.15;">Hi <span style="font-size: 13px;">there</span></p>{{quoteSummaryTable}}<p>Bye</p>'
+    const result = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(normalizeForCompare(result)).toBe(normalizeForCompare(source))
+  })
+
   it("preserves a span combining font size, text color, and highlight", () => {
     // The DOM canonicalizes color/background-color to rgb(r, g, b) once
     // touched by the editor (confirmed empirically) — this is the exact

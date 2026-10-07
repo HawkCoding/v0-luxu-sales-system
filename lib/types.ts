@@ -1003,7 +1003,9 @@ export interface PricingSnapshot {
   isComplimentaryTransport?: boolean | null
   /** Transfer/rental legs only: the booking_transport_requests row this line priced, so the
    *  voucher builder can match a complimentary flag back to the specific captured trip (unlike
-   *  hotels, whose complimentary flag is per-leg, transfers are per-request). */
+   *  hotels, whose complimentary flag is per-leg, transfers are per-request), and the invoice can
+   *  name the trip's pick-up/drop-off. Stamped on comped lines only until 2026-10; older charged
+   *  lines lack it and are matched heuristically (lib/invoices/transport-line-points.ts). */
   transportRequestId?: string | null
   /** Transfers only: which pricing basis this specific line priced under. Present on every
    *  transfer line once any transfer supplier has adopted per-person pricing, so a leg mixing a

@@ -37,11 +37,14 @@ export type EmailFontSize = (typeof EMAIL_FONT_SIZE_OPTIONS)[number]
 // allowlist rather than free text: an arbitrary value would be a CSS
 // injection vector, and the rich-text serializer (lib/templates/rich-text/
 // serialize.ts) only treats a span as safely representable when its size is
-// one of these.
+// one of these. Every px step up to 16 so body copy can be nudged by 1px.
 export const EMAIL_INLINE_FONT_SIZE_OPTIONS = [
   "10px",
+  "11px",
   "12px",
+  "13px",
   "14px",
+  "15px",
   "16px",
   "18px",
   "20px",
@@ -55,6 +58,42 @@ export type EmailInlineFontSize = (typeof EMAIL_INLINE_FONT_SIZE_OPTIONS)[number
 /** True when `value` is exactly one of the allowlisted inline sizes. */
 export function isEmailInlineFontSize(value: string | null | undefined): value is EmailInlineFontSize {
   return EMAIL_INLINE_FONT_SIZE_OPTIONS.includes(value as EmailInlineFontSize)
+}
+
+// Line spacing for a paragraph or list item of an email body. Rendered as an
+// inline `style="line-height:…"` on the <p>/<li> itself — email clients need
+// the value inline, and a block-level value is what controls the gap between
+// wrapped lines. Same allowlist rationale as the sizes above: an arbitrary
+// value would be a CSS injection vector, so the rich-text serializer only
+// keeps a styled <p>/<li> as editable content when its line-height is one of
+// these. Unitless, so a larger inline font size scales its own line box.
+export const EMAIL_LINE_HEIGHT_OPTIONS = ["1", "1.15", "1.5", "2"] as const
+
+export type EmailLineHeight = (typeof EMAIL_LINE_HEIGHT_OPTIONS)[number]
+
+export const EMAIL_LINE_HEIGHT_LABELS: Record<EmailLineHeight, string> = {
+  "1": "Single",
+  "1.15": "1.15",
+  "1.5": "1.5",
+  "2": "Double",
+}
+
+/**
+ * Line height the email layout gives body content when no spacing is chosen
+ * (emails/base-layout.tsx). The editor previews with it too, so "Default" in
+ * the toolbar looks the way the sent email does.
+ */
+export const EMAIL_DEFAULT_LINE_HEIGHT = "1.4"
+
+/** True when `value` is exactly one of the allowlisted line heights. */
+export function isEmailLineHeight(value: string | null | undefined): value is EmailLineHeight {
+  return EMAIL_LINE_HEIGHT_OPTIONS.includes(value as EmailLineHeight)
+}
+
+/** The allowlisted line height `value` names (surrounding whitespace ignored), or null. */
+export function toEmailLineHeight(value: string | null | undefined): EmailLineHeight | null {
+  const trimmed = value?.trim()
+  return isEmailLineHeight(trimmed) ? trimmed : null
 }
 
 // Text colour swatches for a highlighted section of an email body. Brand-

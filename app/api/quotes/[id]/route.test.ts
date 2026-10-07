@@ -10,6 +10,14 @@ vi.mock("@/lib/api/auth", () => ({
   requireUser: vi.fn(),
 }))
 
+const syncMocks = vi.hoisted(() => ({
+  syncBookingPaymentState: vi.fn(),
+}))
+
+vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
+  syncBookingPaymentState: syncMocks.syncBookingPaymentState,
+}))
+
 import { PATCH } from "./route"
 
 const QUOTE_ID = "00000000-0000-4000-8000-00000000dddd"
@@ -24,11 +32,21 @@ interface PrevLine {
   pricing_snapshot: unknown
 }
 
+interface BookingJoin {
+  primary_supplier_id: string | null
+  stage: string
+  cancelled_at: string | null
+}
+
+const BOOKING_ID = "00000000-0000-4000-8000-00000000bbbb"
+
 function buildAuth(
   previousLineItems: PrevLine[],
   status = "draft",
   overrideReason: string | null = null,
   agentCommission = 0,
+  booking: BookingJoin = { primary_supplier_id: null, stage: "deposit_paid", cancelled_at: null },
+  quoteTotals: { subtotal: number; total: number } = { subtotal: 0, total: 0 },
 ) {
   const rpc = vi.fn(async () => ({ error: null }))
   const auditInsert = vi.fn(async () => ({ error: null }))
@@ -44,12 +62,14 @@ function buildAuth(
               single: vi.fn(async () => ({
                 data: {
                   id: QUOTE_ID,
-                  subtotal: 0,
-                  total: 0,
+                  booking_id: BOOKING_ID,
+                  subtotal: quoteTotals.subtotal,
+                  total: quoteTotals.total,
                   status,
                   updated_at: QUOTE_UPDATED_AT,
                   override_reason: overrideReason,
                   agent_commission: agentCommission,
+                  booking,
                 },
                 error: null,
               })),
@@ -83,7 +103,7 @@ function buildAuth(
     },
   })
 
-  return { rpc, auditInsert, quoteUpdate }
+  return { rpc, auditInsert, quoteUpdate, supabase }
 }
 
 const QUOTE_UPDATED_AT = "2026-07-14T00:00:00.000Z"
@@ -119,6 +139,13 @@ function prevLine(overrides: Partial<PrevLine> = {}): PrevLine {
 describe("PATCH /api/quotes/[id]", () => {
   beforeEach(() => {
     authMocks.requireRole.mockReset()
+    syncMocks.syncBookingPaymentState.mockReset()
+    syncMocks.syncBookingPaymentState.mockResolvedValue({
+      totalPaid: 6200,
+      depositPaid: true,
+      invoiceBalance: 22600,
+      overpaidAmount: 0,
+    })
   })
 
   it("refuses to edit an accepted quote, since documents now render from what it priced", async () => {
@@ -407,5 +434,254 @@ describe("PATCH /api/quotes/[id]", () => {
     expect(payload.subtotal).toBe(24800)
     expect(payload.total).toBe(19800)
     expect(rpc).toHaveBeenCalledWith("replace_quote_line_items", expect.objectContaining({ p_total: 19800 }))
+  })
+
+  // Option B (Carmen, 2026-10-07): an accepted quote can be amended in place — an extra hotel
+  // night after the invoice went out — without rewinding the booking, voiding invoices or emailing.
+  describe("amend (accepted quote, in place)", () => {
+    const engine = { source: "pricing_engine" }
+    const acceptedLine = prevLine({
+      description: "Package Total",
+      unit_price: 24800,
+      total: 24800,
+      pricing_snapshot: engine,
+    })
+    const amendedLines = [
+      { description: "Package Total", qty: 1, unitPrice: 24800, total: 24800, pricingSnapshot: engine },
+      { description: "Extra night - Cape Grace", qty: 2, unitPrice: 2000, total: 1, pricingSnapshot: engine },
+    ]
+
+    function tablesTouched(supabase: { from: { mock: { calls: unknown[][] } } }): string[] {
+      return supabase.from.mock.calls.map((call) => String(call[0]))
+    }
+
+    it("saves the new lines onto the same accepted quote, recomputes totals, syncs the balance and audits it", async () => {
+      const { rpc, auditInsert, quoteUpdate, supabase } = buildAuth(
+        [acceptedLine],
+        "accepted",
+        null,
+        3000,
+        undefined,
+        { subtotal: 24800, total: 21800 },
+      )
+
+      const res = await PATCH(
+        patchReq({ lineItems: amendedLines, amend: true, amendNote: "  Client asked for an extra night  " }),
+        routeParams,
+      )
+      const payload = await res.json()
+
+      expect(res.status).toBe(200)
+      // Line total is recomputed (2 × 2000), the client's bogus `total: 1` is discarded, and the
+      // existing agent commission is still netted off.
+      expect(payload.subtotal).toBe(28800)
+      expect(payload.total).toBe(25800)
+      expect(payload.amended).toBe(true)
+      expect(payload.invoiceBalance).toBe(22600)
+      expect(rpc).toHaveBeenCalledWith(
+        "replace_quote_line_items",
+        expect.objectContaining({ p_quote_id: QUOTE_ID, p_subtotal: 28800, p_total: 25800 }),
+      )
+
+      expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledTimes(1)
+      expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(supabase, BOOKING_ID, {
+        actorName: "Jane",
+        actorUserId: "u1",
+      })
+
+      expect(auditInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "quote_amended",
+          actor: "Jane",
+          actor_user_id: "u1",
+          entity_type: "Quote",
+          entity_id: QUOTE_ID,
+          before_json: expect.objectContaining({ total: 21800, lineCount: 1 }),
+          after_json: expect.objectContaining({ total: 25800, lineCount: 2 }),
+          meta_json: expect.objectContaining({
+            amendNote: "Client asked for an extra night",
+            bookingStage: "deposit_paid",
+            emailsSent: false,
+          }),
+        }),
+      )
+
+      // The quote stays accepted (no status write), and nothing outside the quote is touched here:
+      // no invoice voided, no booking stage moved, no correspondence/email row written.
+      expect(quoteUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ status: expect.anything() }))
+      const touched = tablesTouched(supabase)
+      expect(touched).not.toContain("invoices")
+      expect(touched).not.toContain("bookings")
+      expect(touched).not.toContain("correspondences")
+      expect(touched).not.toContain("email_outbox")
+    })
+
+    it("records a null note when none is given", async () => {
+      const { auditInsert } = buildAuth([acceptedLine], "accepted")
+
+      const res = await PATCH(patchReq({ lineItems: amendedLines, amend: true }), routeParams)
+
+      expect(res.status).toBe(200)
+      expect(auditInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "quote_amended",
+          meta_json: expect.objectContaining({ amendNote: null }),
+        }),
+      )
+    })
+
+    it("still saves but warns when the balance sync throws", async () => {
+      buildAuth([acceptedLine], "accepted")
+      syncMocks.syncBookingPaymentState.mockRejectedValueOnce(new Error("boom"))
+
+      const res = await PATCH(patchReq({ lineItems: amendedLines, amend: true }), routeParams)
+      const payload = await res.json()
+
+      expect(res.status).toBe(200)
+      expect(payload.amended).toBe(true)
+      expect(payload.warning).toContain("balance could not be refreshed")
+    })
+
+    it("keeps the 409 for a plain PATCH (no amend flag) on an accepted quote", async () => {
+      const { rpc } = buildAuth([acceptedLine], "accepted")
+
+      const res = await PATCH(patchReq({ lineItems: amendedLines }), routeParams)
+
+      expect(res.status).toBe(409)
+      expect(rpc).not.toHaveBeenCalled()
+      expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    })
+
+    it.each(["draft", "sent", "superseded", "cancelled"])("refuses to amend a %s quote", async (status) => {
+      const { rpc, auditInsert } = buildAuth([acceptedLine], status)
+
+      const res = await PATCH(patchReq({ lineItems: amendedLines, amend: true }), routeParams)
+
+      expect(res.status).toBe(409)
+      expect((await res.json()).error).toBe("Only an accepted quote can be amended.")
+      expect(rpc).not.toHaveBeenCalled()
+      expect(auditInsert).not.toHaveBeenCalled()
+      expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      [{ primary_supplier_id: null, stage: "lost", cancelled_at: null }, "cancelled"],
+      [{ primary_supplier_id: null, stage: "deposit_paid", cancelled_at: "2026-10-01T00:00:00Z" }, "cancelled"],
+      [{ primary_supplier_id: null, stage: "closed", cancelled_at: null }, "closed"],
+    ])("refuses to amend when the booking is off the ladder (%o)", async (booking, word) => {
+      const { rpc } = buildAuth([acceptedLine], "accepted", null, 0, booking)
+
+      const res = await PATCH(patchReq({ lineItems: amendedLines, amend: true }), routeParams)
+
+      expect(res.status).toBe(409)
+      expect((await res.json()).error).toContain(word)
+      expect(rpc).not.toHaveBeenCalled()
+    })
+
+    it("409s an amend on a cancelled booking and writes nothing", async () => {
+      const { rpc, auditInsert } = buildAuth([acceptedLine], "accepted", null, 0, {
+        primary_supplier_id: null,
+        stage: "lost",
+        cancelled_at: "2026-10-01T00:00:00Z",
+      })
+
+      const res = await PATCH(patchReq({ lineItems: amendedLines, amend: true }), routeParams)
+
+      expect(res.status).toBe(409)
+      expect((await res.json()).error).toBe("This booking is cancelled, so its quote can't be amended.")
+      expect(rpc).not.toHaveBeenCalled()
+      expect(auditInsert).not.toHaveBeenCalled()
+      expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    })
+
+    it("409s an amend on a closed booking and writes nothing", async () => {
+      const { rpc, auditInsert } = buildAuth([acceptedLine], "accepted", null, 0, {
+        primary_supplier_id: null,
+        stage: "closed",
+        cancelled_at: null,
+      })
+
+      const res = await PATCH(patchReq({ lineItems: amendedLines, amend: true }), routeParams)
+
+      expect(res.status).toBe(409)
+      expect((await res.json()).error).toBe("This booking is closed, so its quote can't be amended.")
+      expect(rpc).not.toHaveBeenCalled()
+      expect(auditInsert).not.toHaveBeenCalled()
+      expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    })
+
+    it("still enforces the version token on an amend", async () => {
+      const { rpc } = buildAuth([acceptedLine], "accepted")
+
+      const res = await PATCH(
+        patchReq({ lineItems: amendedLines, amend: true, expectedUpdatedAt: "2026-07-13T00:00:00.000Z" }),
+        routeParams,
+      )
+
+      expect(res.status).toBe(409)
+      expect((await res.json()).code).toBe("STALE_VERSION")
+      expect(rpc).not.toHaveBeenCalled()
+    })
+
+    it("refuses an amendment that adds an unpriced line", async () => {
+      const { rpc } = buildAuth([acceptedLine], "accepted")
+
+      const res = await PATCH(
+        patchReq({
+          lineItems: [
+            amendedLines[0],
+            { description: "Extra tour", qty: 1, unitPrice: 0, total: 0, pricingSnapshot: engine },
+          ],
+          amend: true,
+        }),
+        routeParams,
+      )
+
+      expect(res.status).toBe(400)
+      expect((await res.json()).error).toContain("needs a price")
+      expect(rpc).not.toHaveBeenCalled()
+    })
+
+    it("tolerates an unchanged R0 line the accepted quote already carried", async () => {
+      const { rpc } = buildAuth(
+        [acceptedLine, prevLine({ description: "The Blue Train", unit_price: 0, sort_order: 1 })],
+        "accepted",
+      )
+
+      const res = await PATCH(
+        patchReq({
+          lineItems: [...amendedLines, { description: "The Blue Train", qty: 1, unitPrice: 0, total: 0 }],
+          amend: true,
+        }),
+        routeParams,
+      )
+
+      expect(res.status).toBe(200)
+      expect(rpc).toHaveBeenCalled()
+    })
+
+    describe("validation", () => {
+      it("rejects amend: false — the flag is an explicit opt-in, not a toggle", async () => {
+        buildAuth([acceptedLine], "accepted")
+        const res = await PATCH(patchReq({ lineItems: amendedLines, amend: false }), routeParams)
+        expect(res.status).toBe(400)
+      })
+
+      it("rejects an amendNote sent without amend: true", async () => {
+        const { rpc } = buildAuth([acceptedLine], "draft")
+        const res = await PATCH(patchReq({ lineItems: amendedLines, amendNote: "why" }), routeParams)
+        expect(res.status).toBe(400)
+        expect(rpc).not.toHaveBeenCalled()
+      })
+
+      it("rejects an amendNote over 500 characters", async () => {
+        buildAuth([acceptedLine], "accepted")
+        const res = await PATCH(
+          patchReq({ lineItems: amendedLines, amend: true, amendNote: "x".repeat(501) }),
+          routeParams,
+        )
+        expect(res.status).toBe(400)
+      })
+    })
   })
 })

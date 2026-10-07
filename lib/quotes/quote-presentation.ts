@@ -510,9 +510,9 @@ function describeBlockSentence(block: VoucherServiceBlock): Sentence {
         [
           start ? `Check in from ${start}` : null,
           // A comp is still tracked on the block (isComplimentary/isFirstNightComplimentary drive
-          // the voucher's callout and the invoice's "(first night complimentary)" line item) but is
-          // never spelled out to the client on the quote itself -- the price already reads R0/less,
-          // so the word added nothing a client needed and the reviewer struck it from every markup.
+          // the voucher's callout) but is never spelled out to the client on the quote or the
+          // invoice -- the price already reads R0/less, so the word added nothing a client needed
+          // and the reviewer struck it from every markup.
         ],
       )
     }

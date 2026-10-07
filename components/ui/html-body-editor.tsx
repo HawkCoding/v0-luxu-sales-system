@@ -16,6 +16,7 @@ import {
   Highlighter,
   Ban,
   PlusCircle,
+  ListChevronsUpDown,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -29,9 +30,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils"
 import { buildEditorExtensions } from "@/lib/templates/rich-text/editor-extensions"
 import { toEditorHtml, fromEditorHtml, canRoundTrip } from "@/lib/templates/rich-text/serialize"
+import { getActiveBlockLineHeight, setBlockLineHeight } from "@/lib/templates/rich-text/line-height"
 import {
   EMAIL_INLINE_FONT_SIZE_OPTIONS,
   isEmailInlineFontSize,
+  EMAIL_LINE_HEIGHT_OPTIONS,
+  EMAIL_LINE_HEIGHT_LABELS,
+  EMAIL_DEFAULT_LINE_HEIGHT,
+  toEmailLineHeight,
   EMAIL_FONT_FAMILY_OPTIONS,
   EMAIL_FONT_FAMILY_LABELS,
   toEmailInlineFontFamily,
@@ -66,7 +72,7 @@ export interface HtmlBodyEditorProps {
   /** The email's actual base font family (Settings → Email Appearance), used to
    *  label the family dropdown's unset option (e.g. "Arial") instead of "Default". */
   baseFontFamily?: string
-  /** "compact" drops the list buttons and shrinks minHeight — for short single-line/paragraph fields (e.g. a signature line) rather than a full email body. */
+  /** "compact" drops the list and line spacing controls and shrinks minHeight — for short single-line/paragraph fields (e.g. a signature line) rather than a full email body. Signature fields are flattened to one inline run when sent, so block-level line spacing could not survive there. */
   variant?: "full" | "compact"
   /** Fires when the editable area loses focus — save-on-blur callers don't need to debounce onChange. */
   onBlur?: () => void
@@ -92,6 +98,9 @@ export function HtmlBodyEditor({
   insertTokens,
 }: HtmlBodyEditorProps) {
   const resolvedMinHeight = minHeight ?? (variant === "compact" ? "4rem" : "16rem")
+  // A full email body previews at the sent email's default line height, so the
+  // line spacing control's "Default" looks here the way it does in the inbox.
+  const previewLineHeight = variant === "full" ? `;line-height:${EMAIL_DEFAULT_LINE_HEIGHT}` : ""
   // Content too exotic to round-trip opens in source mode with the rich toggle
   // disabled — the user is never worse off than the old raw-HTML textarea.
   const richSafe = useMemo(() => canRoundTrip(value, blockTokens), [])
@@ -118,7 +127,7 @@ export function HtmlBodyEditor({
     editorProps: {
       attributes: {
         class: "prose-email focus:outline-none px-3 py-2",
-        style: `min-height:${resolvedMinHeight}${baseFontSize ? `;font-size:${baseFontSize}` : ""}`,
+        style: `min-height:${resolvedMinHeight}${previewLineHeight}${baseFontSize ? `;font-size:${baseFontSize}` : ""}`,
       },
       handleDOMEvents: onBlur
         ? {
@@ -397,6 +406,18 @@ function RichToolbar({
       toEmailInlineFontFamily(e.getAttributes("textStyle").fontFamily as string | undefined) ?? DEFAULT_FONT_SIZE_VALUE,
   })
 
+  // Block-level, so it reads the paragraph (or its list item) at the cursor
+  // rather than the textStyle mark the other selects read.
+  const activeLineHeight = useEditorState({
+    editor,
+    selector: ({ editor: e }) => getActiveBlockLineHeight(e.state) ?? DEFAULT_FONT_SIZE_VALUE,
+  })
+
+  function applyLineHeight(value: string) {
+    // The "default" sentinel (or anything off the allowlist) clears the spacing.
+    editor.chain().focus().command(setBlockLineHeight(toEmailLineHeight(value))).run()
+  }
+
   function applyFontFamily(value: string) {
     if (value === DEFAULT_FONT_SIZE_VALUE) {
       editor.chain().focus().unsetFontFamily().run()
@@ -579,6 +600,21 @@ function RichToolbar({
           >
             <ListOrdered className="h-3.5 w-3.5" />
           </Toggle>
+
+          <Select value={activeLineHeight} onValueChange={applyLineHeight} disabled={disabled}>
+            <SelectTrigger size="sm" className="h-8 w-[6.5rem] gap-1 px-2 text-xs" aria-label="Line spacing">
+              <ListChevronsUpDown className="size-3.5" aria-hidden />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DEFAULT_FONT_SIZE_VALUE}>Default</SelectItem>
+              {EMAIL_LINE_HEIGHT_OPTIONS.map((lineHeight) => (
+                <SelectItem key={lineHeight} value={lineHeight}>
+                  {EMAIL_LINE_HEIGHT_LABELS[lineHeight]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </>
       )}
 

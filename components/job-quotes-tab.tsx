@@ -31,13 +31,14 @@ import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
 import { QuoteAdjustmentsLedger } from "@/components/quotes/quote-adjustments-ledger"
 import { findCommissionLineIndex } from "@/lib/quotes/apply-commission-bonus"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
+import { amendIneligibilityReason } from "@/lib/quotes/amend-quote"
 import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
 /** Statuses whose services can still be rebuilt. Mirrors LOCKED_QUOTE_STATUSES in
  * app/api/quotes/[id]/route.ts — an accepted quote is the record of what was sold, so changing
- * it goes through Revise instead. Exported so the Enquiry tab's readiness panel can find a quote
+ * it goes through Amend (Build Booking in amend mode, confirmed) or Revise instead. Exported so the Enquiry tab's readiness panel can find a quote
  * to send Build Booking's primary action to, without re-deriving this rule. */
 export const BUILDABLE_QUOTE_STATUSES = [...EDITABLE_QUOTE_STATUSES, "sent", "expired"]
 
@@ -62,6 +63,10 @@ interface JobQuotesTabProps {
    *  Commission/Discount on the adjustments ledger is multiplied by. */
   bookingHeadcount: number
   emailImportNeedsReview?: boolean
+  /** The booking's pipeline stage and cancellation stamp — Amend is hidden on a closed, lost or
+   *  cancelled booking, by the same rule the PATCH route enforces (amendIneligibilityReason). */
+  bookingStage?: string | null
+  bookingCancelledAt?: string | null
   mutate: () => void
   autoOpenBuildBookingQuoteId?: string | null
   onAutoOpenBuildBookingHandled?: () => void
@@ -75,6 +80,8 @@ export function JobQuotesTab({
   customerName,
   bookingHeadcount,
   emailImportNeedsReview = false,
+  bookingStage = null,
+  bookingCancelledAt = null,
   mutate,
   autoOpenBuildBookingQuoteId: externalAutoOpenBuildBookingQuoteId = null,
   onAutoOpenBuildBookingHandled,
@@ -225,6 +232,30 @@ export function JobQuotesTab({
                   )}
                   {can("edit:quotes") && (
                     <>
+                      {/* Amend: the fast in-place change to an accepted quote — no rewind, no emails.
+                          Revise below stays the full path. See lib/quotes/amend-quote.ts. */}
+                      {amendIneligibilityReason({
+                        quoteStatus: q.status,
+                        bookingStage,
+                        bookingCancelledAt,
+                      }) === null && (
+                        <BuildBookingDialog
+                          jobId={jobId}
+                          quoteId={q.id}
+                          quoteCurrency={q.currency}
+                          travelDate={travelDate}
+                          existingLineItemCount={q.lineItems.length}
+                          existingLineItems={q.lineItems}
+                          expectedUpdatedAt={q.updatedAt}
+                          onApplied={mutate}
+                          amend={{
+                            currentTotal: q.total,
+                            bookingStage,
+                            agentCommission: q.agentCommission ?? 0,
+                            discountAmount: q.discountAmount ?? 0,
+                          }}
+                        />
+                      )}
                       {(q.status === "sent" || q.status === "accepted" || q.status === "expired") && (
                         <ReviseQuoteDialog
                           quoteId={q.id}

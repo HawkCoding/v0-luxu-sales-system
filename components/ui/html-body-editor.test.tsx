@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
+import { beforeAll, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { HtmlBodyEditor } from "@/components/ui/html-body-editor"
 import { normalizeForCompare } from "@/lib/templates/rich-text/serialize"
@@ -126,6 +126,74 @@ describe("HtmlBodyEditor", () => {
     render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
     expect(screen.getByLabelText("Bullet list")).toBeInTheDocument()
     expect(screen.getByLabelText("Ordered list")).toBeInTheDocument()
+  })
+
+  describe("line spacing", () => {
+    beforeAll(() => {
+      // Radix Select relies on pointer-capture and scrollIntoView, which jsdom omits.
+      if (!HTMLElement.prototype.hasPointerCapture) HTMLElement.prototype.hasPointerCapture = () => false
+      if (!HTMLElement.prototype.releasePointerCapture) HTMLElement.prototype.releasePointerCapture = () => {}
+      if (!HTMLElement.prototype.scrollIntoView) HTMLElement.prototype.scrollIntoView = () => {}
+      // The editor's focus() scrolls the caret into view on the next frame, which measures a
+      // Range — jsdom implements neither measuring method.
+      if (!Range.prototype.getClientRects) {
+        Range.prototype.getClientRects = () => [] as unknown as DOMRectList
+      }
+      if (!Range.prototype.getBoundingClientRect) {
+        Range.prototype.getBoundingClientRect = () =>
+          ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+      }
+    })
+
+    it("renders a line spacing control in the full variant, defaulted to 'Default'", () => {
+      render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
+      expect(screen.getByLabelText("Line spacing")).toHaveTextContent("Default")
+    })
+
+    it("hides the line spacing control in the compact (signature) variant", () => {
+      render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} variant="compact" />)
+      expect(screen.queryByLabelText("Line spacing")).not.toBeInTheDocument()
+    })
+
+    it("shows the spacing of the paragraph at the cursor", async () => {
+      render(<HtmlBodyEditor value='<p style="line-height: 1.5;">Hello</p>' onChange={() => {}} />)
+      await waitFor(() => expect(screen.getByLabelText("Line spacing")).toHaveTextContent("1.5"))
+    })
+
+    it("previews a full body at the sent email's default line height, but leaves signature fields alone", () => {
+      const { unmount } = render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
+      expect((document.querySelector(".ProseMirror") as HTMLElement).style.lineHeight).toBe("1.4")
+      unmount()
+      render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} variant="compact" />)
+      expect((document.querySelector(".ProseMirror") as HTMLElement).style.lineHeight).toBe("")
+    })
+
+    it("applies a chosen spacing from the keyboard and emits it inline on the paragraph, then resets it", async () => {
+      const onChange = vi.fn()
+      render(<HtmlBodyEditor value="<p>Hello</p>" onChange={onChange} />)
+
+      const trigger = screen.getByLabelText("Line spacing")
+      fireEvent.keyDown(trigger, { key: "Enter" })
+      for (const label of ["Default", "Single", "1.15", "1.5", "Double"]) {
+        expect(screen.getByRole("option", { name: label })).toBeInTheDocument()
+      }
+      fireEvent.click(screen.getByRole("option", { name: "Double" }))
+
+      await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('<p style="line-height: 2;">Hello</p>'))
+      await waitFor(() => expect(screen.getByLabelText("Line spacing")).toHaveTextContent("Double"))
+
+      fireEvent.keyDown(screen.getByLabelText("Line spacing"), { key: "Enter" })
+      fireEvent.click(screen.getByRole("option", { name: "Default" }))
+      await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("<p>Hello</p>"))
+    })
+
+    it("offers the in-between 11px, 13px and 15px font sizes", () => {
+      render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
+      fireEvent.keyDown(screen.getByLabelText("Font size"), { key: "Enter" })
+      for (const size of ["11px", "12px", "13px", "14px", "15px", "16px"]) {
+        expect(screen.getByRole("option", { name: size })).toBeInTheDocument()
+      }
+    })
   })
 
   it("omits the Insert field control when no insertTokens are given", () => {

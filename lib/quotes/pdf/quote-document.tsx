@@ -30,7 +30,12 @@ import {
   type DocumentFooterCompany,
   type PagePadding,
 } from "@/lib/pdf/sarail-design"
-import { buildQuoteDetailSections, type QuoteDetailBullet } from "@/lib/quotes/pdf/quote-details"
+import {
+  buildQuoteDetailSections,
+  uniqueDetailLines,
+  withoutTrailingColon,
+  type QuoteDetailBullet,
+} from "@/lib/quotes/pdf/quote-details"
 import { quoteJourneyHeading, type QuoteJourneyDetails } from "@/lib/quotes/pdf/quote-journey-details"
 import {
   AGENT_COMMISSION_LABEL,
@@ -116,7 +121,9 @@ const DEFAULT_FOOTER_TEXT = QUOTE_VALIDITY_ENABLED
   : "This quotation is subject to availability. Prices are quoted in {{currency}}."
 
 const DEFAULT_INCLUDES_HEADING = "Travel Package Includes"
-const DETAILS_HEADING = "Travel Package Details:"
+/** The second page sets its headings without colons (client markup, 2026-10-06); the first page's
+ *  labels keep theirs. */
+const DETAILS_HEADING = "Travel Package Details"
 const DEFAULT_EXCLUDES_HEADING = "Your Package Excludes"
 
 function resolveFooterText(template: string, validUntil: string | null, currency: string): string {
@@ -217,7 +224,7 @@ const styles = StyleSheet.create({
   dayItems: { flex: 1 },
   detailTitle: { width: DATE_COLUMN },
   // Titles wrap at 125.8pt (was the designer's 95), so "Ivory Manor Boutique Hotel" (124.1pt at
-  // 10pt Manrope) and "Your Package Excludes:" (107.8pt) each set on one line (client markup).
+  // 10pt Manrope) and "Your Package Excludes" (under 107.8pt) each set on one line (client markup).
   detailTitleLine: { fontSize: 10, width: DATE_COLUMN - DETAIL_TITLE_GAP },
 
   totals: {
@@ -351,7 +358,9 @@ export function QuoteDocument({
       : null
   const summaryDays = buildQuoteSummaryDays(sortedBlocks, flightCapBullet)
   const detailSections = buildQuoteDetailSections(sortedBlocks)
-  const exclusions = collectQuoteExclusions(sortedBlocks, packageExcludesDefault)
+  // The details page's lines carry no closing colon (see withoutTrailingColon).
+  const exclusions = uniqueDetailLines(collectQuoteExclusions(sortedBlocks, packageExcludesDefault))
+  const excludesTitle = withoutTrailingColon(packageExcludesHeading) || DEFAULT_EXCLUDES_HEADING
   const hasDetails = detailSections.length > 0 || exclusions.length > 0
 
   const journeyRows: Array<{ label: string; value: string }> = [
@@ -511,7 +520,7 @@ export function QuoteDocument({
               {exclusions.length > 0 ? (
                 <View style={styles.detailRow} wrap={false}>
                   <View style={styles.detailTitle}>
-                    <Text style={styles.detailTitleLine}>{withColon(packageExcludesHeading)}</Text>
+                    <Text style={styles.detailTitleLine}>{excludesTitle}</Text>
                   </View>
                   <View style={styles.dayItems}>
                     {exclusions.map((item, index) => (

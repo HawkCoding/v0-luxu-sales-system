@@ -65,6 +65,20 @@ describe("EmailSignatureSettingsEditor", () => {
     toastMocks.error.mockReset()
   })
 
+  it("puts the save bar after the last field", () => {
+    render(<EmailSignatureSettingsEditor canEdit />)
+    const status = screen.getByText("All changes saved")
+    expect(status).toHaveAttribute("role", "status")
+    const lastField = screen.getByLabelText("signature_office_address")
+    expect(lastField.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("scrolls focused controls clear of the pinned save bar", () => {
+    const { container } = render(<EmailSignatureSettingsEditor canEdit />)
+    expect(screen.getByText("All changes saved").parentElement).toHaveClass("sticky", "bottom-3")
+    expect(container.firstElementChild).toHaveClass("[&_*]:scroll-mb-28")
+  })
+
   it("never saves while typing", () => {
     render(<EmailSignatureSettingsEditor canEdit />)
     const field = screen.getByLabelText("signature_company_line")

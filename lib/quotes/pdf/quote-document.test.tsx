@@ -165,21 +165,67 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(first).not.toContain("Economy |")
     })
 
-    it("heads a train's details with its name and \"Includes:\", not its route", async () => {
+    it("heads a train's details \"<Operator> Inclusions\", not with its route", async () => {
       const [, second] = await pages({ itineraryBlocks })
 
-      expect(second).toContain("Rovos Rail Includes:")
+      expect(second).toContain("Rovos Rail Inclusions")
+      expect(second).not.toContain("Includes")
     })
 
     it("starts the package details on a new page, with the hotel description in place of its facilities", async () => {
       const [first, second] = await pages({ itineraryBlocks })
 
       expect(first).not.toContain("Travel Package Details")
-      expect(second).toContain("Travel Package Details:")
+      expect(second).toContain("Travel Package Details")
       expect(second).toContain("A boutique manor in Pretoria.")
-      expect(second).toContain("Onboard:")
+      expect(second).toContain("Onboard")
       expect(second).toContain("All meals")
       expect(`${first} ${second}`).not.toContain("24-hour front desk")
+    })
+
+    it("sets no colon at the end of any heading or bullet on the details page, and keeps the first page's", async () => {
+      const blocks = itineraryBlocks.map((block) =>
+        block.serviceType === "train"
+          ? {
+              ...block,
+              serviceData: {
+                ...block.serviceData,
+                inclusions: ["# Onboard:", "All meals", "Check-in 14:00 at Capital Park", "# Off-train:", "Flights"],
+                exclusions: ["Gratuities:"],
+              },
+            }
+          : block,
+      )
+      const overrides: Partial<QuotePdfData> = {
+        itineraryBlocks: blocks,
+        packageExcludesHeading: "Your Package Excludes:",
+        packageExcludesDefault: "Services not mentioned.",
+      }
+      const [first, second] = await pages(overrides)
+
+      for (const text of [
+        "Travel Package Details",
+        "Rovos Rail Inclusions",
+        "Onboard",
+        "Off-train",
+        "Your Package Excludes",
+        "Gratuities",
+      ]) {
+        expect(second).toContain(text)
+        expect(second).not.toContain(`${text}:`)
+      }
+      // A colon inside a line is part of its sentence.
+      expect(second).toContain("Check-in 14:00 at Capital Park")
+      // The first page's labels keep theirs.
+      expect(first).toContain("Prepared for:")
+      expect(first).toContain("Travel dates:")
+      expect(first).toContain("Sub Total incl. VAT:")
+      expect(first).toContain("Travel Package Includes:")
+
+      // No text run on the details page ends with one.
+      const runs = (await pageRuns(overrides, 2)).map((run) => run.str.trim()).filter(Boolean)
+      expect(runs.length).toBeGreaterThan(5)
+      expect(runs.filter((run) => run.endsWith(":"))).toEqual([])
     })
 
     it("sets a 26-character hotel name and the excludes heading on one line each", async () => {
@@ -187,7 +233,8 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       const printed = await lines({ itineraryBlocks, packageExcludesDefault: "Services not mentioned." })
 
       expect(printed.some((line) => line.startsWith("Ivory Manor Boutique Hotel"))).toBe(true)
-      expect(printed.some((line) => line.startsWith("Your Package Excludes:"))).toBe(true)
+      expect(printed.some((line) => line.startsWith("Your Package Excludes"))).toBe(true)
+      expect(printed.some((line) => line.startsWith("Your Package Excludes:"))).toBe(false)
     })
 
     it("keeps the details bullet column where it was, with the one-line titles clear of it", async () => {
@@ -197,7 +244,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       for (const bullet of ["A boutique manor in Pretoria.", "Services not mentioned."]) {
         expect(runOf(runs, bullet).x).toBeCloseTo(DETAILS_BULLET_TEXT_X, 1)
       }
-      for (const title of ["Ivory Manor Boutique Hotel", "Your Package Excludes:"]) {
+      for (const title of ["Ivory Manor Boutique Hotel", "Your Package Excludes"]) {
         expect(runOf(runs, title).right).toBeLessThanOrEqual(DETAILS_BULLET_COLUMN_X - DETAILS_TITLE_GAP)
       }
     })
