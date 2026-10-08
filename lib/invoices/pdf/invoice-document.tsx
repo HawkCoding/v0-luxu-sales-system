@@ -15,7 +15,6 @@ import {
   DESIGN_COLORS,
   DocumentFooter,
   DocumentHeader,
-  FooterClearance,
   PAGE_BOTTOM,
   PAGE_TOP,
   PageBackground,
@@ -564,11 +563,7 @@ export function InvoiceDocument({
     ...sentences(paymentNote),
   ].filter(Boolean)
 
-  const footerLines = buildDocumentFooterLines(footerCompanyFromBanking(banking), {
-    division: resolvedBrand.subheading,
-    year: Number((issueDate || new Date().toISOString()).slice(0, 4)),
-    includeVatNumber: true,
-  })
+  const footerLines = buildDocumentFooterLines(footerCompanyFromBanking(banking))
 
   return (
     <Document
@@ -755,7 +750,6 @@ export function InvoiceDocument({
               </View>
             ) : null}
           </View>
-          <FooterClearance />
         </View>
 
         <DocumentFooter lines={footerLines} />

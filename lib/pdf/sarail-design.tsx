@@ -1,27 +1,25 @@
 import fs from "fs"
 import path from "path"
+import { Fragment } from "react"
 import { Image, StyleSheet, Text, View } from "@react-pdf/renderer"
-import { DOCUMENT_FOOTER_BRAND_NAME } from "@/lib/assets/footer-brand"
 import type { NestedBulletLine } from "@/lib/inclusions/bullet-lines"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import { DESIGN_BODY_FAMILY, DESIGN_DISPLAY_FONT } from "@/lib/pdf/document-fonts"
 import type { BankingSettings, DocumentBrand } from "@/lib/settings-access"
 
 // Shared chrome for the SA-Rail document design (Figma "SA-Rail new Templates"): the patterned
-// Angora page, the letterhead on the first page, the Swirl boxes, bullets and the company footer on
-// the last page. Every measurement is in PDF points, read off the designer's exported PDFs.
+// Angora page, the letterhead and the company footer on the first page, the Swirl boxes and
+// bullets. Every measurement is in PDF points, read off the designer's exported PDFs.
 
 export const DESIGN_COLORS = {
   /** Angora 500 — every page background. */
   page: "#e8e5df",
   /** Swirl 50 — every box. */
   box: "#fbfaf9",
-  /** Body text and rules. */
+  /** Body text, rules and the company footer. */
   ink: "#1e1f22",
   /** Letterhead lines. */
   brand: "#252d32",
-  /** Company footer. */
-  footer: "#515865",
 } as const
 
 export const PAGE_WIDTH = 595.28
@@ -31,19 +29,24 @@ export const RULE_WIDTH = 0.75
 
 /** Where every page after the first starts its content (the letterhead only prints on page 1). */
 export const PAGE_TOP = 55
-/** The lowest point content may reach on a page. */
-export const PAGE_BOTTOM = 28
 
 /** The letterhead's height from the top edge of the page — first-page content starts below it. */
 export const HEADER_HEIGHT = 80
 
-const FOOTER_FONT_SIZE = 6
-const FOOTER_LINE_HEIGHT = 8.2
+const FOOTER_FONT_SIZE = 7
+/** Manrope's natural line at 7pt. */
+const FOOTER_LINE_HEIGHT = 9.6
 const FOOTER_BOTTOM = 20
-const FOOTER_MAX_LINES = 6
-const FOOTER_TOP = PAGE_HEIGHT - FOOTER_BOTTOM - FOOTER_MAX_LINES * FOOTER_LINE_HEIGHT
-/** Room the last block keeps free beneath itself so it never runs into the footer. */
-export const FOOTER_CLEARANCE = PAGE_HEIGHT - PAGE_BOTTOM - (FOOTER_TOP - 12)
+/** Address, contacts, registration. */
+const FOOTER_MAX_LINES = 3
+const FOOTER_GAP = 10
+
+/**
+ * The lowest point content may reach on a page: clear of the company footer on page 1. Content
+ * flows from page to page, so every page keeps the same margin — a page can't know in advance
+ * whether it will be the first.
+ */
+export const PAGE_BOTTOM = FOOTER_BOTTOM + FOOTER_MAX_LINES * FOOTER_LINE_HEIGHT + FOOTER_GAP
 
 export const BOLD = { fontFamily: DESIGN_BODY_FAMILY, fontWeight: 700 } as const
 export const REGULAR = { fontFamily: DESIGN_BODY_FAMILY, fontWeight: 400 } as const
@@ -112,16 +115,18 @@ const styles = StyleSheet.create({
     color: DESIGN_COLORS.brand,
     textAlign: "center",
   },
-  // Anchored by `bottom` with no lineHeight/height: react-pdf silently drops a dynamic (render-prop)
-  // text that carries either. Manrope's natural 6pt line (8.2pt) is the template's 8pt pitch.
+  // Anchored by `bottom` with no lineHeight/height: react-pdf silently drops dynamic (render-prop)
+  // content that carries either, so the lines keep Manrope's natural line.
   footer: {
     position: "absolute",
     bottom: FOOTER_BOTTOM,
     left: 0,
     right: 0,
+  },
+  footerLine: {
     ...REGULAR,
     fontSize: FOOTER_FONT_SIZE,
-    color: DESIGN_COLORS.footer,
+    color: DESIGN_COLORS.ink,
     textAlign: "center",
   },
   bulletRow: {
@@ -186,33 +191,47 @@ export function DocumentHeader({ brand, logo, padding }: DocumentHeaderProps) {
   )
 }
 
+/** One run of a footer line: a bold label ("Tel:") and the value after it. */
+export interface FooterSegment {
+  label?: string
+  value: string
+}
+
+/** A footer line's runs and what separates them ("Tel: … • Cell: …"). */
+export interface FooterLine {
+  segments: FooterSegment[]
+  separator: string
+}
+
 /**
- * The company footer, printed at the foot of the last page only (the templates' multipage rule).
- * `fixed` so react-pdf offers it to every page; the render prop blanks it on all but the last.
+ * The company footer, printed at the foot of the first page only (client request 2026-10-07 —
+ * it used to sit on the last). `fixed` so react-pdf offers it to every page; the render prop
+ * leaves it out on all but page 1. PAGE_BOTTOM keeps every page's content clear of it.
  */
-export function DocumentFooter({ lines }: { lines: string[] }) {
+export function DocumentFooter({ lines }: { lines: FooterLine[] }) {
   if (lines.length === 0) return null
-  const text = lines.slice(0, FOOTER_MAX_LINES).join("\n")
-  return (
-    <Text
-      fixed
-      style={styles.footer}
-      render={({ pageNumber, totalPages }) => (pageNumber === totalPages ? text : "")}
-    />
+  const content = (
+    <View>
+      {lines.slice(0, FOOTER_MAX_LINES).map((line, lineIndex) => (
+        <Text key={lineIndex} style={styles.footerLine}>
+          {line.segments.map((segment, index) => (
+            <Fragment key={index}>
+              {index > 0 ? line.separator : ""}
+              {segment.label ? <Text style={BOLD}>{`${segment.label} `}</Text> : null}
+              {segment.value}
+            </Fragment>
+          ))}
+        </Text>
+      ))}
+    </View>
   )
+  return <View fixed style={styles.footer} render={({ pageNumber }) => (pageNumber === 1 ? content : null)} />
 }
 
-/**
- * Empty space kept under the document's closing block. Wrap it with that block in one
- * `wrap={false}` View: if the pair cannot fit above the footer, both move to a fresh last page, so
- * the footer never prints over content.
- */
-export function FooterClearance() {
-  return <View style={{ height: FOOTER_CLEARANCE }} />
-}
-
-/** The company details the footer prints — the same fields the invoice has always carried. */
+/** The company details the footer prints — the payment method's company fields. */
 export interface DocumentFooterCompany {
+  /** Multi-line in Settings; printed on one line, its lines joined with commas. */
+  address?: string | null
   tel?: string | null
   cell?: string | null
   fax?: string | null
@@ -224,6 +243,7 @@ export interface DocumentFooterCompany {
 
 export function footerCompanyFromBanking(banking: Partial<BankingSettings> | null | undefined): DocumentFooterCompany {
   return {
+    address: banking?.company_address,
     tel: banking?.company_tel,
     cell: banking?.company_cell,
     fax: banking?.company_fax,
@@ -238,39 +258,50 @@ function clean(value: string | null | undefined): string {
   return value?.trim() ?? ""
 }
 
-interface FooterLineOptions {
-  /** The brand's division line, e.g. "A division of Luxus Travel & Tours". */
-  division?: string | null
-  /** Year printed after the copyright mark. */
-  year: number
-  /**
-   * Adds the VAT number to the registration line. Only the invoice asks: the templates' footer has
-   * no VAT number, but a tax invoice must still name the supplier's.
-   */
-  includeVatNumber?: boolean
+function segment(label: string, value: string | null | undefined): FooterSegment[] {
+  const text = clean(value)
+  return text ? [{ label, value: text }] : []
 }
 
 /**
- * The templates' footer, line by line: "©SA Rail 2026", the division, contact numbers, e-mail,
- * website and company registration. The postal address is deliberately absent — the design brief
- * says the footer matches the itineraries and carries no address. Unset settings drop out.
+ * The footer the client specified on 2026-10-07, the same on every document:
+ *
+ *   Address: No 6 Oostewal Business Centre, …, South Africa 7357
+ *   Tel: … • Cell: … • Email: … • Web: sa-rail.co.za • Web: luxustravel.co.za
+ *   Company Registration CK2007/049324/23 | VAT number 4580275016
+ *
+ * The website field may hold several sites (comma- or space-separated), one "Web:" each. Unset
+ * settings drop out, and so does a line left with nothing on it.
  */
-export function buildDocumentFooterLines(company: DocumentFooterCompany, options: FooterLineOptions): string[] {
-  const numbers = [clean(company.tel), clean(company.cell)].filter(Boolean)
-  const fax = clean(company.fax)
-  const numbersLine = [...numbers, ...(fax ? [`Fax: ${fax}`] : [])].join(" | ")
-  const reg = clean(company.regNumber)
-  const vat = options.includeVatNumber ? clean(company.vatNumber) : ""
-  const regLine = [reg ? `RSA Co Reg: ${reg}` : "", vat ? `VAT No: ${vat}` : ""].filter(Boolean).join(" | ")
+export function buildDocumentFooterLines(company: DocumentFooterCompany): FooterLine[] {
+  const address = clean(company.address)
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(", ")
+  const websites = clean(company.website).split(/[\s,;]+/).filter(Boolean)
 
-  return [
-    `©${DOCUMENT_FOOTER_BRAND_NAME} ${options.year}`,
-    clean(options.division),
-    numbersLine ? `Contact Numbers: ${numbersLine}` : "",
-    clean(company.email) ? `Email: ${clean(company.email)}` : "",
-    clean(company.website) ? `Website: ${clean(company.website)}` : "",
-    regLine,
-  ].filter(Boolean)
+  const lines: FooterLine[] = [
+    { segments: segment("Address:", address), separator: "" },
+    {
+      segments: [
+        ...segment("Tel:", company.tel),
+        ...segment("Cell:", company.cell),
+        ...segment("Fax:", company.fax),
+        ...segment("Email:", company.email),
+        ...websites.flatMap((site) => segment("Web:", site)),
+      ],
+      separator: " • ",
+    },
+    {
+      segments: [
+        ...segment("Company Registration", company.regNumber),
+        ...segment("VAT number", company.vatNumber),
+      ],
+      separator: " | ",
+    },
+  ]
+  return lines.filter((line) => line.segments.length > 0)
 }
 
 /**

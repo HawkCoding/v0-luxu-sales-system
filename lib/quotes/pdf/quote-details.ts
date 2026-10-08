@@ -66,9 +66,17 @@ function sectionFor(block: VoucherServiceBlock): QuoteDetailSection | null {
 
   switch (block.serviceType) {
     case "hotel": {
-      // The hotel's own description replaces its facility list when it has one, exactly as the
-      // quote's itinerary always chose between them.
       const description = paragraphBullets(block.contactDetails.description)
+      // A hotel sold as a product in its own right (Kruger Shalati) reads like the trains:
+      // "Kruger Shalati Inclusions", its brand without the " - Train on the Bridge" tail, listing
+      // its inclusions (client request 2026-10-07).
+      if (d.isStandaloneProduct && supplier) {
+        const brand = supplier.split(" - ")[0].trim() || supplier
+        const bullets = inclusions.length > 0 ? inclusions : description
+        return bullets.length > 0 ? { title: [`${brand} Inclusions`], bullets } : null
+      }
+      // An add-on hotel's own description replaces its facility list when it has one, exactly as
+      // the quote's itinerary always chose between them.
       const bullets = description.length > 0 ? description : inclusions
       return supplier && bullets.length > 0 ? { title: [supplier], bullets } : null
     }

@@ -10,40 +10,53 @@ import { makeBankingSettings } from "@/lib/settings-access.fixtures"
 
 describe("buildDocumentFooterLines", () => {
   const company = {
-    tel: "+27 (0)21 100 3596",
-    cell: "+27 (0)81 580 6471",
-    fax: "+27 (0)86 598 0812",
+    address: "No 6 Oostewal Business Centre, Cnr of Sleigh & Oostewal Rd\nLangebaan, Westerncape, South Africa 7357",
+    tel: "(+27) 021 100 3596",
+    cell: "(+27) 081 580 6471",
     email: "info@sa-rail.co.za",
-    website: "www.sa-rail.co.za",
-    regNumber: "2007/049324/23",
+    website: "sa-rail.co.za, luxustravel.co.za",
+    regNumber: "CK2007/049324/23",
     vatNumber: "4580275016",
   }
 
-  it("prints the template's six lines, without the postal address", () => {
-    expect(buildDocumentFooterLines(company, { division: "A Division of Luxus Travel & Tours", year: 2026 })).toEqual([
-      "©SA Rail 2026",
-      "A Division of Luxus Travel & Tours",
-      "Contact Numbers: +27 (0)21 100 3596 | +27 (0)81 580 6471 | Fax: +27 (0)86 598 0812",
-      "Email: info@sa-rail.co.za",
-      "Website: www.sa-rail.co.za",
-      "RSA Co Reg: 2007/049324/23",
+  /** Each line as it prints: "Label value" runs joined by the line's separator. */
+  const printed = (lines: ReturnType<typeof buildDocumentFooterLines>) =>
+    lines.map((line) =>
+      line.segments.map((segment) => (segment.label ? `${segment.label} ${segment.value}` : segment.value)).join(line.separator),
+    )
+
+  it("prints the client's three lines: address, contacts with one Web per site, registration and VAT", () => {
+    expect(printed(buildDocumentFooterLines(company))).toEqual([
+      "Address: No 6 Oostewal Business Centre, Cnr of Sleigh & Oostewal Rd, Langebaan, Westerncape, South Africa 7357",
+      "Tel: (+27) 021 100 3596 • Cell: (+27) 081 580 6471 • Email: info@sa-rail.co.za • Web: sa-rail.co.za • Web: luxustravel.co.za",
+      "Company Registration CK2007/049324/23 | VAT number 4580275016",
     ])
   })
 
-  it("adds the VAT number to the registration line when asked (the invoice)", () => {
-    const lines = buildDocumentFooterLines(company, { year: 2026, includeVatNumber: true })
-
-    expect(lines.at(-1)).toBe("RSA Co Reg: 2007/049324/23 | VAT No: 4580275016")
+  it("keeps the labels apart from the values, so the labels can print bold", () => {
+    const [, contacts] = buildDocumentFooterLines(company)
+    expect(contacts.segments[0]).toEqual({ label: "Tel:", value: "(+27) 021 100 3596" })
   })
 
-  it("drops every line whose setting is blank", () => {
-    expect(buildDocumentFooterLines({ tel: " ", email: "" }, { division: null, year: 2027 })).toEqual(["©SA Rail 2027"])
+  it("drops every blank setting, and a line left with nothing on it", () => {
+    expect(printed(buildDocumentFooterLines({ tel: " ", email: "info@sa-rail.co.za", address: "" }))).toEqual([
+      "Email: info@sa-rail.co.za",
+    ])
+    expect(buildDocumentFooterLines({})).toEqual([])
   })
 
   it("reads the company fields off the banking settings", () => {
-    const banking = makeBankingSettings({ company_tel: "+27 12 100 3596", company_reg_number: "CK2007/049324/23" })
+    const banking = makeBankingSettings({
+      company_tel: "+27 12 100 3596",
+      company_reg_number: "CK2007/049324/23",
+      company_address: "No 6 Oostewal Business Centre",
+    })
 
-    expect(footerCompanyFromBanking(banking)).toMatchObject({ tel: "+27 12 100 3596", regNumber: "CK2007/049324/23" })
+    expect(footerCompanyFromBanking(banking)).toMatchObject({
+      tel: "+27 12 100 3596",
+      regNumber: "CK2007/049324/23",
+      address: "No 6 Oostewal Business Centre",
+    })
   })
 })
 

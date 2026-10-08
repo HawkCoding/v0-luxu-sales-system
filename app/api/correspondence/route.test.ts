@@ -130,6 +130,19 @@ function buildAuth(options: AuthOptions = {}) {
   }))
 
   const followUpInsert = vi.fn(async () => ({ error: null }))
+  // Cancels the booking's earlier pending follow-up before the new one is drafted. Each .eq()
+  // filter is recorded so a test can check exactly which rows the update targets.
+  const staleFollowUpFilters: Array<[string, unknown]> = []
+  const correspondenceUpdate = vi.fn((_values: unknown) => {
+    const chain = {
+      eq: vi.fn((column: string, value: unknown) => {
+        staleFollowUpFilters.push([column, value])
+        return chain
+      }),
+      then: (resolve: (result: { error: null }) => unknown) => resolve({ error: null }),
+    }
+    return chain
+  })
   // The stage gates re-read correspondences after the send, so the row this request just wrote is
   // part of the evidence — that is how "the voucher email was sent" becomes true. A mock that
   // always returned [] would make every send-and-move look like it had never sent anything.
@@ -267,6 +280,7 @@ function buildAuth(options: AuthOptions = {}) {
             }
             return followUpInsert()
           }),
+          update: correspondenceUpdate,
           select: correspondenceSelect,
         }
       }
@@ -374,6 +388,8 @@ function buildAuth(options: AuthOptions = {}) {
   return {
     correspondenceInsertChain,
     followUpInsert,
+    correspondenceUpdate,
+    staleFollowUpFilters,
     quoteUpdate,
     pipelineHistoryInsert,
     auditInsert,
@@ -597,6 +613,14 @@ describe("POST /api/correspondence", () => {
       expect.objectContaining({ action: "stage_change", entity_id: BOOKING_ID }),
     )
     expect(mocks.followUpInsert).toHaveBeenCalledTimes(1)
+    // The booking's earlier pending follow-up is cancelled before the new one is drafted, so a
+    // re-sent quote never leaves two follow-ups waiting (one quoting the old route/price).
+    expect(mocks.correspondenceUpdate).toHaveBeenCalledWith({ status: "cancelled" })
+    expect(mocks.staleFollowUpFilters).toEqual([
+      ["booking_id", BOOKING_ID],
+      ["kind", "quote_follow_up"],
+      ["status", "scheduled"],
+    ])
   })
 
   it("does not call applyTransition when moveStage matches current booking stage", async () => {

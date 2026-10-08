@@ -10,8 +10,6 @@ import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
   DocumentFooter,
   DocumentHeader,
-  FOOTER_CLEARANCE,
-  FooterClearance,
   PageBackground,
   buildDocumentFooterLines,
   displayDocumentTitle,
@@ -33,7 +31,7 @@ export interface VoucherDocumentProps {
   brand?: DocumentBrand
   /** Brand logo resolved to embeddable bytes (see lib/pdf/brand-logo.ts). */
   brandLogo?: BrandLogoImage | null
-  /** Company details for the last page's footer. */
+  /** Company details for the first page's footer. */
   company?: DocumentFooterCompany
 }
 
@@ -41,8 +39,8 @@ function normalizeTemplate(template?: VoucherTemplate | null): VoucherTemplate {
   return { ...VOUCHER_TEMPLATE_DEFAULTS, ...template }
 }
 
-/** "End Of Services" (21.7 gap + one 10pt line) plus the footer's clearance under it. */
-const CLOSING_HEIGHT = 21.7 + 13.7 + FOOTER_CLEARANCE
+/** "End Of Services": the 21.7 gap plus one 10pt line. */
+const CLOSING_HEIGHT = 21.7 + 13.7
 
 function sectionFor(key: VoucherSectionKey, data: VoucherData, template: VoucherTemplate, styles: VoucherStyles) {
   if (key === "guest_info") {
@@ -51,12 +49,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
   if (key === "service_provider") {
     const blocks = sortedVoucherServiceBlocks(data.serviceBlocks ?? [])
     const last = blocks.at(-1)
-    const closing = (
-      <>
-        <Text style={styles.endOfServices}>End Of Services. Thank you</Text>
-        <FooterClearance />
-      </>
-    )
+    const closing = <Text style={styles.endOfServices}>End Of Services. Thank you</Text>
     const blockFor = (block: VoucherServiceBlock, idx: number) => (
       <ServiceBlock
         key={`${block.serviceType}-${idx}`}
@@ -67,10 +60,9 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
         wideSuiteName
       />
     )
-    // The closing line and the footer's clearance travel with the last block, so the footer never
-    // overprints them and "End Of Services" never sits alone on a page — unless the block and the
-    // closing line together would not fit one page, when the block goes on its own (whole, or
-    // breaking if it is taller than a page) and the closing line follows it.
+    // The closing line travels with the last block, so "End Of Services" never sits alone on a
+    // page — unless the block and the closing line together would not fit one page, when the block
+    // goes on its own (whole, or breaking if it is taller than a page) and the closing line follows.
     const lastKeptWhole = last
       ? serviceBlockFitsOnOnePage(last, { showDescription: false, showInclusions: false, wideSuiteName: true }, CLOSING_HEIGHT)
       : true
@@ -91,7 +83,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
       </View>
     )
   }
-  // "footer" is the company footer on the last page — drawn by the Page itself, see below.
+  // "footer" is the company footer on the first page — drawn by the Page itself, see below.
   return null
 }
 
@@ -115,9 +107,7 @@ export function VoucherDocument({
     subheading: FOOTER_BRAND_DIVISION_LINE,
     logoUrl: null,
   }
-  const footerLines = hiddenSections.has("footer")
-    ? []
-    : buildDocumentFooterLines(company ?? {}, { division: resolvedBrand.subheading, year: new Date().getFullYear() })
+  const footerLines = hiddenSections.has("footer") ? [] : buildDocumentFooterLines(company ?? {})
 
   return (
     <Document

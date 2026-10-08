@@ -95,6 +95,31 @@ describe("derivePerPersonTotals", () => {
     ).toEqual({ perAdult: 36_000, perChild: 18_000 })
   })
 
+  it("treats a typed hotel room price as shared, even on a line stamped with a per-person label", () => {
+    // Quote lines built before 2026-10 labelled an overridden room with its stay's per-person basis.
+    // The typed figure is still the whole room's, so it must not land on the adults alone.
+    const legacyOverride = line(10_000, {
+      legId: "leg-hotel",
+      unit: "per person per night",
+      manualRoomPrice: 5_000,
+    })
+    expect(
+      derivePerPersonTotals({
+        lines: [adultFare(80_000), childFare(40_000), legacyOverride],
+        adults: 2,
+        children: 2,
+        total: 130_000,
+      }),
+    ).toEqual(
+      derivePerPersonTotals({
+        lines: [adultFare(80_000), childFare(40_000), hotelRoom(10_000)],
+        adults: 2,
+        children: 2,
+        total: 130_000,
+      }),
+    )
+  })
+
   it("splits equally per paying guest when everything is shared", () => {
     const result = derivePerPersonTotals({
       lines: [hotelRoom(70_000), shuttle(30_000)],

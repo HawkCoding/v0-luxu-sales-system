@@ -43,7 +43,11 @@ import {
   rateCardFares,
   type PassengerFare,
 } from "@/lib/pricing/passenger-fares"
-import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
+import {
+  accommodationPriceLabel,
+  cardNightlyRoomRate,
+  resolveAccommodationPricingBasis,
+} from "@/lib/pricing/accommodation-basis"
 import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 import { effectiveUnitRateTypeId } from "@/lib/packages/unit-rate-type"
 import { describeEmptyUnit, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
@@ -1166,13 +1170,26 @@ export async function buildPackageQuoteLineItems({
               suiteTypeName,
               variantNames: specificUnitVariantNames(unitSelection),
               selectedVariantGroups: specificUnitVariantGroups(unitSelection),
-              unit: hotelUnit,
+              // The line is one room × charged nights at the typed room price, whatever the stay's
+              // basis -- so it says "per room per night". Labelling it with the stay's basis put
+              // "per person per night" beside a qty of nights, and made the per-adult/per-child split
+              // on client documents count the whole room as an adult fare.
+              unit: accommodationPriceLabel("per_room"),
               hideRoomConfig: true,
               sourceCurrency: overrideCurrency,
               accommodationPricingBasis: accommodationBasis,
               roomOverride: {
                 price: overridePrice,
-                basePrice: validRateCard?.pricePerPerson ?? null,
+                // What the card would have charged this room a night -- the figure Build Booking
+                // says the override replaces. Under per_person that is the occupants' fares summed,
+                // not the bare adult fare (which read as "replacing R4 130" for a R8 260 room).
+                basePrice: validRateCard
+                  ? cardNightlyRoomRate(validRateCard, accommodationBasis, {
+                      adultCount: unitSelection.adultCount ?? 0,
+                      childCount: unitSelection.childCount ?? 0,
+                      infantCount: unitSelection.infantCount ?? 0,
+                    })
+                  : null,
                 setAt: unitSelection.manualRoomPriceSetAt ?? null,
                 setByName: unitSelection.manualRoomPriceSetByName ?? null,
               },

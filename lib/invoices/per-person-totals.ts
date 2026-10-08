@@ -34,8 +34,9 @@ function isPerTravellerUnit(unit: string | null | undefined): boolean {
 }
 
 /** The adult or child fare a line charges, or null when the line is a shared cost: per room, per
- *  vehicle, per day, a fixed-package total (no leg), a manual or overridden tour price, commission,
- *  an infant's charge, or a line with no pricing snapshot to say whose cost it is. */
+ *  vehicle, per day, a fixed-package total (no leg), a manual or overridden tour price, a typed
+ *  hotel room price, commission, an infant's charge, or a line with no pricing snapshot to say whose
+ *  cost it is. */
 function fareKind(snapshot: PricingSnapshot | null): "adult" | "child" | null {
   if (
     !snapshot ||
@@ -43,6 +44,10 @@ function fareKind(snapshot: PricingSnapshot | null): "adult" | "child" | null {
     !snapshot.legId ||
     snapshot.pricingMode !== "rate_card" ||
     snapshot.manualTourPrice != null ||
+    // A typed room price is the whole room's, whoever sleeps in it. Lines stamped before 2026-10
+    // labelled it with the stay's "per person per night" basis, which alone would count it as one
+    // adult's fare.
+    snapshot.manualRoomPrice != null ||
     !isPerTravellerUnit(snapshot.unit)
   ) {
     return null

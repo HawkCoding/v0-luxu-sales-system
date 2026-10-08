@@ -13,7 +13,7 @@ export interface RenderVoucherPdfInput {
   docTitle?: string
   brand?: DocumentBrand
   brandLogo?: BrandLogoImage | null
-  /** Company details for the last page's footer. */
+  /** Company details for the first page's footer. */
   company?: DocumentFooterCompany
 }
 

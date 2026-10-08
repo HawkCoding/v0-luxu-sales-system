@@ -252,29 +252,36 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect((await extractPdfPageTexts(buffer)).length).toBe(1)
   })
 
-  it("takes two pages for 7–8 guests with a long wrapping address, a known pair-grid trade-off, and splits cleanly", async () => {
-    // Known trade-off: 7–8 guests with a long wrapping address take two pages since the guests print
-    // in pairs (they fit on one before the pair grid); the split stays clean.
+  it("fits 8 guests with a long wrapping address on one page, footer included", async () => {
+    // These used to take two pages: the Terms and Bank block carried the last-page footer's
+    // clearance with it. The footer now sits on page one under a fixed margin, so it fits.
     const buffer = await renderInvoicePdf(denseInvoice(EIGHT_GUESTS))
+
+    const pages = await extractPdfPageTexts(buffer)
+    expect(pages).toHaveLength(1)
+    const [first] = pages
+    expect(first).toContain("Guest 8:")
+    expect(first).toContain("OUTSTANDING AMOUNT:")
+    expect(first).toContain("Terms and Conditions:")
+    expect(first).toContain("Bank Details for EFT:")
+    expect(first.split("Company Registration")).toHaveLength(2)
+  })
+
+  it("splits a longer invoice cleanly, with the company footer on the first page only", async () => {
+    const buffer = await renderInvoicePdf({
+      ...denseInvoice(EIGHT_GUESTS),
+      items: Array.from({ length: 14 }, (_, index) => ({ ...items[0], description: `Service line ${index + 1}` })),
+    })
 
     const pages = await extractPdfPageTexts(buffer)
     expect(pages).toHaveLength(2)
     const [first, second] = pages
-    // The whole money ladder stays on page one, down to the outstanding amount…
-    expect(first).toContain("Guest 8:")
-    expect(first).toContain("Total per Adult:")
-    expect(first).toContain("Total incl. VAT:")
-    expect(first).toContain("25% Deposit due now")
-    expect(first).toContain("OUTSTANDING AMOUNT:")
-    // …and the Terms and Bank block moves across as one piece.
+    // The Terms and Bank block moves across as one piece.
     expect(first).not.toContain("Terms and Conditions:")
-    expect(first).not.toContain("Bank Details for EFT:")
     expect(second).toContain("Terms and Conditions:")
     expect(second).toContain("Bank Details for EFT:")
-    expect(second).not.toContain("OUTSTANDING AMOUNT:")
-    // The company footer prints once, on the last page.
-    expect(first).not.toContain("RSA Co Reg:")
-    expect(second.split("RSA Co Reg:")).toHaveLength(2)
+    expect(first.split("Company Registration")).toHaveLength(2)
+    expect(second).not.toContain("Company Registration")
   })
 
   it("renders custom notes and footer text", async () => {

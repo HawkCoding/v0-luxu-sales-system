@@ -35,16 +35,52 @@ describe("describeInvoiceLine", () => {
     )
   })
 
-  it("renders Supplier — meal plan for a hotel line (route field carries the meal plan)", () => {
+  it("renders Supplier — room, meal plan (nights) for a hotel line (route field carries the meal plan)", () => {
     const snapshot = makeSnapshot({
       supplierName: "Irene Country Lodge",
+      supplierKind: "hotel_property",
       legLabel: "Irene Country Lodge",
       routeName: "Full Board",
+      suiteTypeName: "Garden Suite",
       passengerKind: "included",
+      stayNights: 2,
     })
     expect(describeInvoiceLine("Irene Country Lodge - Full Board - 2 nights", snapshot)).toBe(
-      "Irene Country Lodge — Full Board",
+      "Irene Country Lodge — Garden Suite, Full Board (2 nights)",
     )
+  })
+
+  it("rebuilds a hotel stay from the charged and gifted nights on an older snapshot", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "DaVinci Hotel & Suites",
+      supplierKind: "hotel_property",
+      routeName: "Bed & Breakfast",
+      suiteTypeName: "Deluxe Room",
+      chargedNights: 1,
+      complimentaryNights: 1,
+    })
+    expect(describeInvoiceLine("line", snapshot)).toBe("DaVinci Hotel & Suites — Deluxe Room, Bed & Breakfast (2 nights)")
+  })
+
+  it("prints no night count when a hotel line carries none", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "DaVinci Hotel & Suites",
+      supplierKind: "hotel_property",
+      routeName: "Bed & Breakfast",
+      suiteTypeName: "Deluxe Room",
+    })
+    expect(describeInvoiceLine("line", snapshot)).toBe("DaVinci Hotel & Suites — Deluxe Room, Bed & Breakfast")
+  })
+
+  it("says 1 night, singular", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "DaVinci Hotel & Suites",
+      supplierKind: "hotel_property",
+      routeName: null,
+      suiteTypeName: "Deluxe Room",
+      stayNights: 1,
+    })
+    expect(describeInvoiceLine("line", snapshot)).toBe("DaVinci Hotel & Suites — Deluxe Room (1 night)")
   })
 
   it("appends (Child) for child passenger lines", () => {
@@ -197,23 +233,28 @@ describe("describeInvoiceLine", () => {
     it("drops the first-night-complimentary suffix from a hotel line", () => {
       const snapshot = makeSnapshot({
         supplierName: "DaVinci Hotel & Suites",
+        supplierKind: "hotel_property",
         routeName: "Bed & Breakfast",
+        suiteTypeName: "Deluxe Room",
         complimentaryNights: 1,
         stayNights: 2,
       })
+      // The whole stay is counted, the gifted night included — never "1 night" or "complimentary".
       expect(describeInvoiceLine("DaVinci Hotel & Suites - Bed & Breakfast — Deluxe Room", snapshot)).toBe(
-        "DaVinci Hotel & Suites — Bed & Breakfast",
+        "DaVinci Hotel & Suites — Deluxe Room, Bed & Breakfast (2 nights)",
       )
     })
 
     it("drops the N-nights-complimentary suffix from a hotel line", () => {
       const snapshot = makeSnapshot({
         supplierName: "Table Bay Hotel",
+        supplierKind: "hotel_property",
         routeName: "Bed & Breakfast",
+        suiteTypeName: null,
         complimentaryNights: 2,
         stayNights: 4,
       })
-      expect(describeInvoiceLine("line", snapshot)).toBe("Table Bay Hotel — Bed & Breakfast")
+      expect(describeInvoiceLine("line", snapshot)).toBe("Table Bay Hotel — Bed & Breakfast (4 nights)")
     })
 
     it("drops the complimentary suffix from a comped transfer line", () => {
@@ -233,11 +274,14 @@ describe("describeInvoiceLine", () => {
     it("still appends (Child) on a hotel line with a gifted night", () => {
       const snapshot = makeSnapshot({
         supplierName: "Table Bay Hotel",
+        supplierKind: "hotel_property",
         routeName: "Bed & Breakfast",
+        suiteTypeName: "Family Room",
         complimentaryNights: 1,
+        stayNights: 3,
         passengerKind: "child",
       })
-      expect(describeInvoiceLine("line", snapshot)).toBe("Table Bay Hotel — Bed & Breakfast (Child)")
+      expect(describeInvoiceLine("line", snapshot)).toBe("Table Bay Hotel — Family Room, Bed & Breakfast (3 nights, Child)")
     })
   })
 

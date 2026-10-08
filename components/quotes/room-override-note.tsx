@@ -9,7 +9,8 @@ interface RoomOverrideNoteProps {
 }
 
 /**
- * "Manual room price — R3 600,00/night, replacing R4 000,00 · set by Carmen on 14 Aug 2026".
+ * "Manual room price — R3 600,00 per room per night, replacing the rate card's R4 000,00 · set by
+ * Carmen on 14 Aug 2026".
  *
  * INTERNAL ONLY, exactly like FxProvenanceNote. The client sees the room and its amount; what the
  * rate card said, and who decided otherwise, is ours. Do not add this to
@@ -59,13 +60,19 @@ export function RoomOverrideNote({ snapshot, quoteCurrency }: RoomOverrideNotePr
     )
   }
 
+  // The typed price is always a whole-room price. Its base is the card's nightly figure for the same
+  // room -- except on lines stamped before 2026-10, where a per-person stay recorded the bare adult
+  // fare instead. Those lines still carry the stay's "per person ..." label, so they are told apart
+  // by it and named for what they are rather than read as the room's rate.
+  const legacyPerPersonBase = (snapshot.unit ?? "").trim().toLowerCase().startsWith("per person")
+
   return (
     <>
       <div className="text-[11px] text-amber-600 dark:text-amber-500">
-        ⚑ Manual room price — {formatMoney(snapshot.manualRoomPrice, currency)}/night
+        ⚑ Manual room price — {formatMoney(snapshot.manualRoomPrice, currency)} per room per night
         {base === null || base === undefined
           ? ", no rate card covered this room"
-          : `, replacing ${formatMoney(base, currency)}`}
+          : `, replacing the rate card's ${formatMoney(base, currency)}${legacyPerPersonBase ? " per person" : ""}`}
         {attribution ? ` · ${attribution}` : ""}
       </div>
       {complimentaryLine}

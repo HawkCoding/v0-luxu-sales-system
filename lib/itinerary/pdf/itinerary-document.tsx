@@ -12,8 +12,6 @@ import {
   DESIGN_COLORS,
   DocumentFooter,
   DocumentHeader,
-  FOOTER_CLEARANCE,
-  FooterClearance,
   PageBackground,
   RULE_WIDTH,
   buildDocumentFooterLines,
@@ -25,7 +23,7 @@ import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { joinGuestNames } from "@/lib/voucher/pdf/sections/guest-info"
 import { InfoRow } from "@/lib/voucher/pdf/sections/info-row"
-import { ServiceBlock, serviceBlockFitsOnOnePage } from "@/lib/voucher/pdf/sections/service-block"
+import { ServiceBlock } from "@/lib/voucher/pdf/sections/service-block"
 import { VOUCHER_PAGE_PADDING, voucherStyles } from "@/lib/voucher/pdf/styles"
 
 export interface ItineraryDocumentProps {
@@ -37,7 +35,7 @@ export interface ItineraryDocumentProps {
   brand?: DocumentBrand
   /** Brand logo resolved to embeddable bytes (see lib/pdf/brand-logo.ts). */
   brandLogo?: BrandLogoImage | null
-  /** Company details for the last page's footer. */
+  /** Company details for the first page's footer. */
   company?: DocumentFooterCompany
 }
 
@@ -91,12 +89,9 @@ export function ItineraryDocument({
     subheading: FOOTER_BRAND_DIVISION_LINE,
     logoUrl: null,
   }
-  const footerLines = t.hidden_sections.includes("footer")
-    ? []
-    : buildDocumentFooterLines(company ?? {}, { division: resolvedBrand.subheading, year: new Date().getFullYear() })
+  const footerLines = t.hidden_sections.includes("footer") ? [] : buildDocumentFooterLines(company ?? {})
 
   const sorted = sortItineraryBlocksChronologically(data.serviceBlocks)
-  const last = sorted.at(-1)
 
   return (
     <Document
@@ -135,26 +130,11 @@ export function ItineraryDocument({
             <Text style={extra.journeyHeading} minPresenceAhead={80}>
               {withColon(journeyHeading)}
             </Text>
-            {sorted.slice(0, -1).map((block, idx) => (
+            {sorted.map((block, idx) => (
               <ServiceBlock key={`${block.serviceType}-${idx}`} block={block} styles={styles} />
             ))}
           </>
         ) : null}
-
-        {/* The last block travels with the footer's clearance, so the footer never overprints it and
-            never sits alone on an otherwise empty page — unless the block is too tall to keep whole,
-            when it breaks like any other and the clearance follows it. */}
-        {last && !serviceBlockFitsOnOnePage(last, {}, FOOTER_CLEARANCE) ? (
-          <>
-            <ServiceBlock block={last} styles={styles} />
-            <FooterClearance />
-          </>
-        ) : (
-          <View wrap={false}>
-            {last ? <ServiceBlock block={last} styles={styles} /> : null}
-            <FooterClearance />
-          </View>
-        )}
         <DocumentFooter lines={footerLines} />
       </Page>
     </Document>

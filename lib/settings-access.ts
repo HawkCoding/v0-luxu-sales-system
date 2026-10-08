@@ -555,6 +555,18 @@ const EMAIL_SIGNATURE_DEFAULTS: EmailSignatureSettings = {
 }
 
 /**
+ * Stored in place of a chrome line an admin cleared on purpose. No row, or a stored blank, still
+ * means "use the built-in default" (older saves could write a blank the admin never typed), so a
+ * deliberately cleared line needs its own marker to stay cleared instead of snapping back.
+ */
+export const SIGNATURE_LINE_HIDDEN = "__hidden__"
+
+/** The lines with a built-in default — the only ones where "cleared" and "unset" differ. */
+export const HIDEABLE_SIGNATURE_KEYS: ReadonlySet<string> = new Set(
+  EMAIL_SIGNATURE_SETTING_KEYS.filter((key) => key !== "signature_enabled" && EMAIL_SIGNATURE_DEFAULTS[key] !== ""),
+)
+
+/**
  * Company-wide signature chrome, resolved with the service client because
  * composing runs from workers and cron with no user session. Never throws —
  * a settings lookup must not block a send. Every field but `signature_enabled`
@@ -577,9 +589,11 @@ export async function getEmailSignatureSettings(): Promise<EmailSignatureSetting
         key,
         key === "signature_enabled"
           ? map[key]?.trim() || EMAIL_SIGNATURE_DEFAULTS[key]
-          : isBlankSignatureHtml(map[key])
-            ? EMAIL_SIGNATURE_DEFAULTS[key]
-            : map[key],
+          : map[key] === SIGNATURE_LINE_HIDDEN
+            ? ""
+            : isBlankSignatureHtml(map[key])
+              ? EMAIL_SIGNATURE_DEFAULTS[key]
+              : map[key],
       ]),
     ) as EmailSignatureSettings
   } catch {

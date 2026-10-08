@@ -261,12 +261,11 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(printed.some((line) => line.startsWith("Kruger Shalati Train on the Bridge"))).toBe(false)
     })
 
-    it("prints the company footer on the last page only", async () => {
+    it("prints the company footer on the first page only", async () => {
       const [first, second] = await pages({ itineraryBlocks })
 
-      expect(first).not.toContain("©SA Rail")
-      expect(second).toContain("©SA Rail 2026")
-      expect(second).toContain("RSA Co Reg: 2007/049324/23")
+      expect(first).toContain("Company Registration 2007/049324/23")
+      expect(second).not.toContain("Company Registration")
     })
   })
 

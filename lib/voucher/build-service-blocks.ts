@@ -130,6 +130,8 @@ interface SupplierJoin {
    * operator publishes no check-in time. See buildTrainScheduleBullets in
    * lib/quotes/quote-presentation.ts. */
   check_in_offset_minutes?: number | null
+  /** Whether the supplier is a product sold on its own (both trains, Kruger Shalati). */
+  sells_standalone?: boolean | null
 }
 
 /** Mirrors `supplierLocationName` in lib/suppliers.ts against this join's shape -- trains print
@@ -792,7 +794,7 @@ export async function buildVoucherServiceBlocks(
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, luggage_storage_available,
-       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, check_in_offset_minutes, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, check_in_offset_minutes, sells_standalone, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
@@ -1026,6 +1028,7 @@ export async function buildVoucherServiceBlocks(
         ? context.firstNightComplimentaryLegIds?.has(row.package_leg_id) ?? false
         : null,
       hasLuggageStorage: isHotel ? row.luggage_storage_available ?? false : null,
+      isStandaloneProduct: isHotel ? supplier?.sells_standalone === true : null,
       vehicleType: serviceType === "transfer" ? suite?.name ?? null : null,
       // A flight's cabin is the booked suite type — SUITE_NOUN_KINDS deliberately excludes airline,
       // so the name reads as typed ("Economy") and feeds the itinerary's "in Economy".

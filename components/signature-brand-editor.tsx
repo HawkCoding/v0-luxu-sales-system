@@ -429,7 +429,11 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
             />
             <p className="text-xs text-muted-foreground">
               Blank inherits the shared default
-              {defaults?.[defaultKey] ? `: “${toPlainText(defaults[defaultKey])}”` : "."}
+              {defaults?.[defaultKey]
+                ? `: “${toPlainText(defaults[defaultKey])}”`
+                : defaults
+                  ? ", which is blank — so the line is left out."
+                  : "."}
             </p>
           </div>
         ))}

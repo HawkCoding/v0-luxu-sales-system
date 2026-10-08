@@ -4,7 +4,7 @@ import { footerCompanyFromBanking, type DocumentFooterCompany } from "@/lib/pdf/
 import type { Database } from "@/lib/supabase/types"
 
 /**
- * The company details every PDF's last-page footer prints (quote, voucher, itinerary): the default
+ * The company details every PDF's first-page footer prints (quote, voucher, itinerary): the default
  * payment method's company fields, the same ones the invoice has always carried. Never throws — a
  * footer lookup must not stop a client document from rendering; it degrades to the brand lines.
  */
