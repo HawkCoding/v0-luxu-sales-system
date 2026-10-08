@@ -89,6 +89,9 @@ export interface VoucherServiceBlockData {
   /** Hotel-only: the property lets guests store luggage at reception. Prints a suffix on the quote
    *  itinerary's check-out line only — never shown on the voucher. */
   hasLuggageStorage?: boolean | null
+  /** Hotel-only: the property is a product sold on its own (Kruger Shalati), not an add-on stay —
+   *  the quote's details page heads it "<Brand> Inclusions" like the trains. */
+  isStandaloneProduct?: boolean | null
   vehicleType?: string | null
   pickup?: string | null
   dropoff?: string | null

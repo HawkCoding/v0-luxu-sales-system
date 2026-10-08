@@ -659,6 +659,16 @@ export async function POST(req: Request) {
     })
 
     if (followUp) {
+      // One pending follow-up per booking: the draft left by an earlier send of this quote (or of
+      // the quote it replaced) quotes a route, date or price the client has since been re-sent.
+      const { error: staleFollowUpError } = await supabase
+        .from("correspondences")
+        .update({ status: "cancelled" })
+        .eq("booking_id", bookingId)
+        .eq("kind", "quote_follow_up")
+        .eq("status", "scheduled")
+      if (staleFollowUpError) console.error("correspondence:cancel-stale-follow-up", staleFollowUpError)
+
       await supabase.from("correspondences").insert({
         booking_id: bookingId,
         channel: "email",

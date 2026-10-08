@@ -372,7 +372,7 @@ export function JobQuotesTab({
                               is longer, and the client documents still say so. */}
                           {hasComplimentaryNight(li) ? (
                             <div className="text-[10px] text-emerald-600 dark:text-emerald-500">
-                              of {stayNights(li)}
+                              of {stayNights(li)} nights
                             </div>
                           ) : null}
                         </td>

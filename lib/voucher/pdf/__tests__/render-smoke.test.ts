@@ -75,19 +75,18 @@ describe("renderVoucherPdf smoke", { timeout: 20_000 }, () => {
     await renderAndAssert("logo", sampleData(), VOUCHER_TEMPLATE_DEFAULTS, { data: png, format: "png" })
   })
 
-  it("prints the letterhead on the first page only and the company footer on the last page only", async () => {
+  it("prints the letterhead and the company footer on the first page only", async () => {
     const buffer = await renderVoucherPdf({
       data: { ...sampleData(), serviceBlocks: [...serviceBlocks(), ...serviceBlocks()] },
-      company: { tel: "+27 12 100 3596", email: "info@sa-rail.co.za" },
+      company: { tel: "(+27) 021 100 3596", email: "info@sa-rail.co.za" },
     })
     const pages = await extractPdfPageTexts(buffer)
 
     expect(pages.length).toBeGreaterThan(1)
-    // The letterhead heading; the division line under it also closes the footer, so it is not a page-one marker.
     expect(pages[0]).toContain("KRUGER SHALATI")
     pages.slice(1).forEach((page) => expect(page).not.toContain("KRUGER SHALATI"))
-    pages.slice(0, -1).forEach((page) => expect(page).not.toContain("©SA Rail"))
-    expect(pages.at(-1)).toContain("©SA Rail")
+    expect(pages[0]).toContain("(+27) 021 100 3596")
+    pages.slice(1).forEach((page) => expect(page).not.toContain("info@sa-rail.co.za"))
     expect(pages.at(-1)).toContain("End Of Services. Thank you")
   })
 

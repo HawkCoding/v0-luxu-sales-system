@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { JobReservationTab } from "./job-reservation-tab"
+import type { Customer } from "@/lib/types"
 import type { JobReservationDetails, JobTraveller } from "@/lib/use-data"
 
 // This card used to also render a "From enquiry: …" hint sourced from the enquiry's
@@ -50,7 +51,11 @@ function reservationDetails(overrides: Partial<JobReservationDetails> = {}): Job
   }
 }
 
-function setup(details: JobReservationDetails, travellers: JobTraveller[] = []) {
+function setup(
+  details: JobReservationDetails,
+  travellers: JobTraveller[] = [],
+  customer: Customer | null = null,
+) {
   useDataMocks.useJobTravellers.mockReturnValue({
     data: { travellers, paxComparison: null },
     isLoading: false,
@@ -69,7 +74,7 @@ function setup(details: JobReservationDetails, travellers: JobTraveller[] = []) 
       bookingId="booking-1"
       reservationFormReceivedAt={null}
       mutateJob={vi.fn()}
-      customer={null}
+      customer={customer}
       stage="accepted"
     />,
   )
@@ -95,6 +100,76 @@ describe("JobReservationTab — Special requests card", () => {
     ) as HTMLTextAreaElement
     expect(textarea.value).toBe("Anniversary celebration")
     expect(screen.queryByText(/From enquiry/i)).not.toBeInTheDocument()
+  })
+})
+
+describe("JobReservationTab — Fill from customer profile", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const peter: Customer = {
+    id: "c1",
+    firstName: "Peter",
+    lastName: "Award",
+    email: "peter@example.com",
+    phone: "+27 82 000 0000",
+    country: "South Africa",
+    title: "Mr",
+    idPassport: "A1234567",
+    dateOfBirth: "1960-05-04",
+    createdAt: "2026-01-01T00:00:00Z",
+  }
+
+  function guest(overrides: Partial<JobTraveller>): JobTraveller {
+    return {
+      id: "t1",
+      prefix: "",
+      firstName: "Peter",
+      lastName: "Award",
+      idPassport: "",
+      dateOfBirth: "",
+      residence: "",
+      roomWith: "",
+      roomType: "",
+      isChild: false,
+      isPrimary: true,
+      sortOrder: 0,
+      clubMemberships: [],
+      ...overrides,
+    }
+  }
+
+  const fillButton = () => screen.getByRole("button", { name: /fill from customer profile/i })
+
+  it("seeds the guest row from the customer when the booking has no guests", () => {
+    setup(reservationDetails(), [], peter)
+    fireEvent.click(fillButton())
+
+    expect(screen.getByDisplayValue("Peter")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Award")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("A1234567")).toBeInTheDocument()
+  })
+
+  it("fills the blanks on a primary guest row on open", () => {
+    setup(reservationDetails(), [guest({ isPrimary: true })], peter)
+    expect(screen.getByDisplayValue("A1234567")).toBeInTheDocument()
+  })
+
+  it("fills a guest row that matches the customer by name even when it is not flagged primary", () => {
+    setup(reservationDetails(), [guest({ isPrimary: false })], peter)
+    expect(screen.getByDisplayValue("A1234567")).toBeInTheDocument()
+  })
+
+  it("fills nothing when no guest row is the customer (name differs, none flagged primary)", () => {
+    setup(reservationDetails(), [guest({ firstName: "Pieter", isPrimary: false })], peter)
+    fireEvent.click(fillButton())
+    expect(screen.queryByDisplayValue("A1234567")).not.toBeInTheDocument()
+  })
+
+  it("is disabled until the customer has loaded", () => {
+    setup(reservationDetails(), [], null)
+    expect(fillButton()).toBeDisabled()
   })
 })
 

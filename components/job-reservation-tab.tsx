@@ -310,8 +310,9 @@ export function JobReservationTab({
   // section for the customer's address).
   const agencySeed = useMemo(() => ({ name: customer?.companyName ?? "" }), [customer])
 
-  // Structured fields for the "Copy from customer profile" buttons below — the invoice
-  // reads only the billing_* columns (no fallback), so this is a one-shot fill, not a default.
+  // Structured fields for the "Copy from customer profile" buttons below — a one-shot fill, not a
+  // default. Company/VAT never fall back; the invoice prints the profile's address only while every
+  // billing address field here is blank (buildBillingParty).
   const billingSeed = useMemo(
     () => ({
       companyName: customer?.companyName ?? "",
@@ -349,6 +350,22 @@ export function JobReservationTab({
   const [billingPostalCode, setBillingPostalCode] = useState("")
   const [billingCountry, setBillingCountry] = useState("")
   const [savingDetails, setSavingDetails] = useState(false)
+  const billingAddressBlank = [
+    billingAddressLine1,
+    billingAddressLine2,
+    billingCity,
+    billingProvince,
+    billingPostalCode,
+    billingCountry,
+  ].every((value) => !value.trim())
+  const customerHasAddress = [
+    billingSeed.addressLine1,
+    billingSeed.addressLine2,
+    billingSeed.city,
+    billingSeed.province,
+    billingSeed.postalCode,
+    billingSeed.country,
+  ].some((value) => value.trim())
   const detailsHydrated = useRef(false)
   // Same idea as travellersBaselineRef, but for the shared reservation-details payload used by
   // the Company details / Special requests / Agency details cards (and the billing sub-panel).
@@ -1006,6 +1023,11 @@ export function JobReservationTab({
                           onChange={(e) => setBillingCountry(e.target.value)}
                         />
                       </div>
+                      {billingAddressBlank && customerHasAddress ? (
+                        <p className="text-xs text-muted-foreground">
+                          Left blank, the invoice prints the customer profile&apos;s address.
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

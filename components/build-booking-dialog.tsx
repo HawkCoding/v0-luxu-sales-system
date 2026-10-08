@@ -29,7 +29,14 @@ import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
-import { calculateQuoteTotals, isMissingPricing, resolveLineTotal } from "@/lib/quotes/pricing-engine"
+import {
+  calculateQuoteTotals,
+  describeQtyBasis,
+  hasComplimentaryNight,
+  isMissingPricing,
+  resolveLineTotal,
+  stayNights,
+} from "@/lib/quotes/pricing-engine"
 import { AmendQuoteConfirmDialog } from "@/components/quotes/amend-quote-confirm-dialog"
 import { createAmendServicesTracker } from "@/lib/quotes/amend-quote"
 import { findChangedExistingLines, rebuildAcceptedQuoteFxRates } from "@/lib/quotes/amend-pricing"
@@ -1701,6 +1708,17 @@ export function BuildBookingDialog({
                         <div>{li.qty}</div>
                         {li.pricingSnapshot?.unit ? (
                           <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
+                        ) : null}
+                        {/* Same qty explanation as the Quotes tab (job-quotes-tab.tsx): person-nights
+                            read as a headcount beside "per person per night", and once a night is
+                            gifted the qty is the charged nights, not the stay. */}
+                        {describeQtyBasis(li) ? (
+                          <div className="text-[11px] text-muted-foreground">{describeQtyBasis(li)}</div>
+                        ) : null}
+                        {hasComplimentaryNight(li) ? (
+                          <div className="text-[11px] text-emerald-600 dark:text-emerald-500">
+                            of {stayNights(li)} nights
+                          </div>
                         ) : null}
                       </td>
                       <td className="px-3 py-2 text-right text-xs whitespace-nowrap">{formatMoney(li.unitPrice, quoteCurrency)}</td>

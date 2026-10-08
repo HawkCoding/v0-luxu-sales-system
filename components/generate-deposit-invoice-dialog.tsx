@@ -73,15 +73,24 @@ interface GenerateDepositInvoiceResponse {
   error?: string
 }
 
-function latestPricedQuote(quotes: Quote[]): Quote | null {
+function latestByUpdate(quotes: Quote[]): Quote | null {
   return quotes
-    .filter((quote) => quote.total > 0)
     .slice()
     .sort((left, right) => {
       const leftTime = left.updatedAt ? new Date(left.updatedAt).getTime() : 0
       const rightTime = right.updatedAt ? new Date(right.updatedAt).getTime() : 0
       return rightTime - leftTime
     })[0] ?? null
+}
+
+/**
+ * The quote the invoice will bill — the accepted one, as the API prices it (calculateInvoiceBalance).
+ * Picking the most recently *updated* priced quote instead showed a revision's superseded parent:
+ * superseding it bumps its updated_at past the revision's own.
+ */
+export function billingQuote(quotes: Quote[]): Quote | null {
+  const priced = quotes.filter((quote) => quote.total > 0)
+  return latestByUpdate(priced.filter((quote) => quote.status === "accepted")) ?? latestByUpdate(priced)
 }
 
 function addDays(date: Date, days: number): string {
@@ -155,7 +164,7 @@ export function GenerateDepositInvoiceDialog({
   const [generated, setGenerated] = useState<GenerateDepositInvoiceResponse | null>(null)
   const dialogOpen = open ?? internalOpen
   const setDialogOpen = onOpenChange ?? setInternalOpen
-  const quote = useMemo(() => latestPricedQuote(quotes), [quotes])
+  const quote = useMemo(() => billingQuote(quotes), [quotes])
   const numericPercentage = Number(percentage)
   const validPercentage = Number.isFinite(numericPercentage)
     ? Math.min(100, Math.max(0, numericPercentage))

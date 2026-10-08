@@ -73,6 +73,24 @@ describe("buildQuoteDetailSections", () => {
     expect(buildQuoteDetailSections([blueTrain])[0].title).toEqual(["Blue Train Inclusions"])
   })
 
+  it("heads Kruger Shalati \"Kruger Shalati Inclusions\" with its inclusions, like the trains", () => {
+    const shalati: VoucherServiceBlock = {
+      ...hotel,
+      title: "Kruger Shalati",
+      contactDetails: { name: "Kruger Shalati - Train on the Bridge", description: "A train on a bridge." },
+      serviceData: { inclusions: ["Game drives", "All meals"], isStandaloneProduct: true },
+    }
+    const [section] = buildQuoteDetailSections([shalati])
+
+    expect(section.title).toEqual(["Kruger Shalati Inclusions"])
+    expect(section.bullets.map((bullet) => bullet.text)).toEqual(["Game drives", "All meals"])
+  })
+
+  it("keeps an add-on hotel headed by its full name", () => {
+    const [section] = buildQuoteDetailSections([{ ...hotel, serviceData: { ...hotel.serviceData, isStandaloneProduct: false } }])
+    expect(section.title).toEqual(["Ivory Manor Boutique Hotel"])
+  })
+
   it("skips a service with nothing to describe and prints a repeated one once", () => {
     const sections = buildQuoteDetailSections([transfer, hotel, train, { ...hotel, displayOrder: 5 }])
 

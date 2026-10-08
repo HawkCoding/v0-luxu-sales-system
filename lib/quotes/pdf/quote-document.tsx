@@ -17,7 +17,6 @@ import {
   DESIGN_COLORS,
   DocumentFooter,
   DocumentHeader,
-  FooterClearance,
   NestedBulletList,
   PAGE_BOTTOM,
   PAGE_TOP,
@@ -108,7 +107,7 @@ export interface QuotePdfData {
   /** "hidden" drops the letterhead; the design has no bottom slot, so "bottom" prints it on top. */
   brandPosition?: BrandBlockPosition
   brandLogo?: BrandLogoImage | null
-  /** Company details for the last page's footer. */
+  /** Company details for the first page's footer. */
   company?: DocumentFooterCompany
 }
 
@@ -373,18 +372,14 @@ export function QuoteDocument({
     ...(journeyDetails?.route ? [{ label: "Route:", value: journeyDetails.route }] : []),
   ]
 
-  const footerLines = buildDocumentFooterLines(company ?? {}, {
-    division: resolvedBrand.subheading,
-    year: Number((quoteDate || new Date().toISOString()).slice(0, 4)),
-  })
+  const footerLines = buildDocumentFooterLines(company ?? {})
   const disclaimer = resolveFooterText(footerText, validUntil, currency)
 
-  const closing = (
+  const closing = disclaimer ? (
     <View wrap={false}>
-      {disclaimer ? <Text style={styles.disclaimer}>{disclaimer}</Text> : null}
-      <FooterClearance />
+      <Text style={styles.disclaimer}>{disclaimer}</Text>
     </View>
-  )
+  ) : null
 
   return (
     <Document

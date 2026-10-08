@@ -108,6 +108,17 @@ describe("resolveDurationNights", () => {
 })
 
 describe("buildBillingParty", () => {
+  const profile = {
+    phone: "+27 21 555 0000",
+    email: "customer@example.com",
+    address_line1: "49 Mitchell Ave",
+    address_line2: null,
+    city: "Newcastle upon Tyne",
+    province: null,
+    postal_code: "NE1 4ST",
+    country: "United Kingdom",
+  }
+
   it("reads company, VAT and address from booking_reservation_details, not the customer profile", () => {
     const billing = buildBillingParty(
       {
@@ -120,7 +131,7 @@ describe("buildBillingParty", () => {
         billing_postal_code: "8001",
         billing_country: "South Africa",
       },
-      { phone: "+27 21 555 0000", email: "customer@example.com" },
+      profile,
     )
     expect(billing.companyName).toBe("Acme Travel")
     expect(billing.vatNumber).toBe("VAT123")
@@ -131,13 +142,39 @@ describe("buildBillingParty", () => {
     expect(billing.email).toBe("customer@example.com")
   })
 
-  it("has no fallback to the customer profile — a null details row prints blank, not customer data", () => {
-    const billing = buildBillingParty(null, { phone: "+27 21 555 0000", email: "customer@example.com" })
+  it("never falls back to the customer profile for company or VAT", () => {
+    const billing = buildBillingParty(null, { ...profile, address_line1: null, city: null, postal_code: null, country: null })
     expect(billing.companyName).toBeNull()
     expect(billing.vatNumber).toBeNull()
     expect(billing.addressLines).toEqual([])
     expect(billing.phone).toBe("+27 21 555 0000")
     expect(billing.email).toBe("customer@example.com")
+  })
+
+  it("prints the customer profile's address when the booking has no billing address at all", () => {
+    expect(buildBillingParty(null, profile).addressLines).toEqual([
+      "49 Mitchell Ave",
+      "Newcastle upon Tyne",
+      "NE1 4ST",
+      "United Kingdom",
+    ])
+  })
+
+  it("never mixes the profile's address into a booking that has any address line of its own", () => {
+    const billing = buildBillingParty(
+      {
+        billing_company_name: null,
+        billing_vat_number: null,
+        billing_address_line1: null,
+        billing_address_line2: null,
+        billing_city: null,
+        billing_province: null,
+        billing_postal_code: null,
+        billing_country: "South Africa",
+      },
+      profile,
+    )
+    expect(billing.addressLines).toEqual(["South Africa"])
   })
 
   it("drops empty address lines rather than printing blanks", () => {
@@ -393,6 +430,7 @@ describe("buildInvoiceItems", () => {
       supplierName: "DaVinci Hotel & Suites",
       supplierKind: "hotel_property",
       routeName: "Bed & Breakfast",
+      suiteTypeName: "Deluxe Room",
       travelDate: "2027-11-20",
       serviceType: null,
       complimentaryNights: 1,
@@ -432,7 +470,7 @@ describe("buildInvoiceItems", () => {
   it("prints neither comp suffix, and names the transfer by its pick-up and drop-off", () => {
     const items = buildInvoiceItems([hotelLine, transferLine()], [], [tripRequest])
     expect(items.map((item) => item.description)).toEqual([
-      "DaVinci Hotel & Suites — Bed & Breakfast",
+      "DaVinci Hotel & Suites — Deluxe Room, Bed & Breakfast (3 nights)",
       "Transfer Sandton Hotel to Pretoria Station",
     ])
     // Wording only: the qty and money columns are untouched.

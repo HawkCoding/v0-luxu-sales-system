@@ -27,14 +27,15 @@ export function sampleBanking(): BankingSettings {
     bank_account_number: "625 489 436 55",
     bank_branch_code: "250 655",
     bank_swift_code: "FIRNZAJJ",
-    company_address: "SA-Rail (a division of Luxus Travel & Tours)\nUnit 6 Oostewal Business Centre, Oostewal Road, Langebaan",
+    company_address:
+      "No 6 Oostewal Business Centre, Cnr of Sleigh & Oostewal Rd, Langebaan, Westerncape, South Africa 7357",
     company_reg_number: "CK2007/049324/23",
     company_vat_number: "4580275016",
-    company_tel: "+27 12 100 3596",
-    company_cell: "+27 81 580 6471",
+    company_tel: "(+27) 021 100 3596",
+    company_cell: "(+27) 081 580 6471",
     company_fax: "",
     company_email: "info@sa-rail.co.za",
-    company_website: "sa-rail.co.za",
+    company_website: "sa-rail.co.za, luxustravel.co.za",
   }
 }
 

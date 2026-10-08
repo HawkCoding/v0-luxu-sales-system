@@ -40,7 +40,13 @@ export interface InvoiceView {
   pricedLines: PerPersonLine[]
 }
 
-type CustomerRow = Pick<Database["public"]["Tables"]["customers"]["Row"], "phone" | "email">
+type CustomerRow = Pick<Database["public"]["Tables"]["customers"]["Row"], "phone" | "email"> &
+  Partial<
+    Pick<
+      Database["public"]["Tables"]["customers"]["Row"],
+      "address_line1" | "address_line2" | "city" | "province" | "postal_code" | "country"
+    >
+  >
 
 type BillingDetailsRow = Pick<
   Database["public"]["Tables"]["booking_reservation_details"]["Row"],
@@ -54,10 +60,34 @@ type BillingDetailsRow = Pick<
   | "billing_country"
 >
 
+interface PostalAddress {
+  line1?: string | null
+  line2?: string | null
+  city?: string | null
+  province?: string | null
+  postalCode?: string | null
+  country?: string | null
+}
+
+function postalAddressLines(address: PostalAddress): string[] {
+  return [
+    address.line1,
+    address.line2,
+    [address.city, address.province].filter(Boolean).join(", "),
+    address.postalCode,
+    address.country,
+  ]
+    .map((line) => line?.trim() ?? "")
+    .filter((line) => line.length > 0)
+}
+
 /**
- * The billing party is job-level, not customer-level: Company, VAT and address
- * come only from booking_reservation_details, with no fallback to the customer
- * profile. Phone and e-mail are the exception and still read the customer.
+ * The billing party is job-level, not customer-level: Company and VAT come only from
+ * booking_reservation_details, with no fallback to the customer profile. The address reads the
+ * booking first and falls back to the customer profile's address only when the booking has none
+ * at all (client request 2026-10-07: the profile address "is not pulling through") — a booking
+ * with any billing address line of its own never mixes in the customer's. Phone and e-mail still
+ * read the customer.
  *
  * The postal code is part of the address, on its own line under the town/province and above the
  * country, as a South African postal address is written — not a separate "Code" field.
@@ -66,15 +96,25 @@ export function buildBillingParty(
   details: BillingDetailsRow | null | undefined,
   customer: CustomerRow | null | undefined,
 ): InvoiceBillingParty {
-  const addressLines = [
-    details?.billing_address_line1,
-    details?.billing_address_line2,
-    [details?.billing_city, details?.billing_province].filter(Boolean).join(", "),
-    details?.billing_postal_code,
-    details?.billing_country,
-  ]
-    .map((line) => line?.trim() ?? "")
-    .filter((line) => line.length > 0)
+  const bookingAddress = postalAddressLines({
+    line1: details?.billing_address_line1,
+    line2: details?.billing_address_line2,
+    city: details?.billing_city,
+    province: details?.billing_province,
+    postalCode: details?.billing_postal_code,
+    country: details?.billing_country,
+  })
+  const addressLines =
+    bookingAddress.length > 0
+      ? bookingAddress
+      : postalAddressLines({
+          line1: customer?.address_line1,
+          line2: customer?.address_line2,
+          city: customer?.city,
+          province: customer?.province,
+          postalCode: customer?.postal_code,
+          country: customer?.country,
+        })
 
   return {
     companyName: details?.billing_company_name ?? null,
@@ -349,7 +389,7 @@ export async function buildInvoiceView(
     supabase
       .from("bookings")
       .select(
-        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, child_ages, no_of_suites, duration_nights, trip_start_date, trip_end_date, primary_supplier_id, customer:customers(phone, email), route:routes(name)",
+        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, child_ages, no_of_suites, duration_nights, trip_start_date, trip_end_date, primary_supplier_id, customer:customers(phone, email, address_line1, address_line2, city, province, postal_code, country), route:routes(name)",
       )
       .eq("id", bookingId)
       .maybeSingle(),

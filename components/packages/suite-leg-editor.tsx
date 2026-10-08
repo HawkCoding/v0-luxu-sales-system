@@ -23,7 +23,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { PackageLeg, RateType, ServiceDateAnchor, SupplierRateCard } from "@/lib/types"
-import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
+import {
+  cardNightlyRoomRate,
+  describeCardRoomRateBreakdown,
+  type AccommodationPricingBasis,
+} from "@/lib/pricing/accommodation-basis"
 import {
   getSupplierVocabulary,
   isCoreBookingLeg,
@@ -191,29 +195,38 @@ function RoomPriceOverride({
   // against who is actually in the room -- the same sum the pricer does (hotelRateCardFares: an
   // unset child or infant fare means free, never "same as an adult"). Showing the bare
   // pricePerPerson here used to tell the consultant a double room cost half what it does.
-  const cardNightlyRoomRate =
-    baseRateCard === null
-      ? null
-      : basis === "per_room"
-        ? baseRateCard.pricePerPerson
-        : Math.round(
-            (unit.adultCount * baseRateCard.pricePerPerson +
-              unit.childCount * (baseRateCard.childPrice ?? 0) +
-              unit.infantCount * (baseRateCard.infantPrice ?? 0)) *
-              100,
-          ) / 100
+  const occupancy = {
+    adultCount: unit.adultCount,
+    childCount: unit.childCount,
+    infantCount: unit.infantCount,
+  }
+  const cardRoomRate = baseRateCard === null ? null : cardNightlyRoomRate(baseRateCard, basis, occupancy)
   const cardRateLabel = basis === "per_room" ? "per room per night" : "per night for this room"
+  // Under per_person the room's figure is the guests' fares added up. Spell the sum out, so a
+  // consultant whose rate sheet quotes the room sees at once that the card is being read per person
+  // (R8 260 for the room = 2 adults × R4 130) instead of an unexplained doubling.
+  const cardBreakdown =
+    baseRateCard !== null && basis === "per_person"
+      ? describeCardRoomRateBreakdown(baseRateCard, occupancy, (amount) =>
+          formatMoney(amount, baseRateCard.currency),
+        )
+      : null
 
   // What the quote will actually charge, whichever price the room is running on. A typed override
   // is always a room price, so it needs no occupancy sum.
-  const effectivePrice = overridden ? price : cardNightlyRoomRate
+  const effectivePrice = overridden ? price : cardRoomRate
+  // State the full stay and what the gift takes off it. "1 of 2 nights at R8 260 = R8 260" alone
+  // reads like nothing was discounted -- the same figure appears on both sides.
   const complimentarySummary =
     effectivePrice === null
       ? `First night complimentary · ${chargedNights} of ${nights} nights charged`
-      : `First night complimentary · ${chargedNights} of ${nights} nights at ${formatMoney(
+      : `First night complimentary · ${chargedNights} of ${nights} nights charged at ${formatMoney(
           effectivePrice,
           currency,
-        )} = ${formatMoney(Math.round(effectivePrice * chargedNights * 100) / 100, currency)}`
+        )} per room = ${formatMoney(Math.round(effectivePrice * chargedNights * 100) / 100, currency)} (full stay ${formatMoney(
+          Math.round(effectivePrice * nights * 100) / 100,
+          currency,
+        )}, ${formatMoney(Math.round(effectivePrice * (nights - chargedNights) * 100) / 100, currency)} free)`
 
   const complimentaryToggle = (
     <Button
@@ -238,13 +251,14 @@ function RoomPriceOverride({
       <div className="space-y-1.5 border-t pt-3 md:col-span-2 xl:col-span-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
-            {baseRateCard && cardNightlyRoomRate !== null ? (
+            {baseRateCard && cardRoomRate !== null ? (
               <>
                 Rate card{" "}
                 <span className="font-medium tabular-nums text-foreground">
-                  {formatMoney(cardNightlyRoomRate, baseRateCard.currency)}
+                  {formatMoney(cardRoomRate, baseRateCard.currency)}
                 </span>{" "}
                 {cardRateLabel}
+                {cardBreakdown ? ` (per person: ${cardBreakdown})` : ""}
               </>
             ) : (
               "No rate card price for this room yet"
@@ -324,10 +338,10 @@ function RoomPriceOverride({
             data-slot="input-group-control"
             className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             placeholder={
-              cardNightlyRoomRate !== null
+              cardRoomRate !== null
                 ? // The room rate the override would replace, so typing the same number is a no-op
                   // rather than a silent halving of a shared room.
-                  cardNightlyRoomRate.toLocaleString("en-ZA", {
+                  cardRoomRate.toLocaleString("en-ZA", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })
@@ -338,7 +352,9 @@ function RoomPriceOverride({
             onValueChange={onChange}
           />
           <InputGroupAddon align="inline-end">
-            <InputGroupText className="text-xs">/ night</InputGroupText>
+            {/* Always a whole-room price, also on a per-person stay -- "/ night" alone left it open
+                whether to type one guest's fare or the room's. */}
+            <InputGroupText className="text-xs">/ room / night</InputGroupText>
           </InputGroupAddon>
         </InputGroup>
         <Button
@@ -370,11 +386,13 @@ function RoomPriceOverride({
           <p className="text-xs text-muted-foreground">
             {isComplimentary
               ? "The client's quote and voucher will show this room as complimentary."
-              : baseRateCard && cardNightlyRoomRate !== null
+              : baseRateCard && cardRoomRate !== null
                 ? // A typed price is always a room price. Under per_person that means it replaces
                   // the card's whole per-guest sum for this room, not the single adult fare -- so
                   // the figure quoted here is the one the override actually has to beat.
-                  `Replaces the rate card's ${formatMoney(cardNightlyRoomRate, baseRateCard.currency)} ${cardRateLabel}.`
+                  `Replaces the rate card's ${formatMoney(cardRoomRate, baseRateCard.currency)} ${cardRateLabel}${
+                    cardBreakdown ? ` (per person: ${cardBreakdown})` : ""
+                  }.`
                 : "No rate card covers this room, so nothing is being replaced."}
           </p>
         </div>

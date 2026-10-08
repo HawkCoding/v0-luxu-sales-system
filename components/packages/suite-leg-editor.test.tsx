@@ -555,6 +555,34 @@ describe("SuiteLegEditor room price override", () => {
 
     expect(screen.getByText(/8[\s,]?500/)).toBeInTheDocument()
     expect(screen.getByText(/per night for this room/i)).toBeInTheDocument()
+    // ...and says how it got there, so a rate sheet that quotes the room shows up as a doubling.
+    // (The fixture room also holds a child, sharing free on a card with no child rate.)
+    expect(
+      screen.getByText(/\(per person: 2 adults × R\s?4[\s,]?250[.,]00 \+ 1 child free\)/),
+    ).toBeInTheDocument()
+  })
+
+  it("asks for the override as a whole-room price, and says what it replaces in the same terms", () => {
+    render(
+      <SuiteLegEditor leg={hotelLeg} value={makeHotelState({ manualRoomPrice: 4500 })} onChange={vi.fn()} />,
+    )
+
+    expect(screen.getByText("/ room / night")).toBeInTheDocument()
+    expect(
+      screen.getByText(/Replaces the rate card's R\s?8[\s,]?500[.,]00 per night for this room \(per person: 2 adults × /),
+    ).toBeInTheDocument()
+  })
+
+  it("does not break a per-room card down per guest", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), accommodationPricingBasis: "per_room" }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText(/\(per person:/)).not.toBeInTheDocument()
   })
 
   it("quotes the card as the room's flat nightly rate when the stay prices per room", () => {
@@ -579,8 +607,23 @@ describe("SuiteLegEditor room price override", () => {
       />,
     )
 
-    // Three nights, one gifted, two charged at R8 500 = R17 000 -- not 2 x R4 250.
-    expect(screen.getByText(/2 of 3 nights at .*=.*17[\s,]?000/)).toBeInTheDocument()
+    // Three nights, one gifted, two charged at R8 500 = R17 000 -- not 2 x R4 250. The full stay and
+    // the gift are stated too, so the discount is visible rather than implied.
+    expect(
+      screen.getByText(/2 of 3 nights charged at .*8[\s,]?500.* per room = .*17[\s,]?000.*full stay .*25[\s,]?500.*8[\s,]?500.* free/),
+    ).toBeInTheDocument()
+  })
+
+  it("costs a gifted first night off a typed room price the same way", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={makeHotelState({ complimentaryFirstNight: true, manualRoomPrice: 4750 })}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/9[\s,]?500[.,]00 for 2 nights of 3 \(first night complimentary\)/)).toBeInTheDocument()
   })
 })
 

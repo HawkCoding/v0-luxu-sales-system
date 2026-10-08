@@ -1569,6 +1569,66 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].pricingSnapshot?.complimentaryNights).toBe(1)
   })
 
+  // LTT-26-0019: DaVinci Deluxe Room, STO R4 130 on a per-person card, two adults, two nights, the
+  // first gifted. The pricing itself is unchanged by the 2026-10 fix; what changed is that the
+  // overridden room's line now says what it is (a room price) and what it replaced (the room's
+  // R8 260, the figure Build Booking showed, not the bare R4 130 adult fare).
+  describe("a gifted first night on a per-person stay, card-priced then overridden (LTT-26-0019)", () => {
+    const hotelLeg = () =>
+      leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        routes: [route("route-bb", "supplier-leg-hotel", "Bed & Breakfast")],
+        suiteTypes: [suiteType("room-deluxe", "supplier-leg-hotel", "Deluxe Room")],
+        rateCards: [rateCard({ id: "rc-deluxe", routeId: "route-bb", suiteTypeId: "room-deluxe", pricePerPerson: 4130 })],
+      })
+
+    async function build(unit: { manualRoomPrice?: number }) {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [{ suiteTypeId: "room-deluxe", adultCount: 2, complimentaryFirstNight: true, ...unit }],
+          },
+        ],
+      })
+      return lineItems
+    }
+
+    it("charges two guests for the one paid night off the card (the gift is applied)", async () => {
+      const [line] = await build({})
+      expect(line.qty).toBe(2)
+      expect(line.unitPrice).toBe(4130)
+      expect(line.total).toBe(8260) // not 16 520: the gifted night is gone
+      expect(line.description).toMatch(/- Adult$/)
+      expect(line.pricingSnapshot?.unit).toBe("per person per night")
+      expect(describeQtyBasis(line)).toBe("2 guests × 1 night")
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+      expect(line.pricingSnapshot?.stayNights).toBe(2)
+    })
+
+    it("labels an overridden room per room and records the room's card rate it replaced", async () => {
+      const [line] = await build({ manualRoomPrice: 4750 })
+      expect(line.qty).toBe(1)
+      expect(line.unitPrice).toBe(4750)
+      expect(line.total).toBe(4750)
+      expect(line.description).not.toMatch(/- Adult$/)
+      expect(line.pricingSnapshot?.unit).toBe("per room per night")
+      expect(line.pricingSnapshot?.manualRoomPrice).toBe(4750)
+      expect(line.pricingSnapshot?.manualRoomPriceBase).toBe(8260)
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+      // The stay itself is still per person -- only this room's price was typed.
+      expect(line.pricingSnapshot?.accommodationPricingBasis).toBe("per_person")
+    })
+  })
+
   it("still emits a line for a one-night stay whose only night was gifted", async () => {
     const hotelLeg = leg({
       id: "leg-hotel",

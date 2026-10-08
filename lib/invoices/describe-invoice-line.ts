@@ -50,11 +50,17 @@ export function describeInvoiceLine(
   // displayRouteName also guards the fallback: snapshots stamped between the itinerary-name
   // retirement and this fix carry the itinerary's id as routeName, which must never render.
   const isTour = snapshot?.supplierKind === "tour_operator"
+  const isHotel = snapshot?.supplierKind === "hotel_property"
   const detail = (isTour ? snapshot?.suiteTypeName?.trim() : null) || displayRouteName(snapshot?.routeName)
+  // A hotel names the room category ahead of the meal plan its route field carries (client
+  // request 2026-10-07: "Deluxe Room, Bed & Breakfast"), and counts the stay in the brackets.
+  const hotelDetail = isHotel ? [snapshot?.suiteTypeName?.trim(), detail].filter(Boolean).join(", ") : null
+  const nights = isHotel ? hotelStayNights(snapshot) : null
 
   let base: string
   if (supplier) {
-    base = detail ? `${supplier} — ${detail}` : supplier
+    const shown = hotelDetail || detail
+    base = shown ? `${supplier} — ${shown}` : supplier
   } else if (isGenericService) {
     // Category word only, never the supplier — "Transfer <pick-up> to <drop-off>". The route's own
     // name is an internal short code, so it is only the fallback for a trip with no typed points.
@@ -65,8 +71,24 @@ export function describeInvoiceLine(
     return storedDescription
   }
 
-  if (snapshot?.passengerKind === "child") return `${base} (Child)`
-  if (snapshot?.passengerKind === "infant") return `${base} (Infant)`
+  const notes = [
+    nights ? `${nights} ${nights === 1 ? "night" : "nights"}` : null,
+    snapshot?.passengerKind === "child" ? "Child" : snapshot?.passengerKind === "infant" ? "Infant" : null,
+  ].filter(Boolean)
 
-  return base
+  return notes.length > 0 ? `${base} (${notes.join(", ")})` : base
+}
+
+/**
+ * The room's whole stay, gifted night included — the client is told how long they stay, not how
+ * many nights were charged. Older snapshots without stayNights rebuild it from the per-person
+ * line's charged nights; a line carrying neither prints no count rather than a guess.
+ */
+function hotelStayNights(snapshot: PricingSnapshot | null | undefined): number | null {
+  const stay = snapshot?.stayNights
+  if (typeof stay === "number" && stay > 0) return stay
+  const charged = snapshot?.chargedNights
+  if (typeof charged !== "number" || charged <= 0) return null
+  const gifted = snapshot?.complimentaryNights
+  return charged + (typeof gifted === "number" && gifted > 0 ? gifted : 0)
 }

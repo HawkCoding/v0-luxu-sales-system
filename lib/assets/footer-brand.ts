@@ -28,9 +28,6 @@ export const FOOTER_BRAND_LOCAL_PATH = "assets/brand/sarail-footer-logo.png"
  */
 export const DOCUMENT_BRAND_LOGO_LOCAL_PATH = "assets/brand/sarail-document-logo.png"
 
-/** The trading name after the copyright mark in every PDF's footer: "©SA Rail 2026". */
-export const DOCUMENT_FOOTER_BRAND_NAME = "SA Rail"
-
 /**
  * Absolute public URL of the footer logo for email embedding. Each environment
  * resolves against its own Supabase project, so no extra config is needed.

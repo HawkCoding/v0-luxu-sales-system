@@ -335,8 +335,8 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
   })
 
   // The multipage rules: the quote's first section flows across pages and its details section
-  // starts a fresh page; voucher blocks never split; the letterhead prints on page one only and
-  // the company footer on the last page only.
+  // starts a fresh page; voucher blocks never split; the letterhead and the company footer print
+  // on page one only.
   it("renders long, multi-page variants", async () => {
     const dir = path.join(OUT as string, "multi-page")
     mkdirSync(dir, { recursive: true })
