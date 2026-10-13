@@ -14,6 +14,14 @@ vi.mock("@/lib/quotes/quote-number", () => ({
   buildQuoteNumber: vi.fn(() => "BT-2026-0001-Q1"),
 }))
 
+const claimMocks = vi.hoisted(() => ({
+  claimUnassignedBooking: vi.fn(async () => ({ ok: true, claimed: true, assignedSalespersonId: "u1" })),
+}))
+
+vi.mock("@/lib/bookings/claim-unassigned-booking", () => ({
+  claimUnassignedBooking: claimMocks.claimUnassignedBooking,
+}))
+
 import { POST } from "./route"
 
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
@@ -131,6 +139,19 @@ describe("POST /api/quotes", () => {
     const body = await res.json()
     expect(body.error).toBe("Invalid request body")
     expect(body.details).toBeDefined()
+  })
+
+  it("assigns the creating salesperson to an unassigned booking", async () => {
+    buildAuth()
+    claimMocks.claimUnassignedBooking.mockClear()
+
+    const res = await POST(postJson({ bookingId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(claimMocks.claimUnassignedBooking).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bookingId: BOOKING_ID }),
+    )
   })
 
   it("creates the quote and inserts line items", async () => {

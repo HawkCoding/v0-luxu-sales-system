@@ -18,6 +18,14 @@ vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
   syncBookingPaymentState: syncMocks.syncBookingPaymentState,
 }))
 
+const claimMocks = vi.hoisted(() => ({
+  claimUnassignedBooking: vi.fn(async () => ({ ok: true, claimed: false, assignedSalespersonId: "u1" })),
+}))
+
+vi.mock("@/lib/bookings/claim-unassigned-booking", () => ({
+  claimUnassignedBooking: claimMocks.claimUnassignedBooking,
+}))
+
 import { PATCH } from "./route"
 
 const QUOTE_ID = "00000000-0000-4000-8000-00000000dddd"

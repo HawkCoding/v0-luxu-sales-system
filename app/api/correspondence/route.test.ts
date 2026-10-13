@@ -24,6 +24,13 @@ const templateMocks = vi.hoisted(() => ({
 const libraryMocks = vi.hoisted(() => ({
   loadLibraryAttachments: vi.fn(),
 }))
+const claimMocks = vi.hoisted(() => ({
+  claimUnassignedBooking: vi.fn(),
+}))
+
+vi.mock("@/lib/bookings/claim-unassigned-booking", () => ({
+  claimUnassignedBooking: claimMocks.claimUnassignedBooking,
+}))
 
 vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
@@ -447,6 +454,8 @@ describe("POST /api/correspondence", () => {
     })
     libraryMocks.loadLibraryAttachments.mockReset()
     libraryMocks.loadLibraryAttachments.mockResolvedValue([])
+    claimMocks.claimUnassignedBooking.mockReset()
+    claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: true, claimed: false, assignedSalespersonId: null })
     transitionMocks.applyTransition.mockResolvedValue({
       updated: {},
       crossedStages: [],
@@ -934,6 +943,30 @@ describe("POST /api/correspondence", () => {
         salespersonCredentialId: "cred-1",
       }),
     )
+  })
+
+  it("assigns the sender to an unassigned booking and sends from their mailbox", async () => {
+    claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: true, claimed: true, assignedSalespersonId: "u1" })
+    buildAuth()
+
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello" }))
+
+    expect(res.status).toBe(200)
+    expect(claimMocks.claimUnassignedBooking).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bookingId: BOOKING_ID, userId: "u1" }),
+    )
+    expect(senderMocks.resolveSalespersonSender).toHaveBeenCalledWith(expect.anything(), "u1")
+  })
+
+  it("does not send when the booking cannot be assigned", async () => {
+    claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: false, error: { message: "rls" } })
+    buildAuth()
+
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello" }))
+
+    expect(res.status).toBe(500)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
   })
 
   it("returns 503 before rendering the quote PDF when no mailbox is configured", async () => {

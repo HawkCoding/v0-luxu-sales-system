@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
+import { claimUnassignedBooking } from "@/lib/bookings/claim-unassigned-booking"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
@@ -141,6 +142,15 @@ export async function POST(req: Request) {
     meta: { line_item_count: normalizedLineItems.length },
   })
   if (auditResult.error) return safeSupabaseError("quotes:audit-generated", auditResult.error)
+
+  // Starting a quote on an unassigned enquiry makes this salesperson its owner. The quote already
+  // exists, so a failed claim is logged rather than failing the create — the send path claims again.
+  const claim = await claimUnassignedBooking(supabase, {
+    bookingId,
+    userId: user.id,
+    actorName: profile.actorName,
+  })
+  if (!claim.ok) console.error("quotes:create:claim-booking", claim.error.message)
 
   return Response.json({
     id: quote.id,
