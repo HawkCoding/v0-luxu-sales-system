@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
+import { claimUnassignedBooking } from "@/lib/bookings/claim-unassigned-booking"
 import { describeValidationIssue } from "@/lib/api/describe-zod-issue"
 import { jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
@@ -354,6 +355,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       balanceWarning = "Quote amended, but the booking balance could not be refreshed. Reload the booking to check it."
     }
   }
+
+  // Working the quote on an unassigned enquiry makes this salesperson its owner. The lines are
+  // already saved, so a failed claim is logged rather than failing the save — the send path claims
+  // again before it needs a mailbox.
+  const claim = await claimUnassignedBooking(supabase, {
+    bookingId: quote.booking_id,
+    userId: user.id,
+    actorName: profile.actorName,
+  })
+  if (!claim.ok) console.error("quotes:patch:claim-booking", claim.error.message)
 
   const { data: updatedQuote, error: updatedQuoteError } = await supabase
     .from("quotes")

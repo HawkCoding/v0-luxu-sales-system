@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
+import { claimUnassignedBooking } from "@/lib/bookings/claim-unassigned-booking"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
@@ -330,6 +331,16 @@ export async function POST(req: Request) {
       return jsonError("Correspondence has already been processed", 409)
     }
   }
+
+  // An unassigned enquiry belongs to whoever sends from it — otherwise there is no salesperson
+  // mailbox to send through and the send fails in production.
+  const claim = await claimUnassignedBooking(supabase, {
+    bookingId,
+    userId: auth.value.user.id,
+    actorName: profile.actorName,
+  })
+  if (!claim.ok) return safeSupabaseError("correspondence:claim-booking", claim.error)
+  booking.assigned_salesperson_id = claim.assignedSalespersonId ?? booking.assigned_salesperson_id
 
   // Send through the assigned salesperson's mailbox when configured;
   // fall back to the office-wide From address.
