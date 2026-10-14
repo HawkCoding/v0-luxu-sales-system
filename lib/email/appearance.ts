@@ -96,6 +96,56 @@ export function toEmailLineHeight(value: string | null | undefined): EmailLineHe
   return isEmailLineHeight(trimmed) ? trimmed : null
 }
 
+// Space after a paragraph or list item of an email body. Rendered as an
+// inline `style="margin: 0 0 …"` on the <p>/<li> itself — the zero top margin
+// keeps the gap below a paragraph the only gap, so it reads the same in every
+// client. Same allowlist rationale as line spacing: the rich-text serializer
+// only keeps a styled <p>/<li> as editable content when its margin is exactly
+// that shape with one of these values. px rather than em because Outlook's
+// Word engine handles px margins reliably.
+export const EMAIL_PARAGRAPH_SPACING_OPTIONS = ["0px", "16px", "24px", "32px"] as const
+
+export type EmailParagraphSpacing = (typeof EMAIL_PARAGRAPH_SPACING_OPTIONS)[number]
+
+export const EMAIL_PARAGRAPH_SPACING_LABELS: Record<EmailParagraphSpacing, string> = {
+  "0px": "None",
+  "16px": "16px",
+  "24px": "24px",
+  "32px": "32px",
+}
+
+/** True when `value` is exactly one of the allowlisted paragraph spacings. */
+export function isEmailParagraphSpacing(value: string | null | undefined): value is EmailParagraphSpacing {
+  return EMAIL_PARAGRAPH_SPACING_OPTIONS.includes(value as EmailParagraphSpacing)
+}
+
+/** The allowlisted paragraph spacing `value` names ("0" reads as "0px"; surrounding whitespace ignored), or null. */
+export function toEmailParagraphSpacing(value: string | null | undefined): EmailParagraphSpacing | null {
+  const trimmed = value?.trim()
+  const normalized = trimmed === "0" ? "0px" : trimmed
+  return isEmailParagraphSpacing(normalized) ? normalized : null
+}
+
+/** The inline `margin` value a paragraph spacing is stored as. */
+export function toEmailParagraphSpacingMargin(spacing: EmailParagraphSpacing): string {
+  return `0 0 ${spacing}`
+}
+
+/**
+ * True when a `margin` declaration value is the shape the paragraph spacing
+ * control writes — zero top and sides, an allowlisted bottom — in any of the
+ * shorthand forms the DOM canonicalizes it to ("0px 0px 24px", or just "0px"
+ * for None).
+ */
+export function isEmailParagraphSpacingMargin(value: string): boolean {
+  const parts = value.trim().split(/\s+/)
+  const isZero = (part: string | undefined): boolean => part === "0" || part === "0px"
+  if (parts.length === 1) return isZero(parts[0])
+  if (parts.length !== 3 && parts.length !== 4) return false
+  const [top, sides, bottom, left = sides] = parts
+  return isZero(top) && isZero(sides) && isZero(left) && toEmailParagraphSpacing(bottom) !== null
+}
+
 // Text colour swatches for a highlighted section of an email body. Brand-
 // derived and chosen for contrast on white. Same allowlist rationale as
 // sizes above: rendered as an inline `<span style="color:…">`, so the

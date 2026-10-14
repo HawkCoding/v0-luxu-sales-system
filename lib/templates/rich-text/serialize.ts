@@ -21,6 +21,7 @@ import {
   isEmailHighlightColor,
   isEmailInlineFontFamily,
   isEmailLineHeight,
+  isEmailParagraphSpacingMargin,
 } from "@/lib/email/appearance"
 
 // Tags the editor schema represents faithfully. An element is left as-is only
@@ -91,11 +92,13 @@ const STYLED_SPAN_VALIDATORS: StyleValidators = {
   "font-family": isEmailInlineFontFamily,
 }
 
-// Same idea for the block tags the toolbar's line spacing control styles
-// (lib/templates/rich-text/line-height.ts): a <p> or <li> stays rich only
-// when its style is exactly an allowlisted line-height.
+// Same idea for the block tags the toolbar's line and paragraph spacing
+// controls style (lib/templates/rich-text/line-height.ts, paragraph-spacing.ts):
+// a <p> or <li> stays rich only when its style is an allowlisted line-height
+// and/or an allowlisted `margin: 0 0 …`.
 const STYLED_BLOCK_VALIDATORS: StyleValidators = {
   "line-height": isEmailLineHeight,
+  "margin": isEmailParagraphSpacingMargin,
 }
 
 const STYLE_VALIDATORS_BY_TAG: Record<string, StyleValidators> = {
@@ -111,7 +114,7 @@ const STYLE_VALIDATORS_BY_TAG: Record<string, StyleValidators> = {
  * / `font-family` — the styled shapes the editor schema (TextStyle +
  * FontSize/Color/BackgroundColor/FontFamily) represents faithfully, including
  * any combination of the four on the same run; for a <p>/<li> it's
- * `line-height` (BlockLineHeight). Anything else (an unrecognised property, a
+ * `line-height` (BlockLineHeight) and/or `margin` (BlockParagraphSpacing). Anything else (an unrecognised property, a
  * duplicate, an off-list value, a class) is left opaque so it can't be
  * silently dropped or mixed up with an unrelated style.
  */
@@ -273,8 +276,9 @@ export function fromEditorHtml(editorHtml: string): string {
  * Collapse `<li><p>x</p></li>` to `<li>x</li>`. The editor's listItem content is
  * `paragraph block*`, so bullets serialize with an inner <p> that renders extra
  * margin in email clients. A style on the inner <p> (only ever an allowlisted
- * line-height — the editor schema renders nothing else there) moves to the
- * <li> so it isn't lost with the <p>.
+ * line-height or paragraph spacing — the editor schema renders nothing else
+ * there) moves to the <li> so it isn't lost with the <p>; where both carry the
+ * same property, the <p>'s value wins, as it would have in the editor.
  */
 function unwrapListItemParagraphs(el: Element): string {
   if (el.tagName !== "UL" && el.tagName !== "OL") return el.outerHTML
@@ -282,11 +286,25 @@ function unwrapListItemParagraphs(el: Element): string {
     const paragraph = li.firstElementChild
     if (li.children.length === 1 && paragraph?.tagName === "P") {
       const paragraphStyle = paragraph.getAttribute("style")
-      if (paragraphStyle) li.setAttribute("style", paragraphStyle)
+      if (paragraphStyle) li.setAttribute("style", mergeStyles(li.getAttribute("style"), paragraphStyle))
       li.innerHTML = paragraph.innerHTML
     }
   }
   return el.outerHTML
+}
+
+/** `base` with `override`'s declarations layered on top, property by property. */
+function mergeStyles(base: string | null, override: string): string {
+  if (!base?.trim()) return override
+  const declarations = new Map<string, string>()
+  for (const style of [base, override]) {
+    for (const part of style.split(";")) {
+      const separator = part.indexOf(":")
+      if (separator === -1) continue
+      declarations.set(part.slice(0, separator).trim().toLowerCase(), part.slice(separator + 1).trim())
+    }
+  }
+  return Array.from(declarations, ([property, value]) => `${property}: ${value};`).join(" ")
 }
 
 /** True when source survives toEditorHtml -> fromEditorHtml unchanged (ignoring the editor pass). */

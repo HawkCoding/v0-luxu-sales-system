@@ -146,6 +146,20 @@ describe("toEditorHtml", () => {
     expect(html).not.toContain("data-preserved-block")
   })
 
+  it.each([
+    ["None", "margin: 0px;"],
+    ["None, unitless", "margin: 0;"],
+    ["16px", "margin: 0px 0px 16px;"],
+    ["24px, as the toolbar writes it", "margin: 0 0 24px;"],
+    ["32px, four-value form", "margin: 0px 0px 32px 0px;"],
+    ["with line spacing", "line-height: 1.5; margin: 0px 0px 24px;"],
+  ])("leaves a paragraph with allowlisted paragraph spacing (%s) as rich content", (_label, style) => {
+    const src = `<p style="${style}">Spaced</p><p>Plain</p>`
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).not.toContain("data-preserved-block")
+    expect(canRoundTrip(src, BLOCK_TOKENS)).toBe(true)
+  })
+
   it("leaves list items with an allowlisted line-height as rich content", () => {
     const src = '<ul><li style="line-height: 1.5;">One</li><li>Two</li></ul>'
     const { html } = toEditorHtml(src, BLOCK_TOKENS)
@@ -157,8 +171,14 @@ describe("toEditorHtml", () => {
     ["an off-allowlist number", "line-height: 1.4"],
     ["a px value", "line-height: 24px"],
     ["a CSS injection attempt", "line-height: 1.5; background: url(evil)"],
-    ["a property the toolbar never sets on a block", "margin: 0"],
+    ["a property the toolbar never sets on a block", "padding: 0"],
     ["a duplicate line-height", "line-height: 1.5; line-height: 2"],
+    ["an off-allowlist bottom margin", "margin: 0px 0px 13px"],
+    ["a top margin", "margin: 8px 0px 16px"],
+    ["a side margin", "margin: 0px 4px 16px"],
+    ["a two-value margin", "margin: 0px 16px"],
+    ["a longhand bottom margin", "margin-bottom: 16px"],
+    ["a duplicate margin", "margin: 0px 0px 16px; margin: 0px 0px 24px"],
   ])("lifts a paragraph styled with %s into an opaque placeholder", (_label, style) => {
     const { html } = toEditorHtml(`<p style="${style}">x</p>`, BLOCK_TOKENS)
     expect(html).toContain("data-preserved-block")
@@ -218,6 +238,15 @@ describe("fromEditorHtml", () => {
     const editorHtml = '<ul><li><p style="line-height: 1.5;">one</p></li><li style="line-height: 2;"><p>two</p></li></ul>'
     expect(fromEditorHtml(editorHtml)).toBe(
       '<ul><li style="line-height: 1.5;">one</li><li style="line-height: 2;">two</li></ul>',
+    )
+  })
+
+  it("merges an inner <p>'s spacing into the <li>'s own style when unwrapping, the <p> winning a clash", () => {
+    const editorHtml =
+      '<ul><li style="line-height: 2;"><p style="margin: 0px 0px 24px;">one</p></li>' +
+      '<li style="margin: 0px 0px 16px;"><p style="margin: 0px;">two</p></li></ul>'
+    expect(fromEditorHtml(editorHtml)).toBe(
+      '<ul><li style="line-height: 2; margin: 0px 0px 24px;">one</li><li style="margin: 0px;">two</li></ul>',
     )
   })
 

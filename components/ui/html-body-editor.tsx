@@ -17,6 +17,7 @@ import {
   Ban,
   PlusCircle,
   ListChevronsUpDown,
+  Pilcrow,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,12 +33,19 @@ import { buildEditorExtensions } from "@/lib/templates/rich-text/editor-extensio
 import { toEditorHtml, fromEditorHtml, canRoundTrip } from "@/lib/templates/rich-text/serialize"
 import { getActiveBlockLineHeight, setBlockLineHeight } from "@/lib/templates/rich-text/line-height"
 import {
+  getActiveBlockParagraphSpacing,
+  setBlockParagraphSpacing,
+} from "@/lib/templates/rich-text/paragraph-spacing"
+import {
   EMAIL_INLINE_FONT_SIZE_OPTIONS,
   isEmailInlineFontSize,
   EMAIL_LINE_HEIGHT_OPTIONS,
   EMAIL_LINE_HEIGHT_LABELS,
   EMAIL_DEFAULT_LINE_HEIGHT,
   toEmailLineHeight,
+  EMAIL_PARAGRAPH_SPACING_OPTIONS,
+  EMAIL_PARAGRAPH_SPACING_LABELS,
+  toEmailParagraphSpacing,
   EMAIL_FONT_FAMILY_OPTIONS,
   EMAIL_FONT_FAMILY_LABELS,
   toEmailInlineFontFamily,
@@ -72,7 +80,7 @@ export interface HtmlBodyEditorProps {
   /** The email's actual base font family (Settings → Email Appearance), used to
    *  label the family dropdown's unset option (e.g. "Arial") instead of "Default". */
   baseFontFamily?: string
-  /** "compact" drops the list and line spacing controls and shrinks minHeight — for short single-line/paragraph fields (e.g. a signature line) rather than a full email body. Signature fields are flattened to one inline run when sent, so block-level line spacing could not survive there. */
+  /** "compact" drops the list, line spacing and paragraph spacing controls and shrinks minHeight — for short single-line/paragraph fields (e.g. a signature line) rather than a full email body. Signature fields are flattened to one inline run when sent, so block-level spacing could not survive there. */
   variant?: "full" | "compact"
   /** Fires when the editable area loses focus — save-on-blur callers don't need to debounce onChange. */
   onBlur?: () => void
@@ -418,6 +426,16 @@ function RichToolbar({
     editor.chain().focus().command(setBlockLineHeight(toEmailLineHeight(value))).run()
   }
 
+  const activeParagraphSpacing = useEditorState({
+    editor,
+    selector: ({ editor: e }) => getActiveBlockParagraphSpacing(e.state) ?? DEFAULT_FONT_SIZE_VALUE,
+  })
+
+  function applyParagraphSpacing(value: string) {
+    // Same as line spacing: the "default" sentinel clears it.
+    editor.chain().focus().command(setBlockParagraphSpacing(toEmailParagraphSpacing(value))).run()
+  }
+
   function applyFontFamily(value: string) {
     if (value === DEFAULT_FONT_SIZE_VALUE) {
       editor.chain().focus().unsetFontFamily().run()
@@ -611,6 +629,21 @@ function RichToolbar({
               {EMAIL_LINE_HEIGHT_OPTIONS.map((lineHeight) => (
                 <SelectItem key={lineHeight} value={lineHeight}>
                   {EMAIL_LINE_HEIGHT_LABELS[lineHeight]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={activeParagraphSpacing} onValueChange={applyParagraphSpacing} disabled={disabled}>
+            <SelectTrigger size="sm" className="h-8 w-[6.5rem] gap-1 px-2 text-xs" aria-label="Paragraph spacing">
+              <Pilcrow className="size-3.5" aria-hidden />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DEFAULT_FONT_SIZE_VALUE}>Default</SelectItem>
+              {EMAIL_PARAGRAPH_SPACING_OPTIONS.map((spacing) => (
+                <SelectItem key={spacing} value={spacing}>
+                  {EMAIL_PARAGRAPH_SPACING_LABELS[spacing]}
                 </SelectItem>
               ))}
             </SelectContent>

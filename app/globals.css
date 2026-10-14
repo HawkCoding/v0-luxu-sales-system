@@ -368,12 +368,14 @@ body {
 }
 
 /* Rich-text email body editor surface. Tailwind Preflight zeroes list styles
-   and paragraph margins, so restore email-ish typography inside the editor. */
+   and paragraph margins, so restore email-ish typography inside the editor.
+   Margins match the sent email's (emails/base-layout.tsx) so the paragraph
+   spacing control's "Default" looks here the way it does in the inbox. */
 .prose-email {
   color: var(--luxu-text-body);
 }
 .prose-email p {
-  margin: 0 0 1em;
+  margin: 0 0 8px;
 }
 .prose-email p:last-child {
   margin-bottom: 0;
@@ -381,12 +383,15 @@ body {
 .prose-email ul {
   list-style: disc;
   padding-left: 1.5em;
-  margin: 0 0 1em;
+  margin: 0 0 8px;
 }
 .prose-email ol {
   list-style: decimal;
   padding-left: 1.5em;
-  margin: 0 0 1em;
+  margin: 0 0 8px;
+}
+.prose-email li {
+  margin: 0 0 2px;
 }
 .prose-email a {
   color: var(--primary);
