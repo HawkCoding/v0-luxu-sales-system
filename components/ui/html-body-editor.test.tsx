@@ -187,6 +187,37 @@ describe("HtmlBodyEditor", () => {
       await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("<p>Hello</p>"))
     })
 
+    it("renders a paragraph spacing control in the full variant only, defaulted to 'Default'", () => {
+      const { unmount } = render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
+      expect(screen.getByLabelText("Paragraph spacing")).toHaveTextContent("Default")
+      unmount()
+      render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} variant="compact" />)
+      expect(screen.queryByLabelText("Paragraph spacing")).not.toBeInTheDocument()
+    })
+
+    it("shows the paragraph spacing of the paragraph at the cursor", async () => {
+      render(<HtmlBodyEditor value='<p style="margin: 0px 0px 24px;">Hello</p>' onChange={() => {}} />)
+      await waitFor(() => expect(screen.getByLabelText("Paragraph spacing")).toHaveTextContent("24px"))
+    })
+
+    it("applies a chosen paragraph spacing inline on the paragraph, then resets it", async () => {
+      const onChange = vi.fn()
+      render(<HtmlBodyEditor value="<p>Hello</p>" onChange={onChange} />)
+
+      fireEvent.keyDown(screen.getByLabelText("Paragraph spacing"), { key: "Enter" })
+      for (const label of ["Default", "None", "16px", "24px", "32px"]) {
+        expect(screen.getByRole("option", { name: label })).toBeInTheDocument()
+      }
+      fireEvent.click(screen.getByRole("option", { name: "32px" }))
+
+      await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('<p style="margin: 0px 0px 32px;">Hello</p>'))
+      await waitFor(() => expect(screen.getByLabelText("Paragraph spacing")).toHaveTextContent("32px"))
+
+      fireEvent.keyDown(screen.getByLabelText("Paragraph spacing"), { key: "Enter" })
+      fireEvent.click(screen.getByRole("option", { name: "Default" }))
+      await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("<p>Hello</p>"))
+    })
+
     it("offers the in-between 11px, 13px and 15px font sizes", () => {
       render(<HtmlBodyEditor value="<p>Hello</p>" onChange={() => {}} />)
       fireEvent.keyDown(screen.getByLabelText("Font size"), { key: "Enter" })
