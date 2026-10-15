@@ -58,6 +58,8 @@ import {
 import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
+import { UploadRequirementsList } from "@/components/upload-requirements-list"
+import { LOGO_UPLOAD_REQUIREMENTS, pngLogoUploadError, uploadErrorMessage } from "@/lib/upload-limits"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -967,8 +969,10 @@ function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLo
   }, [])
 
   const handleLogoUpload = async (file: File) => {
-    if (file.type !== "image/png") {
-      toast.error("The logo must be a PNG image.")
+    const fileError = pngLogoUploadError(file)
+    if (fileError) {
+      toast.error(fileError)
+      if (logoInputRef.current) logoInputRef.current.value = ""
       return
     }
 
@@ -991,8 +995,7 @@ function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLo
       body.append("file", file)
       const res = await fetch("/api/settings/app-logo", { method: "POST", body })
       if (!res.ok) {
-        const { error: message } = await res.json().catch(() => ({ error: "" }))
-        throw new Error(message || "upload failed")
+        throw new Error(await uploadErrorMessage(res, "Failed to upload logo"))
       }
       const { url } = (await res.json()) as { url: string }
       setLogoUrl(url)
@@ -1088,10 +1091,10 @@ function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLo
                     </Button>
                   )}
                 </div>
+                <UploadRequirementsList requirements={LOGO_UPLOAD_REQUIREMENTS} />
                 <p className="text-[11px] text-muted-foreground max-w-xs">
-                  PNG, up to 5 MB, square recommended. Without a logo the app shows the
-                  company name's initials. The browser tab icon updates on next reload;
-                  removing it clears the tab icon entirely.
+                  No logo? The app shows the company initials. The browser tab icon
+                  updates after a page reload.
                 </p>
               </div>
             )}
