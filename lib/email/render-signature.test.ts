@@ -228,7 +228,7 @@ describe("renderSignatureFragment", () => {
       },
     })
     const anchors = html.match(/<a\b[^>]*>/g) ?? []
-    expect(anchors.length).toBe(4) // email, website, company line, badge
+    expect(anchors.length).toBe(6) // tel, cell, email, website, company line, badge
     for (const anchor of anchors) expect(anchor).toMatch(/text-decoration:none/)
     const textLinks = anchors.filter((anchor) => !anchor.includes("iata.org"))
     for (const anchor of textLinks) expect(anchor).toMatch(/style="color:#(3d3831|6b6258);text-decoration:none"/)

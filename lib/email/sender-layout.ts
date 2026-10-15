@@ -131,16 +131,34 @@ function declaredColor(style: string | null): string | null {
 
 const TAG_SPLIT_RE = /(<[^>]*>)/
 const ANCHOR_TAG_RE = /^<(\/?)a(?:\s[^>]*)?>$/i
-// An email address, or a URL starting with http(s):// or www. — the forms
-// Outlook, Gmail and Apple Mail auto-link on the receiving side.
-const BARE_CONTACT_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|\b(?:https?:\/\/|www\.)[^\s<]*[^\s<.,;:!?)'"]/gi
+// An email address, a URL starting with http(s):// or www., or a phone
+// number starting with + or 0 — the forms Outlook, Gmail and Apple Mail
+// auto-link on the receiving side.
+const BARE_CONTACT_RE =
+  /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|\b(?:https?:\/\/|www\.)[^\s<]*[^\s<.,;:!?)'"]|(?:\+|\b0)\d[\d ()-]*\d/gi
+const PHONE_START_RE = /^(?:\+|0)\d/
 
 /**
- * Wraps every email address and http(s)/www URL typed as plain text (outside
- * an existing `<a>`) in a link. A signature layout can hard-code a shared
- * address such as reservations@sa-rail.co.za instead of using {{email}};
- * left as plain text, the recipient's mail client links it itself in its
- * default blue and underline, where styleSignatureLinks can't reach it.
+ * tel: href for a typed number, or null when it has too few or too many
+ * digits to be one. Drops the "(0)" and the 0 after +27 that people write
+ * but a dialler must not get: "+27 021 100 3596" → tel:+27211003596.
+ */
+function telHref(number: string): string | null {
+  const digits = number.replace(/\D/g, "")
+  if (digits.length < 9 || digits.length > 15) return null
+  const dialable = number.startsWith("+")
+    ? `+${number.replace(/\(0\)/g, "").replace(/\D/g, "").replace(/^270/, "27")}`
+    : digits
+  return `tel:${dialable}`
+}
+
+/**
+ * Wraps every email address, http(s)/www URL and phone number typed as plain
+ * text (outside an existing `<a>`) in a link. A signature layout can
+ * hard-code a shared address such as reservations@sa-rail.co.za instead of
+ * using {{email}}, and {{tel}}/{{cell}} fill in as plain text; left that way,
+ * the recipient's mail client links them itself in its default blue and
+ * underline, where styleSignatureLinks can't reach them.
  */
 export function linkBareContacts(html: string): string {
   let anchorDepth = 0
@@ -154,9 +172,14 @@ export function linkBareContacts(html: string): string {
       }
       if (chunk.startsWith("<") || anchorDepth > 0) return chunk
       return chunk.replace(BARE_CONTACT_RE, (match) => {
-        const href = match.includes("@") && !/^(?:https?:\/\/|www\.)/i.test(match)
-          ? `mailto:${match}`
-          : /^https?:\/\//i.test(match) ? match : `https://${match}`
+        const isUrl = /^(?:https?:\/\/|www\.)/i.test(match)
+        const isPhone = !isUrl && !match.includes("@") && PHONE_START_RE.test(match)
+        const href = isPhone
+          ? telHref(match)
+          : match.includes("@") && !isUrl
+            ? `mailto:${match}`
+            : /^https?:\/\//i.test(match) ? match : `https://${match}`
+        if (!href) return match
         return `<a href="${href.replace(/"/g, "&quot;")}">${match}</a>`
       })
     })
@@ -168,8 +191,9 @@ export function linkBareContacts(html: string): string {
  * underline, so a link reads as the signature text around it rather than a
  * mail client's default blue. Inline is the only form that works: Outlook
  * and Gmail ignore `color: inherit` on a link, and Gmail/iOS auto-link a
- * bare address or URL in blue — an explicitly styled anchor covers both, so
- * plain-text addresses are first turned into links (linkBareContacts).
+ * bare address, URL or phone number in blue — an explicitly styled anchor
+ * covers both, so plain-text ones are first turned into links
+ * (linkBareContacts).
  *
  * A link inside a coloured `<span>` takes that span's colour (the author's
  * choice); otherwise it takes `color`. A link that already declares a colour

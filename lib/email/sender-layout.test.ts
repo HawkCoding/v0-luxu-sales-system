@@ -25,16 +25,18 @@ describe("renderSenderLayout", () => {
     const html = renderSenderLayout("", FULL)
     expect(html).toBe(
       "<strong>Leonie Burke</strong> | <em>Tour Operating Consultant</em><br>" +
-        'Tel: +27 (0)21 100 3596 | Cell: +27 (0)81 580 6471 | Fax: +27 (0)86 598 0812<br>' +
+        `Tel: <a href="tel:+27211003596" ${LINK_STYLE}>+27 (0)21 100 3596</a> | ` +
+        `Cell: <a href="tel:+27815806471" ${LINK_STYLE}>+27 (0)81 580 6471</a> | ` +
+        `Fax: <a href="tel:+27865980812" ${LINK_STYLE}>+27 (0)86 598 0812</a><br>` +
         `Email: <a href="mailto:reservations@sa-rail.co.za" ${LINK_STYLE}>reservations@sa-rail.co.za</a> | ` +
         `Web: <a href="https://www.sa-rail.co.za" ${LINK_STYLE}>www.sa-rail.co.za</a>`,
     )
   })
 
-  it("styles the email and website links in the signature text colour, never the client's default blue", () => {
+  it("styles the phone, email and website links in the signature text colour, never the client's default blue", () => {
     const html = renderSenderLayout("", FULL)
     const anchors = html.match(/<a\b[^>]*>/g) ?? []
-    expect(anchors).toHaveLength(2)
+    expect(anchors).toHaveLength(5)
     for (const anchor of anchors) {
       expect(anchor).toContain("color:#3d3831")
       expect(anchor).toContain("text-decoration:none")
@@ -167,6 +169,19 @@ describe("styleSignatureLinks", () => {
         '<a href="https://www.sa-rail.co.za" style="color:#6b6258;text-decoration:none">www.sa-rail.co.za</a>.',
     )
     expect(styleSignatureLinks(html, MUTED)).toBe(html)
+  })
+
+  it("links and styles a typed phone number, dialling without the trunk 0", () => {
+    const html = styleSignatureLinks("Tel: +27 021 100 3596 | Cell: 081 580 6471", MUTED)
+    expect(html).toBe(
+      'Tel: <a href="tel:+27211003596" style="color:#6b6258;text-decoration:none">+27 021 100 3596</a> | ' +
+        'Cell: <a href="tel:0815806471" style="color:#6b6258;text-decoration:none">081 580 6471</a>',
+    )
+  })
+
+  it("leaves registration numbers, hours and dates in the small print unlinked", () => {
+    const line = "Registered in South Africa CK2007/049324/23 | Mon - Fri 08h30 to 16h00 | Since 07 October 2014"
+    expect(linkBareContacts(line)).toBe(line)
   })
 
   it("keeps an https URL as typed and never double-links text already inside a link", () => {

@@ -27,6 +27,18 @@ const libraryMocks = vi.hoisted(() => ({
 const claimMocks = vi.hoisted(() => ({
   claimUnassignedBooking: vi.fn(),
 }))
+const signatureMocks = vi.hoisted(() => ({
+  resolveEmailSignature: vi.fn(),
+  renderSignatureFragment: vi.fn(),
+}))
+
+vi.mock("@/lib/email/signature", () => ({
+  resolveEmailSignature: signatureMocks.resolveEmailSignature,
+}))
+
+vi.mock("@/lib/email/render-signature", () => ({
+  renderSignatureFragment: signatureMocks.renderSignatureFragment,
+}))
 
 vi.mock("@/lib/bookings/claim-unassigned-booking", () => ({
   claimUnassignedBooking: claimMocks.claimUnassignedBooking,
@@ -90,6 +102,8 @@ interface AuthOptions {
   customerInvoiceNumber?: string | null
   emailImportNeedsReview?: boolean
   quoteStatus?: string
+  /** The scheduled correspondence row a send fulfils (scheduledCorrespondenceId). */
+  scheduledRow?: { id: string; status: string } | null
 }
 
 function buildAuth(options: AuthOptions = {}) {
@@ -146,6 +160,7 @@ function buildAuth(options: AuthOptions = {}) {
         staleFollowUpFilters.push([column, value])
         return chain
       }),
+      select: vi.fn(() => ({ single: correspondenceInsertResult })),
       then: (resolve: (result: { error: null }) => unknown) => resolve({ error: null }),
     }
     return chain
@@ -154,9 +169,16 @@ function buildAuth(options: AuthOptions = {}) {
   // part of the evidence — that is how "the voucher email was sent" becomes true. A mock that
   // always returned [] would make every send-and-move look like it had never sent anything.
   const sentCorrespondences: { id: string; kind: string | null; subject: string; status: string; created_at: string }[] = []
-  const correspondenceSelect = vi.fn(() => ({
-    eq: vi.fn(async () => ({ data: sentCorrespondences, error: null })),
-  }))
+  // Awaitable after one .eq() for the stage gates; .eq().eq().maybeSingle() is the
+  // scheduled-row check a send that fulfils a scheduled email makes first.
+  const correspondenceSelect = vi.fn(() => {
+    const chain: Record<string, unknown> = {}
+    chain.eq = vi.fn(() => chain)
+    chain.maybeSingle = vi.fn(async () => ({ data: options.scheduledRow ?? null, error: null }))
+    chain.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data: sentCorrespondences, error: null }).then(resolve)
+    return chain
+  })
 
   const quoteUpdate = vi.fn(() => ({
     eq: vi.fn(() => ({
@@ -456,6 +478,10 @@ describe("POST /api/correspondence", () => {
     libraryMocks.loadLibraryAttachments.mockResolvedValue([])
     claimMocks.claimUnassignedBooking.mockReset()
     claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: true, claimed: false, assignedSalespersonId: null })
+    signatureMocks.resolveEmailSignature.mockReset()
+    signatureMocks.resolveEmailSignature.mockResolvedValue({ fullName: "Carmen" })
+    signatureMocks.renderSignatureFragment.mockReset()
+    signatureMocks.renderSignatureFragment.mockResolvedValue("<p>fresh signature</p>")
     transitionMocks.applyTransition.mockResolvedValue({
       updated: {},
       crossedStages: [],
@@ -501,6 +527,27 @@ describe("POST /api/correspondence", () => {
     expect(emailMocks.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({ from: "noreply@example.com", subject: "Hello" }),
     )
+  })
+
+  it("re-renders the signature of a scheduled email at send time, not the one stored when it was drafted", async () => {
+    buildAuth({ scheduledRow: { id: "00000000-0000-4000-8000-00000000cccc", status: "scheduled" } })
+    const stored =
+      "<html><p>follow up</p><!--LUXUS_SIGNATURE_START--><p>old signature</p><!--LUXUS_SIGNATURE_END--></html>"
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Following up", bodyHtml: stored, scheduledCorrespondenceId: "00000000-0000-4000-8000-00000000cccc" }),
+    )
+    expect(res.status).toBe(200)
+    const sentHtml = emailMocks.sendEmail.mock.calls[0][0].html as string
+    expect(sentHtml).toContain("<!--LUXUS_SIGNATURE_START--><p>fresh signature</p><!--LUXUS_SIGNATURE_END-->")
+    expect(sentHtml).not.toContain("old signature")
+  })
+
+  it("leaves the signature the salesperson previewed alone on an ordinary send", async () => {
+    buildAuth()
+    const html = "<html><!--LUXUS_SIGNATURE_START--><p>previewed</p><!--LUXUS_SIGNATURE_END--></html>"
+    await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello", bodyHtml: html }))
+    expect(signatureMocks.resolveEmailSignature).not.toHaveBeenCalled()
+    expect(emailMocks.sendEmail.mock.calls[0][0].html).toBe(html)
   })
 
   it("attaches selected library files to the outgoing email", async () => {

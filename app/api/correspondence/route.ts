@@ -7,6 +7,9 @@ import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender, type ResolvedSenderReason } from "@/lib/email/resolve-sender"
 import { resolveSenderDisplayName } from "@/lib/email/sender-identity"
+import { renderSignatureFragment } from "@/lib/email/render-signature"
+import { resolveEmailSignature } from "@/lib/email/signature"
+import { extractSignatureSlot, replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { staleVersionResponse } from "@/lib/concurrency"
@@ -358,7 +361,16 @@ export async function POST(req: Request) {
     parsed.data.signatureBrandId,
   )
   const subject = parsed.data.subject.trim()
-  const bodyHtml = parsed.data.bodyHtml?.trim() || null
+  let bodyHtml = parsed.data.bodyHtml?.trim() || null
+  // A scheduled email's HTML was composed when it was drafted (a follow-up, two days
+  // before it goes out), so its signature can predate Settings or rendering changes made
+  // since. Re-render the signature slot now, for the same sender compose used.
+  if (bodyHtml && parsed.data.scheduledCorrespondenceId && extractSignatureSlot(bodyHtml) !== null) {
+    const signature = await resolveEmailSignature(booking.assigned_salesperson_id, parsed.data.signatureBrandId)
+    if (signature) {
+      bodyHtml = replaceSignatureSlot(bodyHtml, await renderSignatureFragment(signature)) ?? bodyHtml
+    }
+  }
   const text = parsed.data.text?.trim() || (bodyHtml ? getPlainTextFromHtml(bodyHtml) : null)
 
   const baseAttachments: NonNullable<typeof parsed.data.attachments> = parsed.data.attachments ?? []
