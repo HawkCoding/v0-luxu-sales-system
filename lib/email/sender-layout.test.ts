@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  linkBareContacts,
   renderSenderLayout,
   styleSignatureLinks,
   DEFAULT_SENDER_LAYOUT,
@@ -52,6 +53,12 @@ describe("renderSenderLayout", () => {
       '<span style="color:#1f4e79"><a href="mailto:reservations@sa-rail.co.za" style="color:#1f4e79;text-decoration:none">' +
         "reservations@sa-rail.co.za</a></span>",
     )
+  })
+
+  it("links a shared address the layout hard-codes instead of using {{email}}/{{website}}", () => {
+    const html = renderSenderLayout("{{fullName}}<br>Email: reservations@sa-rail.co.za | Web: www.sa-rail.co.za", FULL)
+    expect(html).toContain(`<a href="mailto:reservations@sa-rail.co.za" ${LINK_STYLE}>reservations@sa-rail.co.za</a>`)
+    expect(html).toContain(`<a href="https://www.sa-rail.co.za" ${LINK_STYLE}>www.sa-rail.co.za</a>`)
   })
 
   it("falls back to DEFAULT_SENDER_LAYOUT when the layout is blank", () => {
@@ -147,6 +154,27 @@ describe("styleSignatureLinks", () => {
     const once = styleSignatureLinks('<a href="https://x.example" style="color:#123456">X</a>', MUTED)
     expect(once).toBe('<a href="https://x.example" style="text-decoration:none;color:#123456">X</a>')
     expect(styleSignatureLinks(once, MUTED)).toBe(once)
+  })
+
+  it("links and styles an address or URL typed as plain text, so the recipient's client can't link it in blue", () => {
+    const html = styleSignatureLinks(
+      'Email: <span style="font-size:12px">reservations@sa-rail.co.za</span> | Web: www.sa-rail.co.za.',
+      MUTED,
+    )
+    expect(html).toBe(
+      'Email: <span style="font-size:12px"><a href="mailto:reservations@sa-rail.co.za" style="color:#6b6258;text-decoration:none">' +
+        "reservations@sa-rail.co.za</a></span> | Web: " +
+        '<a href="https://www.sa-rail.co.za" style="color:#6b6258;text-decoration:none">www.sa-rail.co.za</a>.',
+    )
+    expect(styleSignatureLinks(html, MUTED)).toBe(html)
+  })
+
+  it("keeps an https URL as typed and never double-links text already inside a link", () => {
+    expect(linkBareContacts("See https://sa-rail.co.za/trains")).toBe(
+      'See <a href="https://sa-rail.co.za/trains">https://sa-rail.co.za/trains</a>',
+    )
+    const linked = '<a href="mailto:a@b.co.za">a@b.co.za</a> <a href="https://www.x.example"><strong>www.x.example</strong></a>'
+    expect(linkBareContacts(linked)).toBe(linked)
   })
 
   it("leaves non-link tags and text alone", () => {
