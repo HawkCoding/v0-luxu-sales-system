@@ -129,12 +129,47 @@ function declaredColor(style: string | null): string | null {
   return value && SAFE_COLOR_RE.test(value) ? value : null
 }
 
+const TAG_SPLIT_RE = /(<[^>]*>)/
+const ANCHOR_TAG_RE = /^<(\/?)a(?:\s[^>]*)?>$/i
+// An email address, or a URL starting with http(s):// or www. — the forms
+// Outlook, Gmail and Apple Mail auto-link on the receiving side.
+const BARE_CONTACT_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|\b(?:https?:\/\/|www\.)[^\s<]*[^\s<.,;:!?)'"]/gi
+
+/**
+ * Wraps every email address and http(s)/www URL typed as plain text (outside
+ * an existing `<a>`) in a link. A signature layout can hard-code a shared
+ * address such as reservations@sa-rail.co.za instead of using {{email}};
+ * left as plain text, the recipient's mail client links it itself in its
+ * default blue and underline, where styleSignatureLinks can't reach it.
+ */
+export function linkBareContacts(html: string): string {
+  let anchorDepth = 0
+  return html
+    .split(TAG_SPLIT_RE)
+    .map((chunk) => {
+      const anchor = chunk.match(ANCHOR_TAG_RE)
+      if (anchor) {
+        anchorDepth = Math.max(0, anchorDepth + (anchor[1] ? -1 : 1))
+        return chunk
+      }
+      if (chunk.startsWith("<") || anchorDepth > 0) return chunk
+      return chunk.replace(BARE_CONTACT_RE, (match) => {
+        const href = match.includes("@") && !/^(?:https?:\/\/|www\.)/i.test(match)
+          ? `mailto:${match}`
+          : /^https?:\/\//i.test(match) ? match : `https://${match}`
+        return `<a href="${href.replace(/"/g, "&quot;")}">${match}</a>`
+      })
+    })
+    .join("")
+}
+
 /**
  * Gives every `<a>` in a signature fragment an inline colour and no
  * underline, so a link reads as the signature text around it rather than a
  * mail client's default blue. Inline is the only form that works: Outlook
  * and Gmail ignore `color: inherit` on a link, and Gmail/iOS auto-link a
- * bare address or URL in blue — an explicitly styled anchor covers both.
+ * bare address or URL in blue — an explicitly styled anchor covers both, so
+ * plain-text addresses are first turned into links (linkBareContacts).
  *
  * A link inside a coloured `<span>` takes that span's colour (the author's
  * choice); otherwise it takes `color`. A link that already declares a colour
@@ -143,7 +178,7 @@ function declaredColor(style: string | null): string | null {
  */
 export function styleSignatureLinks(html: string, color: string): string {
   const spanColors: (string | null)[] = []
-  return html.replace(LINK_OR_SPAN_TAG_RE, (tag: string, closing: string, name: string, rawAttrs?: string) => {
+  return linkBareContacts(html).replace(LINK_OR_SPAN_TAG_RE, (tag: string, closing: string, name: string, rawAttrs?: string) => {
     const attrs = rawAttrs ?? ""
     if (name.toLowerCase() === "span") {
       if (closing) spanColors.pop()
