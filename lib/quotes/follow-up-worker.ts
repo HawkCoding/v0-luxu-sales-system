@@ -8,6 +8,7 @@ import { resolveSenderDisplayName } from "@/lib/email/sender-identity"
 import { sendEmail } from "@/lib/email/transport"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
 import { getTemplate, type EmailTemplate } from "@/lib/templates/get-template"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { loadQuoteConfig } from "@/lib/quotes/load-quote-config"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import type { PricingSnapshot } from "@/lib/types"
@@ -217,6 +218,9 @@ export async function runQuoteFollowUpWorker(
       bookingPrimarySupplierId: booking.primary_supplier_id ?? null,
     })
     const template = await templateFor(quoteConfig.primarySupplierId)
+    // Every other token a template may use ({{supplierName}}, {{clientSurname}}, {{direction}},
+    // {{departureDateShort}} in the default subject) -- without it those went out literally.
+    const shared = await resolveSharedEmailTokens(supabase, booking.id)
 
     for (const day of dueDays) {
       const scheduledFor = new Date(sentDate)
@@ -242,10 +246,12 @@ export async function runQuoteFollowUpWorker(
 
       const { subject, bodyHtml } = await composeFromTemplate(template, {
         tokens: {
+          ...shared.tokens,
           customerName,
           jobNumber: booking.booking_number,
           lastSentDate: formatDisplayDateLong(lastSentDateStr),
         },
+        blocks: shared.blocks,
         senderProfileId: booking.assigned_salesperson_id,
       })
 
