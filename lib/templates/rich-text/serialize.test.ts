@@ -257,6 +257,47 @@ describe("fromEditorHtml", () => {
   it("strips a trailing empty paragraph that a select-all line spacing change styled", () => {
     expect(fromEditorHtml('<p>body</p><p style="line-height: 2;"></p>')).toBe("<p>body</p>")
   })
+
+  it("writes a blank line as a paragraph holding a break, so it keeps its height in the email", () => {
+    expect(fromEditorHtml('<p>Dear X</p><p style="line-height: 1.15; margin: 0px;"></p><p>Thanks</p>')).toBe(
+      '<p>Dear X</p><p style="line-height: 1.15; margin: 0px;"><br></p><p>Thanks</p>',
+    )
+  })
+})
+
+describe("blank lines and pasted fonts (client, 2026-10-20)", () => {
+  const CALIBRI = "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif"
+
+  it("loads a stored blank line as an empty paragraph and writes it back unchanged", () => {
+    const stored = '<p>a</p><p style="margin: 0px;"><br></p><p>b</p>'
+    const { html } = toEditorHtml(stored, BLOCK_TOKENS)
+    expect(html).toBe('<p>a</p><p style="margin: 0px;"></p><p>b</p>')
+    expect(fromEditorHtml(html)).toBe(stored)
+    expect(canRoundTrip(stored, BLOCK_TOKENS)).toBe(true)
+  })
+
+  it("keeps a paragraph of pasted Outlook text editable, with its font mapped to Calibri", () => {
+    const stored =
+      '<p><span style="font-size: 12pt; font-family: Calibri, sans-serif; color: rgb(38, 38, 38);">Feel free to send me a few pictures.</span></p>'
+    const { html } = toEditorHtml(stored, BLOCK_TOKENS)
+    expect(html).not.toContain("data-preserved-block")
+    expect(html).toContain(`font-size: 16px; font-family: ${CALIBRI}; color: rgb(38, 38, 38);`)
+    expect(canRoundTrip(stored, BLOCK_TOKENS)).toBe(true)
+  })
+
+  it("keeps a paragraph with an Outlook emoji run editable, dropping the emoji font", () => {
+    const stored =
+      '<p><span style="font-size: 12pt; font-family: Calibri, sans-serif;">Welcome home! </span><span style="font-size: 12pt; font-family: &quot;Segoe UI Emoji&quot;, sans-serif;">😊</span></p>'
+    const { html } = toEditorHtml(stored, BLOCK_TOKENS)
+    expect(html).not.toContain("data-preserved-block")
+    expect(html).not.toContain("Segoe UI Emoji")
+  })
+
+  it("keeps the original bytes of an element that is still locked after mapping fonts", () => {
+    const table = '<table><tbody><tr><td><span style="font-size: 12pt">x</span></td></tr></tbody></table>'
+    const restored = fromEditorHtml(toEditorHtml(table, BLOCK_TOKENS).html)
+    expect(restored).toBe(table)
+  })
 })
 
 describe("round-trip identity (pure, no editor)", () => {

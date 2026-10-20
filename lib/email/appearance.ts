@@ -60,6 +60,30 @@ export function isEmailInlineFontSize(value: string | null | undefined): value i
   return EMAIL_INLINE_FONT_SIZE_OPTIONS.includes(value as EmailInlineFontSize)
 }
 
+const LOOSE_FONT_SIZE_RE = /^(\d+(?:\.\d+)?)\s*(px|pt)$/i
+
+/**
+ * The allowlisted inline size nearest to any px/pt size (pt converted at 4/3 px), or null for
+ * other units/keywords and sizes outside 8-36px (snapping those would visibly change the text).
+ * Text pasted from Word/Outlook carries sizes like
+ * `10pt` or `13.3333px`; this maps them onto the toolbar's options instead of leaving them
+ * unrecognised (12pt -> 16px, 11pt -> 15px, 10pt -> 13px).
+ */
+export function toEmailInlineFontSizeLoose(value: string | null | undefined): EmailInlineFontSize | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  if (isEmailInlineFontSize(trimmed)) return trimmed
+  const match = trimmed.match(LOOSE_FONT_SIZE_RE)
+  if (!match) return null
+  const px = match[2].toLowerCase() === "pt" ? (Number(match[1]) * 4) / 3 : Number(match[1])
+  if (!(px >= 8 && px <= 36)) return null
+  let nearest: EmailInlineFontSize = EMAIL_INLINE_FONT_SIZE_OPTIONS[0]
+  for (const option of EMAIL_INLINE_FONT_SIZE_OPTIONS) {
+    if (Math.abs(parseFloat(option) - px) < Math.abs(parseFloat(nearest) - px)) nearest = option
+  }
+  return nearest
+}
+
 // Line spacing for a paragraph or list item of an email body. Rendered as an
 // inline `style="line-height:…"` on the <p>/<li> itself — email clients need
 // the value inline, and a block-level value is what controls the gap between
@@ -335,6 +359,27 @@ export function toEmailInlineFontFamily(value: string | null | undefined): Email
   if (!value) return null
   if (EMAIL_FONT_FAMILY_SET.has(value)) return value as EmailFontFamily
   return EMAIL_FONT_FAMILY_DOUBLE_QUOTED.get(value) ?? null
+}
+
+/** First family of a stack, unquoted and lowercased: `"Verdana",sans-serif` -> `verdana`. */
+function leadingFontFamily(value: string): string {
+  return value.split(",")[0].trim().replace(/^["']|["']$/g, "").trim().toLowerCase()
+}
+
+const EMAIL_FONT_FAMILY_BY_LEADING = new Map<string, EmailFontFamily>(
+  EMAIL_FONT_FAMILY_OPTIONS.map((option) => [leadingFontFamily(option), option]),
+)
+
+/**
+ * The allowlisted stack for any font-family value whose first family is one of ours, or null.
+ * Text pasted from Word/Outlook names a font as `Calibri, sans-serif` or `"Verdana",sans-serif`
+ * rather than our exact stacks; this maps it to the matching option (the toolbar then shows the
+ * right name) instead of leaving it unrecognised. A family we don't offer (e.g. the
+ * `Segoe UI Emoji` Outlook wraps emoji in) maps to null.
+ */
+export function toEmailInlineFontFamilyLoose(value: string | null | undefined): EmailFontFamily | null {
+  if (!value) return null
+  return toEmailInlineFontFamily(value) ?? EMAIL_FONT_FAMILY_BY_LEADING.get(leadingFontFamily(value)) ?? null
 }
 
 /** Coerce a stored value to an allowlisted size, falling back to the default. */

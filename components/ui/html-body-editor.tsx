@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils"
 import { buildEditorExtensions } from "@/lib/templates/rich-text/editor-extensions"
 import { toEditorHtml, fromEditorHtml, canRoundTrip } from "@/lib/templates/rich-text/serialize"
+import { normalizeSpanFontsHtml } from "@/lib/templates/rich-text/normalize-fonts"
 import { getActiveBlockLineHeight, setBlockLineHeight } from "@/lib/templates/rich-text/line-height"
 import {
   getActiveBlockParagraphSpacing,
@@ -137,6 +138,9 @@ export function HtmlBodyEditor({
         class: "prose-email focus:outline-none px-3 py-2",
         style: `min-height:${resolvedMinHeight}${previewLineHeight}${baseFontSize ? `;font-size:${baseFontSize}` : ""}`,
       },
+      // Word/Outlook pastes carry sizes like 10pt and families like "Calibri, sans-serif"; snap
+      // them to the toolbar's options so the dropdowns name them and the text stays editable.
+      transformPastedHTML: normalizeSpanFontsHtml,
       handleDOMEvents: onBlur
         ? {
             blur: () => {
