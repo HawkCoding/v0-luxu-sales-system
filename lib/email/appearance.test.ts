@@ -5,8 +5,43 @@ import {
   EMAIL_LINE_HEIGHT_OPTIONS,
   isEmailInlineFontSize,
   isEmailLineHeight,
+  toEmailInlineFontFamilyLoose,
+  toEmailInlineFontSizeLoose,
   toEmailLineHeight,
 } from "./appearance"
+
+describe("toEmailInlineFontSizeLoose", () => {
+  it.each([
+    ["12pt", "16px"],
+    ["11pt", "15px"],
+    ["10pt", "13px"],
+    ["10.0pt", "13px"],
+    ["13.3333px", "13px"],
+    ["14px", "14px"],
+    ["19px", "18px"],
+  ])("maps %s to %s", (value, expected) => {
+    expect(toEmailInlineFontSizeLoose(value)).toBe(expected)
+  })
+
+  it.each(["2em", "medium", "72px", "4pt", "", "12"])("rejects %j", (value) => {
+    expect(toEmailInlineFontSizeLoose(value)).toBeNull()
+  })
+})
+
+describe("toEmailInlineFontFamilyLoose", () => {
+  it.each([
+    ["Calibri, sans-serif", "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif"],
+    ['"Verdana", sans-serif', "Verdana, Geneva, sans-serif"],
+    ["'times new roman', serif", "'Times New Roman', Times, serif"],
+    ["Verdana, Geneva, sans-serif", "Verdana, Geneva, sans-serif"],
+  ])("maps %s to its stack", (value, expected) => {
+    expect(toEmailInlineFontFamilyLoose(value)).toBe(expected)
+  })
+
+  it("rejects a family we don't offer", () => {
+    expect(toEmailInlineFontFamilyLoose('"Segoe UI Emoji", sans-serif')).toBeNull()
+  })
+})
 
 describe("EMAIL_INLINE_FONT_SIZE_OPTIONS", () => {
   it("offers every px step from 10 to 16, then the larger steps, in ascending order", () => {

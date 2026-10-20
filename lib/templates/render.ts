@@ -7,6 +7,8 @@
 // are left visible and reported as warnings so the salesperson catches them
 // in the preview instead of the customer catching them in their inbox.
 
+import { fillEmptyParagraphs } from "@/lib/templates/empty-paragraphs"
+
 const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
 
 export interface RenderTemplateInput {
@@ -58,7 +60,9 @@ export function renderTemplate(input: RenderTemplateInput): RenderedTemplate {
   const unknown = new Set<string>()
 
   const subject = substitute(input.subject, input.tokens, blocks, false, unknown, false)
-  const bodyHtml = substitute(input.bodyHtml, input.tokens, blocks, true, unknown, true)
+  // Templates saved before the editor wrote blank lines as `<p><br></p>` still
+  // hold empty paragraphs, which have no height once sent (empty-paragraphs.ts).
+  const bodyHtml = substitute(fillEmptyParagraphs(input.bodyHtml), input.tokens, blocks, true, unknown, true)
 
   const warnings = [...unknown].sort().map((name) => `Unreplaced token: {{${name}}}`)
 

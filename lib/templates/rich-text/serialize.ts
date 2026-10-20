@@ -14,6 +14,8 @@
 // Zero editor/Tiptap imports — pure string->string via DOMParser (available in
 // the browser and the jsdom test environment).
 
+import { fillEmptyParagraphs } from "@/lib/templates/empty-paragraphs"
+import { normalizeSpanFonts } from "@/lib/templates/rich-text/normalize-fonts"
 import { PRESERVED_BLOCK_TAG } from "@/lib/templates/rich-text/preserved-block-shared"
 import {
   isEmailInlineFontSize,
@@ -208,18 +210,27 @@ export function toEditorHtml(source: string, blockTokens: string[]): ToEditorRes
     if (node.nodeType !== doc.ELEMENT_NODE) continue
     const el = node as Element
 
-    if (isPlainRich(el)) {
+    // Pasted Word/Outlook font sizes and families snap onto the allowlist so
+    // the paragraph stays editable (normalize-fonts.ts), and a stored blank
+    // line's <br> comes off (the editor adds its own). Only the editable copy
+    // changes: an element that still can't be represented keeps its exact
+    // original markup in the placeholder below.
+    const candidate = el.cloneNode(true) as Element
+    normalizeSpanFonts(candidate)
+    removeLoneParagraphBreak(candidate)
+
+    if (isPlainRich(candidate)) {
       // A block token nested inside inline/rich content would serialize to
       // invalid HTML after substitution (<p><div><table>...</p>). Leave it as
       // literal text but warn so the latent bug is visible.
-      for (const match of (el.textContent ?? "").matchAll(TOKEN_RE)) {
+      for (const match of (candidate.textContent ?? "").matchAll(TOKEN_RE)) {
         if (blockSet.has(match[1])) {
           warnings.push(
-            `{{${match[1]}}} is inside a <${el.tagName.toLowerCase()}>; it will produce invalid HTML when sent. Move it to its own line.`,
+            `{{${match[1]}}} is inside a <${candidate.tagName.toLowerCase()}>; it will produce invalid HTML when sent. Move it to its own line.`,
           )
         }
       }
-      out.push(el.cloneNode(true))
+      out.push(candidate)
       continue
     }
 
@@ -269,7 +280,18 @@ export function fromEditorHtml(editorHtml: string): string {
   // Drop a single trailing empty paragraph artefact the editor appends — also
   // when a select-all line spacing change has styled it.
   result = result.replace(/<p(?: style="[^"]*")?><\/p>\s*$/, "")
-  return result
+  // Every other empty paragraph is a blank line the user typed: give it a
+  // line's height in the email, as the editor does (empty-paragraphs.ts).
+  return fillEmptyParagraphs(result)
+}
+
+/** `<p><br></p>` (a stored blank line) -> `<p></p>`, in place; the editor renders its own break. */
+function removeLoneParagraphBreak(el: Element): void {
+  if (el.tagName !== "P") return
+  const meaningful = Array.from(el.childNodes).filter(
+    (child) => !(child.nodeType === child.TEXT_NODE && !(child.textContent ?? "").trim()),
+  )
+  if (meaningful.length === 1 && (meaningful[0] as Element).tagName === "BR") el.replaceChildren()
 }
 
 /**
@@ -319,8 +341,12 @@ export function canRoundTrip(source: string, blockTokens: string[]): boolean {
  * serialization variants (`<br/>` vs `<br>`, ` ` vs `&nbsp;`) together while
  * still surfacing real structural loss — a dropped style attribute or missing
  * tag survives parse/serialize and therefore still fails the comparison.
+ * The two deliberate rewrites of the round trip (blank lines gain a <br>,
+ * pasted span fonts snap to the allowlist) are applied to both sides too, so
+ * they don't push a template out of the rich editor into source mode.
  */
 export function normalizeForCompare(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html")
+  const doc = new DOMParser().parseFromString(fillEmptyParagraphs(html), "text/html")
+  normalizeSpanFonts(doc.body)
   return doc.body.innerHTML.replace(/>\s+</g, "><").trim()
 }
