@@ -921,6 +921,43 @@ export function mergeLegStatesAfterRebuild(
   })
 }
 
+/**
+ * Ids of the legs whose stored row version no longer matches the stamp `states` holds -- what the
+ * services PATCH would 409 on. A leg the server no longer has, or a state with no stamp yet, is
+ * not reported: neither can be written against a stale version.
+ */
+export function findLegsChangedSince(
+  states: readonly ApplyLegState[],
+  saved: Pick<SavedPackageState, "selections">,
+): string[] {
+  const storedByLegId = new Map(saved.selections.map((row) => [row.package_leg_id, row.updated_at ?? null]))
+  return states.flatMap((state) => {
+    const stored = storedByLegId.get(state.legId)
+    if (!stored || !state.updatedAt) return []
+    return Date.parse(stored) !== Date.parse(state.updatedAt) ? [state.legId] : []
+  })
+}
+
+/**
+ * Replaces the named legs in `local` with their freshly hydrated server state; every other leg
+ * keeps its in-memory edits. A leg whose kind changed, or that has no fresh counterpart, is left
+ * alone -- the same fallback mergeLegStatesAfterRebuild takes.
+ */
+export function takeServerLegs(
+  local: readonly ApplyLegState[],
+  fresh: readonly ApplyLegState[],
+  legIds: ReadonlySet<string>,
+): ApplyLegState[] {
+  const freshByLegId = new Map(fresh.map((state) => [state.legId, state]))
+  return local.map((state) => {
+    if (!legIds.has(state.legId)) return state
+    const replacement = freshByLegId.get(state.legId)
+    if (!replacement) return state
+    if (replacement.kind !== state.kind || replacement.supplierKind !== state.supplierKind) return state
+    return replacement
+  })
+}
+
 /** Hydrates dialog state from the booking's saved selections and transport requests. Legs with
  * no saved row (shouldn't happen after package assign seeds them, but defensive) get defaults. */
 export function hydrateFromSaved(

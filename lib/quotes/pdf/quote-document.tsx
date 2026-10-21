@@ -6,7 +6,7 @@ import {
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import { sortItineraryBlocksByLegOrder } from "@/lib/itinerary/sort-blocks"
 import { formatMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
@@ -350,7 +350,7 @@ export function QuoteDocument({
   const hasVisibleDiscount = discountVisible && discount > 0
   const hasDeduction = hasAgentCommission || hasVisibleDiscount
 
-  const sortedBlocks = sortItineraryBlocksChronologically(itineraryBlocks)
+  const sortedBlocks = sortItineraryBlocksByLegOrder(itineraryBlocks)
   const flightCapBullet =
     flightCapPerPerson != null
       ? formatFlightCapLine((amount) => formatMoney(amount, currency, { decimals: false }), flightCapPerPerson)

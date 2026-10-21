@@ -170,12 +170,9 @@ export async function POST(req: Request, { params }: RouteParams) {
   const documentText = await getDocumentTextSettings(supabase)
 
   // Journey + header departure date come from the priced legs, not the booking's enquiry-time
-  // scalar dates which drift out of sync once the package changes -- narrowed to the primary
-  // product's own legs where it has any (F-P3-4), so a tour's dates aren't stretched by an add-on.
-  const journey = deriveJourneyFromBlocks(
-    itineraryBlocks,
-    mapSupplierKindToServiceType(primarySupplierKind),
-  ) ?? { start: null, end: null }
+  // scalar dates which drift out of sync once the package changes. "Travel Dates" spans every leg
+  // (pre/post-night hotels, transfers, flights); only the header departure date is primary-only.
+  const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
   const trainDeparture = deriveTrainDepartureFromBlocks(
     itineraryBlocks,
     mapSupplierKindToServiceType(primarySupplierKind),

@@ -221,12 +221,13 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain('data-label="Divider line"')
   })
 
-  it("renders the itinerary section chronologically when blocks exist", () => {
+  it("renders the itinerary section in the salesperson's leg order when blocks exist", () => {
     const html = buildQuoteSummaryBlock({ ...base, itineraryBlocks })
     expect(html).toContain("Your Package Includes")
     expect(html).toContain("18 July 2026")
     expect(html).toContain("Irene Country Lodge")
-    expect(html.indexOf("Irene Country Lodge")).toBeLessThan(html.indexOf("The Blue Train"))
+    // The hotel's check-in date is earlier than the train's, but the train leg is placed first.
+    expect(html.indexOf("The Blue Train")).toBeLessThan(html.indexOf("Irene Country Lodge"))
   })
 
   it("omits the itinerary section when there are no blocks", () => {

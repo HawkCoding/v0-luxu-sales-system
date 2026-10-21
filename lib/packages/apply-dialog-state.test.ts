@@ -11,9 +11,11 @@ import {
   buildDefaultLegStates,
   collectHeadcountWarnings,
   createDraftTransportRequest,
+  findLegsChangedSince,
   getTransferAnchorContext,
   hydrateFromSaved,
   mergeLegStatesAfterRebuild,
+  takeServerLegs,
   toApplySelections,
   toHotelAnchorContext,
   toPackageSelectionsPatch,
@@ -1379,6 +1381,85 @@ describe("adoptSavedServiceRows", () => {
 
     expect(suiteState(next, "leg-train").units.map((unit) => unit.id)).toEqual(before)
     expect(suiteState(next, "leg-train").updatedAt).toBe("2026-09-30T10:00:00.000Z")
+  })
+})
+
+// A restored draft or a long-idle dialog holds row versions that something else may have moved --
+// including the same user in another window or a system write. These two helpers let the dialog
+// reload only the legs whose version moved and keep the rest of the user's edits.
+describe("findLegsChangedSince / takeServerLegs", () => {
+  function savedWith(versions: Record<string, string>): Pick<SavedPackageState, "selections"> {
+    return {
+      selections: Object.entries(versions).map(([legId, updated_at]) => ({
+        package_leg_id: legId,
+        updated_at,
+      })) as unknown as SavedPackageState["selections"],
+    }
+  }
+
+  it("reports only the legs whose stored version differs from the held stamp", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: "2026-09-30T10:00:00.000Z",
+    })) as ApplyLegState[]
+
+    const changed = findLegsChangedSince(
+      states,
+      savedWith({
+        "leg-train": "2026-09-30T10:00:00.000Z",
+        "leg-transfer": "2026-09-30T11:30:00.000Z",
+      }),
+    )
+
+    expect(changed).toEqual(["leg-transfer"])
+  })
+
+  it("treats the same instant in a different format as unchanged", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: "2026-09-30T10:00:00.000Z",
+    })) as ApplyLegState[]
+
+    expect(findLegsChangedSince(states, savedWith({ "leg-train": "2026-09-30T10:00:00+00:00" }))).toEqual([])
+  })
+
+  it("ignores a leg the server no longer has and a state with no stamp yet", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: state.legId === "leg-train" ? null : "2026-09-30T10:00:00.000Z",
+    })) as ApplyLegState[]
+
+    expect(findLegsChangedSince(states, savedWith({ "leg-train": "2026-10-01T00:00:00.000Z" }))).toEqual([])
+    expect(findLegsChangedSince(states, savedWith({ "someone-else": "2026-10-01T00:00:00.000Z" }))).toEqual([])
+  })
+
+  it("takes the server state for the named legs only and keeps every other edit", () => {
+    const local = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    const fresh = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: "2026-10-01T09:00:00.000Z",
+    })) as ApplyLegState[]
+    const localTrain = suiteState(local, "leg-train")
+    localTrain.units[0].adultCount = 7
+    const localTransfer = transportState(local, "leg-transfer")
+    localTransfer.bookingDate = "2026-01-01"
+
+    const next = takeServerLegs(local, fresh, new Set(["leg-transfer"]))
+
+    expect(transportState(next, "leg-transfer").updatedAt).toBe("2026-10-01T09:00:00.000Z")
+    expect(transportState(next, "leg-transfer").bookingDate).toBeNull()
+    expect(suiteState(next, "leg-train").units[0].adultCount).toBe(7)
+    expect(suiteState(next, "leg-train").updatedAt).toBe(suiteState(local, "leg-train").updatedAt)
+    // Pure: the input is untouched.
+    expect(transportState(local, "leg-transfer").bookingDate).toBe("2026-01-01")
+  })
+
+  it("leaves a leg alone when the server state has no counterpart for it", () => {
+    const local = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+
+    const next = takeServerLegs(local, [], new Set(["leg-train"]))
+
+    expect(next).toEqual(local)
   })
 })
 

@@ -4,7 +4,7 @@ import {
   FOOTER_BRAND_PRODUCT_LINE,
 } from "@/lib/assets/footer-brand"
 import type { ItineraryData } from "@/lib/itinerary/build-itinerary"
-import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import { sortItineraryBlocksByLegOrder } from "@/lib/itinerary/sort-blocks"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import {
@@ -91,7 +91,7 @@ export function ItineraryDocument({
   }
   const footerLines = t.hidden_sections.includes("footer") ? [] : buildDocumentFooterLines(company ?? {})
 
-  const sorted = sortItineraryBlocksChronologically(data.serviceBlocks)
+  const sorted = sortItineraryBlocksByLegOrder(data.serviceBlocks)
 
   return (
     <Document

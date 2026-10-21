@@ -16,7 +16,6 @@ import { getCachedRates } from "@/lib/fx/rates"
 import { getDefaultCommission } from "@/lib/pricing/default-commission"
 import { BASE_CURRENCY, formatMoney, isSupportedCurrency, normaliseCurrency } from "@/lib/money"
 import { MissingFxRateError, roundFxRate } from "@/lib/pricing/convert-currency"
-import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
 import { mergeAmendFxRates, rebuildAcceptedQuoteFxRates } from "@/lib/quotes/amend-pricing"
 import type { PricingSnapshot } from "@/lib/types"
 
@@ -234,18 +233,8 @@ export async function POST(req: Request, { params }: RouteParams) {
     ? mergeAmendFxRates({ cachedRates: fx.rates, accepted: acceptedFx.rates, clientRates })
     : { ...fx.rates, ...clientRates, [BASE_CURRENCY]: 1 }
 
-  // Building the quote is the moment the legs are put in date order: every service is dated and
-  // saved by now (the dialog's PATCH /services and PUT /transport-requests land first), and the
-  // package detail loaded below walks the legs by sort_order -- so the quote lines, and the invoice
-  // built from them, follow the itinerary. A moved leg's updated_at changes, so the response says
-  // so and the dialog re-reads the versions before its next save.
-  const reorder = await persistServiceDateOrder(supabase, id)
-  if (reorder.error) {
-    // Ordering is presentation, not pricing: a failure here must not cost the salesperson the quote.
-    console.error("services-apply:date-order", reorder.error)
-  }
-  const legOrderChanged = reorder.changedServiceIds.length > 0
-
+  // The package detail loaded below walks the legs by sort_order -- the order the salesperson
+  // arranged them in step 1 -- so the quote lines, and the invoice built from them, follow it.
   const { detail } = await loadBookingServicesPackageDetail(
     supabase,
     id,
@@ -336,13 +325,13 @@ export async function POST(req: Request, { params }: RouteParams) {
     const pricedALeg = lineItems.some((item) => item.pricingSnapshot?.legId)
     if (incompleteLegs.length > 0 && !pricedALeg) {
       return NextResponse.json(
-        { error: incompleteLegs[0].message, incompleteLegs, legOrderChanged },
+        { error: incompleteLegs[0].message, incompleteLegs },
         { status: 400 },
       )
     }
 
     return NextResponse.json({
-      // Built legs first, in date order; extras always follow them.
+      // Built legs first, in the salesperson's step 1 order; extras always follow them.
       lineItems: [...lineItems, ...extraLineItems],
       incompleteLegs,
       currency: quoteCurrency,
@@ -354,17 +343,16 @@ export async function POST(req: Request, { params }: RouteParams) {
         // Amend only: currencies whose default rate came from the accepted quote, not today's.
         ...(acceptedFx ? { prefilledCurrencies: acceptedFx.prefilledCurrencies } : {}),
       },
-      legOrderChanged,
     })
   } catch (error) {
     // A missing rate is the salesperson's problem to fix (refresh or type one), not a server
     // fault -- surface it the same way an unpriced rate card is surfaced.
     if (error instanceof MissingFxRateError) {
-      return NextResponse.json({ error: error.message, legOrderChanged }, { status: 400 })
+      return NextResponse.json({ error: error.message }, { status: 400 })
     }
     const message = error instanceof Error ? error.message : "Failed to build service line items"
     const status = message === "Job not found" ? 404 : 400
 
-    return NextResponse.json({ error: message, legOrderChanged }, { status })
+    return NextResponse.json({ error: message }, { status })
   }
 }
