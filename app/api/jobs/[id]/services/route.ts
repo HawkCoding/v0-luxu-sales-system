@@ -30,7 +30,6 @@ import { PASSENGER_SUM_SUPPLIER_KINDS } from "@/lib/packages/apply-dialog-state"
 import { describeEmptyUnitSentence, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
 import { SERVICES_WITH_SUPPLIER_SELECT, SERVICES_WITH_UNITS_SELECT } from "@/lib/packages/service-columns"
 import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
-import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -154,8 +153,7 @@ const patchServicesSchema = z.object({
   selections: z.array(updateServiceSchema).min(1, "At least one selection is required"),
   /** Skips the trip-date recompute (5 sequential reads) when the caller knows a transport-requests
    * PUT immediately follows and will recompute from the final state of both tables anyway — see
-   * PUT /api/jobs/[id]/transport-requests. The leg date-order pass is skipped with it (POST
-   * /services/apply sorts once both tables are final). Defaults to false so every other caller is
+   * PUT /api/jobs/[id]/transport-requests. Defaults to false so every other caller is
    * unaffected. */
   deferTripDateRecompute: z.boolean().optional(),
 })
@@ -367,7 +365,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json(
       {
         error:
-          "Someone else changed this booking's services while you were editing. Close and reopen the dialog to pick up their changes.",
+          "This booking's services were saved elsewhere since you opened them (another window, another quote, or a colleague). Load the latest to carry on — your other changes are kept.",
         code: "STALE_VERSION",
         packageLegId: first.packageLegId,
         currentUpdatedAt: serviceById.get(first.packageLegId)?.updated_at ?? null,
@@ -868,17 +866,6 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   if (!parsed.data.deferTripDateRecompute) {
     const recompute = await recomputeBookingTripDates(supabase, id)
     if (recompute.error) return jsonError(recompute.error, 500)
-
-    // Keep the legs in date order once they are dated, so the quote, the invoice and Build
-    // Booking's own lists read as an itinerary. Deferred along with the recompute: a caller that
-    // defers is about to write transport requests (whose pickups date the transfer legs) and then
-    // price, and POST /services/apply sorts from the final state of both tables. Runs before the
-    // reload below so the response carries the new sort_order and updated_at stamps.
-    const reorder = await persistServiceDateOrder(supabase, id)
-    if (reorder.error) {
-      // Ordering is presentation, not data: a failure here must not lose the save that just landed.
-      console.error("services:date-order", reorder.error)
-    }
   }
 
   // F-P3-1: the flag intake sets for an unresolved suite/tour type is source-agnostic (see

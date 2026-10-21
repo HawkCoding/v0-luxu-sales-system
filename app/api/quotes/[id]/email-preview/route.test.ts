@@ -209,7 +209,7 @@ describe("POST /api/quotes/[id]/email-preview", () => {
     expect(composeArgs.tokens.departureDateShort).toBe("10 Aug 2026")
   })
 
-  it("keeps dating off the train leg for a rail-primary booking (regression guard)", async () => {
+  it("spans travel dates across every leg but dates {{departureDate}} off the train (regression guard)", async () => {
     loadSupplierKindMocks.loadSupplierKind.mockResolvedValue("train_operator")
     voucherBlocksMocks.buildVoucherServiceBlocks.mockResolvedValue({
       blocks: [
@@ -229,7 +229,7 @@ describe("POST /api/quotes/[id]/email-preview", () => {
     })
 
     expect(summaryBlockMocks.buildQuoteSummaryBlock).toHaveBeenCalledWith(
-      expect.objectContaining({ journeyStart: "2026-08-10", journeyEnd: "2026-08-12" }),
+      expect.objectContaining({ journeyStart: "2026-08-08", journeyEnd: "2026-08-12" }),
     )
     const composeArgs = composeEmailMocks.composeEmail.mock.calls[0][2] as {
       tokens: Record<string, string>

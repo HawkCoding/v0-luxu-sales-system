@@ -261,7 +261,6 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       serviceType: "airline",
       title: "Airlink",
       displayOrder: -1,
-      clockTime: "10:00",
       contactDetails: { name: "Airlink" },
       serviceData: {
         flightNumber: "4Z492",

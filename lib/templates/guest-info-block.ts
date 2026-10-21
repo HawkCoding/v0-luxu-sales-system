@@ -67,9 +67,9 @@ export function buildGuestInfoBlock(input: GuestInfoInput): string {
   const lines: string[] = []
 
   if (input.guests.length > 0) {
-    for (const guest of input.guests) {
-      lines.push(`<p style="${rowStyle}">${formatGuestLine(guest)}</p>`)
-    }
+    // One paragraph with <br/> breaks: separate <p>s get a full paragraph gap in Outlook.
+    const guestLines = input.guests.map(formatGuestLine).join("<br/>")
+    lines.push(`<p style="${rowStyle}">${guestLines}</p>`)
   } else {
     const paxCount = formatPaxCount(input.adults, input.children)
     if (paxCount) {

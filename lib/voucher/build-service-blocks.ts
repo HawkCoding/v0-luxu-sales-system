@@ -21,7 +21,6 @@ import type { JourneyClass, RateAudience } from "@/lib/quotes/quote-config"
 import { fetchDefaultAgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
 import { resolveTransferPax } from "@/lib/pricing/transfer-basis"
-import { resolveServiceTiming } from "@/lib/packages/sort-legs-by-date"
 
 /** Kinds whose suite/room name gets a noun appended when the type name doesn't already carry
  * one (see formatSuitePhrase). Tour, airline and transfer labels feed different sentences
@@ -655,9 +654,6 @@ function transportRequestBlock(
     emergencyPhone: blockContext.supplier?.emergency_phone ?? blockContext.contactDetails.emergencyPhone ?? null,
   }
   const supplierContactName = request.supplier_contact_name ?? blockContext.supplier?.default_contact_name ?? null
-  // Read exactly as the saved leg order reads a pickup (resolveServiceTiming), so the itinerary
-  // sort and sortLegsByDate agree; a pickup at 00:00 means "no time typed".
-  const clockTime = resolveServiceTiming({ kind: "transfers", serviceDate: null, pickupAts: [request.pickup_at] }).time
 
   if (isFlight) {
     return {
@@ -689,7 +685,6 @@ function transportRequestBlock(
         footnote: request.voucher_footnote,
       },
       displayOrder: blockContext.displayOrder,
-      clockTime,
     }
   }
 
@@ -752,7 +747,6 @@ function transportRequestBlock(
       isComplimentary: blockContext.complimentaryTransportRequestIds?.has(request.id) ?? false,
     },
     displayOrder: blockContext.displayOrder,
-    clockTime,
   }
 }
 
@@ -1085,13 +1079,6 @@ export async function buildVoucherServiceBlocks(
         contactDetails,
         serviceData,
         displayOrder,
-        // Only a flight's own departure is a real clock event here; the train's route schedule and
-        // a hotel's check-in are not (see sortItineraryBlocksChronologically).
-        clockTime: resolveServiceTiming({
-          kind: supplier?.kind ?? null,
-          serviceDate,
-          departureTime: row.departure_time,
-        }).time,
       },
     ]
   })

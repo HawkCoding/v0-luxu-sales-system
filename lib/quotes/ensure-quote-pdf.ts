@@ -10,7 +10,7 @@ import {
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
-import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
+import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { selectPrimaryBlocks } from "@/lib/invoices/build-invoice-view"
 import { loadDocumentFooterCompany } from "@/lib/pdf/document-footer-company"
 import { buildQuoteJourneyDetails } from "@/lib/quotes/pdf/quote-journey-details"
@@ -202,12 +202,9 @@ export async function ensureQuotePdf(
   }
 
   // Journey window comes from the priced legs, not the booking's enquiry-time scalar dates which
-  // drift out of sync once the package changes -- narrowed to the primary product's own legs
-  // where it has any (F-P3-4), so a tour's dates aren't stretched by an add-on hotel or transfer.
-  const journey = deriveJourneyFromBlocks(
-    itineraryBlocks,
-    mapSupplierKindToServiceType(primarySupplierKind),
-  ) ?? { start: null, end: null }
+  // drift out of sync once the package changes. "Travel Dates" spans every leg (pre/post-night
+  // hotels, transfers, flights), not just the primary product's own dates.
+  const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
 
   // The "Train Journey details" box names the same main product the invoice's journey block does.
   const bookingRoute = Array.isArray(booking?.route) ? booking.route[0] : booking?.route

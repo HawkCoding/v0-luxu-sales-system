@@ -66,7 +66,9 @@ import {
   adoptSavedServiceRows,
   applyAnchoredDates,
   buildDefaultLegStates,
+  findLegsChangedSince,
   hydrateFromSaved,
+  takeServerLegs,
   mergeLegStatesAfterRebuild,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   PASSENGER_SUM_SUPPLIER_KINDS,
@@ -410,6 +412,12 @@ export function BuildBookingDialog({
   const [incompleteLegs, setIncompleteLegs] = useState<IncompleteLeg[]>([])
   const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
+  // Latest legStates for async work (a draft restore reconciling against the server) that outlives
+  // the render it was started in.
+  const legStatesRef = useRef(legStates)
+  useEffect(() => {
+    legStatesRef.current = legStates
+  }, [legStates])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
   const [bucketsBySupplierId, setBucketsBySupplierId] = useState<Record<string, AgeBuckets>>({})
   const [bookingCounts, setBookingCounts] = useState<TravellerCounts | null>(null)
@@ -516,6 +524,23 @@ export function BuildBookingDialog({
 
     if (legStatesRestorable && draft.legStates.length > 0) {
       setLegStates(draft.legStates)
+      // The draft carries the row versions it was typed against. Services belong to the booking, not
+      // the quote, so they may have been saved since (another quote's dialog, a movement-time edit,
+      // another window): keeping those stamps guarantees a 409 on Next. Refresh any leg that moved
+      // from the server, keep the draft's edits on the rest.
+      if (packageDetail) {
+        void reloadLatestLegs(packageDetail)
+          .then((reloaded) => {
+            if (reloaded.length > 0) {
+              toast.warning(
+                `${reloaded.join(", ")} changed since this draft was saved, so the latest saved version was loaded instead. Check it before continuing.`,
+              )
+            }
+          })
+          .catch(() => {
+            // Best-effort: the draft stays as restored and the next save overwrites, as for any save.
+          })
+      }
       // "confirm" needs previewLineItems, which isn't persisted (it's re-derived server-side) --
       // land one step back and let Next regenerate it.
       setStep(draft.step === "confirm" ? "configure" : draft.step)
@@ -903,8 +928,7 @@ export function BuildBookingDialog({
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
 
   /** Re-reads booking_services.updated_at for every leg after a write this dialog made itself --
-   *  and the legs' sort_order with it, so a server-side date re-sort (POST /services/apply puts the
-   *  legs in date order when the quote is priced) shows up in the step 1 and step 2 lists. */
+   *  and the legs' sort_order with it, so the step 1 and step 2 lists follow what is saved. */
   async function refreshLegVersions() {
     const res = await fetch(`/api/jobs/${jobId}/services`)
     if (!res.ok) return
@@ -952,6 +976,44 @@ export function BuildBookingDialog({
         })
         .map(({ row }) => row),
     )
+  }
+
+  /**
+   * Pulls the server's current copy of every leg whose stored version no longer matches the stamp
+   * this dialog holds, and leaves every other leg's edits alone. Saving no longer checks versions
+   * (last save wins), so this is what stops a restored draft from silently writing old values over
+   * services saved since it was taken. Returns the labels of the legs that were reloaded, empty
+   * when nothing had moved.
+   */
+  async function reloadLatestLegs(detail: PackageDetail): Promise<string[]> {
+    const [servicesRes, transportRes] = await Promise.all([
+      fetch(`/api/jobs/${jobId}/services`),
+      fetch(`/api/jobs/${jobId}/transport-requests`),
+    ])
+    if (!servicesRes.ok) return []
+    const saved = (await servicesRes.json().catch(() => null)) as SavedPackageState | null
+    if (!saved?.selections) return []
+    const transportRows = transportRes.ok
+      ? ((await transportRes.json().catch(() => null)) as BookingTransportRequest[] | null) ?? []
+      : existingTransportRequests
+
+    const staleIds = new Set(findLegsChangedSince(legStatesRef.current, saved))
+    if (staleIds.size === 0) return []
+
+    const fresh = hydrateFromSaved(detail, saved, transportRows, {
+      primarySupplierId: saved.primarySupplierId ?? null,
+      tripStartDate: saved.tripStartDate ?? travelDate ?? null,
+      totalsBySupplierId: totalsBySupplierId,
+      quoteCurrency,
+    })
+    setSavedState(saved)
+    setExistingTransportRequests(transportRows)
+    setLegStates((prev) =>
+      applyAnchoredDates(detail, takeServerLegs(prev, fresh, staleIds), saved.primarySupplierId ?? null),
+    )
+
+    const labelByLegId = new Map(detail.legs.map((leg) => [leg.id, leg.label ?? leg.supplierName]))
+    return Array.from(staleIds).map((legId) => labelByLegId.get(legId) ?? "a service")
   }
 
   /**
@@ -1153,10 +1215,6 @@ export function BuildBookingDialog({
         }),
       })
       const payload = await res.json()
-      // Pricing puts the legs in date order and persists it. A moved leg's updated_at changed, so
-      // adopt the fresh versions (or the next save 409s against this very request) and let both
-      // step lists follow the new order. Reported on a failed price too -- the sort ran first.
-      if (payload?.legOrderChanged === true) await refreshLegVersions()
       if (!res.ok) {
         const baseMessage = typeof payload?.error === "string" ? payload.error : "Validation failed"
         setBuildError(appendFieldDetails(baseMessage, payload))

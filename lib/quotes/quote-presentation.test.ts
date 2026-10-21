@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import { sortItineraryBlocksByLegOrder } from "@/lib/itinerary/sort-blocks"
 import type { QuoteLineItem } from "@/lib/types"
 import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
 import type { BulletLine } from "@/lib/inclusions/bullet-lines"
@@ -548,9 +548,9 @@ describe("buildQuoteItineraryLines", () => {
     ])
   })
 
-  it("interleaves lines from different blocks by date", () => {
+  it("keeps lines in block order instead of re-sorting them by date", () => {
     const dates = buildQuoteItineraryLines([trainBlock, hotelBlock]).map((line) => line.dateISO)
-    expect(dates).toEqual(["2026-07-18", "2026-07-20", "2026-07-20", "2026-07-22"])
+    expect(dates).toEqual(["2026-07-20", "2026-07-22", "2026-07-18", "2026-07-20"])
   })
 
   it("collapses two hotel blocks whose check-out lands on the same date with identical wording", () => {
@@ -634,7 +634,7 @@ describe("buildQuoteItineraryLines", () => {
     }
 
     // Deliberately passed out of builder order to prove the sort — not the input order — decides.
-    const sorted = sortItineraryBlocksChronologically([hotel, train, transfer])
+    const sorted = sortItineraryBlocksByLegOrder([hotel, train, transfer])
     const lines = buildQuoteItineraryLines(sorted)
     const nov25 = lines.filter((line) => line.dateISO === "2026-11-25").map((line) => line.text)
 

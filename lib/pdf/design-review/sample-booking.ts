@@ -101,7 +101,6 @@ export function sampleServiceBlocks(): VoucherServiceBlock[] {
       supplierReference: "58267",
       supplierContactName: "Ndazi",
       displayOrder: 0,
-      clockTime: "14:00",
       contactDetails: { ...ULYSSES },
       serviceData: {
         route: "JHB – APT JHTL",
@@ -179,7 +178,6 @@ export function sampleServiceBlocks(): VoucherServiceBlock[] {
       supplierReference: "58267",
       supplierContactName: "Ndazi",
       displayOrder: 3,
-      clockTime: "11:00",
       contactDetails: { ...ULYSSES },
       serviceData: {
         route: "PTY – STA APT",
@@ -198,7 +196,6 @@ export function sampleServiceBlocks(): VoucherServiceBlock[] {
       supplierReference: "58267",
       supplierContactName: "Ndazi",
       displayOrder: 4,
-      clockTime: "17:00",
       contactDetails: { ...ULYSSES },
       serviceData: {
         route: "PTY – PHTL APT",

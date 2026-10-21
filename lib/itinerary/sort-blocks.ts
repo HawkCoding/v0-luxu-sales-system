@@ -1,24 +1,14 @@
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import { sortByDateAndClock } from "@/lib/packages/sort-legs-by-date"
 
 /**
- * Orders itinerary blocks the same way the booking's legs are saved (sortLegsByDate), so the
- * voucher, the itinerary and the quote PDF list same-day legs in the order Build Booking shows.
- *
- * Earlier date first; undated blocks last. Two services on the same day run in the order the
- * consultant put them in the booking builder (displayOrder = booking_services.sort_order), with
- * one exception: blocks that carry a real clock event (`clockTime` -- a flight's departure, a
- * transfer's pickup) are put in clock order among themselves, within the slots they already hold.
- * `startTime` is never compared: a hotel's is a "check in from" policy that falls back to the
- * supplier's or the app's default (see buildVoucherServiceBlocks), and sorting on it made an
- * unscheduled 15h00 check-in outrank the 18h00 transfer that delivers the guests to it.
+ * Orders itinerary blocks in the order the salesperson arranged the legs in Build Booking step 1
+ * (displayOrder = booking_services.sort_order), so the voucher, the itinerary and the quote PDF
+ * list services exactly as the quote and invoice lines do. Dates and clock times never reorder
+ * anything: the salesperson owns the order. Stable, and the input array is not mutated.
  */
-export function sortItineraryBlocksChronologically(
-  blocks: VoucherServiceBlock[],
-): VoucherServiceBlock[] {
-  return sortByDateAndClock(blocks, (block) => ({
-    date: block.serviceData.departureDate ?? null,
-    time: block.clockTime ?? null,
-    order: block.displayOrder,
-  }))
+export function sortItineraryBlocksByLegOrder(blocks: VoucherServiceBlock[]): VoucherServiceBlock[] {
+  return blocks
+    .map((block, index) => ({ block, index }))
+    .sort((a, b) => a.block.displayOrder - b.block.displayOrder || a.index - b.index)
+    .map(({ block }) => block)
 }

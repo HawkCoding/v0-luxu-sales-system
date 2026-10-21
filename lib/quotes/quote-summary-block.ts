@@ -11,7 +11,7 @@ import { EMAIL_COLORS } from "@/lib/email/email-chrome"
 import { formatMoney } from "@/lib/money"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import { sortItineraryBlocksByLegOrder } from "@/lib/itinerary/sort-blocks"
 import {
   AGENT_COMMISSION_COLOR,
   AGENT_COMMISSION_LABEL,
@@ -164,7 +164,7 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${money(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>` +
     `</div>`
 
-  const sortedBlocks = sortItineraryBlocksChronologically(input.itineraryBlocks)
+  const sortedBlocks = sortItineraryBlocksByLegOrder(input.itineraryBlocks)
 
   let itinerary = ""
   const moneyNoDecimals = (amount: number) => formatMoney(amount, input.currency, { decimals: false })

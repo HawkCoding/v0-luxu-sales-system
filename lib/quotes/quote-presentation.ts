@@ -696,22 +696,12 @@ export function buildQuoteItineraryLines(
     if (endLine) lines.push(endLine)
   })
 
-  // Undated lines keep their position at the end rather than sorting to the front.
-  const sorted = lines
-    .map((line, index) => ({ line, index }))
-    .sort((a, b) => {
-      const aDate = a.line.dateISO ?? "9999-12-31"
-      const bDate = b.line.dateISO ?? "9999-12-31"
-      if (aDate !== bDate) return aDate < bDate ? -1 : 1
-      return a.index - b.index
-    })
-    .map((entry) => entry.line)
-
+  // Lines stay in the order the salesperson arranged the legs in; dates never reorder them.
   // Two stays that land on the same date can produce a byte-identical closing line (a check-out
   // line states no property, just a time — see describeEndLine) even once dates are chained
   // correctly; collapsing them here is a backstop against ever printing the same dated line twice.
   const seen = new Set<string>()
-  return sorted.filter((line) => {
+  return lines.filter((line) => {
     const key = `${line.dateISO ?? ""} ${line.text} ${line.description ?? ""} ${line.bullets.map((b) => `${b.kind}:${b.text}`).join("")}`
     if (seen.has(key)) return false
     seen.add(key)
@@ -806,20 +796,11 @@ export function buildQuoteSummaryDays(
     }
   })
 
-  // Undated lines keep their position at the end rather than sorting to the front.
-  const sorted = lines
-    .map((line, index) => ({ line, index }))
-    .sort((a, b) => {
-      const aDate = a.line.dateISO ?? "9999-12-31"
-      const bDate = b.line.dateISO ?? "9999-12-31"
-      if (aDate !== bDate) return aDate < bDate ? -1 : 1
-      return a.index - b.index
-    })
-    .map((entry) => entry.line)
-
+  // Lines stay in the order the salesperson arranged the legs in; only consecutive same-date
+  // lines share a day heading.
   const days: QuoteSummaryDay[] = []
   const seen = new Set<string>()
-  for (const line of sorted) {
+  for (const line of lines) {
     // Same backstop as buildQuoteItineraryLines: two stays ending the same day never print twice.
     const key = `${line.dateISO ?? ""} ${line.items.map((item) => [item.text, ...item.details].join("")).join("")}`
     if (seen.has(key)) continue

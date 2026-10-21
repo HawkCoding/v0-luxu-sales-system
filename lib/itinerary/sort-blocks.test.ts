@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
-import { sortLegsByDate } from "@/lib/packages/sort-legs-by-date"
+import { sortItineraryBlocksByLegOrder } from "@/lib/itinerary/sort-blocks"
 
 function block(
   overrides: Partial<VoucherServiceBlock> & { displayOrder: number },
@@ -15,8 +14,8 @@ function block(
   }
 }
 
-describe("sortItineraryBlocksChronologically", () => {
-  it("sorts by departure date regardless of displayOrder", () => {
+describe("sortItineraryBlocksByLegOrder", () => {
+  it("follows displayOrder even when the dates run the other way", () => {
     const hotel = block({
       serviceType: "hotel",
       title: "Hotel",
@@ -36,97 +35,29 @@ describe("sortItineraryBlocksChronologically", () => {
       serviceData: { departureDate: "2026-08-11" },
     })
 
-    const sorted = sortItineraryBlocksChronologically([hotel, flight, transfer])
-    expect(sorted.map((b) => b.title)).toEqual(["Flight", "Transfer", "Hotel"])
+    const sorted = sortItineraryBlocksByLegOrder([flight, transfer, hotel])
+    expect(sorted.map((b) => b.title)).toEqual(["Hotel", "Transfer", "Flight"])
   })
 
-  it("keeps displayOrder for same-date blocks", () => {
-    const pickup = block({
-      serviceType: "transfer",
-      title: "Airport Pickup",
-      displayOrder: 1,
-      serviceData: { departureDate: "2026-08-10" },
-    })
+  it("ignores start times: a later block with an earlier time stays after", () => {
     const flight = block({
       serviceType: "airline",
       title: "Flight",
       displayOrder: 0,
-      serviceData: { departureDate: "2026-08-10" },
-    })
-    const hotel = block({
-      serviceType: "hotel",
-      title: "Hotel Check-In",
-      displayOrder: 2,
-      serviceData: { departureDate: "2026-08-10" },
-    })
-
-    const sorted = sortItineraryBlocksChronologically([pickup, hotel, flight])
-    expect(sorted.map((b) => b.title)).toEqual([
-      "Flight",
-      "Airport Pickup",
-      "Hotel Check-In",
-    ])
-  })
-
-  it("keeps builder order even when a later block's clock time is earlier", () => {
-    // Regression: the transfer that delivers guests to the TAJ Hotel carries a real captured
-    // pickup time (18h00); the hotel's start time is just its default check-in policy (15h00), not
-    // an event. Sorting on clock time made the hotel print first — wrong, since the transfer has
-    // to happen before check-in. Builder order (train, transfer, hotel) must win.
-    const hotel = block({
-      serviceType: "hotel",
-      title: "TAJ Hotel",
-      displayOrder: 2,
-      serviceData: { departureDate: "2026-11-25", startTime: "15:00" },
-    })
-    const transfer = block({
-      serviceType: "transfer",
-      title: "Station Transfer",
-      displayOrder: 1,
-      serviceData: { departureDate: "2026-11-25", startTime: "18:00" },
-    })
-
-    const sorted = sortItineraryBlocksChronologically([hotel, transfer])
-    expect(sorted.map((b) => b.title)).toEqual(["Station Transfer", "TAJ Hotel"])
-  })
-
-  it("puts same-day blocks with a real clock time in clock order, like the saved leg order", () => {
-    // A 14:00 flight saved before a 09:00 transfer pickup: sortLegsByDate saves the transfer first,
-    // so the itinerary must print it first too. The hotel between them has no clock event and keeps
-    // its slot.
-    const flight = block({
-      serviceType: "airline",
-      title: "Flight",
-      displayOrder: 0,
-      clockTime: "14:00",
       serviceData: { departureDate: "2026-11-25", startTime: "14:00" },
-    })
-    const hotel = block({
-      serviceType: "hotel",
-      title: "Hotel",
-      displayOrder: 1,
-      serviceData: { departureDate: "2026-11-25", startTime: "15:00" },
     })
     const transfer = block({
       serviceType: "transfer",
       title: "Transfer",
-      displayOrder: 2,
-      clockTime: "09:00",
+      displayOrder: 1,
       serviceData: { departureDate: "2026-11-25", startTime: "09:00" },
     })
 
-    const sorted = sortItineraryBlocksChronologically([flight, hotel, transfer])
-    expect(sorted.map((b) => b.title)).toEqual(["Transfer", "Hotel", "Flight"])
-
-    const legs = sortLegsByDate([
-      { id: "Flight", date: "2026-11-25", time: "14:00", sortOrder: 0 },
-      { id: "Hotel", date: "2026-11-25", time: null, sortOrder: 1 },
-      { id: "Transfer", date: "2026-11-25", time: "09:00", sortOrder: 2 },
-    ])
-    expect(legs.map((leg) => leg.id)).toEqual(sorted.map((b) => b.title))
+    const sorted = sortItineraryBlocksByLegOrder([transfer, flight])
+    expect(sorted.map((b) => b.title)).toEqual(["Flight", "Transfer"])
   })
 
-  it("places undated blocks after dated ones", () => {
+  it("keeps undated blocks where the salesperson put them", () => {
     const extras = block({
       serviceType: "additional_service",
       title: "Additional Services",
@@ -139,28 +70,27 @@ describe("sortItineraryBlocksChronologically", () => {
       serviceData: { departureDate: "2026-08-15" },
     })
 
-    const sorted = sortItineraryBlocksChronologically([extras, train])
-    expect(sorted.map((b) => b.title)).toEqual(["Train", "Additional Services"])
+    const sorted = sortItineraryBlocksByLegOrder([train, extras])
+    expect(sorted.map((b) => b.title)).toEqual(["Additional Services", "Train"])
   })
 
-  it("sorts all-undated blocks by displayOrder", () => {
-    const second = block({ title: "Second", displayOrder: 1 })
-    const first = block({ title: "First", displayOrder: 0 })
+  it("keeps input order for equal displayOrder", () => {
+    const a = block({ title: "A", displayOrder: 1 })
+    const b = block({ title: "B", displayOrder: 1 })
 
-    const sorted = sortItineraryBlocksChronologically([second, first])
-    expect(sorted.map((b) => b.title)).toEqual(["First", "Second"])
+    expect(sortItineraryBlocksByLegOrder([a, b]).map((x) => x.title)).toEqual(["A", "B"])
   })
 
   it("handles an empty array", () => {
-    expect(sortItineraryBlocksChronologically([])).toEqual([])
+    expect(sortItineraryBlocksByLegOrder([])).toEqual([])
   })
 
   it("does not mutate the input array", () => {
-    const a = block({ title: "A", displayOrder: 1, serviceData: { departureDate: "2026-08-20" } })
-    const b = block({ title: "B", displayOrder: 0, serviceData: { departureDate: "2026-08-10" } })
+    const a = block({ title: "A", displayOrder: 1 })
+    const b = block({ title: "B", displayOrder: 0 })
     const input = [a, b]
 
-    sortItineraryBlocksChronologically(input)
+    sortItineraryBlocksByLegOrder(input)
     expect(input).toEqual([a, b])
   })
 })
