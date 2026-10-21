@@ -1162,13 +1162,16 @@ function trainFareOverridePayload(
   }
 }
 
+// Deliberately sends no expectedUpdatedAt: the team is small and talks to each other, so the last
+// save wins rather than 409ing on a row version that moved for reasons the consultant can't see
+// (a restored draft, another quote's dialog, a movement-time edit). The server still enforces the
+// check for any caller that does send a stamp.
 export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelectionsPatchBody {
   return {
     selections: states.map((state) => {
       if (state.kind === "transport") {
         return {
           packageLegId: state.legId,
-          ...(state.updatedAt ? { expectedUpdatedAt: state.updatedAt } : {}),
           selected: state.selected,
           routeId: state.routeId,
           rateTypeId: state.rateTypeId,
@@ -1181,7 +1184,6 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
       }
       return {
         packageLegId: state.legId,
-        ...(state.updatedAt ? { expectedUpdatedAt: state.updatedAt } : {}),
         selected: state.selected,
         routeId: state.routeId,
         routeReversed: state.reversed,

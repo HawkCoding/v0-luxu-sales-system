@@ -452,9 +452,6 @@ export function BuildBookingDialog({
   }
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
-  // Legs the services PATCH refused as out of date; non-empty shows the "Load latest" recovery.
-  const [staleLegIds, setStaleLegIds] = useState<string[]>([])
-  const [loadingLatest, setLoadingLatest] = useState(false)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [syncingTotals, setSyncingTotals] = useState(false)
   const [editingTravellers, setEditingTravellers] = useState(false)
@@ -541,7 +538,7 @@ export function BuildBookingDialog({
             }
           })
           .catch(() => {
-            // Best-effort: if this fails, Next's own stale check still catches it and offers "Load latest".
+            // Best-effort: the draft stays as restored and the next save overwrites, as for any save.
           })
       }
       // "confirm" needs previewLineItems, which isn't persisted (it's re-derived server-side) --
@@ -767,7 +764,6 @@ export function BuildBookingDialog({
     setPreviewLineItems([])
     setIncompleteLegs([])
     setBuildError(null)
-    setStaleLegIds([])
     setValidationErrors([])
     setEditingTravellers(false)
     setTravellerDraft(null)
@@ -984,13 +980,12 @@ export function BuildBookingDialog({
 
   /**
    * Pulls the server's current copy of every leg whose stored version no longer matches the stamp
-   * this dialog holds (or of `onlyLegIds`, when the save already named them), and leaves every other
-   * leg's edits alone. Stale stamps come from a draft restored after the rows moved on, a long-idle
-   * dialog, or another window -- and from writes of our own on other screens (movement times, leg
-   * references), so "someone else" is rarely the whole story. Returns the labels of the legs that
-   * were reloaded, empty when nothing had moved.
+   * this dialog holds, and leaves every other leg's edits alone. Saving no longer checks versions
+   * (last save wins), so this is what stops a restored draft from silently writing old values over
+   * services saved since it was taken. Returns the labels of the legs that were reloaded, empty
+   * when nothing had moved.
    */
-  async function reloadLatestLegs(detail: PackageDetail, onlyLegIds?: readonly string[]): Promise<string[]> {
+  async function reloadLatestLegs(detail: PackageDetail): Promise<string[]> {
     const [servicesRes, transportRes] = await Promise.all([
       fetch(`/api/jobs/${jobId}/services`),
       fetch(`/api/jobs/${jobId}/transport-requests`),
@@ -1002,7 +997,7 @@ export function BuildBookingDialog({
       ? ((await transportRes.json().catch(() => null)) as BookingTransportRequest[] | null) ?? []
       : existingTransportRequests
 
-    const staleIds = new Set(onlyLegIds ?? findLegsChangedSince(legStatesRef.current, saved))
+    const staleIds = new Set(findLegsChangedSince(legStatesRef.current, saved))
     if (staleIds.size === 0) return []
 
     const fresh = hydrateFromSaved(detail, saved, transportRows, {
@@ -1019,25 +1014,6 @@ export function BuildBookingDialog({
 
     const labelByLegId = new Map(detail.legs.map((leg) => [leg.id, leg.label ?? leg.supplierName]))
     return Array.from(staleIds).map((legId) => labelByLegId.get(legId) ?? "a service")
-  }
-
-  async function handleLoadLatest() {
-    if (!packageDetail) return
-    setLoadingLatest(true)
-    try {
-      const reloaded = await reloadLatestLegs(packageDetail, staleLegIds.length > 0 ? staleLegIds : undefined)
-      setStaleLegIds([])
-      setBuildError(null)
-      toast.success(
-        reloaded.length > 0
-          ? `Loaded the latest ${reloaded.join(", ")}. Your other changes are untouched.`
-          : "Already up to date.",
-      )
-    } catch {
-      setBuildError("Could not load the latest services. Please try again.")
-    } finally {
-      setLoadingLatest(false)
-    }
   }
 
   /**
@@ -1162,7 +1138,6 @@ export function BuildBookingDialog({
 
     setValidating(true)
     setBuildError(null)
-    setStaleLegIds([])
 
     try {
       // 1. Persist per-leg selections and suite units (voucher generation reads these).
@@ -1179,7 +1154,6 @@ export function BuildBookingDialog({
         // A concurrent editor's save landed first. Nothing of theirs was overwritten; this dialog
         // is simply holding a stale copy, so the fix is to reopen rather than retry.
         if (patchRes.status === 409 && body?.code === "STALE_VERSION") {
-          setStaleLegIds(Array.isArray(body.staleLegIds) ? (body.staleLegIds as string[]) : [])
           setBuildError(typeof body.error === "string" ? body.error : "This booking's services changed while you were editing.")
           return
         }
@@ -1587,21 +1561,9 @@ export function BuildBookingDialog({
             )}
 
             {buildError && (
-              <div className="flex flex-col gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
-                <p>{buildError}</p>
-                {staleLegIds.length > 0 && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0 bg-background text-foreground"
-                    disabled={loadingLatest}
-                    onClick={() => void handleLoadLatest()}
-                  >
-                    {loadingLatest ? "Loading…" : "Load latest"}
-                  </Button>
-                )}
-              </div>
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {buildError}
+              </p>
             )}
 
             {mismatchedSplitLegs.length > 0 && bookingCounts && (
