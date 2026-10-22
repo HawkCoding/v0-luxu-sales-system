@@ -55,7 +55,7 @@ describe("renderSignatureFragment", () => {
     expect(html).toMatch(/<strong>Leonie Burke<\/strong>\s*\|\s*<em>Tour Operating Consultant<\/em>/)
   })
 
-  it("drops the leading '|' when registrationLine is null", async () => {
+  it("shows trading hours with no '|' when registrationLine is null", async () => {
     const html = await renderSignatureFragment({
       ...BASE,
       brand: { ...BASE.brand, registrationLine: null },
@@ -91,9 +91,9 @@ describe("renderSignatureFragment", () => {
     const paragraphs = afterDivider.match(/<p\b[^>]*>/g) ?? []
     expect(paragraphs.length).toBeGreaterThan(0)
     for (const p of paragraphs) expect(p).toMatch(/font-size:10px/)
-    expect(afterDivider).toMatch(
-      /Registered in South Africa CK2007\/049324\/23 \| Trading Hours: Mon – Fri 08h30 to 16h00<\/p>/,
-    )
+    expect(afterDivider).toMatch(/Registered in South Africa CK2007\/049324\/23<\/p>/)
+    expect(afterDivider).toMatch(/Trading Hours: Mon – Fri 08h30 to 16h00<\/p>/)
+    expect(afterDivider).not.toMatch(/CK2007\/049324\/23\s*\|/)
   })
 
   it("renders no badge table when badges is empty", async () => {

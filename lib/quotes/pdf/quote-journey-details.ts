@@ -14,12 +14,12 @@ export interface QuoteJourneyDetails {
 }
 
 const JOURNEY_HEADINGS: Record<VoucherServiceType, string> = {
-  train: "Train Journey details:",
-  hotel: "Stay details:",
-  tour: "Tour details:",
-  airline: "Flight details:",
-  transfer: "Travel details:",
-  additional_service: "Travel details:",
+  train: "Train Journey details",
+  hotel: "Stay details",
+  tour: "Tour details",
+  airline: "Flight details",
+  transfer: "Travel details",
+  additional_service: "Travel details",
 }
 
 export function quoteJourneyHeading(serviceType: VoucherServiceType | null | undefined): string {

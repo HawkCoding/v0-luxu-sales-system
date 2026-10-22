@@ -9,8 +9,6 @@ interface EmailSignatureProps {
   signature: ResolvedEmailSignature
 }
 
-const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" | ")
-
 /**
  * Brand text fields are editor HTML, often wrapped in `<p>`. They're injected
  * into a styled `<p>`, and a nested `<p>` closes it early — the content then
@@ -46,10 +44,6 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
 
   // renderSenderLayout already styles its links in SIGNATURE_TEXT_COLOR.
   const senderHtml = renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website })
-  const smallPrintLine = joinParts([
-    brand.registrationLine && inlineHtml(brand.registrationLine),
-    brand.tradingHours && inlineHtml(brand.tradingHours),
-  ])
   const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
 
   return (
@@ -69,8 +63,11 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
       {brand.companyLine ? (
         <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.companyLine) }} />
       ) : null}
-      {smallPrintLine ? (
-        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(smallPrintLine) }} />
+      {brand.registrationLine ? (
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.registrationLine) }} />
+      ) : null}
+      {brand.tradingHours ? (
+        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.tradingHours) }} />
       ) : null}
       {brand.divisionsLine ? (
         <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.divisionsLine) }} />

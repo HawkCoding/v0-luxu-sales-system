@@ -25,7 +25,6 @@ import {
   RULE_WIDTH,
   buildDocumentFooterLines,
   displayDocumentTitle,
-  withColon,
   type DocumentFooterCompany,
   type PagePadding,
 } from "@/lib/pdf/sarail-design"
@@ -141,12 +140,16 @@ const SECTION_RIGHT = 14.8
 const BOX_RIGHT_COLUMN = 274.4
 const LEFT_LABEL = 100.4
 const RIGHT_LABEL = 79.7
+/** "Phone" / "E-mail" — the client column's values sit right after the widest label. */
+const CLIENT_LABEL = 40
 /** Date / title column of both package tables (51.7 → 187.5). */
 const DATE_COLUMN = 135.8
 /** Minimum gap a details title keeps before the bullet column; a longer title wraps instead. */
 const DETAIL_TITLE_GAP = 10
 /** The pricing box starts where the includes list's bullets do (187.5). */
 const TOTALS_LEFT = SECTION_LEFT + DATE_COLUMN
+/** Fits "R1 234 567,00" at 10pt Manrope. */
+const TOTALS_VALUE_WIDTH = 80
 const SMALL_LINE = 10.65 / 8
 const RIGHT_LINE = 9.9 / 8
 /** The details page runs x 48.5 → 547. */
@@ -173,7 +176,8 @@ const styles = StyleSheet.create({
   title: { ...BOLD, fontSize: 21.66, width: BOX_RIGHT_COLUMN },
   preparedFor: { flex: 1, paddingTop: 2.8 },
   row: { flexDirection: "row" },
-  preparedLabel: { ...BOLD, fontSize: 10, lineHeight: 1.15, width: LEFT_LABEL },
+  // Labels set flush right against their values now the colons are gone.
+  preparedLabel: { ...BOLD, fontSize: 10, lineHeight: 1.15, width: LEFT_LABEL, textAlign: "right", paddingRight: 8 },
   preparedValue: { fontSize: 10, lineHeight: 1.15, flex: 1 },
 
   box: {
@@ -189,9 +193,9 @@ const styles = StyleSheet.create({
   boxLeft: { width: BOX_RIGHT_COLUMN, paddingRight: 8 },
   boxRight: { flex: 1 },
   boxHeading: { ...BOLD, fontSize: 10 },
-  leftLabel: { ...BOLD, fontSize: 8, lineHeight: SMALL_LINE, width: LEFT_LABEL },
+  leftLabel: { ...BOLD, fontSize: 8, lineHeight: SMALL_LINE, width: CLIENT_LABEL },
   // The journey column sets its rows a little tighter (9.9pt) than the client column, as drawn.
-  rightLabel: { ...BOLD, fontSize: 8, lineHeight: RIGHT_LINE, width: RIGHT_LABEL },
+  rightLabel: { ...BOLD, fontSize: 8, lineHeight: RIGHT_LINE, width: RIGHT_LABEL, textAlign: "right", paddingRight: 6 },
   rightValue: { fontSize: 8, lineHeight: RIGHT_LINE, flex: 1 },
   smallValue: { fontSize: 8, lineHeight: SMALL_LINE, flex: 1 },
 
@@ -218,7 +222,7 @@ const styles = StyleSheet.create({
   // The details page leaves a little more air between suppliers than the includes list does per day.
   detailRow: {
     flexDirection: "row",
-    marginTop: 9.5,
+    marginTop: 7,
   },
   dayItems: { flex: 1 },
   detailTitle: { width: DATE_COLUMN },
@@ -227,7 +231,7 @@ const styles = StyleSheet.create({
   detailTitleLine: { fontSize: 10, width: DATE_COLUMN - DETAIL_TITLE_GAP },
 
   totals: {
-    marginTop: 20.9,
+    marginTop: 14,
     // Lined up with the includes list's bullet column (was 287.9, under "Prepared for"), so the
     // grand-total label "Total for 4 Adults & 1 Child incl. VAT" fits on one line.
     marginLeft: TOTALS_LEFT,
@@ -242,12 +246,13 @@ const styles = StyleSheet.create({
     paddingLeft: 6.3,
     paddingRight: 4.8,
   },
-  totalsLabel: { fontSize: 10, flex: 1, paddingRight: 8 },
-  totalsValue: { fontSize: 10, textAlign: "right" },
+  // Labels end at one fixed edge, right against the amounts column (no colon to mark the gap).
+  totalsLabel: { fontSize: 10, flex: 1, paddingRight: 10, textAlign: "right" },
+  totalsValue: { fontSize: 10, width: TOTALS_VALUE_WIDTH, textAlign: "right" },
 
   disclaimer: {
     fontSize: 10,
-    marginTop: 14.2,
+    marginTop: 9,
     textAlign: "center",
   },
 })
@@ -363,13 +368,13 @@ export function QuoteDocument({
   const hasDetails = detailSections.length > 0 || exclusions.length > 0
 
   const journeyRows: Array<{ label: string; value: string }> = [
-    { label: "Travel dates:", value: journeyRange ?? "To be confirmed" },
-    ...(paxLabel ? [{ label: "Guests:", value: paxLabel }] : []),
+    { label: "Travel dates", value: journeyRange ?? "To be confirmed" },
+    ...(paxLabel ? [{ label: "Guests", value: paxLabel }] : []),
     ...(journeyDetails?.productName
-      ? [{ label: withColon(journeyDetails.productLabel), value: journeyDetails.productName }]
+      ? [{ label: withoutTrailingColon(journeyDetails.productLabel), value: journeyDetails.productName }]
       : []),
-    ...(journeyDetails?.tourName ? [{ label: "Tour:", value: journeyDetails.tourName }] : []),
-    ...(journeyDetails?.route ? [{ label: "Route:", value: journeyDetails.route }] : []),
+    ...(journeyDetails?.tourName ? [{ label: "Tour", value: journeyDetails.tourName }] : []),
+    ...(journeyDetails?.route ? [{ label: "Route", value: journeyDetails.route }] : []),
   ]
 
   const footerLines = buildDocumentFooterLines(company ?? {})
@@ -406,22 +411,22 @@ export function QuoteDocument({
           <Text style={styles.title}>{displayDocumentTitle(title) || "Quotation"}</Text>
           <View style={styles.preparedFor}>
             <View style={styles.row}>
-              <Text style={styles.preparedLabel}>Prepared for:</Text>
+              <Text style={styles.preparedLabel}>Prepared for</Text>
               <Text style={styles.preparedValue}>{customerName || "Valued Guest"}</Text>
             </View>
             <View style={styles.row}>
-              <Text style={styles.preparedLabel}>Date:</Text>
+              <Text style={styles.preparedLabel}>Date</Text>
               <Text style={styles.preparedValue}>{formatDisplayDateLong(quoteDate) || formatDate(quoteDate)}</Text>
             </View>
             {QUOTE_REFERENCE_ENABLED ? (
               <View style={styles.row}>
-                <Text style={styles.preparedLabel}>Quote No:</Text>
+                <Text style={styles.preparedLabel}>Quote No</Text>
                 <Text style={styles.preparedValue}>{quoteNumber}</Text>
               </View>
             ) : null}
             {QUOTE_VALIDITY_ENABLED ? (
               <View style={styles.row}>
-                <Text style={styles.preparedLabel}>Valid until:</Text>
+                <Text style={styles.preparedLabel}>Valid until</Text>
                 <Text style={styles.preparedValue}>{formatDate(validUntil)}</Text>
               </View>
             ) : null}
@@ -430,11 +435,11 @@ export function QuoteDocument({
 
         <View style={styles.box} wrap={false}>
           <View style={styles.boxLeft}>
-            <Text style={styles.boxHeading}>Client details:</Text>
-            {phone ? <BoxRow label="Phone:" value={phone} /> : null}
-            {email ? <BoxRow label="E-mail:" value={email} /> : null}
+            <Text style={styles.boxHeading}>Client details</Text>
+            {phone ? <BoxRow label="Phone" value={phone} /> : null}
+            {email ? <BoxRow label="E-mail" value={email} /> : null}
             {/* The client's postal address is deliberately not printed (client markup, 2026-09-29). */}
-            {!hasContact ? <BoxRow label="Phone:" value="–" /> : null}
+            {!hasContact ? <BoxRow label="Phone" value="–" /> : null}
           </View>
           <View style={styles.boxRight}>
             <Text style={styles.boxHeading}>{quoteJourneyHeading(journeyDetails?.serviceType)}</Text>
@@ -447,9 +452,9 @@ export function QuoteDocument({
         {summaryDays.length > 0 ? (
           <View style={[styles.section, { marginTop: 11.1 }]}>
             <Text style={styles.sectionHeading} minPresenceAhead={60}>
-              {withColon(packageIncludesHeading)}
+              {withoutTrailingColon(packageIncludesHeading)}
             </Text>
-            <View style={[styles.sectionBody, { paddingTop: 0.5, paddingBottom: 14 }]}>
+            <View style={[styles.sectionBody, { paddingTop: 0.5, paddingBottom: 8 }]}>
               {summaryDays.map((day, index) => (
                 <View key={index} style={styles.day} wrap={false}>
                   <Text style={styles.dayDate}>
@@ -471,29 +476,32 @@ export function QuoteDocument({
         <View style={styles.totals} wrap={false}>
           {/* The per-person rows head the block, above Sub Total or the grand total (client markup). */}
           {perPersonTotals?.perAdult != null ? (
-            <TotalsRow label="Total per Adult:" value={money(perPersonTotals.perAdult)} />
+            <TotalsRow label="Total per Adult" value={money(perPersonTotals.perAdult)} />
           ) : null}
           {perPersonTotals?.perChild != null && paying.children > 0 ? (
-            <TotalsRow label="Total per Child:" value={money(perPersonTotals.perChild)} />
+            <TotalsRow label="Total per Child" value={money(perPersonTotals.perChild)} />
           ) : null}
           {hasDeduction ? (
-            <TotalsRow label="Sub Total incl. VAT:" value={money(subtotal ?? total)} bold />
+            <TotalsRow label="Sub Total incl. VAT" value={money(subtotal ?? total)} bold />
           ) : null}
           {hasAgentCommission ? (
             <TotalsRow
-              label={withColon(AGENT_COMMISSION_LABEL)}
+              label={withoutTrailingColon(AGENT_COMMISSION_LABEL)}
               value={formatAgentCommission(agentCommission, money)}
             />
           ) : null}
           {hasVisibleDiscount ? (
-            <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(discount, money)} />
+            <TotalsRow label={withoutTrailingColon(DISCOUNT_LABEL)} value={formatDiscount(discount, money)} />
           ) : null}
-          <TotalsRow label={withColon(formatQuoteGrandTotalLabel(paying))} value={money(total)} bold />
+          <TotalsRow label={withoutTrailingColon(formatQuoteGrandTotalLabel(paying))} value={money(total)} bold />
         </View>
 
+        {closing}
+
         {hasDetails ? (
-          // Section two always starts on a new page.
-          <View break style={{ marginLeft: DETAILS_LEFT, marginRight: DETAILS_RIGHT, marginTop: 3.3 }}>
+          // Section two follows the disclaimer on the same page when it fits (client markup,
+          // 2026-10-22); its heading never strands at a page foot (minPresenceAhead).
+          <View style={{ marginLeft: DETAILS_LEFT, marginRight: DETAILS_RIGHT, marginTop: 12 }}>
             <Text style={styles.sectionHeading} minPresenceAhead={60}>
               {DETAILS_HEADING}
             </Text>
@@ -525,11 +533,8 @@ export function QuoteDocument({
                 </View>
               ) : null}
             </View>
-            {closing}
           </View>
-        ) : (
-          closing
-        )}
+        ) : null}
 
         <DocumentFooter lines={footerLines} />
       </Page>
