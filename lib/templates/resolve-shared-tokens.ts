@@ -375,7 +375,11 @@ export async function resolveSharedEmailTokens(
 
       // "Travel Dates" spans every leg (pre/post-night hotels, transfers, flights), not just the
       // primary product's own dates.
-      const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
+      const journey = deriveJourneyFromBlocks(
+        itineraryBlocks,
+        undefined,
+        primarySupplierKind ? mapSupplierKindToServiceType(primarySupplierKind) : undefined,
+      ) ?? { start: null, end: null }
       trainDepartureDate = deriveTrainDepartureFromBlocks(
         itineraryBlocks,
         mapSupplierKindToServiceType(primarySupplierKind),

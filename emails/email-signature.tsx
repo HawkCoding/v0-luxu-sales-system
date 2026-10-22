@@ -1,6 +1,7 @@
 import { Hr, Img, Link, Section, Text } from "@react-email/components"
 import type { CSSProperties } from "react"
 import { EMAIL_COLORS, SIGNATURE_BANNER_MAX_WIDTH, signatureBannerSize } from "@/lib/email/email-chrome"
+import { toInlineSignatureHtml } from "@/lib/email/signature-html"
 import { renderSenderLayout, SIGNATURE_TEXT_COLOR, styleSignatureLinks } from "@/lib/email/sender-layout"
 import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
@@ -10,8 +11,16 @@ interface EmailSignatureProps {
 
 const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" | ")
 
+/**
+ * Brand text fields are editor HTML, often wrapped in `<p>`. They're injected
+ * into a styled `<p>`, and a nested `<p>` closes it early — the content then
+ * falls out of the 10px style and renders at the client's default size. So
+ * flatten the paragraphs to `<br>`s first.
+ */
+const inlineHtml = (html: string) => toInlineSignatureHtml(html)
+
 /** Links in the small-print lines take the small-print colour, not a client's default blue. */
-const mutedLinks = (html: string) => styleSignatureLinks(html, EMAIL_COLORS.mutedText)
+const mutedLinks = (html: string) => styleSignatureLinks(inlineHtml(html), EMAIL_COLORS.mutedText)
 
 /**
  * Per-sender signature (name/title/contact) plus the picked division's
@@ -37,7 +46,10 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
 
   // renderSenderLayout already styles its links in SIGNATURE_TEXT_COLOR.
   const senderHtml = renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website })
-  const smallPrintLine = joinParts([brand.registrationLine, brand.tradingHours])
+  const smallPrintLine = joinParts([
+    brand.registrationLine && inlineHtml(brand.registrationLine),
+    brand.tradingHours && inlineHtml(brand.tradingHours),
+  ])
   const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
 
   return (

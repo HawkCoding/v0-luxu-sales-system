@@ -183,11 +183,18 @@ export function formatFlightCapLine(amountFormatter: (amount: number) => string,
   return `Flights are capped at ${amountFormatter(capPerPerson)}pp — incl. baggage & fees`
 }
 
-function journeyRangeOf(blocks: VoucherServiceBlock[]): QuoteJourneyDates | null {
+function journeyRangeOf(
+  blocks: VoucherServiceBlock[],
+  primaryServiceType?: VoucherServiceBlock["serviceType"],
+): QuoteJourneyDates | null {
   const dates: string[] = []
   for (const block of blocks) {
     const d = block.serviceData
-    for (const raw of [d.departureDate, d.arrivalDate]) {
+    // A tour leg's arrivalDate is its day-ticket span (service date + nights), not a day the guest
+    // travels. On a trip headed by something else it must not stretch the range, or moving a
+    // sightseeing ticket to the 29th printed a "01 November" end after the flight home on the 31st.
+    const countsOwnSpan = !(block.serviceType === "tour" && primaryServiceType && primaryServiceType !== "tour")
+    for (const raw of countsOwnSpan ? [d.departureDate, d.arrivalDate] : [d.departureDate]) {
       const parsed = parseIsoDate(raw)
       if (parsed) dates.push(toIsoDateString(parsed))
     }
@@ -207,19 +214,22 @@ function journeyRangeOf(blocks: VoucherServiceBlock[]): QuoteJourneyDates | null
  * quoted a window that was never the tour's own. Falls back to every block when the primary
  * product has none of its own type dated yet, or when no `serviceType` is passed at all (every
  * caller written before a booking could be headed by something other than a train keeps its exact
- * prior behaviour). Mirrors `deriveTrainDepartureFromBlocks`, which does the same isolation for
+ * prior behaviour). `primaryServiceType`, when the booking is headed by something other than a
+ * tour, keeps a supporting tour leg (a sightseeing ticket) to its own date instead of its span.
+ * Mirrors `deriveTrainDepartureFromBlocks`, which does the same isolation for
  * the header departure date alone.
  */
 export function deriveJourneyFromBlocks(
   blocks: VoucherServiceBlock[],
   serviceType?: VoucherServiceBlock["serviceType"],
+  primaryServiceType?: VoucherServiceBlock["serviceType"],
 ): QuoteJourneyDates | null {
   if (serviceType) {
     const ownBlocks = blocks.filter((block) => block.serviceType === serviceType)
-    const ownRange = journeyRangeOf(ownBlocks)
+    const ownRange = journeyRangeOf(ownBlocks, primaryServiceType)
     if (ownRange) return ownRange
   }
-  return journeyRangeOf(blocks)
+  return journeyRangeOf(blocks, primaryServiceType)
 }
 
 /**
@@ -644,6 +654,42 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
   return null
 }
 
+/** A closing line (check-out, train arrival) and the index of the main line of the block it closes. */
+interface PendingEndLine<T> {
+  line: T
+  ownerIndex: number
+}
+
+/**
+ * Merges closing lines into the main lines. Main lines keep the order the salesperson arranged the
+ * legs in; a closing line goes after the last main line dated before it and ahead of any main
+ * lines on its own date (a check-out opens the day, it doesn't trail it), never before the line
+ * of the block it closes. Closing lines that share a slot are ordered by date, then as given.
+ */
+function placeEndLines<T extends { dateISO: string | null }>(
+  mains: T[],
+  ends: Array<PendingEndLine<T>>,
+): T[] {
+  const slots: Array<Array<PendingEndLine<T>>> = Array.from({ length: mains.length + 1 }, () => [])
+  for (const end of ends) {
+    let slot = end.ownerIndex + 1
+    mains.forEach((main, index) => {
+      if (main.dateISO && end.line.dateISO && main.dateISO < end.line.dateISO) {
+        slot = Math.max(slot, index + 1)
+      }
+    })
+    slots[slot].push(end)
+  }
+  const placed: T[] = []
+  for (let slot = 0; slot <= mains.length; slot++) {
+    slots[slot].sort((a, b) => (a.line.dateISO ?? "").localeCompare(b.line.dateISO ?? ""))
+    if (slot > 0) placed.push(mains[slot - 1])
+    // Closing lines at slot N follow main line N-1, so they are emitted after it.
+    placed.push(...slots[slot].map((end) => end.line))
+  }
+  return placed
+}
+
 /**
  * The client-facing itinerary. One block can produce two lines — a hotel stay is a check-in line
  * and a separate check-out line on a later date — so lines are re-sorted by date afterwards, then
@@ -657,7 +703,8 @@ export function buildQuoteItineraryLines(
   blocks: VoucherServiceBlock[],
   flightCapBullet?: string | null,
 ): QuoteItineraryLine[] {
-  const lines: QuoteItineraryLine[] = []
+  const mainLines: QuoteItineraryLine[] = []
+  const endLines: Array<PendingEndLine<QuoteItineraryLine>> = []
   let flightCapAttached = false
 
   blocks.forEach((block) => {
@@ -685,7 +732,7 @@ export function buildQuoteItineraryLines(
       flightCapAttached = true
     }
 
-    lines.push({
+    mainLines.push({
       dateISO: d.departureDate ?? null,
       text: describeBlock(block),
       bullets,
@@ -693,15 +740,15 @@ export function buildQuoteItineraryLines(
     })
 
     const endLine = describeEndLine(block)
-    if (endLine) lines.push(endLine)
+    if (endLine) endLines.push({ line: endLine, ownerIndex: mainLines.length - 1 })
   })
 
-  // Lines stay in the order the salesperson arranged the legs in; dates never reorder them.
-  // Two stays that land on the same date can produce a byte-identical closing line (a check-out
+  // Main lines stay in the order the salesperson arranged the legs in; closing lines (check-out,
+  // arrival) slot into their own date. Two stays that land on the same date can produce a byte-identical closing line (a check-out
   // line states no property, just a time — see describeEndLine) even once dates are chained
   // correctly; collapsing them here is a backstop against ever printing the same dated line twice.
   const seen = new Set<string>()
-  return lines.filter((line) => {
+  return placeEndLines(mainLines, endLines).filter((line) => {
     const key = `${line.dateISO ?? ""} ${line.text} ${line.description ?? ""} ${line.bullets.map((b) => `${b.kind}:${b.text}`).join("")}`
     if (seen.has(key)) return false
     seen.add(key)
@@ -765,7 +812,9 @@ export function buildQuoteSummaryDays(
   blocks: VoucherServiceBlock[],
   flightCapBullet?: string | null,
 ): QuoteSummaryDay[] {
-  const lines: Array<{ dateISO: string | null; items: QuoteSummaryItem[] }> = []
+  type SummaryLine = { dateISO: string | null; items: QuoteSummaryItem[] }
+  const mainLines: SummaryLine[] = []
+  const endLines: Array<PendingEndLine<SummaryLine>> = []
   let flightCapAttached = false
 
   blocks.forEach((block) => {
@@ -786,21 +835,24 @@ export function buildQuoteSummaryDays(
       item.details.push(flightCapBullet)
       flightCapAttached = true
     }
-    lines.push({ dateISO: d.departureDate ?? null, items: [item] })
+    mainLines.push({ dateISO: d.departureDate ?? null, items: [item] })
 
     const endLine = describeEndLine(block)
     if (endLine) {
       const [headline, ...notes] = endLine.text.split(" | ")
       const warnings = endLine.bullets.filter((bullet) => bullet.kind === "warning").map((bullet) => bullet.text)
-      lines.push({ dateISO: endLine.dateISO, items: [{ text: [headline, ...warnings].join(" - "), details: notes }] })
+      endLines.push({
+        line: { dateISO: endLine.dateISO, items: [{ text: [headline, ...warnings].join(" - "), details: notes }] },
+        ownerIndex: mainLines.length - 1,
+      })
     }
   })
 
-  // Lines stay in the order the salesperson arranged the legs in; only consecutive same-date
-  // lines share a day heading.
+  // Main lines stay in the order the salesperson arranged the legs in, closing lines (check-out,
+  // arrival) slot into their own date; only consecutive same-date lines share a day heading.
   const days: QuoteSummaryDay[] = []
   const seen = new Set<string>()
-  for (const line of lines) {
+  for (const line of placeEndLines(mainLines, endLines)) {
     // Same backstop as buildQuoteItineraryLines: two stays ending the same day never print twice.
     const key = `${line.dateISO ?? ""} ${line.items.map((item) => [item.text, ...item.details].join("")).join("")}`
     if (seen.has(key)) continue

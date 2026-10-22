@@ -351,6 +351,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return jsonError("Selections reference services outside this booking", 400, { invalidServiceIds: invalid })
   }
 
+  // A bare "Database error" gives the salesperson nothing to act on, so a failed write names the
+  // supplier it was saving. The cause itself still goes to the server log and error_logs.
+  const supplierNameFor = (serviceId: string): string => {
+    const service = serviceById.get(serviceId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    return supplier?.name ?? "a service"
+  }
+  const supplierNamesFor = (serviceIds: string[]): string =>
+    [...new Set(serviceIds.map(supplierNameFor))].join(", ")
+
   // Optimistic lock, checked across every selection before a single write lands: two consultants
   // saving the same booking used to both get a 200, with the later save silently erasing the
   // earlier one. Mirrors PATCH /api/jobs/[id]'s STALE_VERSION contract.
@@ -507,7 +517,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
     if (supplierKind && TRANSPORT_SUPPLIER_KINDS.has(supplierKind)) {
       return jsonError(
-        "Units are not supported for transfer/vehicle rental services — use transport requests instead",
+        `${supplierNameFor(selection.packageLegId)} is a transfer/vehicle rental service, so it takes trips rather than rooms, cabins or suites — add them under Transport instead`,
         400,
         { packageLegId: selection.packageLegId },
       )
@@ -691,8 +701,14 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   })
 
   const updateResults = await Promise.all(fieldUpdates)
-  const firstUpdateError = updateResults.find((result) => result.error)?.error
-  if (firstUpdateError) return safeSupabaseError("services:update", firstUpdateError)
+  const failedUpdateIndex = updateResults.findIndex((result) => result.error)
+  if (failedUpdateIndex !== -1) {
+    return safeSupabaseError(
+      "services:update",
+      updateResults[failedUpdateIndex].error,
+      `Could not save the details for ${supplierNameFor(parsed.data.selections[failedUpdateIndex].packageLegId)}. Nothing was changed for it — please try again.`,
+    )
+  }
 
   // Per-service unit replacement (full replace-set, only for services whose payload includes units).
   const servicesWithUnits = parsed.data.selections.filter((selection) => selection.units)
@@ -763,7 +779,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         servicesWithUnits.map((selection) => selection.packageLegId),
       )
 
-    if (deleteUnitsError) return safeSupabaseError("services:clear-units", deleteUnitsError)
+    if (deleteUnitsError) {
+      return safeSupabaseError(
+        "services:clear-units",
+        deleteUnitsError,
+        `Could not update the rooms, cabins or suites for ${supplierNamesFor(servicesWithUnits.map((selection) => selection.packageLegId))}. Nothing was changed — please try again.`,
+      )
+    }
   }
 
   // An id is reused only when it was one of this very service's stored units, and only once --
@@ -829,7 +851,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   if (unitRows.length > 0) {
     const { error: insertUnitsError } = await supabase.from("booking_service_units").insert(unitRows)
-    if (insertUnitsError) return safeSupabaseError("services:insert-units", insertUnitsError)
+    if (insertUnitsError) {
+      return safeSupabaseError(
+        "services:insert-units",
+        insertUnitsError,
+        `Could not save the rooms, cabins or suites for ${supplierNamesFor(servicesWithUnits.map((selection) => selection.packageLegId))}. Please reopen this booking and check them before saving again.`,
+      )
+    }
   }
 
   // Learn from the correction — the higher-traffic correction point, same alias store as the
