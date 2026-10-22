@@ -135,6 +135,39 @@ describe("deriveJourneyFromBlocks", () => {
       end: "2026-07-22",
     })
   })
+
+  // A sightseeing ticket moved to 29 Oct carried a 3-night span, so the range ended 01 Nov, after the
+  // 31 Oct flight home.
+  describe("supporting tour leg", () => {
+    const sightseeing: VoucherServiceBlock = {
+      serviceType: "tour",
+      title: "City Sightseeing Bus Tours",
+      contactDetails: { name: "City Sightseeing Bus Tours" },
+      serviceData: { departureDate: "2026-07-21", arrivalDate: "2026-07-24" },
+      displayOrder: 3,
+    }
+
+    it("counts only its own date when another product heads the trip", () => {
+      expect(deriveJourneyFromBlocks([trainBlock, hotelBlock, sightseeing], undefined, "train")).toEqual({
+        start: "2026-07-18",
+        end: "2026-07-22",
+      })
+    })
+
+    it("keeps its full span when the tour is the primary product", () => {
+      expect(deriveJourneyFromBlocks([hotelBlock, sightseeing], undefined, "tour")).toEqual({
+        start: "2026-07-18",
+        end: "2026-07-24",
+      })
+    })
+
+    it("keeps its full span when the primary product is not known", () => {
+      expect(deriveJourneyFromBlocks([trainBlock, hotelBlock, sightseeing])).toEqual({
+        start: "2026-07-18",
+        end: "2026-07-24",
+      })
+    })
+  })
 })
 
 describe("deriveTrainDepartureFromBlocks", () => {
@@ -548,9 +581,55 @@ describe("buildQuoteItineraryLines", () => {
     ])
   })
 
-  it("keeps lines in block order instead of re-sorting them by date", () => {
+  it("keeps main lines in block order, with closing lines slotted into their own date", () => {
     const dates = buildQuoteItineraryLines([trainBlock, hotelBlock]).map((line) => line.dateISO)
-    expect(dates).toEqual(["2026-07-20", "2026-07-22", "2026-07-18", "2026-07-20"])
+    expect(dates).toEqual(["2026-07-20", "2026-07-18", "2026-07-20", "2026-07-22"])
+  })
+
+  it("files a check-out under its own date, after the leg-ordered services dated before it", () => {
+    const hotel: VoucherServiceBlock = {
+      ...hotelBlock,
+      serviceData: { ...hotelBlock.serviceData, departureDate: "2026-10-28", arrivalDate: "2026-10-31" },
+    }
+    const tour: VoucherServiceBlock = {
+      serviceType: "tour",
+      title: "City Sightseeing",
+      contactDetails: { name: "City Sightseeing" },
+      serviceData: { departureDate: "2026-10-29" },
+      displayOrder: 2,
+    }
+    const transfer: VoucherServiceBlock = {
+      serviceType: "transfer",
+      title: "Transfer",
+      contactDetails: { name: "Luxus Chauffeur" },
+      serviceData: { departureDate: "2026-10-31", startTime: "12:45", pickup: "the President Hotel", dropoff: "the Cape Town Airport" },
+      displayOrder: 3,
+    }
+
+    const lines = buildQuoteItineraryLines([hotel, tour, transfer])
+
+    expect(lines.map((line) => line.dateISO)).toEqual(["2026-10-28", "2026-10-29", "2026-10-31", "2026-10-31"])
+    expect(lines[2].text).toBe("Check out at 10h00")
+    expect(lines[3].text).toContain("Transfer")
+  })
+
+  it("files a check-out under its own date in the quote PDF summary too", () => {
+    const hotel: VoucherServiceBlock = {
+      ...hotelBlock,
+      serviceData: { ...hotelBlock.serviceData, departureDate: "2026-10-28", arrivalDate: "2026-10-31" },
+    }
+    const tour: VoucherServiceBlock = {
+      serviceType: "tour",
+      title: "City Sightseeing",
+      contactDetails: { name: "City Sightseeing" },
+      serviceData: { departureDate: "2026-10-29" },
+      displayOrder: 2,
+    }
+
+    const days = buildQuoteSummaryDays([hotel, tour])
+
+    expect(days.map((day) => day.dateISO)).toEqual(["2026-10-28", "2026-10-29", "2026-10-31"])
+    expect(days[2].items[0].text).toBe("Check out at 10h00")
   })
 
   it("collapses two hotel blocks whose check-out lands on the same date with identical wording", () => {

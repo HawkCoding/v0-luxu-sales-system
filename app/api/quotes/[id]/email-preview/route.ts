@@ -172,7 +172,11 @@ export async function POST(req: Request, { params }: RouteParams) {
   // Journey + header departure date come from the priced legs, not the booking's enquiry-time
   // scalar dates which drift out of sync once the package changes. "Travel Dates" spans every leg
   // (pre/post-night hotels, transfers, flights); only the header departure date is primary-only.
-  const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
+  const journey = deriveJourneyFromBlocks(
+    itineraryBlocks,
+    undefined,
+    primarySupplierKind ? mapSupplierKindToServiceType(primarySupplierKind) : undefined,
+  ) ?? { start: null, end: null }
   const trainDeparture = deriveTrainDepartureFromBlocks(
     itineraryBlocks,
     mapSupplierKindToServiceType(primarySupplierKind),

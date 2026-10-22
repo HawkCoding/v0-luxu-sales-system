@@ -75,6 +75,27 @@ describe("renderSignatureFragment", () => {
     expect(withAddress).toContain("Rovos Rail House")
   })
 
+  it("keeps <p>-wrapped brand fields inside the 10px small-print paragraph", async () => {
+    const html = await renderSignatureFragment({
+      ...BASE,
+      brand: {
+        ...BASE.brand,
+        registrationLine: "<p>Registered in South Africa CK2007/049324/23</p>",
+        tradingHours: "<p>Trading Hours: Mon – Fri 08h30 to 16h00</p>",
+        companyLine: "<p>SA-Rail is a division of Luxus Travel &amp; Tours.</p>",
+      },
+    })
+    const afterDivider = html.slice(html.indexOf("<hr"))
+    // Every <p> after the divider is the styled small-print paragraph; a bare
+    // nested <p> would render at the mail client's default size.
+    const paragraphs = afterDivider.match(/<p\b[^>]*>/g) ?? []
+    expect(paragraphs.length).toBeGreaterThan(0)
+    for (const p of paragraphs) expect(p).toMatch(/font-size:10px/)
+    expect(afterDivider).toMatch(
+      /Registered in South Africa CK2007\/049324\/23 \| Trading Hours: Mon – Fri 08h30 to 16h00<\/p>/,
+    )
+  })
+
   it("renders no badge table when badges is empty", async () => {
     // <Section> itself renders as a <table>, so assert no *additional* table
     // (the badge row) is emitted, rather than no <table> at all.

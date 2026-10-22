@@ -68,6 +68,8 @@ interface MockState {
   }>
   /** Rows the GET's services-with-supplier select returns, embedded join included. */
   getServiceRows?: Array<Record<string, unknown>>
+  /** Makes the booking_service_units insert fail, as a rejected row would. */
+  insertUnitsError?: { message: string; code?: string }
 }
 
 function buildSupabase(state: MockState = {}) {
@@ -171,6 +173,7 @@ function buildSupabase(state: MockState = {}) {
             }),
           })),
           insert: vi.fn(async (rows: Record<string, unknown>[]) => {
+            if (state.insertUnitsError) return { error: state.insertUnitsError }
             unitInserts.push(...rows)
             return { error: null }
           }),
@@ -1127,8 +1130,33 @@ describe("PATCH /api/jobs/[id]/services", () => {
     })
   })
 
+  it("names the supplier when a failed unit save would otherwise read 'Database error'", async () => {
+    mockAuth({
+      serviceNames: { [SERVICE_A]: "Moe's Transfers" },
+      insertUnitsError: { message: "insert or update violates foreign key constraint", code: "23503" },
+    })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 1, infantCount: 0 }],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(500)
+    const body = await res.json()
+    expect(body.error).toContain("Moe's Transfers")
+    expect(body.error).not.toBe("Database error")
+  })
+
   it("rejects units on a transfer/rental service", async () => {
-    mockAuth({ serviceKinds: { [SERVICE_A]: "transfers" } })
+    mockAuth({ serviceKinds: { [SERVICE_A]: "transfers" }, serviceNames: { [SERVICE_A]: "Moe's Transfers" } })
     const res = await PATCH(
       new Request("http://localhost", {
         method: "PATCH",
@@ -1139,6 +1167,7 @@ describe("PATCH /api/jobs/[id]/services", () => {
       makeParams(),
     )
     expect(res.status).toBe(400)
+    expect((await res.json()).error).toContain("Moe's Transfers")
   })
 
   it("replaces the unit set for a service and learns from the correction", async () => {
