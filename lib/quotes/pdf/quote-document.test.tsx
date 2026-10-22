@@ -49,6 +49,13 @@ async function pageRuns(overrides: Partial<QuotePdfData>, pageNumber: number): P
   )
 }
 
+/** The details follow the totals on the same page when they fit, so find the page that holds them. */
+async function detailsPage(overrides: Partial<QuotePdfData>): Promise<{ text: string; pageNumber: number }> {
+  const all = await pages(overrides)
+  const index = all.findIndex((page) => page.includes("Travel Package Details"))
+  return { text: all[index] ?? "", pageNumber: index + 1 }
+}
+
 function runOf(runs: TextRun[], str: string): TextRun {
   const run = runs.find((candidate) => candidate.str === str)
   if (!run) throw new Error(`"${str}" is not a run on this page`)
@@ -102,7 +109,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     const text = (await pages()).join(" ")
 
     expect(text).not.toContain(QUOTE_NUMBER)
-    expect(text).toContain("Prepared for:")
+    expect(text).toContain("Prepared for")
     expect(text).toContain("16 July 2026")
   })
 
@@ -117,12 +124,12 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
   it("prints the client details and the train journey details", async () => {
     const [first] = await pages()
 
-    expect(first).toContain("Client details:")
+    expect(first).toContain("Client details")
     expect(first).toContain("+27 82 555 0100")
     expect(first).toContain("sample.guest@example.com")
     expect(first).not.toContain("Address:")
-    expect(first).toContain("Train Journey details:")
-    expect(first).toContain("Travel dates:")
+    expect(first).toContain("Train Journey details")
+    expect(first).toContain("Travel dates")
     expect(first).toContain("The Blue Train")
     expect(first).toContain("Pretoria to Cape Town")
   })
@@ -131,7 +138,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     const text = (await pages({ customerPhone: null, customerEmail: "  " })).join(" ")
 
     expect(text).not.toContain("+27 82 555 0100")
-    expect(text).not.toContain("E-mail:")
+    expect(text).not.toContain("E-mail")
   })
 
   it("titles the document in the design's title case", async () => {
@@ -166,21 +173,22 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     })
 
     it("heads a train's details \"<Operator> Inclusions\", not with its route", async () => {
-      const [, second] = await pages({ itineraryBlocks })
+      const { text } = await detailsPage({ itineraryBlocks })
 
-      expect(second).toContain("Rovos Rail Inclusions")
-      expect(second).not.toContain("Includes")
+      expect(text).toContain("Rovos Rail Inclusions")
+      expect(text).not.toContain("Rovos Rail Includes")
     })
 
-    it("starts the package details on a new page, with the hotel description in place of its facilities", async () => {
-      const [first, second] = await pages({ itineraryBlocks })
+    it("sets the package details after the disclaimer, with the hotel description in place of its facilities", async () => {
+      const [first, ...rest] = await pages({ itineraryBlocks })
+      const all = [first, ...rest].join(" ")
 
-      expect(first).not.toContain("Travel Package Details")
-      expect(second).toContain("Travel Package Details")
-      expect(second).toContain("A boutique manor in Pretoria.")
-      expect(second).toContain("Onboard")
-      expect(second).toContain("All meals")
-      expect(`${first} ${second}`).not.toContain("24-hour front desk")
+      expect(first.indexOf("subject to availability")).toBeGreaterThanOrEqual(0)
+      expect(first.indexOf("subject to availability")).toBeLessThan(first.indexOf("Travel Package Details"))
+      expect(all).toContain("A boutique manor in Pretoria.")
+      expect(all).toContain("Onboard")
+      expect(all).toContain("All meals")
+      expect(all).not.toContain("24-hour front desk")
     })
 
     it("sets no colon at the end of any heading or bullet on the details page, and keeps the first page's", async () => {
@@ -201,7 +209,8 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
         packageExcludesHeading: "Your Package Excludes:",
         packageExcludesDefault: "Services not mentioned.",
       }
-      const [first, second] = await pages(overrides)
+      const [first] = await pages(overrides)
+      const { text: second } = await detailsPage(overrides)
 
       for (const text of [
         "Travel Package Details",
@@ -216,16 +225,20 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       }
       // A colon inside a line is part of its sentence.
       expect(second).toContain("Check-in 14:00 at Capital Park")
-      // The first page's labels keep theirs.
-      expect(first).toContain("Prepared for:")
-      expect(first).toContain("Travel dates:")
-      expect(first).toContain("Sub Total incl. VAT:")
-      expect(first).toContain("Travel Package Includes:")
+      // So do the first page's labels (client markup, 2026-10-22).
+      for (const text of ["Prepared for", "Travel dates", "Sub Total incl. VAT", "Travel Package Includes"]) {
+        expect(first).toContain(text)
+        expect(first).not.toContain(`${text}:`)
+      }
 
-      // No text run on the details page ends with one.
-      const runs = (await pageRuns(overrides, 2)).map((run) => run.str.trim()).filter(Boolean)
-      expect(runs.length).toBeGreaterThan(5)
-      expect(runs.filter((run) => run.endsWith(":"))).toEqual([])
+      // Page one's body carries none either; only the company footer (Tel:, Email: …) keeps its labels.
+      const footer = new Set(["Address:", "Tel:", "Cell:", "Email:", "Web:", "Company Registration", "VAT number"])
+      const pageCount = (await pages(overrides)).length
+      for (let page = 1; page <= pageCount; page++) {
+        const runs = (await pageRuns(overrides, page)).map((run) => run.str.trim()).filter(Boolean)
+        expect(runs.length).toBeGreaterThan(5)
+        expect(runs.filter((run) => run.endsWith(":") && !footer.has(run))).toEqual([])
+      }
     })
 
     it("sets a 26-character hotel name and the excludes heading on one line each", async () => {
@@ -239,7 +252,8 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
 
     it("keeps the details bullet column where it was, with the one-line titles clear of it", async () => {
       // The product owner's constraint: widening the titles must not push or narrow the descriptions.
-      const runs = await pageRuns({ itineraryBlocks, packageExcludesDefault: "Services not mentioned." }, 2)
+      const overrides = { itineraryBlocks, packageExcludesDefault: "Services not mentioned." }
+      const runs = await pageRuns(overrides, (await detailsPage(overrides)).pageNumber)
 
       for (const bullet of ["A boutique manor in Pretoria.", "Services not mentioned."]) {
         expect(runOf(runs, bullet).x).toBeCloseTo(DETAILS_BULLET_TEXT_X, 1)
@@ -262,10 +276,10 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     })
 
     it("prints the company footer on the first page only", async () => {
-      const [first, second] = await pages({ itineraryBlocks })
+      const [first, ...rest] = await pages({ itineraryBlocks })
 
       expect(first).toContain("Company Registration 2007/049324/23")
-      expect(second).not.toContain("Company Registration")
+      expect(rest.join(" ")).not.toContain("Company Registration")
     })
   })
 
@@ -275,10 +289,10 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     it("shows the subtotal and both deductions above the net total", async () => {
       const [first] = await pages()
 
-      expect(first).toContain("Sub Total incl. VAT:")
-      expect(first).toContain("Agent Commission:")
-      expect(first).toContain("Discount:")
-      expect(first).toContain("Total for 2 Adults incl. VAT:")
+      expect(first).toContain("Sub Total incl. VAT")
+      expect(first).toContain("Agent Commission")
+      expect(first).toContain("Discount")
+      expect(first).toContain("Total for 2 Adults incl. VAT")
       // One spelling across the whole box.
       expect(first).not.toContain("incl VAT")
     })
@@ -300,9 +314,9 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
         perPersonTotals: { perAdult: 60_000, perChild: 25_000 },
       })
 
-      expect(first).toContain("Total for 4 Adults & 1 Child incl. VAT:")
-      expect(first).toMatch(/Total per Adult: R\s?60[\s ]?000,00/)
-      expect(first).toMatch(/Total per Child: R\s?25[\s ]?000,00/)
+      expect(first).toContain("Total for 4 Adults & 1 Child incl. VAT")
+      expect(first).toMatch(/Total per Adult\s+R\s?60[\s ]?000,00/)
+      expect(first).toMatch(/Total per Child\s+R\s?25[\s ]?000,00/)
     })
 
     it("keeps the booking's own counts in the Guests row while the total label counts the paying pax", async () => {
@@ -315,7 +329,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       })
 
       expect(first).toContain("2 Adults + 1 Child")
-      expect(first).toContain("Total for 2 Adults incl. VAT:")
+      expect(first).toContain("Total for 2 Adults incl. VAT")
       expect(first).not.toContain("Total per Child")
     })
 
@@ -324,7 +338,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(without).not.toContain("Total per")
 
       // The Settings preview sample carries its own adults-only figure.
-      expect((await pages()).join(" ")).toMatch(/Total per Adult: R\s?42[\s ]?500,00/)
+      expect((await pages()).join(" ")).toMatch(/Total per Adult\s+R\s?42[\s ]?500,00/)
 
       const adultsOnly = (await pages({ perPersonTotals: { perAdult: 42_500, perChild: null } })).join(" ")
       expect(adultsOnly).toContain("Total per Adult")
@@ -334,10 +348,10 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     it("heads the block with the per-person rows, above the Sub Total when a deduction shows", async () => {
       const [first] = await pages()
 
-      expect(first.indexOf("Total per Adult:")).toBeGreaterThanOrEqual(0)
-      expect(first.indexOf("Total per Adult:")).toBeLessThan(first.indexOf("Sub Total incl. VAT:"))
-      expect(first.indexOf("Sub Total incl. VAT:")).toBeLessThan(first.indexOf("Discount:"))
-      expect(first.indexOf("Discount:")).toBeLessThan(first.indexOf("Total for 2 Adults incl. VAT:"))
+      expect(first.indexOf("Total per Adult")).toBeGreaterThanOrEqual(0)
+      expect(first.indexOf("Total per Adult")).toBeLessThan(first.indexOf("Sub Total incl. VAT"))
+      expect(first.indexOf("Sub Total incl. VAT")).toBeLessThan(first.indexOf("Discount"))
+      expect(first.indexOf("Discount")).toBeLessThan(first.indexOf("Total for 2 Adults incl. VAT"))
     })
 
     it("heads the block with the per-person rows, above the grand total when nothing is deducted", async () => {
@@ -351,9 +365,9 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       })
 
       expect(first).not.toContain("Sub Total")
-      expect(first.indexOf("Total per Adult:")).toBeGreaterThanOrEqual(0)
-      expect(first.indexOf("Total per Adult:")).toBeLessThan(first.indexOf("Total per Child:"))
-      expect(first.indexOf("Total per Child:")).toBeLessThan(first.indexOf("Total for 4 Adults & 1 Child incl. VAT:"))
+      expect(first.indexOf("Total per Adult")).toBeGreaterThanOrEqual(0)
+      expect(first.indexOf("Total per Adult")).toBeLessThan(first.indexOf("Total per Child"))
+      expect(first.indexOf("Total per Child")).toBeLessThan(first.indexOf("Total for 4 Adults & 1 Child incl. VAT"))
     })
 
     it("hides the Discount row when discountVisible is false", async () => {
