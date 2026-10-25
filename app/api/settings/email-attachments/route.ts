@@ -65,13 +65,17 @@ export async function GET(req: Request) {
   // booking's train (via route → supplier); files scoped to a supplier category
   // apply when that supplier is of the same kind; a file pinned to a route only
   // applies on that exact route; unscoped files always apply.
-  let bookingSupplierId: string | null = null
-  let bookingSupplierKind: string | null = null
+  // A standalone hotel booking (e.g. Kruger Shalati) has no route, so its supplier is only
+  // reachable through the booking's services; those suppliers count too.
+  const bookingSupplierIds = new Set<string>()
+  const bookingSupplierKinds = new Set<string>()
   let bookingRouteId: string | null = null
   if (bookingId) {
     const { data: booking, error: bookingError } = await supabase
       .from("bookings")
-      .select("id, route_id, route:routes(supplier:suppliers(id, kind))")
+      .select(
+        "id, route_id, route:routes(supplier:suppliers(id, kind)), services:booking_services(selected, supplier:suppliers(id, kind))",
+      )
       .eq("id", bookingId)
       .maybeSingle()
 
@@ -79,13 +83,21 @@ export async function GET(req: Request) {
     if (!booking) return jsonError("Booking not found", 404)
 
     const route = Array.isArray(booking.route) ? booking.route[0] : booking.route
-    const supplier = route
+    const routeSupplier = route
       ? Array.isArray(route.supplier)
         ? route.supplier[0]
         : route.supplier
       : null
-    bookingSupplierId = supplier?.id ?? null
-    bookingSupplierKind = supplier?.kind ?? null
+    if (routeSupplier?.id) bookingSupplierIds.add(routeSupplier.id)
+    if (routeSupplier?.kind) bookingSupplierKinds.add(routeSupplier.kind)
+
+    for (const service of booking.services ?? []) {
+      if (service.selected === false) continue
+      const supplier = Array.isArray(service.supplier) ? service.supplier[0] : service.supplier
+      if (supplier?.id) bookingSupplierIds.add(supplier.id)
+      // Category files follow the booking's headline supplier; a route's supplier wins.
+      if (!routeSupplier && supplier?.kind) bookingSupplierKinds.add(supplier.kind)
+    }
     bookingRouteId = booking.route_id
   }
 
@@ -104,8 +116,8 @@ export async function GET(req: Request) {
       // Unscoped files always apply; a route pin narrows a supplier match further.
       if (row.supplier_id === null && row.supplier_kind === null) return true
       if (row.route_id !== null) return row.route_id === bookingRouteId
-      if (row.supplier_id !== null) return row.supplier_id === bookingSupplierId
-      return row.supplier_kind === bookingSupplierKind
+      if (row.supplier_id !== null) return bookingSupplierIds.has(row.supplier_id)
+      return row.supplier_kind !== null && bookingSupplierKinds.has(row.supplier_kind)
     })
     .map((row) => ({
       id: row.id,

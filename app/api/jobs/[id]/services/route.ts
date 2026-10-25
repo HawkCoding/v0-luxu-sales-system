@@ -321,7 +321,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   }
 
   const parsed = patchServicesSchema.safeParse(raw)
-  if (!parsed.success) return jsonZodError(parsed.error)
+  if (!parsed.success) {
+    // flatten() collapses nested failures to a bare "selections" key, so name the first offending
+    // path in the message the dialog shows -- otherwise a rejected leg is undiagnosable.
+    const first = parsed.error.issues[0]
+    const where = first ? first.path.join(".") : ""
+    return jsonZodError(parsed.error, where ? `Invalid request body (${where}: ${first.message})` : undefined, "services:patch")
+  }
 
   const { supabase, user, profile } = auth.value
 

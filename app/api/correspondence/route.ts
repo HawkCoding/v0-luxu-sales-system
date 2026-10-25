@@ -10,6 +10,7 @@ import { resolveSenderDisplayName } from "@/lib/email/sender-identity"
 import { renderSignatureFragment } from "@/lib/email/render-signature"
 import { resolveEmailSignature } from "@/lib/email/signature"
 import { extractSignatureSlot, replaceSignatureSlot } from "@/lib/templates/signature-slot"
+import { brandedEmailToPlainText } from "@/lib/email/plain-text"
 import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { staleVersionResponse } from "@/lib/concurrency"
@@ -36,15 +37,6 @@ import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-
 import type { PricingSnapshot } from "@/lib/types"
 
 export const runtime = "nodejs"
-
-function getPlainTextFromHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-}
 
 const PIPELINE_STAGE_VALUES = [
   "enquiry",
@@ -371,7 +363,7 @@ export async function POST(req: Request) {
       bodyHtml = replaceSignatureSlot(bodyHtml, await renderSignatureFragment(signature)) ?? bodyHtml
     }
   }
-  const text = parsed.data.text?.trim() || (bodyHtml ? getPlainTextFromHtml(bodyHtml) : null)
+  const text = parsed.data.text?.trim() || (bodyHtml ? brandedEmailToPlainText(bodyHtml) : null)
 
   const baseAttachments: NonNullable<typeof parsed.data.attachments> = parsed.data.attachments ?? []
 
