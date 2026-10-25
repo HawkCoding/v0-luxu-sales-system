@@ -248,13 +248,14 @@ export async function ensureQuotePdf(
       children: booking?.no_of_children ?? 0,
       payingPax: pax,
       total: quote.total,
-      // The invoice's own rule (lib/invoices/per-person-totals.ts), so a booking's quote and invoice
-      // can never state different per-person figures.
+      // The invoice's own rule (lib/invoices/per-person-totals.ts). Split the gross subtotal, not the
+      // net total: the per-person rows head the block above Sub Total, so they read at full price,
+      // before the discount and agent commission come off.
       perPersonTotals: derivePerPersonTotals({
         lines: lineItems ?? [],
         adults: pax.adults,
         children: pax.children,
-        total: Number(quote.total),
+        total: Number(quote.subtotal ?? quote.total),
       }),
       subtotal: quote.subtotal,
       agentCommission: Number(quote.agent_commission ?? 0),

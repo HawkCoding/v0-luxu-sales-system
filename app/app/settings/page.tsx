@@ -1321,7 +1321,7 @@ function SessionTimeoutSettingsCard({ canEdit }: { canEdit: boolean }) {
 }
 
 function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
-  const [enabled, setEnabled] = useState(true)
+  const [enabled, setEnabled] = useState(false)
   const [cadenceInput, setCadenceInput] = useState("3,7")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
