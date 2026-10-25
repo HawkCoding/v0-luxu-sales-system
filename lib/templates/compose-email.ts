@@ -3,6 +3,7 @@ import { createElement } from "react"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { TemplateEmail } from "@/emails/template-email"
+import { buildPreheader } from "@/lib/email/plain-text"
 import { renderSignatureFragment } from "@/lib/email/render-signature"
 import { resolveEmailSignature } from "@/lib/email/signature"
 import { getDocumentBrandForEmail, getEmailBrandingSettings } from "@/lib/settings-access"
@@ -67,7 +68,7 @@ export async function composeFromTemplate(
   const signatureHtml = signature ? await renderSignatureFragment(signature) : ""
   const bodyHtml = await render(
     createElement(TemplateEmail, {
-      preview: rendered.subject,
+      preview: buildPreheader(rendered.bodyHtml, rendered.subject),
       contentHtml: rendered.bodyHtml,
       brand: emailBrand.brand,
       brandPosition: emailBrand.position,

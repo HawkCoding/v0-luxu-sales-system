@@ -112,10 +112,12 @@ function buildListSupabase({
   bookingSupplierId = SUPPLIER_A,
   bookingSupplierKind = "train_operator",
   bookingRouteId = ROUTE_A1,
+  bookingServices = [],
 }: {
   bookingSupplierId?: string | null
   bookingSupplierKind?: string | null
   bookingRouteId?: string | null
+  bookingServices?: Array<{ selected: boolean; supplier: { id: string; kind: string } }>
 } = {}) {
   const supabase = {
     from: vi.fn((table: string) => {
@@ -127,7 +129,10 @@ function buildListSupabase({
                 data: {
                   id: BOOKING_ID,
                   route_id: bookingRouteId,
-                  route: { supplier: { id: bookingSupplierId, kind: bookingSupplierKind } },
+                  route: bookingRouteId
+                    ? { supplier: { id: bookingSupplierId, kind: bookingSupplierKind } }
+                    : null,
+                  services: bookingServices,
                 },
                 error: null,
               })),
@@ -223,6 +228,19 @@ describe("GET /api/settings/email-attachments", () => {
     expect(body.attachments.map((a) => a.name)).not.toContain("Route A1 directions")
     // The supplier-scoped file (no route pin) still applies to every route of that supplier.
     expect(body.attachments.map((a) => a.name)).toContain("Blue Train fact sheet")
+  })
+
+  it("matches a route-less standalone hotel booking through its services", async () => {
+    buildListSupabase({
+      bookingRouteId: null,
+      bookingServices: [{ selected: true, supplier: { id: SUPPLIER_B, kind: "hotel_property" } }],
+    })
+    const res = await GET(
+      new Request(`http://localhost/api/settings/email-attachments?bookingId=${BOOKING_ID}`),
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { attachments: Array<{ name: string }> }
+    expect(body.attachments.map((a) => a.name)).toEqual(["Reservation form", "Rovos fact sheet"])
   })
 })
 
