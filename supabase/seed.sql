@@ -1457,7 +1457,7 @@ insert into public.app_settings (key,value,updated_at) values
   ('brand_block_position_invoice','top','2026-07-21T11:11:33.661601+00:00'),
   ('deposit_refundable','false','2026-07-21T11:25:40.93795+00:00'),
   ('quote_follow_up_cadence','[3,7]','2026-07-21T11:25:40.93795+00:00'),
-  ('quote_follow_up_enabled','true','2026-07-21T11:25:40.93795+00:00'),
+  ('quote_follow_up_enabled','false','2026-07-21T11:25:40.93795+00:00'),
   ('email_font_family','Calibri, Candara, Segoe, ''Segoe UI'', Optima, Arial, sans-serif','2026-07-22T08:53:01.264+00:00'),
   ('email_font_size','14px','2026-07-22T08:53:01.264+00:00'),
   ('brand_block_position_email','top','2026-07-22T09:05:10.628+00:00'),

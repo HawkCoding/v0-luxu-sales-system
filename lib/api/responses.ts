@@ -24,7 +24,33 @@ export function jsonZodError(
   // just in the (often-discarded) response body — otherwise a rejected payload is undiagnosable
   // after the fact.
   console.error(`zod:${scope ?? "unscoped"}`, error.flatten().fieldErrors)
+  persistValidationError(scope ?? "unscoped", message, error)
   return jsonError(message, 400, flattenZod(error))
+}
+
+/**
+ * Keeps a rejected request body in `error_logs` (Settings → Error log) with the full nested path
+ * of every failing field. Paths and rule messages only, never the submitted values: a body can
+ * carry guest names, passport numbers or payment details.
+ */
+function persistValidationError(scope: string, message: string, error: ZodError): void {
+  const issues = error.issues.slice(0, 20).map((issue) => ({
+    path: issue.path.join("."),
+    code: issue.code,
+    message: issue.message,
+  }))
+  try {
+    after(() =>
+      logError({
+        severity: "Warning",
+        source: `api:${scope}`,
+        message,
+        details: { kind: "validation", issueCount: error.issues.length, issues },
+      }),
+    )
+  } catch {
+    // Outside a request (unit tests, scripts) there is nothing to defer to; console.error stands.
+  }
 }
 
 export function safeSupabaseError(

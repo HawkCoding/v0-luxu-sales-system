@@ -163,8 +163,11 @@ describe("ensureQuotePdf headcounts", () => {
           id: "quote-1",
           booking_id: "booking-1",
           quote_number: "LTT-26-0001-Q1",
-          total: 107_100,
+          // 7_100 off the subtotal: the per-person rows must still split the gross 107_100.
+          total: 100_000,
           subtotal: 107_100,
+          discount_amount: 7_100,
+          discount_visible: true,
           created_at: "2026-10-02T00:00:00Z",
           pdf_document_id: null,
           booking: {
