@@ -106,7 +106,10 @@ const updateServiceSchema = z.object({
   routeId: z.string().uuid().nullable().optional(),
   routeReversed: z.boolean().optional(),
   serviceDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
-  nights: z.number().int().positive().nullable().optional(),
+  /** The night interval behind the leg's own end date (tours, cruises, hotels). 0 is a same-day
+   * tour -- rendered as "1 day" -- so only negatives are refused here; hotels are held to at least
+   * one night by the guard in PATCH. */
+  nights: z.number().int().nonnegative().nullable().optional(),
   /** Airline legs only. `serviceDate` is the departure date; only the time is separate here.
    * `arrivalDate` is a full date rather than a day offset so an overnight flight states a real
    * arrival day. All rejected on any other supplier kind — see the guard in PATCH. */
@@ -472,6 +475,21 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       return jsonError("Luggage storage is only available on hotel services", 400, {
         packageLegId: selection.packageLegId,
         supplierKind,
+      })
+    }
+  }
+
+  // A stay always covers at least one night, unlike a same-day tour (see the nights field above).
+  // The dialog already floors hotel nights at 1, so this only catches a caller that skips it.
+  for (const selection of parsed.data.selections) {
+    if (selection.nights === undefined || selection.nights === null || selection.nights >= 1) continue
+    const service = serviceById.get(selection.packageLegId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    const supplierKind = supplier?.kind
+    if (supplierKind === "hotel_property") {
+      return jsonError("Hotel stays need at least 1 night", 400, {
+        packageLegId: selection.packageLegId,
+        nights: selection.nights,
       })
     }
   }
