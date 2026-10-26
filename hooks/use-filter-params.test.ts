@@ -92,6 +92,44 @@ describe("useFilterParams", () => {
     expect(nav.replace).toHaveBeenCalledWith("/app/bookings?q=Jacomien", { scroll: false })
   })
 
+  it("keeps the typed search text after the debounce fires until the URL catches up", () => {
+    const { result, rerender } = renderHook(() => useFilterParams(DEFAULTS))
+
+    act(() => {
+      result.current.setValue("q", "Jaco", { debounceMs: 250 })
+    })
+    act(() => {
+      vi.advanceTimersByTime(250)
+    })
+
+    // router.replace has been called but the URL has not landed yet: no revert to "".
+    expect(nav.replace).toHaveBeenCalledTimes(1)
+    expect(result.current.values.q).toBe("Jaco")
+
+    nav.searchParams = new URLSearchParams("q=Jaco")
+    rerender()
+    expect(result.current.values.q).toBe("Jaco")
+  })
+
+  it("keeps newer keystrokes typed while an earlier commit is still navigating", () => {
+    const { result, rerender } = renderHook(() => useFilterParams(DEFAULTS))
+
+    act(() => {
+      result.current.setValue("q", "Jaco", { debounceMs: 250 })
+    })
+    act(() => {
+      vi.advanceTimersByTime(250)
+    })
+    act(() => {
+      result.current.setValue("q", "Jacom", { debounceMs: 250 })
+    })
+
+    // Old navigation lands with "Jaco" while "Jacom" is still pending.
+    nav.searchParams = new URLSearchParams("q=Jaco")
+    rerender()
+    expect(result.current.values.q).toBe("Jacom")
+  })
+
   it("clear() resets every key and writes the bare pathname", () => {
     nav.searchParams = new URLSearchParams("supplier=Rovos+Rail&q=Jaco")
     const { result } = renderHook(() => useFilterParams(DEFAULTS))

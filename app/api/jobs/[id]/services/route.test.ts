@@ -162,21 +162,6 @@ function buildSupabase(state: MockState = {}) {
           select: vi.fn(() => ({
             in: vi.fn(async () => ({ data: state.existingUnits ?? [], error: null })),
           })),
-          delete: vi.fn(() => ({
-            eq: vi.fn(async (_col: string, serviceId: string) => {
-              unitDeletes.push(serviceId)
-              return { error: null }
-            }),
-            in: vi.fn(async (_col: string, serviceIds: string[]) => {
-              unitDeletes.push(...serviceIds)
-              return { error: null }
-            }),
-          })),
-          insert: vi.fn(async (rows: Record<string, unknown>[]) => {
-            if (state.insertUnitsError) return { error: state.insertUnitsError }
-            unitInserts.push(...rows)
-            return { error: null }
-          }),
         }
       }
       if (
@@ -216,6 +201,15 @@ function buildSupabase(state: MockState = {}) {
       }
 
       throw new Error(`Unexpected table ${table}`)
+    }),
+    // The units replace-set: delete + insert in one transaction, so a rejected row rolls the
+    // delete back -- modelled here by recording nothing when it fails.
+    rpc: vi.fn(async (fn: string, args: { p_service_ids: string[]; p_units: Record<string, unknown>[] }) => {
+      if (fn !== "replace_booking_service_units") throw new Error(`Unexpected rpc ${fn}`)
+      if (state.insertUnitsError) return { error: state.insertUnitsError }
+      unitDeletes.push(...args.p_service_ids)
+      unitInserts.push(...args.p_units)
+      return { error: null }
     }),
   }
 
@@ -568,6 +562,50 @@ describe("PATCH /api/jobs/[id]/services", () => {
 
     expect(res.status).toBe(400)
     expect((await res.json()).error).toMatch(/only available on hotel services/)
+  })
+
+  // A same-day tour's end date equals its start, so the night interval behind it is 0 ("1 day").
+  // The schema used to demand a positive value and 400'd every Build Booking save carrying one.
+  it.each(["tour_operator", "cruise_line"])("persists a zero-night (same-day) %s service", async (kind) => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: kind } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, serviceDate: "2026-10-23", nights: 0 }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls[0].payload).toMatchObject({ service_date: "2026-10-23", nights: 0 })
+  })
+
+  it("rejects a zero-night hotel stay", async () => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "hotel_property" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, nights: 0 }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/Hotel stays need at least 1 night/)
+    expect(built.updateCalls).toHaveLength(0)
+  })
+
+  it("rejects negative nights", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "tour_operator" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, nights: -1 }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
   })
 
   it("persists a per-stay pricing basis on a hotel service", async () => {
@@ -950,8 +988,11 @@ describe("PATCH /api/jobs/[id]/services", () => {
     const [kept, foreign, stale] = built.unitInserts
     expect(kept.id).toBe(UNIT_A)
     expect(kept.fare_override_set_at).toBe("2026-09-01T08:00:00.000Z")
-    expect(foreign).not.toHaveProperty("id")
-    expect(stale).not.toHaveProperty("id")
+    // Fresh ids, never absent: PostgREST fills a key missing from some rows of a bulk insert with
+    // NULL, not the column default, which failed the whole save on booking_service_units.id.
+    expect(foreign.id).toEqual(expect.any(String))
+    expect(stale.id).toEqual(expect.any(String))
+    expect(new Set([kept.id, foreign.id, stale.id, UNIT_B, UNIT_C]).size).toBe(5)
   })
 
   it("reuses a stored unit's id only once when the payload repeats it", async () => {
@@ -981,7 +1022,8 @@ describe("PATCH /api/jobs/[id]/services", () => {
 
     expect(res.status).toBe(200)
     expect(built.unitInserts[0].id).toBe(UNIT_A)
-    expect(built.unitInserts[1]).not.toHaveProperty("id")
+    expect(built.unitInserts[1].id).toEqual(expect.any(String))
+    expect(built.unitInserts[1].id).not.toBe(UNIT_A)
   })
 
   it("updates leg-level fields directly on booking_services, tagged origin: consultant", async () => {

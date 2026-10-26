@@ -95,7 +95,9 @@ const applyServicesSchema = z.object({
         serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable().optional(),
         suiteTypeId: z.string().uuid().optional(),
         units: z.array(unitSelectionSchema).optional(),
-        nights: z.number().int().positive().optional(),
+        // 0 is a same-day tour. Hotel pricing floors nights at 1 (build-from-package.ts), so a 0
+        // here can never under-charge a stay.
+        nights: z.number().int().nonnegative().optional(),
         /** Hotel legs only: the stay's own basis (Build Booking's "Price this stay per room").
          * Omitted falls back to the property's default inside the pricer. */
         accommodationPricingBasis: z.enum(["per_person", "per_room"]).optional(),

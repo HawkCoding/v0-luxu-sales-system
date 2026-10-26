@@ -9,7 +9,7 @@ import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
 import { learnSuiteAliasesFromUnits } from "@/lib/suites/learn-from-units"
 import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
 import { createServiceClient } from "@/lib/supabase/server"
-import type { Database } from "@/lib/supabase/types"
+import type { Database, Json } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
 
@@ -106,7 +106,10 @@ const updateServiceSchema = z.object({
   routeId: z.string().uuid().nullable().optional(),
   routeReversed: z.boolean().optional(),
   serviceDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
-  nights: z.number().int().positive().nullable().optional(),
+  /** The night interval behind the leg's own end date (tours, cruises, hotels). 0 is a same-day
+   * tour -- rendered as "1 day" -- so only negatives are refused here; hotels are held to at least
+   * one night by the guard in PATCH. */
+  nights: z.number().int().nonnegative().nullable().optional(),
   /** Airline legs only. `serviceDate` is the departure date; only the time is separate here.
    * `arrivalDate` is a full date rather than a day offset so an overnight flight states a real
    * arrival day. All rejected on any other supplier kind — see the guard in PATCH. */
@@ -476,6 +479,21 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
+  // A stay always covers at least one night, unlike a same-day tour (see the nights field above).
+  // The dialog already floors hotel nights at 1, so this only catches a caller that skips it.
+  for (const selection of parsed.data.selections) {
+    if (selection.nights === undefined || selection.nights === null || selection.nights >= 1) continue
+    const service = serviceById.get(selection.packageLegId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    const supplierKind = supplier?.kind
+    if (supplierKind === "hotel_property") {
+      return jsonError("Hotel stays need at least 1 night", 400, {
+        packageLegId: selection.packageLegId,
+        nights: selection.nights,
+      })
+    }
+  }
+
   // Per-room pricing is a hotel concept: every other kind prices per person off its own rate card
   // or typed fare, so a per-room basis there would be a stored value the pricer never reads. Same
   // reasoning, and the same shape, as the luggage-storage guard above.
@@ -773,27 +791,6 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const savedAt = new Date().toISOString()
 
-  // One delete + one insert across every service in the payload, rather than a pair per service.
-  // The replace-set semantics are unchanged: the delete covers exactly the services whose payload
-  // carries units, which is the same set the per-service loop used to clear.
-  if (servicesWithUnits.length > 0) {
-    const { error: deleteUnitsError } = await supabase
-      .from("booking_service_units")
-      .delete()
-      .in(
-        "service_id",
-        servicesWithUnits.map((selection) => selection.packageLegId),
-      )
-
-    if (deleteUnitsError) {
-      return safeSupabaseError(
-        "services:clear-units",
-        deleteUnitsError,
-        `Could not update the rooms, cabins or suites for ${supplierNamesFor(servicesWithUnits.map((selection) => selection.packageLegId))}. Nothing was changed — please try again.`,
-      )
-    }
-  }
-
   // An id is reused only when it was one of this very service's stored units, and only once --
   // anything else (an id from another service, a stale id, a duplicate) gets a fresh one.
   const reusedUnitIds = new Set<string>()
@@ -822,7 +819,10 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         previousFare.child === fareChild &&
         previousFare.infant === fareInfant
       return {
-        ...(reusedId ? { id: reusedId } : {}),
+        // Every row carries an id. PostgREST builds a bulk insert's column list from the union of
+        // the rows' keys, so a row without `id` beside one with it gets NULL rather than the
+        // column default -- a save mixing a kept room with a new one failed on the NOT NULL.
+        id: reusedId ?? crypto.randomUUID(),
         service_id: selection.packageLegId,
         suite_type_id: unit.suiteTypeId,
         bedroom_type_id: unit.bedroomTypeId ?? null,
@@ -855,13 +855,20 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }),
   )
 
-  if (unitRows.length > 0) {
-    const { error: insertUnitsError } = await supabase.from("booking_service_units").insert(unitRows)
-    if (insertUnitsError) {
+  // Delete and insert run in one transaction (replace_booking_service_units), across every service
+  // whose payload carries units. As two separate calls, an insert that failed after the delete had
+  // landed left those services with no rooms at all until the next save.
+  if (servicesWithUnits.length > 0) {
+    const serviceIdsWithUnits = servicesWithUnits.map((selection) => selection.packageLegId)
+    const { error: replaceUnitsError } = await supabase.rpc("replace_booking_service_units", {
+      p_service_ids: serviceIdsWithUnits,
+      p_units: unitRows as Json,
+    })
+    if (replaceUnitsError) {
       return safeSupabaseError(
-        "services:insert-units",
-        insertUnitsError,
-        `Could not save the rooms, cabins or suites for ${supplierNamesFor(servicesWithUnits.map((selection) => selection.packageLegId))}. Please reopen this booking and check them before saving again.`,
+        "services:replace-units",
+        replaceUnitsError,
+        `Could not save the rooms, cabins or suites for ${supplierNamesFor(serviceIdsWithUnits)}. Nothing was changed for them — please try again.`,
       )
     }
   }
