@@ -11,7 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
-import { AlertTriangle, Briefcase, Clock, CreditCard, FileText, Loader2, Send, X } from "lucide-react"
+import { getRecordHref, isVisibleInBookings, isVisibleInQuotes } from "@/lib/booking-visibility"
+import { AlertTriangle, CalendarCheck, Clock, CreditCard, FileText, Loader2, Send, X } from "lucide-react"
 import Link from "next/link"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -84,11 +85,12 @@ export default function DashboardPage() {
     count: data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === s.key).length,
   }))
 
-  const openJobs = data.bookings.filter((b: { stage: PipelineStage }) => {
-    const canonical = getCanonicalPipelineStage(b.stage)
-    return canonical !== "closed" && canonical !== "lost"
-  }).length
-  const quotedJobs = data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === "quote_sent").length
+  // Same rules as the Quotes and Bookings lists, so each tile matches the page it opens. Closed
+  // trips stay listed under Bookings but aren't "active".
+  const openQuotes = data.bookings.filter(isVisibleInQuotes).length
+  const activeBookings = data.bookings.filter(
+    (b: { stage: PipelineStage }) => isVisibleInBookings(b) && getCanonicalPipelineStage(b.stage) !== "closed",
+  ).length
   const depositsPaid = data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === "deposit_paid").length
   const fullPayments = data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === "final_paid").length
 
@@ -109,8 +111,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
-        <StatCard icon={Briefcase} label="Open Jobs" value={openJobs} href="/app/bookings" />
-        <StatCard icon={FileText} label="Quotes Sent" value={quotedJobs} href="/app/pipeline" />
+        <StatCard icon={FileText} label="Open Quotes" value={openQuotes} href="/app/quotes" />
+        <StatCard icon={CalendarCheck} label="Active Bookings" value={activeBookings} href="/app/bookings" />
         <StatCard icon={CreditCard} label="Deposits Paid" value={depositsPaid} href="/app/payments" />
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
         {canViewErrorLogs && (
@@ -141,7 +143,7 @@ export default function DashboardPage() {
             {recentJobs.map((booking: { id: string; bookingNumber: string; customerId: string; stage: string; createdAt: string }) => {
               const customer = data.customers.find((c: { id: string }) => c.id === booking.customerId)
               return (
-                <Link key={booking.id} href={`/app/bookings/${booking.id}`} className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group">
+                <Link key={booking.id} href={getRecordHref(booking.id, booking.stage)} className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group">
                   <div>
                     <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{booking.bookingNumber}</p>
                     <p className="text-text-muted mt-1">{customer?.firstName} {customer?.lastName}</p>
@@ -178,7 +180,10 @@ export default function DashboardPage() {
                   key={cor.id}
                   className="flex items-center justify-between gap-3 py-4 border-b border-stroke last:border-0 -mx-4 px-4"
                 >
-                  <Link href={`/app/bookings/${cor.bookingId}`} className="space-y-1 flex-1 min-w-0 group">
+                  <Link
+                    href={booking ? getRecordHref(cor.bookingId, booking.stage) : `/app/jobs/${cor.bookingId}`}
+                    className="space-y-1 flex-1 min-w-0 group"
+                  >
                     <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors truncate">
                       {cor.subject}
                     </p>

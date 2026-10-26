@@ -529,6 +529,31 @@ describe("buildQuoteItineraryLines", () => {
     expect(boarding.text).not.toContain("the The Blue Train")
   })
 
+  it("names a Rail operator without an article, and keeps the Blue Train's", () => {
+    const [rovos] = buildQuoteItineraryLines([
+      { ...trainBlock, contactDetails: { ...trainBlock.contactDetails, name: "Rovos Rail" } },
+    ])
+    const [blueTrain] = buildQuoteItineraryLines([trainBlock])
+
+    expect(rovos.text).toContain("Two nights on Rovos Rail in a Deluxe Suite")
+    expect(rovos.text).not.toContain("the Rovos Rail")
+    expect(blueTrain.text).toContain("on the Blue Train")
+  })
+
+  it("still gives a transfer point named after a Rail operator its article", () => {
+    const [transfer] = buildQuoteItineraryLines([
+      {
+        serviceType: "transfer",
+        title: "Transfer",
+        contactDetails: {},
+        serviceData: { departureDate: "2026-07-20", pickup: "Rovos Rail Station", dropoff: "Irene Country Lodge" },
+        displayOrder: 1,
+      },
+    ])
+
+    expect(transfer.text).toContain("from the Rovos Rail Station to the Irene Country Lodge")
+  })
+
   it("prefers itinerarySuiteType over the full suiteType when the supplier states it separately", () => {
     const [boarding] = buildQuoteItineraryLines([
       {

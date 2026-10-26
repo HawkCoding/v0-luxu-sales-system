@@ -371,6 +371,7 @@ export async function GET(req: Request) {
       validityUntilDisplay: formatDisplayDate(q.validity_until),
       subtotal: q.subtotal,
       total: q.total,
+      currency: q.currency,
       commissionBonus: Number(q.commission_bonus ?? 0),
       agentCommission: Number(q.agent_commission ?? 0),
       discountType: q.discount_type,

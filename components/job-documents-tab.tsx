@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,7 @@ import { AlertCircle, ClipboardList, FileText, Send } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { useJobLegReferences } from "@/lib/use-data"
 import { formatDisplayDateTime } from "@/lib/date-format"
+import { getRecordTabHref } from "@/lib/booking-visibility"
 
 const VOUCHER_STAGES = new Set(["final_paid", "voucher_sent", "closed"])
 
@@ -38,6 +39,7 @@ export function JobDocumentsTab({
   const [voucherOpen, setVoucherOpen] = useState(false)
   const [generatingWorksheet, setGeneratingWorksheet] = useState(false)
   const router = useRouter()
+  const pathname = usePathname()
 
   const canGenerateVoucher = job && enquiry && customer && VOUCHER_STAGES.has(job.stage ?? "")
 
@@ -154,7 +156,7 @@ export function JobDocumentsTab({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => router.push(`/app/bookings/${job.id}?tab=references`)}
+                  onClick={() => router.push(getRecordTabHref(pathname, job.id, "?tab=references"))}
                 >
                   <AlertCircle data-icon="inline-start" />
                   Add reference numbers

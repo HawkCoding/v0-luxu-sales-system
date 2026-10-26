@@ -153,4 +153,18 @@ describe("editor round-trip", () => {
     const result = roundTripThroughEditor(source, BLOCK_TOKENS)
     expect(normalizeForCompare(result)).toBe(normalizeForCompare(source))
   })
+
+  it("keeps a blank line typed after the last paragraph, and is stable on reopen (client, 2026-10-26)", () => {
+    const source = "<p>Kind regards,</p><p><br></p>"
+    const saved = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(saved).toBe(source)
+    expect(roundTripThroughEditor(saved, BLOCK_TOKENS)).toBe(source)
+  })
+
+  it("never saves the editor's own trailing paragraph after a final block token", () => {
+    const source = "<p>Dear Sofia,</p>{{quoteSummaryTable}}"
+    const saved = roundTripThroughEditor(source, BLOCK_TOKENS)
+    expect(saved).toBe(source)
+    expect(roundTripThroughEditor(saved, BLOCK_TOKENS)).toBe(source)
+  })
 })

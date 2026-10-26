@@ -461,10 +461,10 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
                 <span className="text-xs text-muted-foreground">Showing unsaved changes</span>
               ) : null}
             </div>
-            {/* Angora background + email font, matching the container the signature sits in when sent.
+            {/* Plain white + email font, matching the unfilled email the signature sits in when sent.
                 Beside the fields (2xl) it gives up height on a short screen, so the sticky column —
                 save bar included — always fits in the viewport. */}
-            <div className="h-[420px] max-w-2xl overflow-auto rounded-md border bg-[#e8e5df] 2xl:h-[min(420px,calc(100svh_-_20rem))] 2xl:min-h-[200px] 2xl:max-w-none">
+            <div className="h-[420px] max-w-2xl overflow-auto rounded-md border bg-white 2xl:h-[min(420px,calc(100svh_-_20rem))] 2xl:min-h-[200px] 2xl:max-w-none">
               {previewHtml === null ? (
                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                   Rendering…
@@ -472,7 +472,7 @@ export function SignatureBrandEditor({ brand, defaults, canEdit, onUpdated, onDi
               ) : (
                 <iframe
                   title="Signature preview"
-                  className="h-full w-full"
+                  className="h-full w-full bg-white"
                   sandbox=""
                   srcDoc={buildSignaturePreviewDocument(previewHtml, previewFontFamily)}
                 />

@@ -277,9 +277,17 @@ export function fromEditorHtml(editorHtml: string): string {
   }
 
   let result = parts.join("")
-  // Drop a single trailing empty paragraph artefact the editor appends — also
-  // when a select-all line spacing change has styled it.
-  result = result.replace(/<p(?: style="[^"]*")?><\/p>\s*$/, "")
+  // The editor appends an empty paragraph after a final block token, table or
+  // list so there is somewhere to type (trailing-paragraph.ts): drop that
+  // artefact — also when a select-all line spacing change has styled it. After
+  // a paragraph it can't be the artefact, only the blank line the salesperson
+  // typed under their last sentence, so it stays (client, 2026-10-26: that line
+  // vanished on every save). Mirrors TrailingParagraph's own test.
+  const elements = Array.from(doc.body.children)
+  const beforeLast = elements.length >= 2 ? elements[elements.length - 2] : null
+  if (beforeLast?.tagName !== "P") {
+    result = result.replace(/<p(?: style="[^"]*")?><\/p>\s*$/, "")
+  }
   // Every other empty paragraph is a blank line the user typed: give it a
   // line's height in the email, as the editor does (empty-paragraphs.ts).
   return fillEmptyParagraphs(result)

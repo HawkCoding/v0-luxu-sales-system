@@ -6,22 +6,39 @@
 
 import type { EmailFontFamily } from "@/lib/email/appearance"
 
+// No fill colours: the email is fully plain — no page, container, strip or panel background — so
+// it reads like a message typed in Outlook (client, 2026-10-26). Only lines and small print keep a
+// colour of their own.
 export const EMAIL_COLORS = {
-  /** Swirl — outer page background behind the message. */
-  canvas: "#f4f1ee",
-  /** Angora — the 640px message container. */
-  surface: "#e8e5df",
-  /** Swirl — header/footer brand strips and inner panels (quote details, banking details). */
-  panel: "#f4f1ee",
-  /** Warm divider that still reads on Angora: strip borders, panel borders, rules. */
+  /** Warm divider: brand strip borders, panel outlines, rules. */
   divider: "#cfc7ba",
   /**
-   * Small print (signature legal lines, brand strip subheading). Darkened from
-   * the old #8a7f74, which fell to ~3.1:1 on Angora; this is ~4.8:1 on Angora
-   * and ~5.4:1 on Swirl, so it clears WCAG AA at 10-11px.
+   * Small print (signature legal lines, brand strip subheading). ~6:1 on
+   * white, so it clears WCAG AA at 10-11px.
    */
   mutedText: "#6b6258",
 } as const
+
+/**
+ * Attributes for a layout table inside the content blocks ({{quoteSummaryTable}},
+ * {{bankingDetails}}): full width, no spacing of its own, ignored by screen readers.
+ */
+export const LAYOUT_TABLE_ATTRS =
+  'role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;"'
+
+/**
+ * An Outlook-proof vertical gap for a layout table: a row exactly `px` tall —
+ * the height attribute and CSS, plus a line box of the same size around a
+ * non-breaking space, which Outlook's Word engine would otherwise grow to its
+ * default line height. Margins on a <div>, <hr> or <table> are what Outlook
+ * drops, so the content blocks space themselves with these instead.
+ */
+export function emailSpacerRow(px: number, extraStyle = ""): string {
+  return (
+    `<tr><td height="${px}" style="height:${px}px;font-size:${px}px;line-height:${px}px;mso-line-height-rule:exactly;${extraStyle}">` +
+    `&nbsp;</td></tr>`
+  )
+}
 
 /** Signature banner display width: half the 640px email, the same in Outlook, Gmail and on a phone. */
 export const SIGNATURE_BANNER_MAX_WIDTH = 320
@@ -69,13 +86,13 @@ export function buildChromeFontCss(fontFamily: EmailFontFamily): string {
 
 /**
  * Standalone document for the Settings signature preview iframe: the rendered
- * fragment on the Angora container colour, in the email font, inside the same
- * chrome wrapper BaseLayout uses — so the preview matches the sent email.
+ * fragment on a plain page, in the email font, inside the same chrome wrapper
+ * BaseLayout uses — so the preview matches the sent email.
  */
 export function buildSignaturePreviewDocument(fragmentHtml: string, fontFamily: EmailFontFamily): string {
   return (
     `<!DOCTYPE html><html><head><meta charset="utf-8"/>` +
-    `<style>body{margin:0;padding:4px 0 16px;background-color:${EMAIL_COLORS.surface};}\n${buildChromeFontCss(fontFamily)}</style>` +
+    `<style>body{padding:0 0 8px;}\n${buildChromeFontCss(fontFamily)}</style>` +
     `</head><body><div class="${CHROME_CLASS_NAME}" style="font-family:${fontFamily}">` +
     fragmentHtml +
     `</div></body></html>`

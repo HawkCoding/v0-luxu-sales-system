@@ -24,21 +24,20 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05)
 }
 
+const WHITE = "#ffffff"
+
 describe("EMAIL_COLORS", () => {
-  it("uses Swirl for the page/strips/panels and Angora for the message", () => {
-    expect(EMAIL_COLORS.canvas).toBe("#f4f1ee")
-    expect(EMAIL_COLORS.panel).toBe("#f4f1ee")
-    expect(EMAIL_COLORS.surface).toBe("#e8e5df")
+  it("defines no fill colours — the email is plain, only lines and small print are tinted", () => {
+    expect(Object.keys(EMAIL_COLORS).sort()).toEqual(["divider", "mutedText"])
   })
 
-  it("keeps small print at WCAG AA contrast on both Angora and Swirl", () => {
-    expect(contrast(EMAIL_COLORS.mutedText, EMAIL_COLORS.surface)).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(EMAIL_COLORS.mutedText, EMAIL_COLORS.canvas)).toBeGreaterThanOrEqual(4.5)
+  it("keeps small print at WCAG AA contrast on a plain white message", () => {
+    expect(contrast(EMAIL_COLORS.mutedText, WHITE)).toBeGreaterThanOrEqual(4.5)
   })
 
-  it("keeps the divider visibly darker than the Angora container", () => {
-    expect(luminance(EMAIL_COLORS.divider)).toBeLessThan(luminance(EMAIL_COLORS.surface))
-    expect(contrast(EMAIL_COLORS.divider, EMAIL_COLORS.surface)).toBeGreaterThan(1.25)
+  it("keeps the divider visibly darker than a plain white message", () => {
+    expect(luminance(EMAIL_COLORS.divider)).toBeLessThan(luminance(WHITE))
+    expect(contrast(EMAIL_COLORS.divider, WHITE)).toBeGreaterThan(1.25)
   })
 })
 
@@ -76,9 +75,9 @@ describe("buildChromeFontCss", () => {
 })
 
 describe("buildSignaturePreviewDocument", () => {
-  it("wraps the fragment on Angora in the chrome font", () => {
+  it("wraps the fragment on a plain page in the chrome font", () => {
     const doc = buildSignaturePreviewDocument("<p>Leonie</p>", CALIBRI)
-    expect(doc).toContain(`background-color:${EMAIL_COLORS.surface}`)
+    expect(doc).not.toMatch(/background/)
     expect(doc).toContain(`<div class="${CHROME_CLASS_NAME}" style="font-family:${CALIBRI}"><p>Leonie</p></div>`)
     expect(doc).toContain(buildChromeFontCss(CALIBRI))
   })

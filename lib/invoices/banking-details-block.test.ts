@@ -11,11 +11,28 @@ const SETTINGS = {
 } as BankingSettings
 
 describe("buildBankingDetailsBlock", () => {
-  it("renders a Swirl panel with a divider border so it reads as a box on the Angora container", () => {
+  it("renders a plain outlined box: a one-cell table, the padding and border on its <td>, no fill", () => {
     const html = buildBankingDetailsBlock(SETTINGS, "37766")
-    expect(html).toContain("background-color:#f4f1ee;border:1px solid #cfc7ba;")
-    expect(html).not.toContain("#fbf8f3")
-    expect(html).not.toContain("#e8dfd2")
+    expect(html).toMatch(/^<table [^>]*data-label="Banking details"/)
+    expect(html).toContain('<td style="padding:14px 16px;border:1px solid #cfc7ba;')
+    expect(html).not.toMatch(/background|bgcolor/)
+    for (const legacy of ["#f4f1ee", "#e8e5df", "#fbf8f3", "#e8dfd2"]) {
+      expect(html).not.toContain(legacy)
+    }
+  })
+
+  it("spaces itself with Outlook-proof spacer rows, never margins on the box", () => {
+    const html = buildBankingDetailsBlock(SETTINGS, "37766")
+    expect(html).not.toMatch(/<(table|div)[^>]*style="[^"]*margin/)
+    expect(html).toContain('<td height="10" style="height:10px;')
+    expect(html).toContain('<td height="18" style="height:18px;')
+  })
+
+  it("is one top-level element carrying the payment-block marker, so the picker can swap it whole", () => {
+    const html = buildBankingDetailsBlock(SETTINGS, "37766")
+    const doc = new DOMParser().parseFromString(html, "text/html")
+    expect(doc.body.children).toHaveLength(1)
+    expect(doc.body.firstElementChild?.getAttribute("data-payment-block")).toBe("1")
   })
 
   it("keeps the payment-block marker and escapes values", () => {

@@ -44,14 +44,33 @@ const base: QuoteSummaryInput = {
 }
 
 describe("buildQuoteSummaryBlock", () => {
-  it("fills both panels with Swirl and a divider border that reads on the Angora container", () => {
-    const html = buildQuoteSummaryBlock(base)
-    const panelStyle = "background-color:#f4f1ee;border:1px solid #cfc7ba;"
-    expect(html).toMatch(new RegExp(`<div style="[^"]*${panelStyle}" data-label="Quote details">`))
-    expect(html).toMatch(new RegExp(`<div style="[^"]*${panelStyle}" data-label="Total price">`))
-    for (const legacy of ["#fbf8f3", "#f4efe6", "#e8dfd2", "#d8cdbc"]) {
+  it("draws both panels as plain outlined boxes: a one-cell table, the border on its <td>, no fill", () => {
+    const html = buildQuoteSummaryBlock({ ...base, subtotal: 91300, agentCommission: 5000 })
+    for (const label of ["Quote details", "Total price"]) {
+      const panel = html.match(new RegExp(`<table[^>]*data-label="${label}">[\\s\\S]*?</table>`))?.[0] ?? ""
+      expect(panel, label).toContain('<td style="padding:14px 16px;border:1px solid #cfc7ba;">')
+    }
+    expect(html).not.toMatch(/background|bgcolor/)
+    for (const legacy of ["#f4f1ee", "#e8e5df", "#fbf8f3", "#f4efe6", "#e8dfd2", "#d8cdbc"]) {
       expect(html).not.toContain(legacy)
     }
+  })
+
+  it("spaces the blocks with Outlook-proof spacer rows and <p> margins, never <div>/<hr> margins", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks,
+      packageExcludesDefault: "Services not mentioned.",
+      subtotal: 91300,
+      agentCommission: 5000,
+    })
+    expect(html).not.toMatch(/<div[^>]*style="[^"]*margin/)
+    expect(html).not.toContain("<hr")
+    expect(html).toContain(
+      '<td height="18" style="height:18px;font-size:18px;line-height:18px;mso-line-height-rule:exactly;border-top:1px solid #cfc7ba;">&nbsp;</td>',
+    )
+    // The second dated entry carries the gap above it on its own title.
+    expect(html.match(/margin:10px 0 2px;/g)?.length).toBe(1)
   })
 
   it("renders quote meta with travel dates and guests", () => {

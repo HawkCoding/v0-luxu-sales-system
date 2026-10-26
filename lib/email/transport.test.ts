@@ -223,6 +223,41 @@ describe("sendEmail test mode redirect", () => {
   })
 })
 
+describe("sendEmail content spacing", () => {
+  beforeEach(() => {
+    sendMail.mockReset()
+    sendMail.mockResolvedValue({ messageId: "local-1" })
+    getEmailTestMode.mockResolvedValue({ enabled: false, recipients: [] })
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubEnv("RESEND_API_KEY", "")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("writes the content slot's spacing inline on the way out, so Outlook keeps it", async () => {
+    const html =
+      "<div><p>Masthead</p><div class=\"luxus-content\"><!--LUXUS_CONTENT_START-->" +
+      "<p>Dear Jane,</p><p><br></p><!--LUXUS_CONTENT_END--></div></div>"
+
+    await sendEmail({ from: "office@example.com", to: "customer@example.com", subject: "Hi", html })
+
+    const sent = sendMail.mock.calls[0]?.[0] as { html: string }
+    expect(sent.html).toContain(
+      '<p style="margin:0 0 8px;">Dear Jane,</p><p style="margin:0 0 8px;">&nbsp;</p>',
+    )
+    // Outside the slot, untouched.
+    expect(sent.html).toContain("<p>Masthead</p>")
+  })
+
+  it("passes a plain-text-only send through untouched", async () => {
+    await sendEmail({ from: "office@example.com", to: "customer@example.com", subject: "Hi", text: "Hi" })
+
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ html: undefined, text: "Hi" }))
+  })
+})
+
 describe("isFallbackSendingUnavailable", () => {
   afterEach(() => {
     vi.unstubAllEnvs()
