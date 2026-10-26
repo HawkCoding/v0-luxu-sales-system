@@ -95,7 +95,9 @@ const applyServicesSchema = z.object({
         serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable().optional(),
         suiteTypeId: z.string().uuid().optional(),
         units: z.array(unitSelectionSchema).optional(),
-        nights: z.number().int().positive().optional(),
+        // 0 is a same-day tour. Hotel pricing floors nights at 1 (build-from-package.ts), so a 0
+        // here can never under-charge a stay.
+        nights: z.number().int().nonnegative().optional(),
         rateTypeId: z.string().uuid().optional(),
         /** Manual-pricing legs and transfer/rental overrides: the currency the typed fares on
          * this leg are in. Rate-card legs ignore it and use the card's own currency. Read

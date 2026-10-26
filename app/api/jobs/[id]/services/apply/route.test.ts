@@ -417,6 +417,24 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     expect(response.status).toBe(200)
   })
 
+  it("accepts zero nights (a same-day tour's span) instead of 400ing the whole request", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_SERVICE_ID,
+          selected: true,
+          nights: 0,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(response.status).toBe(200)
+  })
+
   it("drops an unusable client fx rate instead of 400ing the whole request", async () => {
     const response = await postApply({
       jobId: JOB_ID,
