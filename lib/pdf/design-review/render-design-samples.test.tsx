@@ -243,7 +243,7 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
     // cap, and the per-adult/per-child rows under "Total for 4 Adults & 2 Children incl. VAT".
     const familyBlocks = blocks.map((block) =>
       block.serviceType === "hotel"
-        ? { ...block, serviceData: { ...block.serviceData, itinerarySuiteCounts: [{ label: "Premier Suite Room", count: 2 }] } }
+        ? { ...block, serviceData: { ...block.serviceData, itinerarySuiteCounts: [{ label: "Premier Suite", count: 2 }] } }
         : block.serviceType === "train"
           ? {
               ...block,

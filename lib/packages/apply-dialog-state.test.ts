@@ -1263,6 +1263,16 @@ describe("tour date anchors", () => {
 })
 
 describe("toApplySelections", () => {
+  it("sends a hotel stay's own pricing basis so the per-room toggle reaches the pricer", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    suiteState(states, "leg-hotel").accommodationPricingBasis = "per_room"
+
+    const selections = toApplySelections(states)
+
+    expect(selections.find((s) => s.legId === "leg-hotel")?.accommodationPricingBasis).toBe("per_room")
+    expect(selections.find((s) => s.legId === "leg-train")).not.toHaveProperty("accommodationPricingBasis")
+  })
+
   it("sends units for suite legs and a fallback vehicle category for transport legs", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
     const train = suiteState(states, "leg-train")

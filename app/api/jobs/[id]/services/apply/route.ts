@@ -96,6 +96,9 @@ const applyServicesSchema = z.object({
         suiteTypeId: z.string().uuid().optional(),
         units: z.array(unitSelectionSchema).optional(),
         nights: z.number().int().positive().optional(),
+        /** Hotel legs only: the stay's own basis (Build Booking's "Price this stay per room").
+         * Omitted falls back to the property's default inside the pricer. */
+        accommodationPricingBasis: z.enum(["per_person", "per_room"]).optional(),
         rateTypeId: z.string().uuid().optional(),
         /** Manual-pricing legs and transfer/rental overrides: the currency the typed fares on
          * this leg are in. Rate-card legs ignore it and use the card's own currency. Read

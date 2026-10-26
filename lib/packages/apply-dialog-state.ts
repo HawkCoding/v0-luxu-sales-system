@@ -1414,6 +1414,8 @@ export interface ApplyLegSelectionPayload {
     rateTypeId?: string | null
   }>
   nights?: number
+  /** Hotel legs only: the stay's own pricing basis, overriding the property's default. */
+  accommodationPricingBasis?: AccommodationPricingBasis
   /** Per-leg rate type override; omitted falls back to the system default. */
   rateTypeId?: string
   /** The currency this leg's hand-typed prices are in; converted into the quote currency at
@@ -1476,6 +1478,11 @@ export function toApplySelections(
           ? Math.max(1, state.nights ?? 1)
           : state.nights ?? undefined
         : undefined,
+      // Without this the pricer fell back to the property's default, so flipping "Price this
+      // stay per room" in Build Booking saved but never changed the quote.
+      ...(state.supplierKind === "hotel_property"
+        ? { accommodationPricingBasis: state.accommodationPricingBasis }
+        : {}),
       rateTypeId: state.rateTypeId ?? undefined,
       priceCurrency: state.priceCurrency,
       commissionOverride,
