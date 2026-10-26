@@ -209,6 +209,19 @@ Reference files: `lib/utils.ts`, `components/ui/button.tsx`, `app/globals.css`
 
 ---
 
+## Local Dev Server
+
+**There is only ever one localhost: `http://localhost:3000`.** Every change must show up there.
+
+- Start it with `pnpm dev` only. Never run `next dev` directly, and never use another port (3001, 3002, …)
+- Before starting, check whether port 3000 is already listening. If it is, use that server — do not start a second one
+- Work in the checkout that port 3000 is serving. If the work has to happen in a git worktree, stop the server on 3000 and restart it from that worktree, so port 3000 always reflects the work in progress. Never run two servers side by side
+- Any agent or subagent that needs to see the app uses `http://localhost:3000` — none may start its own server
+- When finished with a worktree, stop its server before leaving it
+- `scripts/start-next-dev.mjs` already refuses to start a second server on port 3000; do not bypass it
+
+---
+
 ## App Versioning
 
 - `lib/version.ts` is the app version source of truth via `APP_VERSION`
