@@ -564,6 +564,50 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect((await res.json()).error).toMatch(/only available on hotel services/)
   })
 
+  // A same-day tour's end date equals its start, so the night interval behind it is 0 ("1 day").
+  // The schema used to demand a positive value and 400'd every Build Booking save carrying one.
+  it.each(["tour_operator", "cruise_line"])("persists a zero-night (same-day) %s service", async (kind) => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: kind } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, serviceDate: "2026-10-23", nights: 0 }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls[0].payload).toMatchObject({ service_date: "2026-10-23", nights: 0 })
+  })
+
+  it("rejects a zero-night hotel stay", async () => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "hotel_property" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, nights: 0 }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/Hotel stays need at least 1 night/)
+    expect(built.updateCalls).toHaveLength(0)
+  })
+
+  it("rejects negative nights", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "tour_operator" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, nights: -1 }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+  })
+
   it("persists a per-stay pricing basis on a hotel service", async () => {
     const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "hotel_property" } })
     const res = await PATCH(
