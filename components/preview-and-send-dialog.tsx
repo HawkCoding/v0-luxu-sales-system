@@ -23,6 +23,7 @@ import { SignaturePicker } from "@/components/signature-picker"
 import { PaymentMethodPicker } from "@/components/payment-method-picker"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceBankingBlock } from "@/lib/templates/banking-block-slot"
+import { finalizeContentSlot } from "@/lib/templates/email-spacing"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
@@ -171,6 +172,10 @@ export function PreviewAndSendDialog({
     if (signatureHtml !== null) out = replaceSignatureSlot(out, signatureHtml) ?? out
     return out
   }, [bodyHtml, canEditBody, content, signatureHtml])
+  // What the iframe shows: finalHtml with the spacing sendEmail writes inline on the way out
+  // (lib/templates/email-spacing.ts), so the preview is the email that arrives. Display only —
+  // the send posts finalHtml, and the editor keeps `content`, neither of them inlined.
+  const displayHtml = useMemo(() => finalizeContentSlot(finalHtml), [finalHtml])
 
   async function handleSend() {
     if (!subject.trim()) return
@@ -228,7 +233,7 @@ export function PreviewAndSendDialog({
       <iframe
         className="h-[420px] w-full bg-white"
         sandbox=""
-        srcDoc={finalHtml}
+        srcDoc={displayHtml}
         title="Email preview"
       />
     </div>

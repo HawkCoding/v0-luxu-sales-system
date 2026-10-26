@@ -460,9 +460,11 @@ function suitePhrase(
 }
 
 /** "Cape Town Station" → "the Cape Town Station" — skipped when the text already carries an
- * article, so supplier-entered strings like "the hotel" never double up. */
+ * article, so supplier-entered strings like "the hotel" never double up. Also skipped for a name
+ * ending in Rail/Railway(s): those are brand names that take no article ("on Rovos Rail"), where
+ * "the Blue Train" does. */
 function withLeadingThe(value: string): string {
-  return /^the\s/i.test(value) ? value : `the ${value}`
+  return /^the\s/i.test(value) || /\bRail(ways?)?$/i.test(value.trim()) ? value : `the ${value}`
 }
 
 /** A line's main clause and the facts trailed onto it ("… | Check in from 14h00"). */

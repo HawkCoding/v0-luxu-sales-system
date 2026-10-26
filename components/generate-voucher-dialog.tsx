@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { AlertCircle, Loader2, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useJobLegReferences } from "@/lib/use-data"
+import { getRecordTabHref } from "@/lib/booking-visibility"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 import {
   VoucherPreviewNotice,
@@ -87,6 +88,7 @@ export function GenerateVoucherDialog({
 }: GenerateVoucherDialogProps) {
   const displayNumber = invoiceNumber || bookingNumber
   const router = useRouter()
+  const pathname = usePathname()
   const [preparing, setPreparing] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
   // Kept after the preview closes: its send runs on a delayed undo timer and must stay mounted.
@@ -117,7 +119,7 @@ export function GenerateVoucherDialog({
 
   function goToVoucherReferences() {
     onOpenChange(false)
-    router.push(`/app/bookings/${jobId}?tab=references`)
+    router.push(getRecordTabHref(pathname, jobId, "?tab=references"))
   }
 
   function reportFailure(payload: VoucherErrorPayload, fallback: string) {

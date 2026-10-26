@@ -169,7 +169,8 @@ export default function EnquiriesPage() {
               <PopoverContent align="start" className="w-80 text-sm leading-6">
                 <p>
                   This queue shows newly captured enquiries, including unreviewed enquiries and enquiries that need
-                  attention. Once you send a quote, the job will move to the Pipeline.
+                  attention. An enquiry moves to Quotes when the quote is sent, and to Bookings once the deposit
+                  is paid.
                 </p>
               </PopoverContent>
             </Popover>
@@ -183,7 +184,7 @@ export default function EnquiriesPage() {
             <NewEnquiryDialog
               open={newEnquiryOpen}
               onOpenChange={setNewEnquiryOpen}
-              onSaved={(jobId) => router.push(`/app/bookings/${jobId}?tab=quotes`)}
+              onSaved={(jobId) => router.push(`/app/enquiries/${jobId}?tab=quotes`)}
             />
           </>
         )}
@@ -265,7 +266,7 @@ export default function EnquiriesPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <Link
-                          href={`/app/bookings/${e.id}`}
+                          href={`/app/enquiries/${e.id}`}
                           className="text-base font-semibold text-foreground hover:text-primary transition-colors"
                         >
                           {e.bookingNumber}
@@ -351,7 +352,7 @@ export default function EnquiriesPage() {
                       <p className="text-xs text-muted-foreground mt-0.5">Created {formatDisplayDate(e.createdAt)}</p>
                     </div>
                     <Button size="sm" asChild className="w-full">
-                      <Link href={`/app/jobs/${e.id}`}>
+                      <Link href={`/app/enquiries/${e.id}`}>
                         <Send className="w-3.5 h-3.5 mr-1.5" />
                         Open Job
                       </Link>

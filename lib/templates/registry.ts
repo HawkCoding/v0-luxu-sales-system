@@ -329,7 +329,9 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
       "Quote meta (journey dates, guests), package itinerary and exclusions, then the VAT-inclusive total (system-generated)",
     kind: "block",
     sample:
-      '<div style="margin:18px 0;padding:14px 16px;background:#f4f1ee;border:1px solid #cfc7ba;" data-label="Quote details"><p style="margin:0;"><strong>Quote number:</strong> BT-2026-0001-Q1</p><p style="margin:6px 0 0;"><strong>Journey:</strong> 18 – 22 July 2026</p><p style="margin:6px 0 0;"><strong>Guests:</strong> 2 Adults</p></div><div style="margin:18px 0;padding:14px 16px;background:#f4efe6;border:1px solid #d8cdbc;" data-label="Total price"><p style="margin:0;font-weight:700;">TOTAL for 2 Adults: R 86 300,00 (incl.VAT)</p></div>',
+      // Same plain outlined panels as lib/quotes/quote-summary-block.ts: no fill, the border on the <td>.
+      '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;" data-label="Quote details"><tbody><tr><td height="10" style="height:10px;font-size:10px;line-height:10px;mso-line-height-rule:exactly;">&nbsp;</td></tr><tr><td style="padding:14px 16px;border:1px solid #cfc7ba;"><p style="margin:0 0 6px;"><strong>Travel Dates:</strong> 18 – 22 July 2026</p><p style="margin:0 0 6px;"><strong>Guests:</strong> 2 Adults</p></td></tr></tbody></table>' +
+      '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;" data-label="Total price"><tbody><tr><td height="16" style="height:16px;font-size:16px;line-height:16px;mso-line-height-rule:exactly;">&nbsp;</td></tr><tr><td style="padding:14px 16px;border:1px solid #cfc7ba;"><p style="margin:0;font-weight:700;">TOTAL for 2 Adults: R 86 300,00 (incl.VAT)</p></td></tr></tbody></table>',
   },
   { name: "lastSentDate", description: "Date the quote was last sent to the customer", kind: "scalar", sample: "05 July 2026" },
   invoiceNumber,

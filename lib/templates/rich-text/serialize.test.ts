@@ -250,12 +250,35 @@ describe("fromEditorHtml", () => {
     )
   })
 
-  it("strips a single trailing empty paragraph", () => {
-    expect(fromEditorHtml("<p>body</p><p></p>")).toBe("<p>body</p>")
+  it("strips the empty paragraph the editor appends after a final block token", () => {
+    const editorHtml = '<p>body</p><div data-preserved-block data-label="X" data-token="quoteSummaryTable"></div><p></p>'
+    expect(fromEditorHtml(editorHtml)).toBe("<p>body</p>{{quoteSummaryTable}}")
   })
 
-  it("strips a trailing empty paragraph that a select-all line spacing change styled", () => {
-    expect(fromEditorHtml('<p>body</p><p style="line-height: 2;"></p>')).toBe("<p>body</p>")
+  it("strips the empty paragraph the editor appends after a final list", () => {
+    expect(fromEditorHtml("<p>body</p><ul><li><p>one</p></li></ul><p></p>")).toBe("<p>body</p><ul><li>one</li></ul>")
+  })
+
+  it("strips a trailing artefact paragraph that a select-all line spacing change styled", () => {
+    const editorHtml = '<div data-preserved-block data-label="X" data-token="quoteSummaryTable"></div><p style="line-height: 2;"></p>'
+    expect(fromEditorHtml(editorHtml)).toBe("{{quoteSummaryTable}}")
+  })
+
+  it("strips the lone empty paragraph of an empty editor", () => {
+    expect(fromEditorHtml("<p></p>")).toBe("")
+  })
+
+  // The editor only appends its own empty paragraph after a non-paragraph, so one after a
+  // paragraph is the blank line the salesperson typed under their last sentence (client, 2026-10-26).
+  it("keeps a blank line typed after the last paragraph", () => {
+    expect(fromEditorHtml("<p>Kind regards,</p><p></p>")).toBe("<p>Kind regards,</p><p><br></p>")
+    expect(fromEditorHtml('<p>body</p><p style="line-height: 2;"></p>')).toBe('<p>body</p><p style="line-height: 2;"><br></p>')
+  })
+
+  it("keeps a typed trailing blank line stable across load -> save", () => {
+    const saved = fromEditorHtml("<p>Kind regards,</p><p></p>")
+    const { html } = toEditorHtml(saved, BLOCK_TOKENS)
+    expect(fromEditorHtml(html)).toBe(saved)
   })
 
   it("writes a blank line as a paragraph holding a break, so it keeps its height in the email", () => {

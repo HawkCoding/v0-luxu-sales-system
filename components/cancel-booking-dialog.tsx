@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { OutcomeReason, PipelineStage } from "@/lib/types"
+import { getRecordNoun } from "@/lib/booking-visibility"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
@@ -62,6 +63,9 @@ export function CancelBookingDialog({
   const [refundReference, setRefundReference] = useState("")
   const [refundedAt, setRefundedAt] = useState("")
   const [loading, setLoading] = useState(false)
+  // "Cancel Quote" on a quote, "Cancel Booking" once the deposit is in — matching the sidebar.
+  const noun = getRecordNoun(sourceStage)
+  const Noun = `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`
   const requiresRefundCapture = ["deposit_paid", "final_paid", "voucher_sent", "closed", "trip_active"].includes(sourceStage)
   const defaultRefundAmount =
     suggestedRefund !== null && suggestedRefund !== undefined ? suggestedRefund.toFixed(2) : ""
@@ -170,9 +174,9 @@ export function CancelBookingDialog({
           onDiscard={closeGuard.confirmDiscard}
         />
         <DialogHeader>
-          <DialogTitle>Cancel Booking</DialogTitle>
+          <DialogTitle>Cancel {Noun}</DialogTitle>
           <DialogDescription>
-            This will mark booking <strong>{bookingNumber}</strong> as lost and remove it from
+            This will mark {noun} <strong>{bookingNumber}</strong> as lost and remove it from
             active work.
           </DialogDescription>
         </DialogHeader>
@@ -181,7 +185,7 @@ export function CancelBookingDialog({
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              Cancelled bookings are moved to Lost and removed from the pipeline board.
+              Cancelled {noun === "enquiry" ? "enquiries" : `${noun}s`} are moved to Lost and removed from the pipeline board.
             </AlertDescription>
           </Alert>
 
@@ -323,7 +327,7 @@ export function CancelBookingDialog({
             }
           >
             {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <XCircle className="w-4 h-4 mr-1" />}
-            Cancel Booking
+            Cancel {Noun}
           </Button>
         </DialogFooter>
       </DialogContent>

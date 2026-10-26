@@ -65,6 +65,26 @@ describe("PreviewAndSendDialog", () => {
     expect(previewHtml()).not.toContain("R289 500,00")
   })
 
+  it("previews the content with the spacing the send writes inline, so Outlook's view is what's shown", () => {
+    render(
+      <PreviewAndSendDialog
+        open
+        onOpenChange={() => {}}
+        title="Payment received"
+        description="Confirms the payment"
+        bookingId="booking-1"
+        initialSubject="Hi"
+        bodyHtml={`<div><p>Masthead</p><!--LUXUS_CONTENT_START--><p>Old</p><!--LUXUS_CONTENT_END--></div>`}
+        bodyContentHtml="<p>Dear Jane,</p><p><br></p>"
+        kind="payment_received"
+        onSent={() => {}}
+      />,
+    )
+
+    expect(previewHtml()).toContain('<p style="margin:0 0 8px;">Dear Jane,</p><p style="margin:0 0 8px;">&nbsp;</p>')
+    expect(previewHtml()).toContain("<p>Masthead</p>")
+  })
+
   it("resets the subject to the new prepared email", () => {
     const { rerender } = render(renderDialog({ open: true, content: "a", subject: "First" }))
     expect(screen.getByLabelText("Subject")).toHaveValue("First")

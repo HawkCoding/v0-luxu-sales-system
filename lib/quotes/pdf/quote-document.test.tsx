@@ -165,6 +165,13 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(first).not.toContain("Departure time:")
     })
 
+    it("names Rovos Rail without an article in the package sentence", async () => {
+      const [first] = await pages({ itineraryBlocks })
+
+      expect(first).toContain("Nine nights on Rovos Rail")
+      expect(first).not.toContain("the Rovos Rail")
+    })
+
     it("runs a flight's times on in its sentence, without a ' | '", async () => {
       const [first] = await pages()
 

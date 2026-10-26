@@ -5,6 +5,7 @@ import { GenerateVoucherDialog } from "./generate-voucher-dialog"
 const routerMocks = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: routerMocks.push }),
+  usePathname: () => "/app/bookings/job-1",
 }))
 
 const legReferencesMock = vi.hoisted(() => vi.fn())

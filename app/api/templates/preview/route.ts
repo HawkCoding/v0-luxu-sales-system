@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
+import { finalizeContentSlot } from "@/lib/templates/email-spacing"
 import { getSampleTokens } from "@/lib/templates/registry"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
@@ -78,7 +79,9 @@ export async function POST(req: Request) {
 
   return Response.json({
     subject: composed.subject,
-    html: composed.bodyHtml,
+    // Display only (the Templates page iframe): shown with the spacing sendEmail writes inline on
+    // the way out (lib/templates/email-spacing.ts), so the preview is the email that arrives.
+    html: finalizeContentSlot(composed.bodyHtml),
     warnings: composed.warnings,
     source,
   })

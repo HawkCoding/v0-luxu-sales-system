@@ -205,6 +205,6 @@ describe("PipelinePage reference display", () => {
     expect(within(panel).getByText("244453")).toBeInTheDocument()
 
     fireEvent.change(search, { target: { value: "no-such-ref" } })
-    expect(within(panel).getByText("No bookings found")).toBeInTheDocument()
+    expect(within(panel).getByText("No jobs found")).toBeInTheDocument()
   })
 })

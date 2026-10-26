@@ -75,7 +75,7 @@ function NeedsReviewRow({ blocker }: { blocker: NeedsReviewBlocker }) {
                 <>
                   {" "}
                   <Link
-                    href={`/app/bookings/${blocker.duplicateOfBookingId}`}
+                    href={`/app/jobs/${blocker.duplicateOfBookingId}`}
                     className="underline underline-offset-2 hover:text-primary"
                   >
                     View possible duplicate

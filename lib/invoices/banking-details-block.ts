@@ -1,4 +1,4 @@
-import { EMAIL_COLORS } from "@/lib/email/email-chrome"
+import { EMAIL_COLORS, emailSpacerRow, LAYOUT_TABLE_ATTRS } from "@/lib/email/email-chrome"
 import type { BankingSettings } from "@/lib/settings-access"
 
 // Builds the {{bankingDetails}} block token for invoice/reminder email
@@ -41,12 +41,22 @@ export function buildBankingDetailsBlock(settings: BankingSettings, invoiceNumbe
 
   // data-label names the locked placeholder card in the send-dialog editor;
   // data-payment-block marks it so PaymentMethodPicker can find and replace
-  // it in-place when the salesperson switches payment methods on a send.
+  // it in-place when the salesperson switches payment methods on a send —
+  // both sit on the one top-level element, the table.
+  //
+  // A plain outlined box, no fill (client, 2026-10-26): a single-cell table
+  // with the padding and border on the <td>, which Outlook's Word engine keeps
+  // (it drops both on a <div>). The gaps around it are spacer rows rather than
+  // margins: 10px above (a default paragraph above adds its own 8px — see
+  // lib/templates/email-spacing.ts), 18px below.
   return (
-    `<div style="margin:18px 0;padding:14px 16px;background-color:${EMAIL_COLORS.panel};border:1px solid ${EMAIL_COLORS.divider};` +
-    `color:#312b24;font-size:13px;line-height:20px;" data-label="Banking details" data-payment-block="1">` +
+    `<table ${LAYOUT_TABLE_ATTRS} data-label="Banking details" data-payment-block="1"><tbody>` +
+    emailSpacerRow(10) +
+    `<tr><td style="padding:14px 16px;border:1px solid ${EMAIL_COLORS.divider};color:#312b24;font-size:13px;line-height:20px;">` +
     `<p style="margin:0 0 6px;"><strong>Banking details</strong></p>` +
     `<p style="margin:0;">${lines}</p>` +
-    `</div>`
+    `</td></tr>` +
+    emailSpacerRow(18) +
+    `</tbody></table>`
   )
 }

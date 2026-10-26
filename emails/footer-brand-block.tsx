@@ -1,4 +1,4 @@
-import { Img, Section, Text } from "@react-email/components"
+import { Img, Text } from "@react-email/components"
 import {
   FOOTER_BRAND_ALT,
   FOOTER_BRAND_DIVISION_LINE,
@@ -13,8 +13,11 @@ interface FooterBrandBlockProps {
 }
 
 /**
- * SARAIL brand chrome in the email footer. Not wrapped in the `.luxus-content`
- * class — the sender's font settings scale their message body, not the mark.
+ * SARAIL brand chrome in the email masthead or footer. Not wrapped in the
+ * `.luxus-content` class — the sender's font settings scale their message
+ * body, not the mark. Left-aligned, on the same edge as the message and the
+ * signature (client, 2026-10-26): no align attribute, no auto margins, no
+ * centred text.
  */
 export function FooterBrandBlock({ brand }: FooterBrandBlockProps) {
   const heading = brand?.heading ?? FOOTER_BRAND_PRODUCT_LINE
@@ -22,39 +25,29 @@ export function FooterBrandBlock({ brand }: FooterBrandBlockProps) {
   const logoUrl = brand?.logoUrl ?? null
 
   return (
-    <Section style={block}>
-      <table align="center" role="presentation" cellPadding={0} cellSpacing={0} style={table}>
-        <tbody>
-          <tr>
-            {logoUrl ? (
-              <td className={BRAND_SEAL_CELL_CLASS} style={sealCell} width={SEAL_CELL_WIDTH}>
-                <Img
-                  alt={FOOTER_BRAND_ALT}
-                  className={BRAND_SEAL_CLASS}
-                  height="72"
-                  src={logoUrl}
-                  style={seal}
-                  width="72"
-                />
-              </td>
-            ) : null}
-            <td className={BRAND_TEXT_CELL_CLASS} style={textCell}>
-              <Text style={divisionLine}>{heading}</Text>
-              <Text style={productLine}>{subheading}</Text>
+    <table role="presentation" border={0} cellPadding={0} cellSpacing={0}>
+      <tbody>
+        <tr>
+          {logoUrl ? (
+            <td className={BRAND_SEAL_CELL_CLASS} style={sealCell} width={SEAL_CELL_WIDTH}>
+              <Img
+                alt={FOOTER_BRAND_ALT}
+                className={BRAND_SEAL_CLASS}
+                height="72"
+                src={logoUrl}
+                style={seal}
+                width="72"
+              />
             </td>
-          </tr>
-        </tbody>
-      </table>
-    </Section>
+          ) : null}
+          <td className={BRAND_TEXT_CELL_CLASS} style={textCell}>
+            <Text style={divisionLine}>{heading}</Text>
+            <Text style={productLine}>{subheading}</Text>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   )
-}
-
-const block = {
-  textAlign: "center" as const,
-}
-
-const table = {
-  margin: "0 auto",
 }
 
 const SEAL_SIZE = 72
@@ -68,18 +61,18 @@ const BRAND_TEXT_CELL_CLASS = "luxus-brand-text-cell"
 
 /**
  * Head rule for BaseLayout: on a phone the seal stacks above the brand text so the heading gets
- * the strip's full width instead of the ~240px left beside the seal. Both cells turn into blocks
+ * the strip's full width instead of the ~270px left beside the seal. Both cells turn into blocks
  * (a lone block cell would still sit beside the other one); the seal keeps its fixed 72px width
- * and is centred by margin. No `!important` (it would beat inline styles the head rules must not
- * touch): rather than cancel the inline right-hand gap, the rule mirrors it on the left so the
- * seal stays centred. Clients that ignore media queries (Outlook desktop, some webmail) keep the
- * side-by-side desktop layout, where the text cell simply wraps beside the full-size seal.
+ * and stays on the left edge with the text under it, like the rest of the message. The inline
+ * right-hand gap is left alone (no `!important` — it would beat inline styles the head rules must
+ * not touch); beside nothing, it is invisible. Clients that ignore media queries (Outlook desktop,
+ * some webmail) keep the side-by-side desktop layout, where the text cell simply wraps beside the
+ * full-size seal.
  */
 export const FOOTER_BRAND_RESPONSIVE_CSS = `
 @media only screen and (max-width: 480px) {
   .${BRAND_SEAL_CELL_CLASS}, .${BRAND_TEXT_CELL_CLASS} { display: block; }
-  .${BRAND_SEAL_CELL_CLASS} { margin: 0 auto; padding-left: ${SEAL_GAP}px; padding-bottom: 10px; }
-  .${BRAND_SEAL_CLASS} { margin: 0 auto; }
+  .${BRAND_SEAL_CELL_CLASS} { padding-bottom: 10px; }
 }`.trim()
 
 // On a phone the long product line claims the row and the auto table layout squeezed the seal's
@@ -104,14 +97,14 @@ const seal = {
 
 const textCell = {
   verticalAlign: "middle" as const,
-  textAlign: "center" as const,
 }
 
 // The default 44-character heading wrapped "...KRUGER / SHALATI" at 19px (client, 2026-10-07).
-// Room beside the seal on a desktop: 640px container - 2 x 24px strip padding - 90px seal cell =
-// 502px. The heading's advance width is ~20.1em in Calibri, ~24.8em in Arial/Helvetica and ~26.1em
-// in Verdana (the widest family on the allowlist), so at 16px it is ~321 / ~396 / ~418px — one line
-// with 80px+ to spare in every family. No `nowrap`: a narrow pane or a phone must still wrap it.
+// Room beside the seal on a desktop: 640px frame (the strips have no side padding) - 90px seal
+// cell = 550px. The heading's advance width is ~20.1em in Calibri, ~24.8em in Arial/Helvetica and
+// ~26.1em in Verdana (the widest family on the allowlist), so at 16px it is ~321 / ~396 / ~418px —
+// one line with 130px+ to spare in every family. No `nowrap`: a narrow pane or a phone must still
+// wrap it.
 const divisionLine = {
   margin: "0",
   color: "#3d3831",

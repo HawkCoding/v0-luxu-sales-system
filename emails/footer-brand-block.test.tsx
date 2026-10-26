@@ -41,6 +41,12 @@ describe("FooterBrandBlock", () => {
     expect(style).not.toContain("nowrap")
   })
 
+  it("sits on the left edge: no centring anywhere", () => {
+    const html = renderToStaticMarkup(<FooterBrandBlock brand={BRAND} />)
+
+    expect(html).not.toMatch(/align="center"|text-align:\s*center|margin:\s*0 auto/)
+  })
+
   it("tags the cells so the phone rule can stack them", () => {
     const html = renderToStaticMarkup(<FooterBrandBlock brand={BRAND} />)
 
@@ -56,9 +62,12 @@ describe("FOOTER_BRAND_RESPONSIVE_CSS", () => {
     expect(FOOTER_BRAND_RESPONSIVE_CSS).toContain(
       ".luxus-brand-seal-cell, .luxus-brand-text-cell { display: block; }",
     )
-    // Mirrors the inline 18px right-hand gap so the stacked seal stays centred.
-    expect(FOOTER_BRAND_RESPONSIVE_CSS).toContain("padding-left: 18px; padding-bottom: 10px;")
+    expect(FOOTER_BRAND_RESPONSIVE_CSS).toContain(".luxus-brand-seal-cell { padding-bottom: 10px; }")
     expect(FOOTER_BRAND_RESPONSIVE_CSS).not.toContain("!important")
+  })
+
+  it("keeps the stacked seal on the left edge, not centred", () => {
+    expect(FOOTER_BRAND_RESPONSIVE_CSS).not.toMatch(/margin|padding-left|text-align|center/)
   })
 
   it("never shrinks the seal when stacked", () => {
