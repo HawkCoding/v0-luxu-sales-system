@@ -128,7 +128,7 @@ export function sampleServiceBlocks(): VoucherServiceBlock[] {
         description: IVORY_DESCRIPTION,
       },
       serviceData: {
-        roomType: "Premier Suite Room",
+        roomType: "Premier Suite",
         numberOfSuites: 1,
         nights: 1,
         mealPlan: "Bed & Breakfast",

@@ -98,6 +98,9 @@ const applyServicesSchema = z.object({
         // 0 is a same-day tour. Hotel pricing floors nights at 1 (build-from-package.ts), so a 0
         // here can never under-charge a stay.
         nights: z.number().int().nonnegative().optional(),
+        /** Hotel legs only: the stay's own basis (Build Booking's "Price this stay per room").
+         * Omitted falls back to the property's default inside the pricer. */
+        accommodationPricingBasis: z.enum(["per_person", "per_room"]).optional(),
         rateTypeId: z.string().uuid().optional(),
         /** Manual-pricing legs and transfer/rental overrides: the currency the typed fares on
          * this leg are in. Rate-card legs ignore it and use the card's own currency. Read

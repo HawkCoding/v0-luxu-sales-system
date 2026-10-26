@@ -4258,6 +4258,10 @@ export type Database = {
         Args: { p_count: number; p_product_code: string; p_year?: number }
         Returns: number
       }
+      replace_booking_service_units: {
+        Args: { p_service_ids: string[]; p_units: Json }
+        Returns: undefined
+      }
       replace_booking_transport_requests: {
         Args: {
           p_booking_id: string

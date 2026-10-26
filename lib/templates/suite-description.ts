@@ -35,7 +35,8 @@ const KIND_PRIORITY: SupplierKind[] = [
  * Prose noun appended when the supplier's type name doesn't carry one, so
  * "Deluxe" reads as "Deluxe Suite". Deliberately not SUPPLIER_VOCABULARY's
  * `suiteType`, whose values ("Suite Type", "Room Type") are admin form labels
- * rather than words that sit in a sentence.
+ * rather than words that sit in a sentence. Never appended to a name that already ends its own
+ * way — see ACCOMMODATION_NOUN.
  */
 const SUITE_NOUN: Record<SupplierKind, string> = {
   train_operator: "Suite",
@@ -46,6 +47,14 @@ const SUITE_NOUN: Record<SupplierKind, string> = {
   vehicle_rental: "Vehicle",
   transfers: "Vehicle",
 }
+
+/**
+ * A type name carrying any accommodation noun of its own needs no SUITE_NOUN: a hotel's "Family
+ * Suite" is the room, so "Family Suite Room" says it twice. Same list as quote-presentation.ts's
+ * SUITE_NOUN_PATTERN, and likewise never the "suite" of an en-suite / En Suite bathroom.
+ */
+const ACCOMMODATION_NOUN =
+  /(?<!\ben[-\s]?)\b(Suite|Room|Cabin|Tent|Villa|Chalet|Cottage|Apartment|Bungalow|Lodge|Unit|Compartment)s?\b/i
 
 export interface SuiteSelection {
   suiteTypeName: string
@@ -100,11 +109,13 @@ function dedupe(values: string[]): string[] {
   return Array.from(new Set(values.filter((value) => value.length > 0)))
 }
 
-/** "Deluxe" -> "Deluxe Suite"; an already-nouned "Deluxe Suite" is left alone. */
+/** "Deluxe" -> "Deluxe Suite"; an already-nouned "Deluxe Suite" (or a hotel's "Family Suite") is
+ *  left alone. */
 function suiteTypeWithNoun(selection: SuiteSelection): string {
   const name = clean(selection.suiteTypeName)
   const noun = selection.supplierKind ? SUITE_NOUN[selection.supplierKind] : null
   if (!name || !noun) return name
+  if (ACCOMMODATION_NOUN.test(name)) return name
   // Nouns come from the fixed map above, so interpolating them is safe.
   return new RegExp(`\\b${noun}s?\\b`, "i").test(name) ? name : `${name} ${noun}`
 }

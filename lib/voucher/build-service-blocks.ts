@@ -381,7 +381,7 @@ function resolveInclusionList(
 /** "Twin bedded Deluxe Suite with a shower" — a unit's suite type, prefixed with its bed
  * configuration and suffixed with its bathroom (and bedroom layout), when the unit has those
  * selected, and the supplier-kind noun appended ("Suite"/"Room") when the type name doesn't
- * already carry one. A thin wrapper over formatSuitePhrase, shared with the
+ * already carry an accommodation noun of its own (a hotel's "Family Suite" stays as is). A thin wrapper over formatSuitePhrase, shared with the
  * {{suiteDescription}} email token so the two surfaces never diverge on grammar. Any part can be
  * absent (legacy rows, or a supplier that doesn't track that variant), in which case that part is
  * simply omitted. */

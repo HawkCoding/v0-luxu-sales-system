@@ -361,6 +361,22 @@ describe("buildRoomTokens", () => {
     })
   })
 
+  it("does not add 'Room' to a hotel type that already ends in 'Suite'", () => {
+    const tokens = buildRoomTokens([{ suiteTypeName: "Family Suite", supplierKind: "hotel_property" }])
+
+    expect(tokens.suiteType).toBe("Family Suite")
+    expect(tokens.suiteDescription).toBe("a Family Suite")
+  })
+
+  it("does not add 'Room' to other accommodation nouns, but still does for an en-suite name", () => {
+    expect(
+      buildRoomTokens([{ suiteTypeName: "Luxury Tent", supplierKind: "hotel_property" }]).suiteType,
+    ).toBe("Luxury Tent")
+    expect(
+      buildRoomTokens([{ suiteTypeName: "Standard En-Suite", supplierKind: "hotel_property" }]).suiteType,
+    ).toBe("Standard En-Suite Room")
+  })
+
   it("collapses repeated identical rooms to one entry", () => {
     expect(buildRoomTokens([shalatiRoom, shalatiRoom]).suiteType).toBe("Bridge House Room")
   })
