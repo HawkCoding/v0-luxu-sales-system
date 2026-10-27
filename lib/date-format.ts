@@ -171,7 +171,7 @@ export function formatDisplayDateLong(value: string | Date | null | undefined): 
   return `${pad(parts.day)} ${LONG_MONTH_NAMES[parts.month - 1]} ${parts.year}`
 }
 
-const SHORT_MONTH_NAMES = [
+export const SHORT_MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ]

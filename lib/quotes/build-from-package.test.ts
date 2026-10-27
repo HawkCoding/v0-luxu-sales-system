@@ -775,6 +775,106 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].pricingSnapshot?.manualTransportPriceBase).toBe(700)
   })
 
+  describe("serviceEndDate", () => {
+    it("stamps a hotel line with its check-out date", async () => {
+      const hotelLeg = leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+        suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+        rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 1200 })],
+      })
+
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            serviceDate: "2026-09-05",
+            nights: 3,
+            units: [{ suiteTypeId: "room-std", adultCount: 2 }],
+          },
+        ],
+      })
+
+      expect(lineItems[0].pricingSnapshot?.travelDate).toBe("2026-09-05")
+      expect(lineItems[0].pricingSnapshot?.serviceEndDate).toBe("2026-09-08")
+    })
+
+    it("stamps a train line with its arrival date off the route duration", async () => {
+      const trainLeg = leg({
+        id: "leg-train",
+        supplierKind: "train_operator",
+        routes: [{ ...route("route-cpt", "supplier-leg-train", "CPT-PTA"), durationDays: 3 }],
+        suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe Double")],
+        rateCards: [rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 })],
+      })
+
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          booking: { id: JOB_ID, no_of_adults: 2, no_of_children: 0, no_of_suites: 1, child_ages: [], departure_date: "2026-09-01" },
+        }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            routeId: "route-cpt",
+            serviceDate: "2026-09-10",
+            units: [{ suiteTypeId: "suite-dlx", adultCount: 2 }],
+          },
+        ],
+      })
+
+      expect(lineItems[0].pricingSnapshot?.travelDate).toBe("2026-09-10")
+      expect(lineItems[0].pricingSnapshot?.serviceEndDate).toBe("2026-09-12")
+    })
+
+    it("stamps a rental line with its return date", async () => {
+      const rentalLeg = leg({
+        id: "leg-rental",
+        supplierKind: "vehicle_rental",
+        routes: [route("route-r", "supplier-leg-rental", "Self-drive")],
+        suiteTypes: [suiteType("vehicle-suv", "supplier-leg-rental", "SUV")],
+        rateCards: [rateCard({ id: "rc-suv", routeId: "route-r", suiteTypeId: "vehicle-suv", pricePerPerson: 700 })],
+      })
+
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              service_type: "rental",
+              route_id: null,
+              suite_type_id: "vehicle-suv",
+              service_id: "leg-rental",
+              pickup_point: "Cape Town Airport",
+              dropoff_point: "Cape Town Airport",
+              pickup_at: "2026-09-01T08:00:00Z",
+              price_override: null,
+              price_override_set_at: null,
+              price_override_set_by: null,
+              rental_details: { return_at: "2026-09-04T08:00:00Z" },
+            },
+          ],
+        }),
+        packageDetail: detail([rentalLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-rental", selected: true, routeId: "route-r", suiteTypeId: "vehicle-suv" }],
+      })
+
+      expect(lineItems[0].pricingSnapshot?.travelDate).toBe("2026-09-01")
+      expect(lineItems[0].pricingSnapshot?.serviceEndDate).toBe("2026-09-04")
+    })
+  })
+
   it("marks fixed-price package legs as inclusions so they aren't read as unpriced", async () => {
     const trainLeg = leg({ id: "leg-train", supplierKind: "train_operator", label: "The Blue Train" })
     const packageDetail = { ...detail([trainLeg]), fixedPricePerPerson: 24800 }

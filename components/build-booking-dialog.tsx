@@ -41,6 +41,7 @@ import { AmendQuoteConfirmDialog } from "@/components/quotes/amend-quote-confirm
 import { createAmendServicesTracker } from "@/lib/quotes/amend-quote"
 import { findChangedExistingLines, rebuildAcceptedQuoteFxRates } from "@/lib/quotes/amend-pricing"
 import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
+import { describeLineDate } from "@/lib/quotes/line-item-date"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { appendFieldDetails } from "@/lib/format-error-details"
@@ -1723,6 +1724,7 @@ export function BuildBookingDialog({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
+                    <th className="px-3 py-2 whitespace-nowrap">Date</th>
                     <th className="px-3 py-2">Description</th>
                     <th className="px-3 py-2 text-right">Qty</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Unit price</th>
@@ -1732,6 +1734,9 @@ export function BuildBookingDialog({
                 <tbody>
                   {lineItemsToSave.map((li, i) => (
                     <tr key={i} className="border-b last:border-0">
+                      <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                        {describeLineDate(li) ?? "—"}
+                      </td>
                       <td className="px-3 py-2 text-xs">
                         <div>
                           {li.description}

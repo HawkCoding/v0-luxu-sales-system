@@ -30,6 +30,7 @@ import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
 import { QuoteAdjustmentsLedger } from "@/components/quotes/quote-adjustments-ledger"
 import { findCommissionLineIndex } from "@/lib/quotes/apply-commission-bonus"
+import { describeLineDate } from "@/lib/quotes/line-item-date"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
 import { amendIneligibilityReason } from "@/lib/quotes/amend-quote"
 import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
@@ -325,10 +326,11 @@ export function JobQuotesTab({
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <table className="w-full table-fixed text-sm" style={{ fontFamily: "var(--font-inter)" }}>
+                <table className="w-full min-w-[640px] table-fixed text-sm" style={{ fontFamily: "var(--font-inter)" }}>
                   <thead>
                     <tr className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
-                      <th className="pb-2 w-[40%]">Description</th>
+                      <th className="pb-2 pr-4 w-28">Date</th>
+                      <th className="pb-2 w-[34%]">Description</th>
                       <th className="pb-2 pl-4 text-right w-16">Qty</th>
                       <th className="pb-2 pl-6 text-right w-28">Unit Price</th>
                       <th className="pb-2 pl-6 text-right w-28">Total</th>
@@ -344,6 +346,9 @@ export function JobQuotesTab({
                       const isComplimentary = isComplimentaryLine(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
+                        <td className="py-2 pr-4 text-xs text-muted-foreground" data-testid="quote-line-date">
+                          {describeLineDate(li) ?? "—"}
+                        </td>
                         <td className="py-2 text-xs text-foreground break-words">
                           {li.description}
                           {isExtra ? (
