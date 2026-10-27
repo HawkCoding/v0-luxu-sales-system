@@ -1761,6 +1761,200 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].pricingSnapshot?.stayNights).toBe(1)
   })
 
+  // LTT-26-0001: The Capital Menlyn Maine is set to manual pricing and has no rate cards; the build
+  // threw "No rate card for "Standard Room" on "Bed & Breakfast"" because the hotel branch never
+  // read the leg's pricing mode.
+  describe("a manual-pricing hotel with no rate cards (LTT-26-0001)", () => {
+    const manualHotel = () => ({
+      ...leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        routes: [route("route-bb", "supplier-leg-hotel", "Bed & Breakfast")],
+        suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard Room")],
+        rateCards: [],
+      }),
+      pricingMode: "manual" as const,
+    })
+
+    async function build(nights: number, unit: { manualRoomPrice?: number; complimentaryFirstNight?: boolean }) {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([manualHotel()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights,
+            units: [{ suiteTypeId: "room-std", adultCount: 2, ...unit }],
+          },
+        ],
+      })
+      return lineItems
+    }
+
+    it("prices a room off its typed room price", async () => {
+      const [line] = await build(2, { manualRoomPrice: 3500 })
+      expect(line.qty).toBe(2)
+      expect(line.unitPrice).toBe(3500)
+      expect(line.total).toBe(7000)
+      expect(line.pricingSnapshot?.pricingMode).toBe("manual")
+      expect(line.pricingSnapshot?.rateCardId).toBeNull()
+    })
+
+    it("emits an unpriced R0 room, flagged as missing pricing, instead of failing the build", async () => {
+      const lineItems = await build(2, {})
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0].qty).toBe(2)
+      expect(lineItems[0].total).toBe(0)
+      expect(lineItems[0].pricingSnapshot?.pricingMode).toBe("manual")
+      expect(lineItems[0].pricingSnapshot?.unit).toBe("per room per night")
+      expect(isMissingPricing(lineItems[0])).toBe(true)
+    })
+
+    it("needs no price at all for a one-night stay whose night was gifted", async () => {
+      const [line] = await build(1, { complimentaryFirstNight: true })
+      expect(line.qty).toBe(0)
+      expect(line.total).toBe(0)
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+      expect(isMissingPricing(line)).toBe(false)
+    })
+
+    it("still asks for a price on the nights left after the gift", async () => {
+      const [line] = await build(3, { complimentaryFirstNight: true })
+      expect(line.qty).toBe(2)
+      expect(line.total).toBe(0)
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+    })
+  })
+
+  // Manual pricing is a switch on every supplier, so every kind must build with nothing typed (a
+  // flagged R0 line, never a "no rate card" error) and must ignore cards kept from before the switch.
+  describe("manual pricing on every supplier kind", () => {
+    const kinds: SupplierKind[] = [
+      "train_operator",
+      "hotel_property",
+      "transfers",
+      "vehicle_rental",
+      "tour_operator",
+      "airline",
+      "cruise_line",
+    ]
+
+    for (const kind of kinds) {
+      it(`builds a ${kind} leg with no typed price and ignores its old rate cards`, async () => {
+        const isTransport = kind === "transfers" || kind === "vehicle_rental"
+        const manualLeg = leg({
+          id: "leg-manual",
+          supplierKind: kind,
+          pricingMode: "manual",
+          routes: [route("route-m", "supplier-leg-manual", "Route")],
+          suiteTypes: [suiteType("type-m", "supplier-leg-manual", "Type")],
+          rateCards: [rateCard({ id: "rc-legacy", routeId: "route-m", suiteTypeId: "type-m", pricePerPerson: 999 })],
+        })
+
+        const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
+          supabase: buildSupabase({
+            transportRequests: isTransport
+              ? [
+                  {
+                    service_type: kind === "vehicle_rental" ? "rental" : "transfer",
+                    route_id: null,
+                    suite_type_id: "type-m",
+                    service_id: "leg-manual",
+                    pickup_point: "A",
+                    dropoff_point: "B",
+                    pickup_at: null,
+                    rental_details: null,
+                  },
+                ]
+              : [],
+          }),
+          packageDetail: detail([manualLeg]),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [
+            isTransport
+              ? { legId: "leg-manual", selected: true, routeId: "route-m" }
+              : {
+                  legId: "leg-manual",
+                  selected: true,
+                  routeId: "route-m",
+                  nights: 1,
+                  units: [{ suiteTypeId: "type-m", adultCount: 2, childCount: 1 }],
+                },
+          ],
+        })
+
+        expect(incompleteLegs).toEqual([])
+        expect(lineItems.length).toBeGreaterThan(0)
+        expect(lineItems.every((li) => li.unitPrice === 0)).toBe(true)
+        expect(lineItems.every((li) => li.pricingSnapshot?.rateCardId == null)).toBe(true)
+        expect(lineItems.some((li) => isMissingPricing(li))).toBe(true)
+      })
+    }
+  })
+
+  it("does not need a rate card for a rate-card hotel room whose only night was gifted", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 1,
+          units: [{ suiteTypeId: "room-std", complimentaryFirstNight: true, adultCount: 2 }],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].total).toBe(0)
+    expect(isMissingPricing(lineItems[0])).toBe(false)
+  })
+
+  it("still requires a rate card for a rate-card hotel room with nights left to charge", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [],
+    })
+
+    await expect(
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [{ suiteTypeId: "room-std", complimentaryFirstNight: true, adultCount: 2 }],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/No rate card for "Standard"/)
+  })
+
   it("prices a tour leg off the tour type's route-agnostic card, whichever itinerary was booked", async () => {
     const tourLeg = leg({
       id: "leg-tour",

@@ -1601,7 +1601,15 @@ export function validateConfigureState(
         // Route + type resolved: check pricing exists before the salesperson hits Next and gets
         // a build-time error that's harder to connect back to this row.
         const pricingDate = dateOnly(request.pickupAt)
-        if (request.routeId && request.suiteTypeId && pricingDate) {
+        // A trip that never reads the card -- manual-pricing supplier, a typed price, or comped --
+        // can't be missing one (same rule as the pricing engine's transport branch).
+        const readsCard =
+          leg.pricingMode !== "manual" &&
+          request.priceOverride == null &&
+          request.priceOverrideChild == null &&
+          request.priceOverrideInfant == null &&
+          !request.complimentary
+        if (readsCard && request.routeId && request.suiteTypeId && pricingDate) {
           const pricingError = describeMissingRateCard(
             leg,
             request.routeId,
@@ -1651,6 +1659,9 @@ export function validateConfigureState(
         leg.pricingMode !== "manual" &&
         (unit.manualRoomPrice ?? null) === null &&
         (unit.manualTourPrice ?? null) === null &&
+        // A room whose every night is gifted charges nothing, so it reads no card either (same
+        // rule as the pricing engine's hotel branch).
+        !(state.supplierKind === "hotel_property" && unit.complimentaryFirstNight && (state.nights ?? 1) <= 1) &&
         // A train suite whose typed fares cover every passenger kind it carries never reads the
         // card either. One that leaves a present kind blank still prices that kind off the card,
         // so the card stays required (same rule as the pricing engine, via the shared helper).

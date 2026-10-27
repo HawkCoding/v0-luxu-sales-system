@@ -2254,5 +2254,69 @@ describe("train fare override", () => {
       const errors = uncoveredTrain({ fareOverrideAdult: 9000 })
       expect(errors.some((e) => e.includes("rate card"))).toBe(true)
     })
+
+    // LTT-26-0001: a hotel with no rate cards at all, gifted or priced by hand.
+    describe("hotel room", () => {
+      function cardlessHotel(
+        patch: Partial<SuiteLegState["units"][number]>,
+        nights: number,
+        pricingMode: "rate_card" | "manual" = "rate_card",
+      ) {
+        const hotelPkg = detail([{ ...hotelLeg, rateCards: [], pricingMode }])
+        const states = buildDefaultLegStates(hotelPkg, { tripStartDate: "2026-09-01" })
+        const hotel = suiteState(states, "leg-hotel")
+        hotel.selected = true
+        hotel.routeId = "route-bb"
+        hotel.nights = nights
+        hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 2, ...patch }
+        return validateConfigureState(hotelPkg, states)
+      }
+
+      it("blocks a charged night with no card", () => {
+        expect(cardlessHotel({}, 1).some((e) => e.includes("rate card"))).toBe(true)
+      })
+
+      it("does not block a one-night stay whose night was gifted", () => {
+        expect(cardlessHotel({ complimentaryFirstNight: true }, 1).some((e) => e.includes("rate card"))).toBe(false)
+      })
+
+      it("still blocks a gifted first night when later nights are charged off the card", () => {
+        expect(cardlessHotel({ complimentaryFirstNight: true }, 2).some((e) => e.includes("rate card"))).toBe(true)
+      })
+
+      it("never asks a manual-pricing hotel for a card", () => {
+        expect(cardlessHotel({}, 2, "manual").some((e) => e.includes("rate card"))).toBe(false)
+      })
+    })
+
+    describe("transfer", () => {
+      function cardlessTransfer(
+        patch: Partial<ReturnType<typeof transportState>["requests"][number]>,
+        pricingMode: "rate_card" | "manual" = "rate_card",
+      ) {
+        const transferPkg = detail([{ ...transferLeg, rateCards: [], pricingMode }])
+        const states = buildDefaultLegStates(transferPkg, { tripStartDate: "2026-09-01" })
+        const transfer = transportState(states, "leg-transfer")
+        transfer.selected = true
+        transfer.requests[0] = {
+          ...transfer.requests[0],
+          routeId: "route-transfer-1",
+          suiteTypeId: "vehicle-1",
+          pickupAt: "2026-09-01T10:00:00Z",
+          ...patch,
+        }
+        return validateConfigureState(transferPkg, states)
+      }
+
+      it("blocks a trip that prices off a missing card", () => {
+        expect(cardlessTransfer({}).some((e) => e.includes("rate card"))).toBe(true)
+      })
+
+      it("does not block a manual-pricing supplier, a typed price, or a comped trip", () => {
+        expect(cardlessTransfer({}, "manual").some((e) => e.includes("rate card"))).toBe(false)
+        expect(cardlessTransfer({ priceOverride: 800 }).some((e) => e.includes("rate card"))).toBe(false)
+        expect(cardlessTransfer({ complimentary: true }).some((e) => e.includes("rate card"))).toBe(false)
+      })
+    })
   })
 })

@@ -146,6 +146,9 @@ interface RoomPriceOverrideProps {
   formatInQuoteCurrency: (amount: number, from: string) => string | null
   onChange: (next: number | null) => void
   onComplimentaryChange: (next: boolean) => void
+  /** A manual-pricing property has no rate card, so the typed price is the room's only price
+   *  rather than an override of one: the field is always open and has nothing to revert to. */
+  manual?: boolean
 }
 
 /**
@@ -169,6 +172,7 @@ function RoomPriceOverride({
   formatInQuoteCurrency,
   onChange,
   onComplimentaryChange,
+  manual = false,
 }: RoomPriceOverrideProps) {
   const currency = baseRateCard?.currency ?? fallbackCurrency
   // 0 is a real price (a comped room), so this is a null check, not a truthiness one.
@@ -183,7 +187,7 @@ function RoomPriceOverride({
   // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
   // and reverting collapses it again, so the two can never drift apart.
   const [requested, setRequested] = useState(false)
-  const expanded = requested || overridden
+  const expanded = manual || requested || overridden
 
   const price = unit.manualRoomPrice ?? 0
   const chargedNights = firstNightFree ? Math.max(0, nights - 1) : nights
@@ -288,7 +292,7 @@ function RoomPriceOverride({
     <div className="space-y-3 rounded-md border bg-muted/40 p-3 md:col-span-2 xl:col-span-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <Label>Price override</Label>
+          <Label>{manual ? "Room price" : "Price override"}</Label>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -318,7 +322,7 @@ function RoomPriceOverride({
             <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
               Complimentary
             </Badge>
-          ) : overridden ? (
+          ) : overridden && !manual ? (
             <Badge variant="secondary" className="h-5 text-[10px]">
               Overridden
             </Badge>
@@ -347,7 +351,7 @@ function RoomPriceOverride({
                   })
                 : "Rate card price"
             }
-            aria-label={`Price override for room ${index + 1}`}
+            aria-label={`${manual ? "Room price" : "Price override"} for room ${index + 1}`}
             value={unit.manualRoomPrice ?? null}
             onValueChange={onChange}
           />
@@ -357,18 +361,20 @@ function RoomPriceOverride({
             <InputGroupText className="text-xs">/ room / night</InputGroupText>
           </InputGroupAddon>
         </InputGroup>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 px-2 text-xs"
-          onClick={() => {
-            setRequested(false)
-            onChange(null)
-          }}
-        >
-          Revert
-        </Button>
+        {manual ? null : (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 px-2 text-xs"
+            onClick={() => {
+              setRequested(false)
+              onChange(null)
+            }}
+          >
+            Revert
+          </Button>
+        )}
         {complimentaryToggle}
       </div>
 
@@ -386,7 +392,9 @@ function RoomPriceOverride({
           <p className="text-xs text-muted-foreground">
             {isComplimentary
               ? "The client's quote and voucher will show this room as complimentary."
-              : baseRateCard && cardRoomRate !== null
+              : manual
+                ? "Priced by hand — this property has no rate card."
+                : baseRateCard && cardRoomRate !== null
                 ? // A typed price is always a room price. Under per_person that means it replaces
                   // the card's whole per-guest sum for this room, not the single adult fare -- so
                   // the figure quoted here is the one the override actually has to beat.
@@ -398,9 +406,15 @@ function RoomPriceOverride({
         </div>
       ) : (
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
-            Leave blank to keep pricing this room off the rate card.
-          </p>
+          {!manual ? (
+            <p className="text-xs text-muted-foreground">
+              Leave blank to keep pricing this room off the rate card.
+            </p>
+          ) : chargedNights > 0 ? (
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              Price required — the quote will flag this room until it&apos;s priced.
+            </p>
+          ) : null}
           {firstNightFree ? (
             <p className="text-xs text-emerald-600 dark:text-emerald-500">{complimentarySummary}</p>
           ) : null}
@@ -1869,7 +1883,9 @@ export function SuiteLegEditor({
                     index={index}
                     nights={nights}
                     basis={value.accommodationPricingBasis}
-                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)}
+                    baseRateCard={
+                      leg.pricingMode === "manual" ? null : resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)
+                    }
                     fallbackCurrency={value.priceCurrency}
                     quoteCurrency={quoteCurrency}
                     formatInQuoteCurrency={formatInQuoteCurrency}
@@ -1877,6 +1893,7 @@ export function SuiteLegEditor({
                     onComplimentaryChange={(next) =>
                       updateUnit(unit.id, { complimentaryFirstNight: next })
                     }
+                    manual={leg.pricingMode === "manual"}
                   />
                 ) : null}
 
@@ -1934,7 +1951,8 @@ export function SuiteLegEditor({
                   />
                 ) : null}
 
-                {leg.pricingMode === "manual" ? (
+                {/* A manual hotel types its price as a room price above, never as per-person fares. */}
+                {leg.pricingMode === "manual" && !isHotel ? (
                   <div className="flex flex-wrap items-end gap-3 md:col-span-2 xl:col-span-3">
                     <div className="space-y-1.5">
                       <Label>Adult fare</Label>
