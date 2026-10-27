@@ -1080,13 +1080,12 @@ export async function buildPackageQuoteLineItems({
         if (!suiteBelongsToLeg) {
           throw new Error(`Selected type is not available for leg: ${legLabel}`)
         }
-        const selected = getValidRateCard(
-          leg,
-          routeId,
-          suiteTypeId,
-          pricingDate,
-          unitRateTypeId ?? selection.rateTypeId,
-        )
+        // A manual-pricing supplier keeps any cards it had before the switch, but they are not
+        // used -- not even for the "was" figure or the currency of a typed price.
+        const selected =
+          leg.pricingMode === "manual"
+            ? null
+            : getValidRateCard(leg, routeId, suiteTypeId, pricingDate, unitRateTypeId ?? selection.rateTypeId)
         return {
           validRateCard: selected?.ok ? selected.card : null,
           rateTypeInherited: selected?.ok ? selected.inherited : null,
@@ -1133,6 +1132,9 @@ export async function buildPackageQuoteLineItems({
         const hotelUnit = resolveSupplierPriceLabel(leg.supplierKind, {
           accommodationPricingBasis: accommodationBasis,
         })
+        // A manual-pricing property has no rate cards: the room price typed in Build Booking is
+        // its only price, so a card is never looked up for it.
+        const isManualPricing = leg.pricingMode === "manual"
 
         // Occupancy no longer has to add up to the booking's travellers: a stay can hold more
         // people than the booking (an extra guest joining for the hotel only) or fewer (someone
@@ -1187,6 +1189,7 @@ export async function buildPackageQuoteLineItems({
               // on client documents count the whole room as an adult fare.
               unit: accommodationPriceLabel("per_room"),
               hideRoomConfig: true,
+              pricingMode: isManualPricing ? "manual" : "rate_card",
               sourceCurrency: overrideCurrency,
               accommodationPricingBasis: accommodationBasis,
               roomOverride: {
@@ -1207,6 +1210,40 @@ export async function buildPackageQuoteLineItems({
               complimentary,
             })
             continue
+          }
+
+          // No typed price, and either nothing to read one from (a manual-pricing property) or
+          // nothing to charge (every night gifted). Neither needs a rate card, so the room reaches
+          // the quote as one line at R0 instead of failing the whole build: a manual room is then
+          // flagged unpriced (isMissingPricing) until a price is typed, and a fully gifted one is
+          // finished as it stands. A gifted room that does have a card still prices off it below.
+          if (isManualPricing || chargedNights === 0) {
+            const resolved = isManualPricing
+              ? { ...resolveManualUnit(unitSelection.suiteTypeId), validRateCard: null }
+              : resolveOverriddenUnit(unitSelection.suiteTypeId, legPricingDate, unitRateTypeId)
+            if (resolved.validRateCard === null) {
+              activeRateCard = null
+              activeRateCardInherited = false
+              addLineItem({
+                description: resolved.description,
+                qty: chargedNights,
+                unitPrice: 0,
+                supplierDescription,
+                suiteTypeId: unitSelection.suiteTypeId,
+                suiteTypeName: resolved.suiteTypeName,
+                variantNames: specificUnitVariantNames(unitSelection),
+                selectedVariantGroups: specificUnitVariantGroups(unitSelection),
+                // The price still to be typed is a room price (see RoomPriceOverride), whatever
+                // the stay's basis.
+                unit: accommodationPriceLabel("per_room"),
+                hideRoomConfig: true,
+                pricingMode: isManualPricing ? "manual" : "rate_card",
+                sourceCurrency: selection.priceCurrency ?? targetCurrency,
+                accommodationPricingBasis: accommodationBasis,
+                complimentary,
+              })
+              continue
+            }
           }
 
           // Each room resolves its own card, so two rooms of the same type on different rate types
@@ -1364,6 +1401,11 @@ export async function buildPackageQuoteLineItems({
           // rate card either), and forces the charged price to 0 regardless of what price_override
           // holds — the two fields are independent, mirroring the hotel first-night flag.
           const isComplimentary = transportRequest?.complimentary === true
+          // A manual-pricing supplier has no card to fall back to, so every trip takes the typed
+          // path: a blank price reaches the quote at R0 and is flagged unpriced (isMissingPricing)
+          // instead of failing the build with "no rate card".
+          const isManualPricing = leg.pricingMode === "manual"
+          const linePricingMode = isManualPricing ? "manual" : "rate_card"
 
           if (isTransfer && transferBasis === "per_person") {
             let validRateCard: SupplierRateCard | null
@@ -1372,7 +1414,7 @@ export async function buildPackageQuoteLineItems({
             let suiteTypeName: string | null
             let fares: PassengerFare[]
 
-            if (hasAnyOverride || isComplimentary) {
+            if (hasAnyOverride || isComplimentary || isManualPricing) {
               const resolved = resolveOverriddenUnit(suiteTypeId, requestPricingDate)
               validRateCard = resolved.validRateCard
               rateTypeInherited = resolved.rateTypeInherited
@@ -1427,6 +1469,7 @@ export async function buildPackageQuoteLineItems({
                 suiteTypeName,
                 unit: requestUnit,
                 hideVariantSuffix: true,
+                pricingMode: linePricingMode,
                 sourceCurrency: lineCurrency,
                 ...(overrideForKey !== null
                   ? {
@@ -1452,7 +1495,7 @@ export async function buildPackageQuoteLineItems({
             continue
           }
 
-          if (overridePrice !== null || isComplimentary) {
+          if (overridePrice !== null || isComplimentary || isManualPricing) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveOverriddenUnit(
               suiteTypeId,
               requestPricingDate,
@@ -1478,6 +1521,7 @@ export async function buildPackageQuoteLineItems({
               suiteTypeName,
               unit,
               hideVariantSuffix: isTransfer,
+              pricingMode: linePricingMode,
               sourceCurrency: overrideCurrency,
               ...(overridePrice !== null
                 ? {

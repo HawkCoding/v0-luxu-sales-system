@@ -100,6 +100,9 @@ interface RequestPriceOverrideProps {
   pax: PassengerTotals
   complimentary: boolean
   onComplimentaryChange: (next: boolean) => void
+  /** A manual-pricing supplier has no rate card, so the typed price is the trip's only price
+   *  rather than an override of one: the fields are always open. */
+  manual?: boolean
 }
 
 /**
@@ -126,6 +129,7 @@ function RequestPriceOverride({
   pax,
   complimentary,
   onComplimentaryChange,
+  manual = false,
 }: RequestPriceOverrideProps) {
   const isPerPerson = basis === "per_person"
   const currency = baseRateCard?.currency ?? fallbackCurrency
@@ -137,7 +141,7 @@ function RequestPriceOverride({
   // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
   // and reverting collapses it again, so the two can never drift apart.
   const [requested, setRequested] = useState(false)
-  const expanded = requested || overridden
+  const expanded = manual || requested || overridden
 
   const billableDays = isRental
     ? getBillableRentalDays(request.pickupAt, request.rentalDetails?.returnAt ?? null)
@@ -228,7 +232,7 @@ function RequestPriceOverride({
     <div className="space-y-3 rounded-md border bg-muted/40 p-3 md:col-span-2 xl:col-span-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <Label>Price override</Label>
+          <Label>{manual ? "Price" : "Price override"}</Label>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -251,7 +255,7 @@ function RequestPriceOverride({
             <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
               Complimentary
             </Badge>
-          ) : overridden ? (
+          ) : overridden && !manual ? (
             <Badge variant="secondary" className="h-5 text-[10px]">
               Overridden
             </Badge>
@@ -310,16 +314,22 @@ function RequestPriceOverride({
             </div>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            {baseRateCard
+            {manual
+              ? "Priced by hand — this supplier has no rate card."
+              : baseRateCard
               ? `Replaces the rate card's ${isPerPerson ? "per-person" : ""} ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} ${basisLabel} where typed.`
               : `No rate card covers this ${tripNoun}, so nothing is being replaced.`}
           </p>
         </div>
-      ) : (
+      ) : !manual ? (
         <p className="text-xs text-muted-foreground">
           Leave blank to keep pricing this {tripNoun} off the rate card.
         </p>
-      )}
+      ) : !complimentary ? (
+        <p className="text-xs text-amber-600 dark:text-amber-500">
+          Price required — the quote will flag this {tripNoun} until it&apos;s priced.
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -554,13 +564,14 @@ export function TransportLegEditor({
           />
           {/* Only a price override is typed by hand here — a request with none prices off the
               rate card and takes the card's currency instead. */}
-          {value.requests.some(
+          {leg.pricingMode === "manual" ||
+          value.requests.some(
             (request) =>
               request.priceOverride != null || request.priceOverrideChild != null || request.priceOverrideInfant != null,
           ) ? (
             <CurrencySelect
               id={`price-currency-${leg.id}`}
-              label="Override currency"
+              label={leg.pricingMode === "manual" ? "Price currency" : "Override currency"}
               value={value.priceCurrency}
               onChange={(priceCurrency) => onChange({ ...value, priceCurrency })}
               className="w-40"
@@ -801,7 +812,7 @@ export function TransportLegEditor({
                 index={index}
                 isRental={isRental}
                 basis={basis}
-                baseRateCard={resolveRequestRateCard(request)}
+                baseRateCard={leg.pricingMode === "manual" ? null : resolveRequestRateCard(request)}
                 noCardMessage={describeNoRateCard(request)}
                 fallbackCurrency={value.priceCurrency}
                 quoteCurrency={quoteCurrency}
@@ -815,6 +826,7 @@ export function TransportLegEditor({
                 pax={pax}
                 complimentary={request.complimentary}
                 onComplimentaryChange={(next) => updateRequest(request.id, { complimentary: next })}
+                manual={leg.pricingMode === "manual"}
               />
               <Collapsible
                 className="md:col-span-2"

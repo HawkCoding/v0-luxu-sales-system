@@ -271,7 +271,7 @@ export function collectForeignCurrencies({
 
     if (state.kind === "transport") {
       for (const request of state.requests) {
-        if (request.priceOverride != null) {
+        if (request.priceOverride != null || leg.pricingMode === "manual") {
           found.add(state.priceCurrency)
           continue
         }
