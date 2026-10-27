@@ -9,6 +9,7 @@ import type {
   CommissionKind,
   PackageDetail,
   PricingSnapshot,
+  PricingUnitRef,
   QuoteLineItem,
   SupplierKind,
   SupplierRateCard,
@@ -68,6 +69,9 @@ function assertNoEmptyUnits(
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
 export interface PackageUnitSelection {
+  /** The booking_service_units row this selection came from, when it came from one. Stamped into
+   *  the line's unitRefs; never read for pricing. */
+  unitId?: string
   suiteTypeId: string
   bedroomTypeId?: string | null
   bedroomLayoutId?: string | null
@@ -599,6 +603,20 @@ export async function buildPackageQuoteLineItems({
      * internal quote view can render "1 guest × 2 nights" rather than a bare 2 that reads as a
      * headcount beside a "per person per night" basis. */
     qtyBasis?: { occupants: number; nights: number } | null
+    /** Hotel, train, tour, cruise and airline lines only: the units this line was priced for (see
+     *  PricingSnapshot.unitRefs). Left off shared costs. */
+    unitRefs?: PricingUnitRef[] | null
+  }
+
+  /** A unit's identity and occupants for PricingSnapshot.unitRefs; `index` is its position on the leg. */
+  function unitRefOf(unitSelection: PackageUnitSelection, index: number): PricingUnitRef {
+    return {
+      index,
+      ...(unitSelection.unitId ? { unitId: unitSelection.unitId } : {}),
+      adults: unitSelection.adultCount ?? 0,
+      children: unitSelection.childCount ?? 0,
+      infants: unitSelection.infantCount ?? 0,
+    }
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -633,6 +651,7 @@ export async function buildPackageQuoteLineItems({
     transferPricingBasis,
     accommodationPricingBasis,
     qtyBasis,
+    unitRefs,
   }: AddLineItemOptions) {
     // A stay whose every night was gifted still has to reach the quote: the client documents read
     // their itinerary off the priced legs, so dropping the line would drop the hotel entirely.
@@ -764,6 +783,7 @@ export async function buildPackageQuoteLineItems({
         ...(transferPricingBasis ? { transferPricingBasis } : {}),
         ...(accommodationPricingBasis ? { accommodationPricingBasis } : {}),
         ...(qtyBasis ? { occupantCount: qtyBasis.occupants, chargedNights: qtyBasis.nights } : {}),
+        ...(unitRefs && unitRefs.length > 0 ? { unitRefs } : {}),
       }
     }
 
@@ -1131,8 +1151,10 @@ export async function buildPackageQuoteLineItems({
         // (PASSENGER_WARN_SUPPLIER_KINDS in lib/packages/apply-dialog-state.ts); only a train must
         // still match exactly (PASSENGER_SUM_SUPPLIER_KINDS, enforced below and in PATCH /services).
 
-        for (const unitSelection of units) {
+        for (const [unitIndex, unitSelection] of units.entries()) {
           const unitRateTypeId = effectiveRateTypeIdOf(unitSelection)
+          // Every line this room emits belongs to this room's occupants (per-guest rows).
+          const roomUnitRefs = [unitRefOf(unitSelection, unitIndex)]
           // 0 is a real override (a comped room), so this is a null check, not a truthiness one.
           const overridePrice =
             unitSelection.manualRoomPrice === null || unitSelection.manualRoomPrice === undefined
@@ -1178,6 +1200,7 @@ export async function buildPackageQuoteLineItems({
               hideRoomConfig: true,
               sourceCurrency: overrideCurrency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs,
               roomOverride: {
                 price: overridePrice,
                 // What the card would have charged this room a night -- the figure Build Booking
@@ -1227,6 +1250,7 @@ export async function buildPackageQuoteLineItems({
               hideRoomConfig: true,
               sourceCurrency: validRateCard.currency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs,
               complimentary,
             })
             // No zero-qty fallback needed below: this path always emits exactly one line per room,
@@ -1270,6 +1294,7 @@ export async function buildPackageQuoteLineItems({
               passengerKind: fare.kind,
               sourceCurrency: validRateCard.currency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs,
               complimentary,
             })
           }
@@ -1291,6 +1316,7 @@ export async function buildPackageQuoteLineItems({
               hideRoomConfig: true,
               sourceCurrency: validRateCard.currency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs,
               complimentary,
             })
           }
@@ -1635,6 +1661,7 @@ export async function buildPackageQuoteLineItems({
                 setAt: unitSelection.manualTourPriceSetAt ?? null,
                 setByName: unitSelection.manualTourPriceSetByName ?? null,
               },
+              unitRefs: [unitRefOf(unitSelection, units.indexOf(unitSelection))],
             })
             continue
           }
@@ -1790,6 +1817,8 @@ export async function buildPackageQuoteLineItems({
                   pricingMode: isManualPricing ? "manual" : "rate_card",
                   singleSupplementPct: isSolo ? packageDetail.singleSupplementPct : null,
                   sourceCurrency: lineSourceCurrency,
+                  // Every unit merged into this line, so the per-guest rows can seat its fare.
+                  unitRefs: variantUnits.map((unitSelection) => unitRefOf(unitSelection, units.indexOf(unitSelection))),
                   ...(kindOverride !== null
                     ? {
                         trainFareOverride: {

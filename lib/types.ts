@@ -1049,6 +1049,21 @@ export interface PricingSnapshot {
   /** The nights `occupantCount` was multiplied by — the charged nights, so a gifted night is
    *  already excluded (see complimentaryNights). */
   chargedNights?: number | null
+  /** Hotel, train, tour, cruise and airline lines only: the units (rooms, suites, tour parties) the
+   *  line was priced for — one on a hotel or tour-override line, every merged unit on a train/tour
+   *  variant line. Lets the per-guest rows (lib/quotes/per-guest-allocation.ts) say which room's
+   *  occupants a cost belongs to. Absent on transfers, rentals, extras and commission (shared by the
+   *  whole party), and on every line built before 2026-10. */
+  unitRefs?: PricingUnitRef[]
+}
+
+/** One unit a line was priced for: its position on the leg and its occupants at pricing time. */
+export interface PricingUnitRef {
+  index: number
+  unitId?: string
+  adults: number
+  children: number
+  infants: number
 }
 
 export interface SupplierPackage {

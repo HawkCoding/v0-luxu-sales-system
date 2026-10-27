@@ -149,6 +149,30 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("Travel Dates:</strong>")
   })
 
+  it("prints one paragraph per guest in place of the per-person rate when per-guest rows are given", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      adults: 2,
+      children: 1,
+      total: 61_000,
+      perGuestRows: [
+        { kind: "adult", ordinal: 1, label: "Adult 1 (sharing)", amount: 24_500, single: false, supplement: false, age: null },
+        { kind: "adult", ordinal: 2, label: "Adult 2 (sharing)", amount: 24_500, single: false, supplement: false, age: null },
+        { kind: "child", ordinal: 1, label: "Child 1 (age 6)", amount: 12_000, single: false, supplement: false, age: 6 },
+      ],
+    })
+    expect(html).toContain(`Adult 1 (sharing): ${formatMoney(24_500)}</p>`)
+    expect(html).toContain(`Child 1 (age 6): ${formatMoney(12_000)}</p>`)
+    expect(html).not.toContain("per person")
+    expect(html).toContain("TOTAL for 2 Adults + 1 Child:")
+  })
+
+  it("keeps the per-person rate when the per-guest rows are null", () => {
+    const html = buildQuoteSummaryBlock({ ...base, perGuestRows: null })
+    expect(html).toContain("2 Adults x")
+    expect(html).toContain("per person")
+  })
+
   it("renders per-person rate and bold VAT-inclusive total for adults-only bookings", () => {
     const html = buildQuoteSummaryBlock(base)
     expect(html).toContain("2 Adults x")

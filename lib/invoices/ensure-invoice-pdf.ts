@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { buildInvoiceView, invoiceJourneyHeading } from "@/lib/invoices/build-invoice-view"
 import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
+import { allocatePerGuest } from "@/lib/quotes/per-guest-allocation"
 import { printedTotalInclVat, type InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
@@ -116,6 +117,14 @@ export async function ensureInvoicePdf(
           children: view.pax.children,
           // The figure printed as "Total incl. VAT", so the per-person rows reconcile with it.
           total: printedTotalInclVat(totals),
+        }),
+        // One row per guest where the lines say who sits in which unit; null keeps the rows above.
+        perGuestRows: allocatePerGuest({
+          lines: view.pricedLines,
+          adults: view.pax.adults,
+          children: view.pax.children,
+          childAges: view.pax.childAges,
+          target: printedTotalInclVat(totals),
         }),
       },
       currency: invoice.currency,

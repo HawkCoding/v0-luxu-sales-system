@@ -12,6 +12,9 @@ export interface BookingPaxRow {
 export interface PayingPax {
   adults: number
   children: number
+  /** The paying children's ages, in booking order (infants and over-age children left out). Can be
+   *  shorter than `children` when the enquiry didn't give every child's age. */
+  childAges: number[]
 }
 
 /**
@@ -41,15 +44,20 @@ export async function resolvePayingPax(
   booking: BookingPaxRow | null | undefined,
   primarySupplierId: string | null,
 ): Promise<PayingPax> {
-  if (!booking) return { adults: 0, children: 0 }
+  if (!booking) return { adults: 0, children: 0, childAges: [] }
   const buckets = await resolveSupplierAgeBuckets(supabase, primarySupplierId)
+  const childAges = booking.child_ages ?? []
   const totals = projectPassengerTotals(
     {
       noOfAdults: booking.no_of_adults ?? 0,
       noOfChildren: booking.no_of_children ?? 0,
-      childAges: booking.child_ages ?? [],
+      childAges,
     },
     buckets,
   )
-  return { adults: totals.adultCount, children: totals.childCount }
+  return {
+    adults: totals.adultCount,
+    children: totals.childCount,
+    childAges: childAges.filter((age) => age > buckets.infantMax && age <= buckets.childMax),
+  }
 }

@@ -25,6 +25,7 @@ import { buildRoomTokens, buildSuiteTokens } from "@/lib/templates/suite-descrip
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { emptyStayTokens, loadStayTokens } from "@/lib/templates/stay-tokens"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
+import { resolveQuotePerGuestRows } from "@/lib/quotes/resolve-per-guest-rows"
 import { formatMoney, normaliseCurrency } from "@/lib/money"
 import {
   deriveFlightCapPerPerson,
@@ -128,6 +129,7 @@ interface BookingRow {
   trip_end_date: string | null
   no_of_adults: number | null
   no_of_children: number | null
+  child_ages: number[] | null
   duration_nights: number | null
   route_reversed: boolean | null
   primary_supplier_id: string | null
@@ -216,7 +218,7 @@ export async function resolveSharedEmailTokens(
         supabase
           .from("bookings")
           .select(
-            "id, booking_number, customer_invoice_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, duration_nights, route_reversed, primary_supplier_id, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
+            "id, booking_number, customer_invoice_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, child_ages, duration_nights, route_reversed, primary_supplier_id, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
           )
           .eq("id", bookingId)
           .maybeSingle(),
@@ -335,7 +337,7 @@ export async function resolveSharedEmailTokens(
     try {
       const { data: lineItems } = await supabase
         .from("quote_line_items")
-        .select("unit_price, pricing_snapshot")
+        .select("unit_price, total, pricing_snapshot")
         .eq("quote_id", latestQuote.id)
         // Ordered because the primary-supplier fallbacks are "first leg in array order".
         .order("sort_order", { ascending: true })
@@ -385,8 +387,16 @@ export async function resolveSharedEmailTokens(
         mapSupplierKindToServiceType(primarySupplierKind),
       )
       const documentText = await getDocumentTextSettings(supabase)
+      // This block prints the total alone (no subtotal or deductions), so the rows add up to it.
+      const perGuestRows = await resolveQuotePerGuestRows(supabase, {
+        booking,
+        quotePrimarySupplierId: quoteConfig.primarySupplierId,
+        lines: lineItems ?? [],
+        target: latestQuote.total ?? 0,
+      })
 
       quoteSummaryTable = buildQuoteSummaryBlock({
+        perGuestRows,
         quoteNumber: latestQuote.quote_number ?? "",
         quoteDate: latestQuote.created_at?.slice(0, 10) ?? "",
         validUntil: latestQuote.validity_until,

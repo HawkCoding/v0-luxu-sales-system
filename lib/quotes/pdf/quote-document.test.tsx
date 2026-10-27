@@ -326,6 +326,45 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(first).toMatch(/Total per Child\s+R\s?25[\s ]?000,00/)
     })
 
+    it("prints one row per guest in place of the per-adult/per-child rows when given", async () => {
+      const [first] = await pages({
+        adults: 3,
+        children: 0,
+        total: 84_805,
+        perPersonTotals: { perAdult: 28_268.33, perChild: null },
+        perGuestRows: [
+          { kind: "adult", ordinal: 1, label: "Adult 1 (sharing)", amount: 24_728, single: false, supplement: false, age: null },
+          { kind: "adult", ordinal: 2, label: "Adult 2 (sharing)", amount: 24_728, single: false, supplement: false, age: null },
+          {
+            kind: "adult",
+            ordinal: 3,
+            label: "Adult 3 (single, supplement incl.)",
+            amount: 35_349,
+            single: true,
+            supplement: true,
+            age: null,
+          },
+        ],
+      })
+
+      expect(first).toMatch(/Adult 1 \(sharing\)\s+R\s?24\s?728,00/)
+      expect(first).toMatch(/Adult 3 \(single, supplement incl\.\)\s+R\s?35\s?349,00/)
+      expect(first).not.toContain("Total per Adult")
+      expect(first).toContain("Total for 3 Adults incl. VAT")
+    })
+
+    it("falls back to the per-adult row when the per-guest rows are empty", async () => {
+      const [first] = await pages({
+        adults: 2,
+        children: 0,
+        perPersonTotals: { perAdult: 42_500, perChild: null },
+        perGuestRows: [],
+      })
+
+      expect(first).toMatch(/Total per Adult\s+R\s?42\s?500,00/)
+      expect(first).not.toContain("(sharing)")
+    })
+
     it("keeps the booking's own counts in the Guests row while the total label counts the paying pax", async () => {
       // 2 adults + a 1-year-old: the Guests row still names the infant; the label and rows don't.
       const [first] = await pages({

@@ -4,6 +4,7 @@ import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
 import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
+import { allocatePerGuest } from "@/lib/quotes/per-guest-allocation"
 import {
   complimentaryLegIdsFromLineItems,
   complimentaryTransportRequestIdsFromLineItems,
@@ -256,6 +257,15 @@ export async function ensureQuotePdf(
         adults: pax.adults,
         children: pax.children,
         total: Number(quote.subtotal ?? quote.total),
+      }),
+      // One row per guest where the lines say who sits in which unit; null keeps the rows above.
+      // Same gross figure as those rows, so the two never disagree about the price they head.
+      perGuestRows: allocatePerGuest({
+        lines: lineItems ?? [],
+        adults: pax.adults,
+        children: pax.children,
+        childAges: pax.childAges,
+        target: Number(quote.subtotal ?? quote.total),
       }),
       subtotal: quote.subtotal,
       agentCommission: Number(quote.agent_commission ?? 0),

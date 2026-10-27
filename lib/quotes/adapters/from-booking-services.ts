@@ -227,6 +227,7 @@ export function bookingServicesToLegSelections(
     const unitSelections: PackageUnitSelection[] = serviceUnits
       .filter((unit): unit is BookingServiceUnitRow & { suite_type_id: string } => unit.suite_type_id !== null)
       .map((unit) => ({
+        unitId: unit.id,
         suiteTypeId: unit.suite_type_id,
         bedroomTypeId: unit.bedroom_type_id,
         bedroomLayoutId: unit.bedroom_layout_id,
