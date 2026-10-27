@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { Playfair_Display, Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import { SpeedInsights } from '@vercel/speed-insights/next'
+import { PerfReporter } from '@/components/perf-reporter'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeProvider } from '@/components/theme-provider'
 import { getAppBranding } from '@/lib/branding/app-logo'
@@ -43,6 +45,8 @@ export default function RootLayout({
           {children}
           <Toaster position="top-right" duration={2500} />
           <Analytics />
+          <SpeedInsights />
+          <PerfReporter />
         </ThemeProvider>
       </body>
     </html>
