@@ -139,11 +139,11 @@ export function BaseLayout({
 }
 
 // fontFamily/fontSize are applied per-render from the app settings. No align
-// attribute and no auto margins: the frame sits on the left like a typed
-// message. Outlook ignores max-width and fills the reading pane, as a typed
-// message does.
+// attribute, no auto margins and no max-width: the frame sits on the left and
+// fills the reading pane like a typed message. A 640px cap made clients that
+// honour max-width wrap every sentence early, well short of the window edge
+// (salesperson report, 2026-10-27).
 const frame = {
-  maxWidth: "640px",
   margin: "0",
 }
 

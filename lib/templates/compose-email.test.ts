@@ -302,8 +302,10 @@ describe("composeFromTemplate", () => {
     // Nothing centred: masthead, body and signature share one left edge.
     expect(html).not.toMatch(/text-align:\s*center/)
     expect(html).not.toMatch(/margin:\s*0 auto/)
-    // The frame caps the width but carries no align attribute (react-email's own centring).
-    const frame = html.match(/<table[^>]*max-width:640px[^>]*>/)?.[0] ?? ""
+    // The frame fills the reading pane (no width cap that would wrap sentences early) and
+    // carries no align attribute (react-email's own centring).
+    expect(html).not.toMatch(/max-width:\s*640px/)
+    const frame = html.match(/<table[^>]*role="presentation"[^>]*width="100%"[^>]*>/)?.[0] ?? ""
     expect(frame).not.toBe("")
     expect(frame).not.toContain("align=")
     // The strip keeps its divider line.

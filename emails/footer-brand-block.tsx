@@ -100,8 +100,8 @@ const textCell = {
 }
 
 // The default 44-character heading wrapped "...KRUGER / SHALATI" at 19px (client, 2026-10-07).
-// Room beside the seal on a desktop: 640px frame (the strips have no side padding) - 90px seal
-// cell = 550px. The heading's advance width is ~20.1em in Calibri, ~24.8em in Arial/Helvetica and
+// Room beside the seal on a desktop: at least a 640px pane (the strips have no side padding) - 90px
+// seal cell = 550px. The heading's advance width is ~20.1em in Calibri, ~24.8em in Arial/Helvetica and
 // ~26.1em in Verdana (the widest family on the allowlist), so at 16px it is ~321 / ~396 / ~418px —
 // one line with 130px+ to spare in every family. No `nowrap`: a narrow pane or a phone must still
 // wrap it.
