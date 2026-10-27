@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
-import type { Quote } from "@/lib/types"
+import type { Quote, QuoteLineItem } from "@/lib/types"
 
 vi.mock("@/lib/role-context", () => ({
   useRole: () => ({ can: () => true }),
@@ -121,5 +121,35 @@ describe("JobQuotesTab — Amend", () => {
     const amendButtons = screen.getAllByRole("button", { name: "Amend" })
     expect(amendButtons).toHaveLength(1)
     expect(amendButtons[0]).toHaveAttribute("data-quote-id", "current")
+  })
+})
+
+describe("JobQuotesTab — line dates", () => {
+  it("shows a dash for a line with no pricing snapshot", () => {
+    renderTab([buildQuote({})])
+
+    expect(screen.getByRole("columnheader", { name: "Date" })).toBeInTheDocument()
+    expect(screen.getAllByTestId("quote-line-date").map((cell) => cell.textContent)).toEqual(["—"])
+  })
+
+  it("shows each dated line's range", () => {
+    const trainSnapshot = {
+      supplierKind: "train_operator",
+      travelDate: "2027-07-09",
+      serviceEndDate: "2027-07-12",
+    } as QuoteLineItem["pricingSnapshot"]
+    renderTab([
+      buildQuote({
+        lineItems: [
+          { description: "Rovos Rail — Adult", supplierDescription: null, qty: 2, unitPrice: 1000, total: 2000, pricingSnapshot: trainSnapshot },
+          { description: "Manual line", supplierDescription: null, qty: 1, unitPrice: 50, total: 50, pricingSnapshot: null },
+        ],
+      }),
+    ])
+
+    expect(screen.getAllByTestId("quote-line-date").map((cell) => cell.textContent)).toEqual([
+      "09–12 Jul 2027",
+      "—",
+    ])
   })
 })

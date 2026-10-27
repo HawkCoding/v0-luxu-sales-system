@@ -17,7 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
-import { dateOnly } from "@/lib/packages/trip-date-range"
+import { dateOnly, selectedRouteDurationDays, serviceDateSpan } from "@/lib/packages/trip-date-range"
 import { getBillableRentalDays } from "@/lib/packages/rental-days"
 import { resolveOverrideSetterNames } from "@/lib/quotes/room-override-provenance"
 import {
@@ -474,6 +474,9 @@ export async function buildPackageQuoteLineItems({
   // The date the current line's rate card was matched against (the leg's own service date, or
   // the quote-level travelDate when the leg has none).
   let activePricingDate: string = travelDate
+  // The last day the current line's service covers (train arrival, hotel check-out, rental
+  // return), stamped so the quote can show each line's date range. Null means a single day.
+  let activeServiceEndDate: string | null = null
   const childAges = job.child_ages ?? []
   // The booking's real headcount — used once, for the single whole-booking commission line,
   // not per line (a line's own qty may be nights/vehicles/rooms rather than passengers).
@@ -694,6 +697,7 @@ export async function buildPackageQuoteLineItems({
         rateTypeName: rateTypeMeta?.name ?? null,
         rateTypeInherited: activeRateCard ? activeRateCardInherited : null,
         travelDate: activePricingDate,
+        serviceEndDate: activeServiceEndDate,
         passengerKind,
         // Already in the quote's currency, so downstream maths (markup, commission) never has to
         // know a conversion happened; the pre-conversion figure lives in sourceUnitPrice below.
@@ -995,6 +999,13 @@ export async function buildPackageQuoteLineItems({
       // rate-card season than the train still gets the right card.
       const legPricingDate = selection.serviceDate ?? travelDate
       activePricingDate = legPricingDate
+      activeServiceEndDate =
+        serviceDateSpan({
+          supplierKind: leg.supplierKind,
+          serviceDate: selection.serviceDate ?? null,
+          nights: selection.nights ?? null,
+          routeDurationDays: selectedRouteDurationDays(leg, routeId),
+        })?.end ?? null
       const supplierDescription = leg.supplierDescription ?? null
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
       /** The rate type a unit prices at: its own on the kinds that support one, else the leg's. The
@@ -1312,6 +1323,14 @@ export async function buildPackageQuoteLineItems({
           }
           const requestPricingDate = dateOnly(transportRequest?.pickup_at) ?? legPricingDate
           activePricingDate = requestPricingDate
+          const returnDate = isVehicleRental
+            ? dateOnly(
+                (Array.isArray(transportRequest?.rental_details)
+                  ? transportRequest?.rental_details[0]
+                  : transportRequest?.rental_details)?.return_at,
+              )
+            : null
+          activeServiceEndDate = returnDate && returnDate >= requestPricingDate ? returnDate : requestPricingDate
 
           const pointLabel =
             transportRequest?.pickup_point.trim() && transportRequest?.dropoff_point.trim()

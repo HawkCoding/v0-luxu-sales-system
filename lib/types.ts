@@ -949,6 +949,10 @@ export interface PricingSnapshot {
    * (manual-pricing legs). */
   rateTypeInherited?: boolean | null
   travelDate: string
+  /** YYYY-MM-DD, the last day this line's service covers (train arrival, hotel check-out, rental
+   *  return). Stamped at build time from 2026-10; absent on older lines and on extras, where
+   *  lib/quotes/line-item-date.ts falls back to the stay length or the start date alone. */
+  serviceEndDate?: string | null
   passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
   baseUnitPrice: number
   markupPct: number
