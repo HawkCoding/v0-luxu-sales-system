@@ -50,6 +50,7 @@ import {
   type QuoteSummaryItem,
 } from "@/lib/quotes/quote-presentation"
 import type { PerPersonTotals } from "@/lib/invoices/per-person-totals"
+import type { GuestShare } from "@/lib/quotes/per-guest-allocation"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 export interface QuotePdfData {
@@ -78,6 +79,9 @@ export interface QuotePdfData {
   /** "Total per Adult" / "Total per Child" — the invoice's own figures (derivePerPersonTotals in
    *  lib/invoices/per-person-totals.ts); a null side omits its line, absent prints neither. */
   perPersonTotals?: PerPersonTotals | null
+  /** One row per paying guest (allocatePerGuest in lib/quotes/per-guest-allocation.ts). When
+   *  present and non-empty it replaces the "Total per Adult" / "Total per Child" rows. */
+  perGuestRows?: readonly GuestShare[] | null
   /** Gross travel price before the agency discount (quotes.subtotal). Only shown when a
    *  commission or visible discount is deducted from it. */
   subtotal?: number
@@ -319,6 +323,7 @@ export function QuoteDocument({
   journeyDetails,
   total,
   perPersonTotals,
+  perGuestRows,
   subtotal,
   agentCommission = 0,
   discount = 0,
@@ -475,12 +480,20 @@ export function QuoteDocument({
             page reads as a separate document. */}
         <View style={styles.totals} wrap={false}>
           {/* The per-person rows head the block, above Sub Total or the grand total (client markup). */}
-          {perPersonTotals?.perAdult != null ? (
-            <TotalsRow label="Total per Adult" value={money(perPersonTotals.perAdult)} />
-          ) : null}
-          {perPersonTotals?.perChild != null && paying.children > 0 ? (
-            <TotalsRow label="Total per Child" value={money(perPersonTotals.perChild)} />
-          ) : null}
+          {perGuestRows && perGuestRows.length > 0 ? (
+            perGuestRows.map((guest) => (
+              <TotalsRow key={`${guest.kind}-${guest.ordinal}`} label={guest.label} value={money(guest.amount)} />
+            ))
+          ) : (
+            <>
+              {perPersonTotals?.perAdult != null ? (
+                <TotalsRow label="Total per Adult" value={money(perPersonTotals.perAdult)} />
+              ) : null}
+              {perPersonTotals?.perChild != null && paying.children > 0 ? (
+                <TotalsRow label="Total per Child" value={money(perPersonTotals.perChild)} />
+              ) : null}
+            </>
+          )}
           {hasDeduction ? (
             <TotalsRow label="Sub Total incl. VAT" value={money(subtotal ?? total)} bold />
           ) : null}

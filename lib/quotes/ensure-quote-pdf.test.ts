@@ -222,7 +222,7 @@ describe("ensureQuotePdf headcounts", () => {
     // Guests row: the booking's own counts, infant included, as the e-mail/invoice/voucher print.
     expect([data.adults, data.children]).toEqual([2, 3])
     // Total label and per-person rows: the paying projection.
-    expect(data.payingPax).toEqual({ adults: 3, children: 1 })
+    expect(data.payingPax).toMatchObject({ adults: 3, children: 1 })
     expect(data.perPersonTotals).toEqual({ perAdult: 30_600, perChild: 15_300 })
 
     for (const path of [

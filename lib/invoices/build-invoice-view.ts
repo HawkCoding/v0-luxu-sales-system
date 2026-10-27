@@ -10,7 +10,7 @@ import {
   resolveTransportLinePoints,
   type InvoiceTransportRequest,
 } from "@/lib/invoices/transport-line-points"
-import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
+import { payingPaxSupplierId, resolvePayingPax, type PayingPax } from "@/lib/invoices/booking-pax"
 import { loadQuoteConfig } from "@/lib/quotes/load-quote-config"
 import type { PerPersonLine } from "@/lib/invoices/per-person-totals"
 import { logError } from "@/lib/error-log"
@@ -35,7 +35,7 @@ export interface InvoiceView {
   departure: InvoiceDeparture | null
   items: InvoiceItem[]
   /** Adults and paying children (resolvePayingPax) — the divisor of the "Total per Adult/Child" rows. */
-  pax: { adults: number; children: number }
+  pax: PayingPax
   /** The accepted quote's raw priced lines (commission unfolded), for derivePerPersonTotals. */
   pricedLines: PerPersonLine[]
 }

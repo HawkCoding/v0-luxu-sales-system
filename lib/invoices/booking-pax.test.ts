@@ -37,7 +37,7 @@ describe("resolvePayingPax", () => {
 
   it("drops the infant and counts the over-age child as an adult", async () => {
     const supabase = fakeSupabase({ defaults: { infant: "2", child: "12" } })
-    expect(await resolvePayingPax(supabase as never, booking, null)).toEqual({ adults: 3, children: 1 })
+    expect(await resolvePayingPax(supabase as never, booking, null)).toEqual({ adults: 3, children: 1, childAges: [8] })
   })
 
   it("buckets by the primary supplier's own ages", async () => {
@@ -46,19 +46,23 @@ describe("resolvePayingPax", () => {
       defaults: { infant: "2", child: "12" },
       supplier: { infant_max_age: 2, child_max_age: 16 },
     })
-    expect(await resolvePayingPax(supabase as never, booking, "supplier-1")).toEqual({ adults: 2, children: 2 })
+    expect(await resolvePayingPax(supabase as never, booking, "supplier-1")).toEqual({
+      adults: 2,
+      children: 2,
+      childAges: [8, 15],
+    })
   })
 
   it("falls back to the house defaults when the age settings can't be read", async () => {
     const supabase = fakeSupabase({ settingsError: true })
-    expect(await resolvePayingPax(supabase as never, booking, null)).toEqual({ adults: 3, children: 1 })
+    expect(await resolvePayingPax(supabase as never, booking, null)).toEqual({ adults: 3, children: 1, childAges: [8] })
   })
 
   it("keeps the raw counts when no child ages were captured, and returns zeros without a booking", async () => {
     const supabase = fakeSupabase({ defaults: { infant: "2", child: "12" } })
     expect(
       await resolvePayingPax(supabase as never, { no_of_adults: 4, no_of_children: 1, child_ages: null }, null),
-    ).toEqual({ adults: 4, children: 1 })
-    expect(await resolvePayingPax(supabase as never, null, null)).toEqual({ adults: 0, children: 0 })
+    ).toEqual({ adults: 4, children: 1, childAges: [] })
+    expect(await resolvePayingPax(supabase as never, null, null)).toEqual({ adults: 0, children: 0, childAges: [] })
   })
 })

@@ -6,6 +6,7 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
+import { resolveQuotePerGuestRows } from "@/lib/quotes/resolve-per-guest-rows"
 import { formatMoney } from "@/lib/money"
 import {
   deriveFlightCapPerPerson,
@@ -61,7 +62,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, journey_class, rate_audience, show_train_only_note, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, journey_class, rate_audience, show_train_only_note, booking:bookings(booking_number, no_of_adults, no_of_children, child_ages, primary_supplier_id, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -182,7 +183,17 @@ export async function POST(req: Request, { params }: RouteParams) {
     mapSupplierKindToServiceType(primarySupplierKind),
   )
 
+  // The quote PDF's own per-guest rows, so the email and the PDF stapled to it print the same people
+  // at the same figures.
+  const perGuestRows = await resolveQuotePerGuestRows(supabase, {
+    booking,
+    quotePrimarySupplierId: quoteConfig.primarySupplierId,
+    lines: lineItems,
+    target: Number(quote.subtotal ?? quote.total),
+  })
+
   const quoteSummaryTable = buildQuoteSummaryBlock({
+    perGuestRows,
     quoteNumber,
     quoteDate,
     validUntil: quote.validity_until,

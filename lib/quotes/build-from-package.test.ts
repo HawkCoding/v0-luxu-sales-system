@@ -4,6 +4,7 @@ import type { Database } from "@/lib/supabase/types"
 import type { PackageDetail, PackageLeg, SupplierKind, SupplierRateCard } from "@/lib/types"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { describeQtyBasis, isMissingPricing } from "@/lib/quotes/pricing-engine"
+import { allocatePerGuest } from "@/lib/quotes/per-guest-allocation"
 
 const JOB_ID = "00000000-0000-4000-8000-00000000aaaa"
 
@@ -2517,6 +2518,84 @@ describe("buildPackageQuoteLineItems", () => {
     expect(soloLine?.description).toContain("3/4 bath")
     expect(soloLine?.description).not.toContain("Shower")
     expect(soloLine?.description).toContain("(25% single supplement included)")
+  })
+
+  it("stamps each line's units so the per-guest rows can seat a sharing pair and a single (Carmen #11)", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-pullman", "supplier-leg-train", "Pullman")],
+      rateCards: [
+        rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-pullman", pricePerPerson: 20000 }),
+      ],
+    })
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      accommodationPricingBasis: "per_room",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [
+        suiteType("room-double", "supplier-leg-hotel", "Double"),
+        suiteType("room-single", "supplier-leg-hotel", "Single"),
+      ],
+      rateCards: [
+        rateCard({ id: "rc-double", routeId: "route-bb", suiteTypeId: "room-double", pricePerPerson: 4728 }),
+        rateCard({ id: "rc-single", routeId: "route-bb", suiteTypeId: "room-single", pricePerPerson: 4174.5 }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        booking: { id: JOB_ID, no_of_adults: 3, no_of_children: 0, no_of_suites: 2, child_ages: [], departure_date: "2026-09-01" },
+      }),
+      packageDetail: { ...detail([trainLeg, hotelLeg]), singleSupplementPct: 35 },
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            { unitId: "unit-shared", suiteTypeId: "suite-pullman", adultCount: 2, childCount: 0, infantCount: 0 },
+            { unitId: "unit-solo", suiteTypeId: "suite-pullman", adultCount: 1, childCount: 0, infantCount: 0 },
+          ],
+        },
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          units: [
+            { suiteTypeId: "room-single", adultCount: 1 },
+            { suiteTypeId: "room-double", adultCount: 2 },
+          ],
+        },
+      ],
+    })
+
+    const trainLines = lineItems.filter((li) => li.pricingSnapshot?.legId === "leg-train")
+    expect(trainLines.map((li) => [li.total, li.pricingSnapshot?.unitRefs])).toEqual([
+      [40000, [{ index: 0, unitId: "unit-shared", adults: 2, children: 0, infants: 0 }]],
+      [27000, [{ index: 1, unitId: "unit-solo", adults: 1, children: 0, infants: 0 }]],
+    ])
+    const hotelLines = lineItems.filter((li) => li.pricingSnapshot?.legId === "leg-hotel")
+    expect(hotelLines.map((li) => [li.total, li.pricingSnapshot?.unitRefs])).toEqual([
+      [8349, [{ index: 0, adults: 1, children: 0, infants: 0 }]],
+      [9456, [{ index: 1, adults: 2, children: 0, infants: 0 }]],
+    ])
+
+    const rows = allocatePerGuest({
+      lines: lineItems.map((li) => ({ total: li.total, pricing_snapshot: li.pricingSnapshot ?? null })),
+      adults: 3,
+      children: 0,
+      target: 84805,
+    })
+    expect(rows?.map((row) => [row.label, row.amount])).toEqual([
+      ["Adult 1 (sharing)", 24728],
+      ["Adult 2 (sharing)", 24728],
+      ["Adult 3 (single, supplement incl.)", 35349],
+    ])
   })
 
   it("charges a single supplement for a unit with exactly one adult and no children", async () => {

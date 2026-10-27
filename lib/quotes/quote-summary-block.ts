@@ -11,6 +11,7 @@ import { EMAIL_COLORS, emailSpacerRow, LAYOUT_TABLE_ATTRS } from "@/lib/email/em
 import { formatMoney } from "@/lib/money"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
+import type { GuestShare } from "@/lib/quotes/per-guest-allocation"
 import { sortItineraryBlocksByLegOrder } from "@/lib/itinerary/sort-blocks"
 import {
   AGENT_COMMISSION_COLOR,
@@ -64,6 +65,9 @@ export interface QuoteSummaryInput {
   packageExcludesDefault?: string
   /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
   flightCapPerPerson?: number | null
+  /** One row per paying guest (allocatePerGuest, on the same gross figure as the per-person rate).
+   *  When present and non-empty it replaces the "N Adults x R… per person" line. */
+  perGuestRows?: readonly GuestShare[] | null
 }
 
 export function formatQuoteDate(value: string | null): string {
@@ -169,9 +173,13 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const pricing = outlinedPanel(
     "Total price",
     16,
-    (perPersonRate !== null
-      ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${money(perPersonRate)} per person</p>`
-      : "") +
+    (input.perGuestRows && input.perGuestRows.length > 0
+      ? input.perGuestRows
+          .map((guest) => `<p style="${perPersonLine}">${escapeHtml(guest.label)}: ${money(guest.amount)}</p>`)
+          .join("")
+      : perPersonRate !== null
+        ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${money(perPersonRate)} per person</p>`
+        : "") +
       (showSubtotal
         ? `<p style="${subtotalLine}">Subtotal: ${money(input.subtotal ?? input.total)}</p>` +
           (hasAgentCommission

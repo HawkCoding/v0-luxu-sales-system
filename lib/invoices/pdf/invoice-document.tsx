@@ -31,6 +31,7 @@ import {
   formatAgentCommission,
   formatDiscount,
 } from "@/lib/quotes/quote-presentation"
+import type { GuestShare } from "@/lib/quotes/per-guest-allocation"
 import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 /** The invoice recipient. A full tax invoice must name and address them. */
@@ -112,6 +113,9 @@ export interface InvoiceTotals {
    *  paying children (perChild). */
   perAdult?: number | null
   perChild?: number | null
+  /** One row per paying guest (allocatePerGuest), adding up to the "Total incl. VAT" figure. When
+   *  present and non-empty it replaces the perAdult / perChild rows. */
+  perGuestRows?: readonly GuestShare[] | null
 }
 
 /** The figure the "Total incl. VAT:" row prints: net of any printed deduction, else the subtotal. */
@@ -382,6 +386,9 @@ const styles = StyleSheet.create({
   },
   totalsLabel: { fontSize: 10, width: 152 },
   totalsValue: { fontSize: 10, flex: 1, textAlign: "right" },
+  perGuestBlock: { rowGap: 3.5 },
+  perGuestLabel: { fontSize: 9, flex: 1, paddingRight: 8 },
+  perGuestValue: { fontSize: 9, textAlign: "right" },
   outstandingRow: {
     flexDirection: "row",
     paddingLeft: 6.2,
@@ -512,6 +519,17 @@ function TotalsRow({ label, value, bold = false }: { label: string; value: strin
     <View style={styles.totalsRow}>
       <Text style={bold ? [styles.totalsLabel, BOLD] : styles.totalsLabel}>{label}</Text>
       <Text style={styles.totalsValue}>{value}</Text>
+    </View>
+  )
+}
+
+/** A per-guest row: the label takes whatever the amount leaves, so "Adult 3 (single, supplement
+ *  incl.):" stays on one line where the ladder's fixed 152pt label column would wrap it. */
+function GuestTotalsRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.totalsRow}>
+      <Text style={styles.perGuestLabel}>{label}</Text>
+      <Text style={styles.perGuestValue}>{value}</Text>
     </View>
   )
 }
@@ -687,12 +705,28 @@ export function InvoiceDocument({
         <View style={styles.totals} wrap={false}>
           <View style={styles.totalsGroup}>
             {/* The per-person rows head the ladder, above the Sub Total / Total incl. VAT rows. */}
-            {totals.perAdult != null ? (
-              <TotalsRow label={withColon("Total per Adult")} value={money(totals.perAdult)} />
-            ) : null}
-            {totals.perChild != null ? (
-              <TotalsRow label={withColon("Total per Child")} value={money(totals.perChild)} />
-            ) : null}
+            {totals.perGuestRows && totals.perGuestRows.length > 0 ? (
+              // One tight block on the ladder's pitch, so six guests cost little more height than
+              // the two per-adult/per-child rows they replace.
+              <View style={styles.perGuestBlock}>
+                {totals.perGuestRows.map((guest) => (
+                  <GuestTotalsRow
+                    key={`${guest.kind}-${guest.ordinal}`}
+                    label={withColon(guest.label)}
+                    value={money(guest.amount)}
+                  />
+                ))}
+              </View>
+            ) : (
+              <>
+                {totals.perAdult != null ? (
+                  <TotalsRow label={withColon("Total per Adult")} value={money(totals.perAdult)} />
+                ) : null}
+                {totals.perChild != null ? (
+                  <TotalsRow label={withColon("Total per Child")} value={money(totals.perChild)} />
+                ) : null}
+              </>
+            )}
             {hasDeduction ? (
               <TotalsRow label="Sub Total incl. VAT:" value={money(totals.subtotalInclVat)} bold />
             ) : null}

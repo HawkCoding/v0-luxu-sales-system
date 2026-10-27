@@ -252,6 +252,30 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect((await extractPdfPageTexts(buffer)).length).toBe(1)
   })
 
+  it("prints one row per guest in place of Total per Adult/Child, still on one page", async () => {
+    const dense = denseInvoice(FAMILY_GUESTS)
+    const buffer = await renderInvoicePdf({
+      ...dense,
+      totals: {
+        ...dense.totals,
+        perGuestRows: [
+          { kind: "adult", ordinal: 1, label: "Adult 1 (sharing)", amount: 24_728, single: false, supplement: false, age: null },
+          { kind: "adult", ordinal: 2, label: "Adult 2 (sharing)", amount: 24_728, single: false, supplement: false, age: null },
+          { kind: "adult", ordinal: 3, label: "Adult 3 (single, supplement incl.)", amount: 35_349, single: true, supplement: true, age: null },
+          { kind: "child", ordinal: 1, label: "Child 1 (age 6)", amount: 12_000, single: false, supplement: false, age: 6 },
+        ],
+      },
+    })
+
+    const text = await extractPdfText(buffer)
+    expect(text).toContain("Adult 1 (sharing):")
+    expect(text).toContain("Adult 3 (single, supplement incl.):")
+    expect(text).toContain("Child 1 (age 6):")
+    expect(text).not.toContain("Total per Adult:")
+    expect(text).not.toContain("Total per Child:")
+    expect((await extractPdfPageTexts(buffer)).length).toBe(1)
+  })
+
   it("fits 8 guests with a long wrapping address on one page, footer included", async () => {
     // These used to take two pages: the Terms and Bank block carried the last-page footer's
     // clearance with it. The footer now sits on page one under a fixed margin, so it fits.
