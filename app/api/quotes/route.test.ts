@@ -12,6 +12,8 @@ vi.mock("@/lib/api/auth", () => ({
 
 vi.mock("@/lib/quotes/quote-number", () => ({
   buildQuoteNumber: vi.fn(() => "BT-2026-0001-Q1"),
+  isQuoteNumberConflict: vi.fn(() => false),
+  QUOTE_NUMBER_CONFLICT_MESSAGE: "conflict",
 }))
 
 const claimMocks = vi.hoisted(() => ({

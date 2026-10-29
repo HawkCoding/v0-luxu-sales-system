@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/api/auth"
 import { claimUnassignedBooking } from "@/lib/bookings/claim-unassigned-booking"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
-import { buildQuoteNumber } from "@/lib/quotes/quote-number"
+import { buildQuoteNumber, isQuoteNumberConflict, QUOTE_NUMBER_CONFLICT_MESSAGE } from "@/lib/quotes/quote-number"
 import { calculateQuoteTotals, resolveLineTotal } from "@/lib/quotes/pricing-engine"
 import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
@@ -101,6 +101,7 @@ export async function POST(req: Request) {
     )
     .single()
 
+  if (isQuoteNumberConflict(error)) return jsonError(QUOTE_NUMBER_CONFLICT_MESSAGE, 409)
   if (error || !quote) return safeSupabaseError("quotes:insert", error)
 
   if (normalizedLineItems.length > 0) {
