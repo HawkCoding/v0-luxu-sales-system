@@ -6,6 +6,7 @@ param(
   [string]$Target = "both",
 
   [switch]$IncludeSeed,
+  # No-op, kept so older callers still bind: pushes always use --include-all.
   [switch]$IncludeAll,
   [switch]$SkipDiff,
   [switch]$ConfirmProduction
@@ -65,7 +66,9 @@ function Compare-Target {
     Invoke-Checked -Command @("supabase", "db", "diff", "--from", $DbUrl, "--to", "local", "--schema", "public") -OutputPath (Join-Path $targetReportDir "remote-to-local-schema-diff.sql")
   }
 
-  Invoke-Checked -Command @("supabase", "db", "push", "--db-url", $DbUrl, "--dry-run") -OutputPath (Join-Path $targetReportDir "push-dry-run.txt")
+  # --include-all so a migration dated before the remote's latest one is listed
+  # as pending instead of aborting the dry run.
+  Invoke-Checked -Command @("supabase", "db", "push", "--db-url", $DbUrl, "--dry-run", "--include-all") -OutputPath (Join-Path $targetReportDir "push-dry-run.txt")
 
   Write-Host "Report: $targetReportDir"
 }
@@ -85,15 +88,17 @@ function Push-Target {
 
   Write-Section "Pushing local migrations to $TargetName"
 
-  $command = @("supabase", "db", "push", "--db-url", $DbUrl, "--yes")
-  if ($IncludeAll) {
-    $command += "--include-all"
-  }
+  # Always --include-all: a branch merged after a newer migration already landed
+  # leaves older-dated files unapplied, and plain `db push` refuses those.
+  $command = @("supabase", "db", "push", "--db-url", $DbUrl, "--yes", "--include-all")
   if ($IncludeSeed) {
     $command += "--include-seed"
   }
 
   Invoke-Checked -Command $command
+
+  Write-Section "Migration history on $TargetName after push"
+  Invoke-Checked -Command @("supabase", "migration", "list", "--db-url", $DbUrl)
 }
 
 Push-Location $repoRoot
@@ -111,10 +116,11 @@ try {
   foreach ($targetName in Get-Targets) {
     $dbUrl = Get-TargetDbUrl -TargetName $targetName
 
-    Compare-Target -TargetName $targetName -DbUrl $dbUrl
-
+    # Push mode skips the schema compare: it dumps the local database, which
+    # needs a running local stack (absent in CI). Run `pnpm db:status` after.
     if ($Mode -eq "push") {
       Push-Target -TargetName $targetName -DbUrl $dbUrl
+    } else {
       Compare-Target -TargetName $targetName -DbUrl $dbUrl
     }
   }

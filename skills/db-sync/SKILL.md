@@ -38,6 +38,8 @@ Three distinct failures, three different fixes:
 
 - **BEHIND** — local migration files not applied to that remote.
   Fix: `pnpm db:remote:push:dev`, or `pnpm db:remote:push:prod` for production.
+  Pushes always pass `--include-all`, so a missing migration dated before the remote's
+  latest one (a branch merged after a newer migration landed) is applied too.
 - **AHEAD** — the remote has a migration version with no local file. Someone pushed
   from another machine or branch. Fix: pull that migration into the repo before
   adding more; do not stack new migrations on top.
