@@ -1,7 +1,7 @@
 ﻿import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { buildQuoteNumber } from "@/lib/quotes/quote-number"
+import { buildQuoteNumber, isQuoteNumberConflict, QUOTE_NUMBER_CONFLICT_MESSAGE } from "@/lib/quotes/quote-number"
 import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
 import type { GateFailure } from "@/lib/pipeline/validate-transition"
 
@@ -118,6 +118,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .select("id, quote_number, status")
     .single()
 
+  if (isQuoteNumberConflict(quoteError)) {
+    return Response.json({ error: QUOTE_NUMBER_CONFLICT_MESSAGE }, { status: 409 })
+  }
   if (quoteError || !quote) return safeSupabaseError("jobs:start-quote-insert", quoteError)
 
   return Response.json({

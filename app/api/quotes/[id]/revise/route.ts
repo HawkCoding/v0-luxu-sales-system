@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { requireRole, type ApiAuthContext } from "@/lib/api/auth"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { StaleTransitionError } from "@/lib/pipeline/apply-transition"
-import { reviseQuoteNumber } from "@/lib/quotes/quote-number"
+import { isQuoteNumberConflict, QUOTE_NUMBER_CONFLICT_MESSAGE, reviseQuoteNumber } from "@/lib/quotes/quote-number"
 import { applyRevisionReset, planRevisionReset, type RevisionResetPlan } from "@/lib/quotes/revision-reset"
 import type { PipelineStage } from "@/lib/types"
 
@@ -123,7 +123,16 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Failed to load quote line items" }, { status: 500 })
   }
 
-  const quoteNumber = reviseQuoteNumber(quote.quote_number, bookingNumber)
+  const { data: siblingQuotes, error: siblingError } = await supabase
+    .from("quotes")
+    .select("quote_number")
+    .eq("booking_id", quote.booking_id)
+
+  if (siblingError) {
+    return NextResponse.json({ error: "Failed to load existing quotes" }, { status: 500 })
+  }
+
+  const quoteNumber = reviseQuoteNumber(quote.quote_number, bookingNumber, siblingQuotes ?? [])
   const { data: revisedQuote, error: insertError } = await supabase
     .from("quotes")
     .insert({
@@ -148,11 +157,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
     .select()
     .single()
 
+  if (isQuoteNumberConflict(insertError)) {
+    return NextResponse.json({ error: QUOTE_NUMBER_CONFLICT_MESSAGE }, { status: 409 })
+  }
   if (insertError || !revisedQuote) {
-    return NextResponse.json(
-      { error: insertError?.message ?? "Failed to revise quote" },
-      { status: 500 },
-    )
+    console.error("quote-revise:insert", insertError)
+    return NextResponse.json({ error: "Could not revise the quote. Please try again." }, { status: 500 })
   }
 
   if (lineItems && lineItems.length > 0) {

@@ -16,14 +16,31 @@ export function buildQuoteNumber(bookingNumber: string, existingQuotes: Existing
   return `${bookingNumber}-Q${highestVersion + 1}`
 }
 
-export function reviseQuoteNumber(quoteNumber: string | null, bookingNumber: string): string {
-  if (!quoteNumber) return `${bookingNumber}-Q2`
+/**
+ * Next revision number. Versions are counted from the highest one already on the booking, not
+ * just the parent's -- revising an older quote (Q1 after Q2 exists) would otherwise reuse Q2.
+ */
+export function reviseQuoteNumber(
+  quoteNumber: string | null,
+  bookingNumber: string,
+  existingQuotes: ExistingQuoteNumber[] = [],
+): string {
+  const base = quoteNumber ? quoteNumber.replace(/-Q\d+$/, "") : bookingNumber
+  const highestVersion = existingQuotes.reduce(
+    (highest, quote) => Math.max(highest, getQuoteVersion(quote.quote_number)),
+    getQuoteVersion(quoteNumber),
+  )
 
-  const version = getQuoteVersion(quoteNumber)
-  if (version === 0) return `${quoteNumber}-Q2`
-
-  return quoteNumber.replace(/-Q\d+$/, `-Q${version + 1}`)
+  return `${base}-Q${Math.max(highestVersion, 1) + 1}`
 }
+
+/** Postgres unique_violation on the quote number index. */
+export function isQuoteNumberConflict(error: { code?: string; message?: string } | null | undefined): boolean {
+  return error?.code === "23505" && (error.message ?? "").includes("quote_number")
+}
+
+export const QUOTE_NUMBER_CONFLICT_MESSAGE =
+  "Another quote on this booking was just created, so this one got the same number. Refresh the page and try again."
 
 /** Customer-facing label — "Quote 1" instead of the internal booking reference. */
 export function formatQuoteDisplayLabel(quoteNumber: string | null | undefined): string {
