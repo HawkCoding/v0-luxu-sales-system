@@ -29,7 +29,7 @@ function formatCommission(
   if (type === null || value === null || !Number.isFinite(value)) return "No commission"
   if (type === "percent") return `${value.toFixed(2)}%`
   if (type === "fixed") return `R ${value.toFixed(2)} total`
-  return `R ${value.toFixed(2)} / pax`
+  return `R ${value.toFixed(2)} per person`
 }
 
 export function CommissionControl({
@@ -120,7 +120,7 @@ export function CommissionControl({
             />
           </div>
           <span className="text-sm text-muted-foreground pb-2">
-            {activeType === "percent" ? "%" : activeType === "fixed" ? "total" : "/ pax"}
+            {activeType === "percent" ? "%" : activeType === "fixed" ? "total" : "per person"}
           </span>
         </div>
       ) : null}

@@ -37,11 +37,14 @@ export type EmailFontSize = (typeof EMAIL_FONT_SIZE_OPTIONS)[number]
 // allowlist rather than free text: an arbitrary value would be a CSS
 // injection vector, and the rich-text serializer (lib/templates/rich-text/
 // serialize.ts) only treats a span as safely representable when its size is
-// one of these.
+// one of these. Every px step up to 16 so body copy can be nudged by 1px.
 export const EMAIL_INLINE_FONT_SIZE_OPTIONS = [
   "10px",
+  "11px",
   "12px",
+  "13px",
   "14px",
+  "15px",
   "16px",
   "18px",
   "20px",
@@ -55,6 +58,116 @@ export type EmailInlineFontSize = (typeof EMAIL_INLINE_FONT_SIZE_OPTIONS)[number
 /** True when `value` is exactly one of the allowlisted inline sizes. */
 export function isEmailInlineFontSize(value: string | null | undefined): value is EmailInlineFontSize {
   return EMAIL_INLINE_FONT_SIZE_OPTIONS.includes(value as EmailInlineFontSize)
+}
+
+const LOOSE_FONT_SIZE_RE = /^(\d+(?:\.\d+)?)\s*(px|pt)$/i
+
+/**
+ * The allowlisted inline size nearest to any px/pt size (pt converted at 4/3 px), or null for
+ * other units/keywords and sizes outside 8-36px (snapping those would visibly change the text).
+ * Text pasted from Word/Outlook carries sizes like
+ * `10pt` or `13.3333px`; this maps them onto the toolbar's options instead of leaving them
+ * unrecognised (12pt -> 16px, 11pt -> 15px, 10pt -> 13px).
+ */
+export function toEmailInlineFontSizeLoose(value: string | null | undefined): EmailInlineFontSize | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  if (isEmailInlineFontSize(trimmed)) return trimmed
+  const match = trimmed.match(LOOSE_FONT_SIZE_RE)
+  if (!match) return null
+  const px = match[2].toLowerCase() === "pt" ? (Number(match[1]) * 4) / 3 : Number(match[1])
+  if (!(px >= 8 && px <= 36)) return null
+  let nearest: EmailInlineFontSize = EMAIL_INLINE_FONT_SIZE_OPTIONS[0]
+  for (const option of EMAIL_INLINE_FONT_SIZE_OPTIONS) {
+    if (Math.abs(parseFloat(option) - px) < Math.abs(parseFloat(nearest) - px)) nearest = option
+  }
+  return nearest
+}
+
+// Line spacing for a paragraph or list item of an email body. Rendered as an
+// inline `style="line-height:…"` on the <p>/<li> itself — email clients need
+// the value inline, and a block-level value is what controls the gap between
+// wrapped lines. Same allowlist rationale as the sizes above: an arbitrary
+// value would be a CSS injection vector, so the rich-text serializer only
+// keeps a styled <p>/<li> as editable content when its line-height is one of
+// these. Unitless, so a larger inline font size scales its own line box.
+export const EMAIL_LINE_HEIGHT_OPTIONS = ["1", "1.15", "1.5", "2"] as const
+
+export type EmailLineHeight = (typeof EMAIL_LINE_HEIGHT_OPTIONS)[number]
+
+export const EMAIL_LINE_HEIGHT_LABELS: Record<EmailLineHeight, string> = {
+  "1": "Single",
+  "1.15": "1.15",
+  "1.5": "1.5",
+  "2": "Double",
+}
+
+/**
+ * Line height the email layout gives body content when no spacing is chosen
+ * (emails/base-layout.tsx). The editor previews with it too, so "Default" in
+ * the toolbar looks the way the sent email does.
+ */
+export const EMAIL_DEFAULT_LINE_HEIGHT = "1.4"
+
+/** True when `value` is exactly one of the allowlisted line heights. */
+export function isEmailLineHeight(value: string | null | undefined): value is EmailLineHeight {
+  return EMAIL_LINE_HEIGHT_OPTIONS.includes(value as EmailLineHeight)
+}
+
+/** The allowlisted line height `value` names (surrounding whitespace ignored), or null. */
+export function toEmailLineHeight(value: string | null | undefined): EmailLineHeight | null {
+  const trimmed = value?.trim()
+  return isEmailLineHeight(trimmed) ? trimmed : null
+}
+
+// Space after a paragraph or list item of an email body. Rendered as an
+// inline `style="margin: 0 0 …"` on the <p>/<li> itself — the zero top margin
+// keeps the gap below a paragraph the only gap, so it reads the same in every
+// client. Same allowlist rationale as line spacing: the rich-text serializer
+// only keeps a styled <p>/<li> as editable content when its margin is exactly
+// that shape with one of these values. px rather than em because Outlook's
+// Word engine handles px margins reliably.
+export const EMAIL_PARAGRAPH_SPACING_OPTIONS = ["0px", "16px", "24px", "32px"] as const
+
+export type EmailParagraphSpacing = (typeof EMAIL_PARAGRAPH_SPACING_OPTIONS)[number]
+
+export const EMAIL_PARAGRAPH_SPACING_LABELS: Record<EmailParagraphSpacing, string> = {
+  "0px": "None",
+  "16px": "16px",
+  "24px": "24px",
+  "32px": "32px",
+}
+
+/** True when `value` is exactly one of the allowlisted paragraph spacings. */
+export function isEmailParagraphSpacing(value: string | null | undefined): value is EmailParagraphSpacing {
+  return EMAIL_PARAGRAPH_SPACING_OPTIONS.includes(value as EmailParagraphSpacing)
+}
+
+/** The allowlisted paragraph spacing `value` names ("0" reads as "0px"; surrounding whitespace ignored), or null. */
+export function toEmailParagraphSpacing(value: string | null | undefined): EmailParagraphSpacing | null {
+  const trimmed = value?.trim()
+  const normalized = trimmed === "0" ? "0px" : trimmed
+  return isEmailParagraphSpacing(normalized) ? normalized : null
+}
+
+/** The inline `margin` value a paragraph spacing is stored as. */
+export function toEmailParagraphSpacingMargin(spacing: EmailParagraphSpacing): string {
+  return `0 0 ${spacing}`
+}
+
+/**
+ * True when a `margin` declaration value is the shape the paragraph spacing
+ * control writes — zero top and sides, an allowlisted bottom — in any of the
+ * shorthand forms the DOM canonicalizes it to ("0px 0px 24px", or just "0px"
+ * for None).
+ */
+export function isEmailParagraphSpacingMargin(value: string): boolean {
+  const parts = value.trim().split(/\s+/)
+  const isZero = (part: string | undefined): boolean => part === "0" || part === "0px"
+  if (parts.length === 1) return isZero(parts[0])
+  if (parts.length !== 3 && parts.length !== 4) return false
+  const [top, sides, bottom, left = sides] = parts
+  return isZero(top) && isZero(sides) && isZero(left) && toEmailParagraphSpacing(bottom) !== null
 }
 
 // Text colour swatches for a highlighted section of an email body. Brand-
@@ -246,6 +359,27 @@ export function toEmailInlineFontFamily(value: string | null | undefined): Email
   if (!value) return null
   if (EMAIL_FONT_FAMILY_SET.has(value)) return value as EmailFontFamily
   return EMAIL_FONT_FAMILY_DOUBLE_QUOTED.get(value) ?? null
+}
+
+/** First family of a stack, unquoted and lowercased: `"Verdana",sans-serif` -> `verdana`. */
+function leadingFontFamily(value: string): string {
+  return value.split(",")[0].trim().replace(/^["']|["']$/g, "").trim().toLowerCase()
+}
+
+const EMAIL_FONT_FAMILY_BY_LEADING = new Map<string, EmailFontFamily>(
+  EMAIL_FONT_FAMILY_OPTIONS.map((option) => [leadingFontFamily(option), option]),
+)
+
+/**
+ * The allowlisted stack for any font-family value whose first family is one of ours, or null.
+ * Text pasted from Word/Outlook names a font as `Calibri, sans-serif` or `"Verdana",sans-serif`
+ * rather than our exact stacks; this maps it to the matching option (the toolbar then shows the
+ * right name) instead of leaving it unrecognised. A family we don't offer (e.g. the
+ * `Segoe UI Emoji` Outlook wraps emoji in) maps to null.
+ */
+export function toEmailInlineFontFamilyLoose(value: string | null | undefined): EmailFontFamily | null {
+  if (!value) return null
+  return toEmailInlineFontFamily(value) ?? EMAIL_FONT_FAMILY_BY_LEADING.get(leadingFontFamily(value)) ?? null
 }
 
 /** Coerce a stored value to an allowlisted size, falling back to the default. */

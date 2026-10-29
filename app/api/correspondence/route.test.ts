@@ -24,6 +24,25 @@ const templateMocks = vi.hoisted(() => ({
 const libraryMocks = vi.hoisted(() => ({
   loadLibraryAttachments: vi.fn(),
 }))
+const claimMocks = vi.hoisted(() => ({
+  claimUnassignedBooking: vi.fn(),
+}))
+const signatureMocks = vi.hoisted(() => ({
+  resolveEmailSignature: vi.fn(),
+  renderSignatureFragment: vi.fn(),
+}))
+
+vi.mock("@/lib/email/signature", () => ({
+  resolveEmailSignature: signatureMocks.resolveEmailSignature,
+}))
+
+vi.mock("@/lib/email/render-signature", () => ({
+  renderSignatureFragment: signatureMocks.renderSignatureFragment,
+}))
+
+vi.mock("@/lib/bookings/claim-unassigned-booking", () => ({
+  claimUnassignedBooking: claimMocks.claimUnassignedBooking,
+}))
 
 vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
@@ -83,6 +102,8 @@ interface AuthOptions {
   customerInvoiceNumber?: string | null
   emailImportNeedsReview?: boolean
   quoteStatus?: string
+  /** The scheduled correspondence row a send fulfils (scheduledCorrespondenceId). */
+  scheduledRow?: { id: string; status: string } | null
 }
 
 function buildAuth(options: AuthOptions = {}) {
@@ -130,13 +151,34 @@ function buildAuth(options: AuthOptions = {}) {
   }))
 
   const followUpInsert = vi.fn(async () => ({ error: null }))
+  // Cancels the booking's earlier pending follow-up before the new one is drafted. Each .eq()
+  // filter is recorded so a test can check exactly which rows the update targets.
+  const staleFollowUpFilters: Array<[string, unknown]> = []
+  const correspondenceUpdate = vi.fn((_values: unknown) => {
+    const chain = {
+      eq: vi.fn((column: string, value: unknown) => {
+        staleFollowUpFilters.push([column, value])
+        return chain
+      }),
+      select: vi.fn(() => ({ single: correspondenceInsertResult })),
+      then: (resolve: (result: { error: null }) => unknown) => resolve({ error: null }),
+    }
+    return chain
+  })
   // The stage gates re-read correspondences after the send, so the row this request just wrote is
   // part of the evidence — that is how "the voucher email was sent" becomes true. A mock that
   // always returned [] would make every send-and-move look like it had never sent anything.
   const sentCorrespondences: { id: string; kind: string | null; subject: string; status: string; created_at: string }[] = []
-  const correspondenceSelect = vi.fn(() => ({
-    eq: vi.fn(async () => ({ data: sentCorrespondences, error: null })),
-  }))
+  // Awaitable after one .eq() for the stage gates; .eq().eq().maybeSingle() is the
+  // scheduled-row check a send that fulfils a scheduled email makes first.
+  const correspondenceSelect = vi.fn(() => {
+    const chain: Record<string, unknown> = {}
+    chain.eq = vi.fn(() => chain)
+    chain.maybeSingle = vi.fn(async () => ({ data: options.scheduledRow ?? null, error: null }))
+    chain.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data: sentCorrespondences, error: null }).then(resolve)
+    return chain
+  })
 
   const quoteUpdate = vi.fn(() => ({
     eq: vi.fn(() => ({
@@ -267,6 +309,7 @@ function buildAuth(options: AuthOptions = {}) {
             }
             return followUpInsert()
           }),
+          update: correspondenceUpdate,
           select: correspondenceSelect,
         }
       }
@@ -374,6 +417,8 @@ function buildAuth(options: AuthOptions = {}) {
   return {
     correspondenceInsertChain,
     followUpInsert,
+    correspondenceUpdate,
+    staleFollowUpFilters,
     quoteUpdate,
     pipelineHistoryInsert,
     auditInsert,
@@ -431,6 +476,12 @@ describe("POST /api/correspondence", () => {
     })
     libraryMocks.loadLibraryAttachments.mockReset()
     libraryMocks.loadLibraryAttachments.mockResolvedValue([])
+    claimMocks.claimUnassignedBooking.mockReset()
+    claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: true, claimed: false, assignedSalespersonId: null })
+    signatureMocks.resolveEmailSignature.mockReset()
+    signatureMocks.resolveEmailSignature.mockResolvedValue({ fullName: "Carmen" })
+    signatureMocks.renderSignatureFragment.mockReset()
+    signatureMocks.renderSignatureFragment.mockResolvedValue("<p>fresh signature</p>")
     transitionMocks.applyTransition.mockResolvedValue({
       updated: {},
       crossedStages: [],
@@ -476,6 +527,27 @@ describe("POST /api/correspondence", () => {
     expect(emailMocks.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({ from: "noreply@example.com", subject: "Hello" }),
     )
+  })
+
+  it("re-renders the signature of a scheduled email at send time, not the one stored when it was drafted", async () => {
+    buildAuth({ scheduledRow: { id: "00000000-0000-4000-8000-00000000cccc", status: "scheduled" } })
+    const stored =
+      "<html><p>follow up</p><!--LUXUS_SIGNATURE_START--><p>old signature</p><!--LUXUS_SIGNATURE_END--></html>"
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Following up", bodyHtml: stored, scheduledCorrespondenceId: "00000000-0000-4000-8000-00000000cccc" }),
+    )
+    expect(res.status).toBe(200)
+    const sentHtml = emailMocks.sendEmail.mock.calls[0][0].html as string
+    expect(sentHtml).toContain("<!--LUXUS_SIGNATURE_START--><p>fresh signature</p><!--LUXUS_SIGNATURE_END-->")
+    expect(sentHtml).not.toContain("old signature")
+  })
+
+  it("leaves the signature the salesperson previewed alone on an ordinary send", async () => {
+    buildAuth()
+    const html = "<html><!--LUXUS_SIGNATURE_START--><p>previewed</p><!--LUXUS_SIGNATURE_END--></html>"
+    await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello", bodyHtml: html }))
+    expect(signatureMocks.resolveEmailSignature).not.toHaveBeenCalled()
+    expect(emailMocks.sendEmail.mock.calls[0][0].html).toBe(html)
   })
 
   it("attaches selected library files to the outgoing email", async () => {
@@ -597,6 +669,14 @@ describe("POST /api/correspondence", () => {
       expect.objectContaining({ action: "stage_change", entity_id: BOOKING_ID }),
     )
     expect(mocks.followUpInsert).toHaveBeenCalledTimes(1)
+    // The booking's earlier pending follow-up is cancelled before the new one is drafted, so a
+    // re-sent quote never leaves two follow-ups waiting (one quoting the old route/price).
+    expect(mocks.correspondenceUpdate).toHaveBeenCalledWith({ status: "cancelled" })
+    expect(mocks.staleFollowUpFilters).toEqual([
+      ["booking_id", BOOKING_ID],
+      ["kind", "quote_follow_up"],
+      ["status", "scheduled"],
+    ])
   })
 
   it("does not call applyTransition when moveStage matches current booking stage", async () => {
@@ -910,6 +990,30 @@ describe("POST /api/correspondence", () => {
         salespersonCredentialId: "cred-1",
       }),
     )
+  })
+
+  it("assigns the sender to an unassigned booking and sends from their mailbox", async () => {
+    claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: true, claimed: true, assignedSalespersonId: "u1" })
+    buildAuth()
+
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello" }))
+
+    expect(res.status).toBe(200)
+    expect(claimMocks.claimUnassignedBooking).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bookingId: BOOKING_ID, userId: "u1" }),
+    )
+    expect(senderMocks.resolveSalespersonSender).toHaveBeenCalledWith(expect.anything(), "u1")
+  })
+
+  it("does not send when the booking cannot be assigned", async () => {
+    claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: false, error: { message: "rls" } })
+    buildAuth()
+
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello" }))
+
+    expect(res.status).toBe(500)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
   })
 
   it("returns 503 before rendering the quote PDF when no mailbox is configured", async () => {

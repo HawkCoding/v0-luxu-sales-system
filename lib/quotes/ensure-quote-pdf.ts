@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
+import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
 import {
   complimentaryLegIdsFromLineItems,
   complimentaryTransportRequestIdsFromLineItems,
@@ -9,6 +11,9 @@ import {
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks, mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
+import { selectPrimaryBlocks } from "@/lib/invoices/build-invoice-view"
+import { loadDocumentFooterCompany } from "@/lib/pdf/document-footer-company"
+import { buildQuoteJourneyDetails } from "@/lib/quotes/pdf/quote-journey-details"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import {
@@ -89,7 +94,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, primary_supplier_id, customer:customers(title, first_name, last_name, email, phone))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, child_ages, primary_supplier_id, route:routes(name), customer:customers(title, first_name, last_name, email, phone))",
     )
     .eq("id", quoteId)
     .single()
@@ -197,12 +202,27 @@ export async function ensureQuotePdf(
   }
 
   // Journey window comes from the priced legs, not the booking's enquiry-time scalar dates which
-  // drift out of sync once the package changes -- narrowed to the primary product's own legs
-  // where it has any (F-P3-4), so a tour's dates aren't stretched by an add-on hotel or transfer.
+  // drift out of sync once the package changes. "Travel Dates" spans every leg (pre/post-night
+  // hotels, transfers, flights), not just the primary product's own dates.
   const journey = deriveJourneyFromBlocks(
     itineraryBlocks,
-    mapSupplierKindToServiceType(primarySupplierKind),
+    undefined,
+    primarySupplierKind ? mapSupplierKindToServiceType(primarySupplierKind) : undefined,
   ) ?? { start: null, end: null }
+
+  // The "Train Journey details" box names the same main product the invoice's journey block does.
+  const bookingRoute = Array.isArray(booking?.route) ? booking.route[0] : booking?.route
+  const [primaryBlock] = selectPrimaryBlocks(itineraryBlocks, quoteConfig.primarySupplierId, primarySupplierKind)
+  const journeyDetails = buildQuoteJourneyDetails(primaryBlock, bookingRoute?.name ?? null)
+  const company = await loadDocumentFooterCompany(supabase)
+  // Adults and paying children as the primary supplier's age buckets price them — infants and
+  // over-age children projected out — so the total's label and the per-person rows (and the
+  // invoice's, which resolve the same supplier the same way) all count the same people.
+  const pax = await resolvePayingPax(
+    supabase,
+    booking,
+    payingPaxSupplierId(quoteConfig.primarySupplierId, booking?.primary_supplier_id),
+  )
 
   let pdfBuffer: Buffer
   try {
@@ -216,13 +236,27 @@ export async function ensureQuotePdf(
       customerName,
       customerPhone: customer?.phone ?? null,
       customerEmail: customer?.email ?? null,
+      journeyDetails,
+      company,
       quoteDate: quote.created_at.slice(0, 10),
       validUntil: quote.validity_until,
       journeyStart: journey.start,
       journeyEnd: journey.end,
+      // The Guests row prints the booking's own counts (infants included), as the e-mail, invoice
+      // and voucher do; only the total's label and the per-person rows use the paying projection.
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,
+      payingPax: pax,
       total: quote.total,
+      // The invoice's own rule (lib/invoices/per-person-totals.ts). Split the gross subtotal, not the
+      // net total: the per-person rows head the block above Sub Total, so they read at full price,
+      // before the discount and agent commission come off.
+      perPersonTotals: derivePerPersonTotals({
+        lines: lineItems ?? [],
+        adults: pax.adults,
+        children: pax.children,
+        total: Number(quote.subtotal ?? quote.total),
+      }),
       subtotal: quote.subtotal,
       agentCommission: Number(quote.agent_commission ?? 0),
       discount: Number(quote.discount_amount ?? 0),

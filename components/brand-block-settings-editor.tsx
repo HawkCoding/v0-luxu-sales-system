@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { MAX_IMAGE_MB } from "@/lib/upload-limits"
+import { UploadRequirementsList } from "@/components/upload-requirements-list"
+import { LOGO_UPLOAD_REQUIREMENTS, pngLogoUploadError, uploadErrorMessage } from "@/lib/upload-limits"
 import { useDocumentBrandSettings, type DocumentBrandSettings } from "@/lib/use-data"
 import { SUPPLIER_VOCABULARY, type SupplierKind } from "@/lib/types"
 
@@ -33,7 +34,7 @@ const TEXT_FIELDS: { key: TextKey; label: string; placeholder: string }[] = [
   {
     key: "brand_block_heading",
     label: "Heading",
-    placeholder: "BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI",
+    placeholder: "THE BLUE TRAIN - ROVOS RAIL - KRUGER SHALATI",
   },
   {
     key: "brand_block_subheading",
@@ -99,8 +100,10 @@ export function BrandBlockSettingsEditor({ canEdit }: BrandBlockSettingsEditorPr
   }
 
   const handleUpload = async (file: File) => {
-    if (file.type !== "image/png") {
-      toast.error("The logo must be a PNG image.")
+    const fileError = pngLogoUploadError(file)
+    if (fileError) {
+      toast.error(fileError)
+      if (fileInputRef.current) fileInputRef.current.value = ""
       return
     }
     setUploading(true)
@@ -109,8 +112,7 @@ export function BrandBlockSettingsEditor({ canEdit }: BrandBlockSettingsEditorPr
       body.append("file", file)
       const res = await fetch("/api/settings/brand-logo", { method: "POST", body })
       if (!res.ok) {
-        const { error: message } = await res.json().catch(() => ({ error: "" }))
-        throw new Error(message || "upload failed")
+        throw new Error(await uploadErrorMessage(res, "Failed to upload logo"))
       }
       const { url } = (await res.json()) as { url: string }
       setValues((v) => ({ ...v, brand_block_logo_url: url }))
@@ -208,9 +210,7 @@ export function BrandBlockSettingsEditor({ canEdit }: BrandBlockSettingsEditorPr
                 >
                   {uploading ? "Uploading…" : "Upload logo"}
                 </Button>
-                <span className="text-[10px] text-muted-foreground">
-                  Square PNG, max {MAX_IMAGE_MB} MB.
-                </span>
+                <UploadRequirementsList requirements={LOGO_UPLOAD_REQUIREMENTS} />
               </div>
             )}
           </div>

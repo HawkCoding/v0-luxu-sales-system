@@ -6,6 +6,7 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import { loadDocumentFooterCompany } from "@/lib/pdf/document-footer-company"
 import { displayRouteName, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
@@ -161,7 +162,7 @@ export async function ensureItineraryPdf(
     getDocumentBrandSettings(supabase, primarySupplierKind),
   ])
   const { brand } = resolveDocumentBrand(documentBrandSettings)
-  const brandLogo = await loadBrandLogo(brand.logoUrl)
+  const [brandLogo, company] = await Promise.all([loadBrandLogo(brand.logoUrl), loadDocumentFooterCompany(supabase)])
 
   const consultant = await resolveConsultant(supabase, {
     consultant: booking.consultant,
@@ -195,6 +196,7 @@ export async function ensureItineraryPdf(
       introText: documentText.itinerary_doc_intro_text,
       brand,
       brandLogo,
+      company,
     })
   } catch (error) {
     console.error("itinerary:render-pdf", error)

@@ -244,6 +244,10 @@ export function bookingServicesToLegSelections(
         complimentaryFirstNight: unit.complimentary_first_night,
         manualTourPrice: unit.manual_tour_price,
         manualTourPriceSetAt: unit.manual_tour_price_set_at,
+        fareOverrideAdult: unit.fare_override_adult,
+        fareOverrideChild: unit.fare_override_child,
+        fareOverrideInfant: unit.fare_override_infant,
+        fareOverrideSetAt: unit.fare_override_set_at,
         rateTypeId: unit.rate_type_id,
       }))
 

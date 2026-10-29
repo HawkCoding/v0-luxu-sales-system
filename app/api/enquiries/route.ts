@@ -5,6 +5,7 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { isAuthorizedWebhookRequest } from "@/lib/api/webhook-secret"
+import { persistServerError } from "@/lib/api/responses"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import {
   legacySuiteNamesToUnits,
@@ -525,6 +526,7 @@ export async function POST(req: Request) {
     jobNumberAllocation = await allocateJobNumberForBooking(supabase)
   } catch (error) {
     console.error("enquiries:allocateJobNumber", error)
+    persistServerError("enquiries:allocateJobNumber", error)
     return NextResponse.json({ error: "Failed to allocate job number" }, { status: 500 })
   }
   const existingExtractedJson =
@@ -588,6 +590,8 @@ export async function POST(req: Request) {
     .single()
 
   if (bookingError || !booking) {
+    console.error("enquiries:createBooking", bookingError)
+    persistServerError("enquiries:createBooking", bookingError ?? "no row returned")
     return NextResponse.json({ error: "Failed to create booking" }, { status: 500 })
   }
 
@@ -992,6 +996,8 @@ export async function resolveEnquiryCustomer(
     .single()
 
   if (customerError || !newCustomer) {
+    console.error("enquiries:createCustomer", customerError)
+    persistServerError("enquiries:createCustomer", customerError ?? "no row returned")
     return { customerId: null, customerIsRepeatClient: false }
   }
 

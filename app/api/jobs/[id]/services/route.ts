@@ -9,7 +9,7 @@ import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
 import { learnSuiteAliasesFromUnits } from "@/lib/suites/learn-from-units"
 import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
 import { createServiceClient } from "@/lib/supabase/server"
-import type { Database } from "@/lib/supabase/types"
+import type { Database, Json } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
 
@@ -30,7 +30,6 @@ import { PASSENGER_SUM_SUPPLIER_KINDS } from "@/lib/packages/apply-dialog-state"
 import { describeEmptyUnitSentence, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
 import { SERVICES_WITH_SUPPLIER_SELECT, SERVICES_WITH_UNITS_SELECT } from "@/lib/packages/service-columns"
 import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
-import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -80,6 +79,12 @@ const selectionUnitSchema = z.object({
   /** Tour legs only: this unit's typed flat price, replacing its rate-card-computed total.
    * Rejected on any other supplier kind — see the guard in PATCH. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
+  /** Train legs only: this suite's typed per-person fares, one per passenger kind, replacing the
+   * rate card's price for that kind (blank kinds stay on the card). Rejected on any other supplier
+   * kind — see the guard in PATCH. */
+  fareOverrideAdult: z.number().nonnegative().nullable().optional(),
+  fareOverrideChild: z.number().nonnegative().nullable().optional(),
+  fareOverrideInfant: z.number().nonnegative().nullable().optional(),
   /** Train, hotel, cruise and tour legs only (supportsUnitRateType): this unit's own rate type,
    * overriding the leg-level rateTypeId below. Rejected on any other supplier kind — see the guard
    * in PATCH. */
@@ -101,7 +106,10 @@ const updateServiceSchema = z.object({
   routeId: z.string().uuid().nullable().optional(),
   routeReversed: z.boolean().optional(),
   serviceDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
-  nights: z.number().int().positive().nullable().optional(),
+  /** The night interval behind the leg's own end date (tours, cruises, hotels). 0 is a same-day
+   * tour -- rendered as "1 day" -- so only negatives are refused here; hotels are held to at least
+   * one night by the guard in PATCH. */
+  nights: z.number().int().nonnegative().nullable().optional(),
   /** Airline legs only. `serviceDate` is the departure date; only the time is separate here.
    * `arrivalDate` is a full date rather than a day offset so an overnight flight states a real
    * arrival day. All rejected on any other supplier kind — see the guard in PATCH. */
@@ -148,8 +156,7 @@ const patchServicesSchema = z.object({
   selections: z.array(updateServiceSchema).min(1, "At least one selection is required"),
   /** Skips the trip-date recompute (5 sequential reads) when the caller knows a transport-requests
    * PUT immediately follows and will recompute from the final state of both tables anyway — see
-   * PUT /api/jobs/[id]/transport-requests. The leg date-order pass is skipped with it (POST
-   * /services/apply sorts once both tables are final). Defaults to false so every other caller is
+   * PUT /api/jobs/[id]/transport-requests. Defaults to false so every other caller is
    * unaffected. */
   deferTripDateRecompute: z.boolean().optional(),
 })
@@ -178,6 +185,10 @@ interface ServiceUnitRow {
   manual_room_price_set_at: string | null
   manual_tour_price: number | null
   manual_tour_price_set_at: string | null
+  fare_override_adult: number | null
+  fare_override_child: number | null
+  fare_override_infant: number | null
+  fare_override_set_at: string | null
   complimentary_first_night: boolean
   rate_type_id: string | null
 }
@@ -313,7 +324,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   }
 
   const parsed = patchServicesSchema.safeParse(raw)
-  if (!parsed.success) return jsonZodError(parsed.error)
+  if (!parsed.success) {
+    // flatten() collapses nested failures to a bare "selections" key, so name the first offending
+    // path in the message the dialog shows -- otherwise a rejected leg is undiagnosable.
+    const first = parsed.error.issues[0]
+    const where = first ? first.path.join(".") : ""
+    return jsonZodError(parsed.error, where ? `Invalid request body (${where}: ${first.message})` : undefined, "services:patch")
+  }
 
   const { supabase, user, profile } = auth.value
 
@@ -343,6 +360,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return jsonError("Selections reference services outside this booking", 400, { invalidServiceIds: invalid })
   }
 
+  // A bare "Database error" gives the salesperson nothing to act on, so a failed write names the
+  // supplier it was saving. The cause itself still goes to the server log and error_logs.
+  const supplierNameFor = (serviceId: string): string => {
+    const service = serviceById.get(serviceId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    return supplier?.name ?? "a service"
+  }
+  const supplierNamesFor = (serviceIds: string[]): string =>
+    [...new Set(serviceIds.map(supplierNameFor))].join(", ")
+
   // Optimistic lock, checked across every selection before a single write lands: two consultants
   // saving the same booking used to both get a 200, with the later save silently erasing the
   // earlier one. Mirrors PATCH /api/jobs/[id]'s STALE_VERSION contract.
@@ -357,7 +384,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json(
       {
         error:
-          "Someone else changed this booking's services while you were editing. Close and reopen the dialog to pick up their changes.",
+          "This booking's services were saved elsewhere since you opened them (another window, another quote, or a colleague). Load the latest to carry on — your other changes are kept.",
         code: "STALE_VERSION",
         packageLegId: first.packageLegId,
         currentUpdatedAt: serviceById.get(first.packageLegId)?.updated_at ?? null,
@@ -452,6 +479,21 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
+  // A stay always covers at least one night, unlike a same-day tour (see the nights field above).
+  // The dialog already floors hotel nights at 1, so this only catches a caller that skips it.
+  for (const selection of parsed.data.selections) {
+    if (selection.nights === undefined || selection.nights === null || selection.nights >= 1) continue
+    const service = serviceById.get(selection.packageLegId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    const supplierKind = supplier?.kind
+    if (supplierKind === "hotel_property") {
+      return jsonError("Hotel stays need at least 1 night", 400, {
+        packageLegId: selection.packageLegId,
+        nights: selection.nights,
+      })
+    }
+  }
+
   // Per-room pricing is a hotel concept: every other kind prices per person off its own rate card
   // or typed fare, so a per-room basis there would be a stored value the pricer never reads. Same
   // reasoning, and the same shape, as the luggage-storage guard above.
@@ -499,7 +541,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
     if (supplierKind && TRANSPORT_SUPPLIER_KINDS.has(supplierKind)) {
       return jsonError(
-        "Units are not supported for transfer/vehicle rental services — use transport requests instead",
+        `${supplierNameFor(selection.packageLegId)} is a transfer/vehicle rental service, so it takes trips rather than rooms, cabins or suites — add them under Transport instead`,
         400,
         { packageLegId: selection.packageLegId },
       )
@@ -538,6 +580,26 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       selection.units.some((unit) => unit.manualTourPrice !== null && unit.manualTourPrice !== undefined)
     ) {
       return jsonError("A tour price override is only available on tour services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
+    }
+
+    // The per-person fare override replaces a train suite's rate-card fares kind by kind. Only a
+    // train suite prices per person sharing with a single supplement the typed fare is defined
+    // against; hotels, tours and airlines each have their own override (or typed fares) with
+    // different meaning, so accepting it there would silently price something other than what
+    // was typed.
+    if (
+      supplierKind !== "train_operator" &&
+      selection.units.some(
+        (unit) =>
+          (unit.fareOverrideAdult !== null && unit.fareOverrideAdult !== undefined) ||
+          (unit.fareOverrideChild !== null && unit.fareOverrideChild !== undefined) ||
+          (unit.fareOverrideInfant !== null && unit.fareOverrideInfant !== undefined),
+      )
+    ) {
+      return jsonError("A per-person fare override is only available on train services", 400, {
         packageLegId: selection.packageLegId,
         supplierKind,
       })
@@ -663,8 +725,14 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   })
 
   const updateResults = await Promise.all(fieldUpdates)
-  const firstUpdateError = updateResults.find((result) => result.error)?.error
-  if (firstUpdateError) return safeSupabaseError("services:update", firstUpdateError)
+  const failedUpdateIndex = updateResults.findIndex((result) => result.error)
+  if (failedUpdateIndex !== -1) {
+    return safeSupabaseError(
+      "services:update",
+      updateResults[failedUpdateIndex].error,
+      `Could not save the details for ${supplierNameFor(parsed.data.selections[failedUpdateIndex].packageLegId)}. Nothing was changed for it — please try again.`,
+    )
+  }
 
   // Per-service unit replacement (full replace-set, only for services whose payload includes units).
   const servicesWithUnits = parsed.data.selections.filter((selection) => selection.units)
@@ -675,11 +743,22 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   // keep re-dating an override nobody touched.
   const existingUnitProvenance = new Map<string, { price: number | null; setAt: string | null; setBy: string | null }>()
   const existingTourProvenance = new Map<string, { price: number | null; setAt: string | null; setBy: string | null }>()
+  // A train suite's fare override is three amounts stamped as one: it counts as unchanged only
+  // when all three kinds match what was saved, so editing any one fare re-stamps the whole set.
+  const existingFareProvenance = new Map<
+    string,
+    { adult: number | null; child: number | null; infant: number | null; setAt: string | null; setBy: string | null }
+  >()
+  // Which service each stored unit belongs to. A unit re-sent with its own id keeps that id across
+  // the delete/insert (see unitRows below), so the id Build Booking holds stays valid for POST
+  // /services/apply's provenance lookup -- a fresh id on every save left that lookup empty and the
+  // quote's "set by X on date" note never rendered.
+  const existingUnitServiceId = new Map<string, string>()
   if (servicesWithUnits.length > 0) {
     const { data: existingUnits, error: existingUnitsError } = await supabase
       .from("booking_service_units")
       .select(
-        "id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by, manual_tour_price, manual_tour_price_set_at, manual_tour_price_set_by",
+        "id, service_id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by, manual_tour_price, manual_tour_price_set_at, manual_tour_price_set_by, fare_override_adult, fare_override_child, fare_override_infant, fare_override_set_at, fare_override_set_by",
       )
       .in(
         "service_id",
@@ -689,6 +768,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (existingUnitsError) return safeSupabaseError("services:load-units", existingUnitsError)
 
     for (const unit of existingUnits ?? []) {
+      if (unit.service_id) existingUnitServiceId.set(unit.id, unit.service_id)
       existingUnitProvenance.set(unit.id, {
         price: unit.manual_room_price,
         setAt: unit.manual_room_price_set_at,
@@ -699,35 +779,50 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         setAt: unit.manual_tour_price_set_at,
         setBy: unit.manual_tour_price_set_by,
       })
+      existingFareProvenance.set(unit.id, {
+        adult: unit.fare_override_adult,
+        child: unit.fare_override_child,
+        infant: unit.fare_override_infant,
+        setAt: unit.fare_override_set_at,
+        setBy: unit.fare_override_set_by,
+      })
     }
   }
 
   const savedAt = new Date().toISOString()
 
-  // One delete + one insert across every service in the payload, rather than a pair per service.
-  // The replace-set semantics are unchanged: the delete covers exactly the services whose payload
-  // carries units, which is the same set the per-service loop used to clear.
-  if (servicesWithUnits.length > 0) {
-    const { error: deleteUnitsError } = await supabase
-      .from("booking_service_units")
-      .delete()
-      .in(
-        "service_id",
-        servicesWithUnits.map((selection) => selection.packageLegId),
-      )
-
-    if (deleteUnitsError) return safeSupabaseError("services:clear-units", deleteUnitsError)
-  }
-
+  // An id is reused only when it was one of this very service's stored units, and only once --
+  // anything else (an id from another service, a stale id, a duplicate) gets a fresh one.
+  const reusedUnitIds = new Set<string>()
   const unitRows: BookingServiceUnitInsert[] = servicesWithUnits.flatMap((selection) =>
     (selection.units ?? []).map((unit, index) => {
+      const reusedId =
+        unit.id && existingUnitServiceId.get(unit.id) === selection.packageLegId && !reusedUnitIds.has(unit.id)
+          ? unit.id
+          : undefined
+      if (reusedId) reusedUnitIds.add(reusedId)
       const roomPrice = unit.manualRoomPrice ?? null
       const previous = unit.id ? existingUnitProvenance.get(unit.id) : undefined
       const unchanged = roomPrice !== null && previous?.price === roomPrice
       const tourPrice = unit.manualTourPrice ?? null
       const previousTour = unit.id ? existingTourProvenance.get(unit.id) : undefined
       const tourUnchanged = tourPrice !== null && previousTour?.price === tourPrice
+      const fareAdult = unit.fareOverrideAdult ?? null
+      const fareChild = unit.fareOverrideChild ?? null
+      const fareInfant = unit.fareOverrideInfant ?? null
+      const hasFareOverride = fareAdult !== null || fareChild !== null || fareInfant !== null
+      const previousFare = unit.id ? existingFareProvenance.get(unit.id) : undefined
+      const fareUnchanged =
+        hasFareOverride &&
+        previousFare !== undefined &&
+        previousFare.adult === fareAdult &&
+        previousFare.child === fareChild &&
+        previousFare.infant === fareInfant
       return {
+        // Every row carries an id. PostgREST builds a bulk insert's column list from the union of
+        // the rows' keys, so a row without `id` beside one with it gets NULL rather than the
+        // column default -- a save mixing a kept room with a new one failed on the NOT NULL.
+        id: reusedId ?? crypto.randomUUID(),
         service_id: selection.packageLegId,
         suite_type_id: unit.suiteTypeId,
         bedroom_type_id: unit.bedroomTypeId ?? null,
@@ -749,15 +844,33 @@ export async function PATCH(req: Request, { params }: RouteParams) {
           tourPrice === null ? null : tourUnchanged ? previousTour?.setAt ?? savedAt : savedAt,
         manual_tour_price_set_by:
           tourPrice === null ? null : tourUnchanged ? previousTour?.setBy ?? user.id : user.id,
+        fare_override_adult: fareAdult,
+        fare_override_child: fareChild,
+        fare_override_infant: fareInfant,
+        fare_override_set_at: !hasFareOverride ? null : fareUnchanged ? previousFare?.setAt ?? savedAt : savedAt,
+        fare_override_set_by: !hasFareOverride ? null : fareUnchanged ? previousFare?.setBy ?? user.id : user.id,
         rate_type_id: unit.rateTypeId ?? null,
         origin: "consultant" as const,
       }
     }),
   )
 
-  if (unitRows.length > 0) {
-    const { error: insertUnitsError } = await supabase.from("booking_service_units").insert(unitRows)
-    if (insertUnitsError) return safeSupabaseError("services:insert-units", insertUnitsError)
+  // Delete and insert run in one transaction (replace_booking_service_units), across every service
+  // whose payload carries units. As two separate calls, an insert that failed after the delete had
+  // landed left those services with no rooms at all until the next save.
+  if (servicesWithUnits.length > 0) {
+    const serviceIdsWithUnits = servicesWithUnits.map((selection) => selection.packageLegId)
+    const { error: replaceUnitsError } = await supabase.rpc("replace_booking_service_units", {
+      p_service_ids: serviceIdsWithUnits,
+      p_units: unitRows as Json,
+    })
+    if (replaceUnitsError) {
+      return safeSupabaseError(
+        "services:replace-units",
+        replaceUnitsError,
+        `Could not save the rooms, cabins or suites for ${supplierNamesFor(serviceIdsWithUnits)}. Nothing was changed for them — please try again.`,
+      )
+    }
   }
 
   // Learn from the correction — the higher-traffic correction point, same alias store as the
@@ -794,17 +907,6 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   if (!parsed.data.deferTripDateRecompute) {
     const recompute = await recomputeBookingTripDates(supabase, id)
     if (recompute.error) return jsonError(recompute.error, 500)
-
-    // Keep the legs in date order once they are dated, so the quote, the invoice and Build
-    // Booking's own lists read as an itinerary. Deferred along with the recompute: a caller that
-    // defers is about to write transport requests (whose pickups date the transfer legs) and then
-    // price, and POST /services/apply sorts from the final state of both tables. Runs before the
-    // reload below so the response carries the new sort_order and updated_at stamps.
-    const reorder = await persistServiceDateOrder(supabase, id)
-    if (reorder.error) {
-      // Ordering is presentation, not data: a failure here must not lose the save that just landed.
-      console.error("services:date-order", reorder.error)
-    }
   }
 
   // F-P3-1: the flag intake sets for an unresolved suite/tour type is source-agnostic (see

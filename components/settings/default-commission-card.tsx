@@ -110,10 +110,11 @@ export function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean })
                 readOnly={!canEdit}
                 disabled={loading}
                 aria-invalid={!isValidValue}
-                className="pr-14"
+                // Room for the widest suffix ("per person") so it never sits over the digits.
+                className="pr-24"
               />
               <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">
-                {commissionType === "percent" ? "%" : commissionType === "fixed" ? "total" : "/ pax"}
+                {commissionType === "percent" ? "%" : commissionType === "fixed" ? "total" : "per person"}
               </span>
             </div>
             {canEdit && (

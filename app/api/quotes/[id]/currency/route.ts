@@ -6,7 +6,7 @@ import { calculateQuoteTotals, roundMoney } from "@/lib/quotes/pricing-engine"
 import { applyFxRate, roundFxRate } from "@/lib/pricing/convert-currency"
 import { normaliseCurrency } from "@/lib/money"
 import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
-import type { PricingSnapshot } from "@/lib/types"
+import type { CommissionBreakdown, PricingSnapshot } from "@/lib/types"
 import type { Json } from "@/lib/supabase/types"
 import { writeAuditLog } from "@/lib/audit-write"
 
@@ -30,6 +30,31 @@ const postSchema = z.object({
   /** The rate's publication date, stamped onto each line for the internal provenance note. */
   asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 })
+
+/**
+ * The Commission line's breakdown, re-denominated alongside its line. The ledger reads the typed
+ * value and calculated amount straight off it, and a Build Booking rebuild reuses the typed value
+ * as the quote's commission setting — so leaving it in the old currency showed the pre-conversion
+ * figure on the ledger and re-priced the rebuilt Commission at, say, R2 000 read as $2 000.
+ *
+ * A percent's value is currency-neutral (same as a percent discount); fixed/per_person values,
+ * the calculated amount and the Rounding bonus are all money and convert.
+ */
+function convertCommission(commission: CommissionBreakdown, rate: number): CommissionBreakdown {
+  const value = commission.type === "percent" ? commission.value : applyFxRate(commission.value, rate)
+  // A per-person amount is value x headcount — recomputed from the converted value so it agrees
+  // exactly with the line's own converted unitPrice x qty rather than drifting a cent from it.
+  const amount =
+    commission.type === "per_person" && typeof commission.passengerCount === "number"
+      ? roundMoney(value * commission.passengerCount)
+      : applyFxRate(commission.amount, rate)
+  return {
+    ...commission,
+    value,
+    amount,
+    ...(typeof commission.bonus === "number" ? { bonus: applyFxRate(commission.bonus, rate) } : {}),
+  }
+}
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -128,6 +153,7 @@ export async function POST(req: Request, { params }: RouteParams) {
                   fxRateAsOf: asOf,
                 }
               : {}),
+            ...(snapshot.commission ? { commission: convertCommission(snapshot.commission, rate) } : {}),
           } satisfies PricingSnapshot as unknown as Json)
         : null,
     }

@@ -157,7 +157,7 @@ describe("PATCH /api/quotes/[id]/commission", () => {
     expect(commissionLine?.total).toBe(400)
   })
 
-  it("falls back to the booking headcount for per_person when no passengerCount is stored yet", async () => {
+  it("multiplies per_person by the booking headcount when the quote has no Commission line yet", async () => {
     authorise([travelLine], { adults: 3, children: 1 })
 
     const res = await PATCH(patchReq({ type: "per_person", value: 100 }), routeParams)
@@ -168,6 +168,44 @@ describe("PATCH /api/quotes/[id]/commission", () => {
       (li) => li.description === "Commission",
     )
     expect(commissionLine?.total).toBe(400)
+  })
+
+  it("uses the booking's current headcount, not the passengerCount frozen on the existing line", async () => {
+    const staleCommission: LineItemRow = {
+      description: "Commission",
+      supplier_description: null,
+      qty: 1,
+      unit_price: 200,
+      total: 200,
+      sort_order: 1,
+      pricing_snapshot: {
+        source: "pricing_engine",
+        pricingMode: "rate_card",
+        commission: { type: "percent", value: 10, amount: 200, source: "line", passengerCount: 1 },
+      },
+    }
+    authorise([travelLine, staleCommission], { adults: 4, children: 1 })
+
+    const res = await PATCH(patchReq({ type: "per_person", value: 100 }), routeParams)
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    const commissionLine = (body.lineItems as { description: string; qty: number; total: number }[]).find(
+      (li) => li.description === "Commission",
+    )
+    expect(commissionLine?.total).toBe(500)
+    expect(commissionLine?.qty).toBe(5)
+  })
+
+  it("rejects a per_person commission when the booking has no travellers", async () => {
+    const { rpc } = authorise([travelLine], { adults: 0, children: 0 })
+
+    const res = await PATCH(patchReq({ type: "per_person", value: 100 }), routeParams)
+    const body = await res.json()
+
+    expect(res.status).toBe(400)
+    expect(body.error).toMatch(/number of travellers/)
+    expect(rpc).not.toHaveBeenCalled()
   })
 
   it("re-folds an existing Rounding top-up into the recomputed Commission line", async () => {

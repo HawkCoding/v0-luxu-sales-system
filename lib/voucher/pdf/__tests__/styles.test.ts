@@ -1,22 +1,19 @@
 import { describe, expect, it } from "vitest"
 
+import { DESIGN_COLORS } from "@/lib/pdf/sarail-design"
 import { voucherStyles } from "../styles"
 
-const styles = voucherStyles({
-  accentColour: "#0B2A3A",
-  sectionBg: "#1a3a4a",
-  fonts: { display: "Playfair Display", sans: "Montserrat", body: "Playfair Display" },
-})
+const styles = voucherStyles()
 
 describe("voucherStyles", () => {
-  // react-pdf drops `fixed` render-prop text (the footer page number) when a
-  // Page ancestor carries lineHeight. Keep lineHeight off the page style.
+  // react-pdf drops `fixed` render-prop text (the last-page footer) when a Page ancestor carries
+  // lineHeight. Keep lineHeight off the page style.
   it("does not set lineHeight on the page style", () => {
     expect("lineHeight" in styles.page).toBe(false)
   })
 
-  it("keeps the page number pinned inside the frame", () => {
-    expect(styles.pageNumber.position).toBe("absolute")
-    expect(styles.pageNumber.bottom).toBeGreaterThanOrEqual(24)
+  it("paints the Angora page and the Swirl boxes from the design palette", () => {
+    expect(styles.page.backgroundColor).toBe(DESIGN_COLORS.page)
+    expect(styles.box.backgroundColor).toBe(DESIGN_COLORS.box)
   })
 })

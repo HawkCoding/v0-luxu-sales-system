@@ -5,6 +5,18 @@ import type { CommissionKind, QuoteLineItem } from "@/lib/types"
 
 const MAX_ADJUSTMENT_VALUE = 1_000_000
 
+export const PER_PERSON_NEEDS_HEADCOUNT_ERROR =
+  "Add the number of travellers to the booking before using a per-person amount."
+
+/**
+ * The booking's headcount for per-person amounts: adults + children, infants excluded — the same
+ * count build-from-package.ts prices the Commission line with. Anything that isn't a positive
+ * finite number is 0 (which makes a non-zero per-person amount a validation error, never ×1).
+ */
+export function normalizeHeadcount(headcount: number): number {
+  return Number.isFinite(headcount) && headcount > 0 ? Math.floor(headcount) : 0
+}
+
 export interface QuoteAdjustmentsInput {
   /** null means "no commission configured" — any existing Commission line is dropped. */
   commission: { type: CommissionKind; value: number } | null
@@ -14,8 +26,9 @@ export interface QuoteAdjustmentsInput {
   agentCommission: number
   /** null means "no discount configured". */
   discount: { type: CommissionKind; value: number; visible: boolean } | null
-  /** Booking headcount, used as the passenger-count fallback when no commission breakdown
-   *  exists yet to read one off. */
+  /** The booking's CURRENT headcount (adults + children). Every per-person Commission/Discount
+   *  is multiplied by this — never by a count frozen on an earlier Commission line, which goes
+   *  stale the moment the booking's travellers change. */
   bookingHeadcount: number
 }
 
@@ -30,6 +43,8 @@ export interface QuoteAdjustmentsResult {
   discountAmount: number
   /** quotes.total — subtotal minus Agent Commission and Discount, floored at 0. */
   total: number
+  /** The headcount every per-person amount in this result was multiplied by. */
+  headcount: number
   /** Validation problems. A non-empty array means the caller must not save this state. */
   errors: string[]
 }
@@ -51,10 +66,12 @@ export function computeQuoteAdjustments(
   input: QuoteAdjustmentsInput,
 ): QuoteAdjustmentsResult {
   const errors: string[] = []
+  const headcount = normalizeHeadcount(input.bookingHeadcount)
+  const needsHeadcount = (adjustment: { type: CommissionKind; value: number } | null): boolean =>
+    adjustment?.type === "per_person" && adjustment.value > 0 && headcount === 0
 
   const commissionIndex = findCommissionLineIndex(currentLineItems)
   const existingSnapshot = commissionIndex >= 0 ? currentLineItems[commissionIndex].pricingSnapshot : null
-  const existingBreakdown = existingSnapshot?.commission ?? null
 
   // The commission base is the subtotal of every OTHER line — never the Commission line's own
   // (bonus-inclusive) total, or a bonus already folded in would compound each save.
@@ -69,8 +86,10 @@ export function computeQuoteAdjustments(
     if (input.commission.value < 0 || input.commission.value > MAX_ADJUSTMENT_VALUE) {
       errors.push("Enter a valid commission value.")
     }
-    const passengerCount =
-      existingBreakdown?.passengerCount ?? (input.bookingHeadcount > 0 ? input.bookingHeadcount : 1)
+    // Always the booking's current headcount. Reading it back off the existing Commission line
+    // froze it at whatever the booking held when that line was first built (often 1 at intake,
+    // or a stored 0), so a per-person commission silently priced ×1 after the pax changed.
+    const passengerCount = headcount
     commissionAmount = calculateCommissionAmount({
       amountAfterMarkup: servicesSubtotal,
       passengerCount,
@@ -85,7 +104,8 @@ export function computeQuoteAdjustments(
     const commissionLine: QuoteLineItem = {
       description: "Commission",
       supplierDescription: null,
-      qty: isPerPerson ? Math.max(1, passengerCount) : 1,
+      // The real count (never padded to 1): the quote API re-derives total as unitPrice × qty.
+      qty: isPerPerson ? passengerCount : 1,
       unitPrice: isPerPerson ? input.commission.value : commissionAmount,
       total: commissionAmount,
       pricingSnapshot: existingSnapshot
@@ -150,18 +170,17 @@ export function computeQuoteAdjustments(
     if (input.discount.value < 0 || input.discount.value > MAX_ADJUSTMENT_VALUE) {
       errors.push("Enter a valid discount value.")
     }
-    let passengerCount = 1
-    if (input.discount.type === "per_person") {
-      const commissionIndexAfter = findCommissionLineIndex(nextLineItems)
-      const snapshotCommission =
-        commissionIndexAfter >= 0 ? nextLineItems[commissionIndexAfter].pricingSnapshot?.commission : null
-      if (snapshotCommission?.passengerCount) passengerCount = snapshotCommission.passengerCount
-    }
+    // Per-person: the booking's current headcount, same as Commission. This used to fall back to
+    // 1 whenever the quote had no Commission line to read a count off.
     discountAmount = calculateCommissionAmount({
       amountAfterMarkup: subtotalBeforeRounding,
-      passengerCount,
+      passengerCount: headcount,
       resolved: { type: input.discount.type, value: input.discount.value, source: "line" },
     })
+  }
+
+  if (needsHeadcount(input.commission) || needsHeadcount(input.discount)) {
+    errors.push(PER_PERSON_NEEDS_HEADCOUNT_ERROR)
   }
 
   if (Math.max(0, agentCommission) + discountAmount > subtotal) {
@@ -178,6 +197,7 @@ export function computeQuoteAdjustments(
     agentCommission,
     discountAmount,
     total,
+    headcount,
     errors,
   }
 }

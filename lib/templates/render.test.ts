@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest"
 import { renderTemplate } from "./render"
 
 describe("renderTemplate", () => {
+  it("gives a stored blank line a break so it keeps its height once sent", () => {
+    const result = renderTemplate({
+      subject: "x",
+      bodyHtml: '<p>Dear {{customerName}}</p><p style="margin: 0px;"></p><p>Thanks</p>',
+      tokens: { customerName: "Jane" },
+    })
+    expect(result.bodyHtml).toBe('<p>Dear Jane</p><p style="margin: 0px;"><br></p><p>Thanks</p>')
+  })
+
   it("substitutes scalar tokens in subject and body", () => {
     const result = renderTemplate({
       subject: "Your Quote — {{jobNumber}}",

@@ -1,225 +1,384 @@
+// @vitest-environment node
+// Renders real PDFs: pdf.js text extraction and react-pdf font subsetting both need Node.
 import { describe, expect, it } from "vitest"
-import { WARNING_TEXT_COLOR } from "@/lib/quotes/quote-presentation"
+import { extractPdfPageTexts, extractPdfText } from "@/lib/pdf/extract-text.fixtures"
 import { QuoteDocument } from "./quote-document"
 import { sampleQuotePdfData } from "./sample-data"
 import type { QuotePdfData } from "./quote-document"
+import { renderQuotePdf } from "../render-quote-pdf"
 
 const QUOTE_NUMBER = "LTT-2026-0001-Q1"
 
-function buildDocument(): React.ReactElement<{ title: string; subject: string }> {
-  const data: QuotePdfData = {
+function data(overrides: Partial<QuotePdfData> = {}): QuotePdfData {
+  return {
     ...sampleQuotePdfData(),
     quoteNumber: QUOTE_NUMBER,
     quoteDate: "2026-07-16",
+    company: { tel: "+27 12 100 3596", email: "info@sa-rail.co.za", regNumber: "2007/049324/23" },
+    ...overrides,
   }
-  return QuoteDocument(data) as React.ReactElement<{ title: string; subject: string }>
 }
 
-/** Collects every string/number rendered anywhere in the element tree. */
-function renderedText(node: unknown, out: string[] = []): string[] {
-  if (node == null || typeof node === "boolean") return out
-  if (typeof node === "string" || typeof node === "number") {
-    out.push(String(node))
-    return out
-  }
-  if (Array.isArray(node)) {
-    for (const child of node) renderedText(child, out)
-    return out
-  }
-  const element = node as { props?: { children?: unknown } }
-  if (element.props?.children !== undefined) renderedText(element.props.children, out)
-  return out
+/** One whitespace-normalised string per page. */
+async function pages(overrides: Partial<QuotePdfData> = {}): Promise<string[]> {
+  const buffer = await renderQuotePdf(data(overrides))
+  return (await extractPdfPageTexts(buffer)).map((page) => page.replace(/\s+/g, " "))
 }
 
-/** The props of the first element whose own rendered text is exactly `text`. */
-function findTextElement(node: unknown, text: string): { style?: unknown } | null {
-  if (node == null || typeof node !== "object") return null
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const found = findTextElement(child, text)
-      if (found) return found
-    }
-    return null
-  }
-  const element = node as { props?: { children?: unknown; style?: unknown } }
-  if (!element.props) return null
-  if (renderedText(element.props.children).join("") === text) return element.props
-  return findTextElement(element.props.children, text)
+/** One string per printed line (a new baseline starts a new one) — for assertions about wrapping. */
+async function lines(overrides: Partial<QuotePdfData> = {}): Promise<string[]> {
+  const buffer = await renderQuotePdf(data(overrides))
+  return (await extractPdfText(buffer)).split("\n").map((line) => line.trim())
 }
 
-describe("QuoteDocument", () => {
-  it("omits the quote number and quote date while the reference is hidden", () => {
-    const text = renderedText(buildDocument()).join(" | ")
+interface TextRun {
+  str: string
+  x: number
+  right: number
+}
+
+/** Every text run on one page with its left and right edge — for the column assertions the joined
+ *  text can't express. */
+async function pageRuns(overrides: Partial<QuotePdfData>, pageNumber: number): Promise<TextRun[]> {
+  const buffer = await renderQuotePdf(data(overrides))
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
+  const document = await pdfjs.getDocument({ data: new Uint8Array(buffer), useSystemFonts: false }).promise
+  const content = await (await document.getPage(pageNumber)).getTextContent()
+  return content.items.flatMap((item) =>
+    "str" in item ? [{ str: item.str, x: item.transform[4], right: item.transform[4] + item.width }] : [],
+  )
+}
+
+/** The details follow the totals on the same page when they fit, so find the page that holds them. */
+async function detailsPage(overrides: Partial<QuotePdfData>): Promise<{ text: string; pageNumber: number }> {
+  const all = await pages(overrides)
+  const index = all.findIndex((page) => page.includes("Travel Package Details"))
+  return { text: all[index] ?? "", pageNumber: index + 1 }
+}
+
+function runOf(runs: TextRun[], str: string): TextRun {
+  const run = runs.find((candidate) => candidate.str === str)
+  if (!run) throw new Error(`"${str}" is not a run on this page`)
+  return run
+}
+
+/** The details page's bullet dots, as the designer placed them (48.5 page edge + 135.8 title column). */
+const DETAILS_BULLET_COLUMN_X = 184.3
+/** Bullet text, 10.3pt past its dot. */
+const DETAILS_BULLET_TEXT_X = 194.6
+/** The gap quote-document.tsx keeps (DETAIL_TITLE_GAP) between a title and the bullet column. */
+const DETAILS_TITLE_GAP = 10
+
+const itineraryBlocks: QuotePdfData["itineraryBlocks"] = [
+  {
+    serviceType: "hotel",
+    title: "Ivory Manor",
+    contactDetails: { name: "Ivory Manor Boutique Hotel", description: "A boutique manor in Pretoria." },
+    serviceData: {
+      departureDate: "2027-03-15",
+      arrivalDate: "2027-03-16",
+      startTime: "14:00",
+      nights: 1,
+      isComplimentary: true,
+      inclusions: ["24-hour front desk"],
+    },
+    displayOrder: 1,
+  },
+  {
+    serviceType: "train",
+    title: "Rovos Rail",
+    contactDetails: { name: "Rovos Rail" },
+    serviceData: {
+      departureDate: "2027-03-16",
+      arrivalDate: "2027-03-25",
+      startTime: "12:00",
+      endTime: "10:00",
+      arrivalStation: "Pretoria",
+      durationDays: 10,
+      checkInOffsetMinutes: 120,
+      notes: "Gluten Free Meals Mrs Adams",
+      inclusions: ["# Onboard:", "All meals"],
+    },
+    displayOrder: 2,
+  },
+]
+
+// A real react-pdf render takes a few seconds and overran the 5 s default under a loaded full run.
+describe("QuoteDocument", { timeout: 30_000 }, () => {
+  it("keeps the quote number out of the document while the reference is hidden", async () => {
+    const text = (await pages()).join(" ")
 
     expect(text).not.toContain(QUOTE_NUMBER)
-    expect(text).not.toContain("Quote date")
-  })
-
-  it("keeps the rest of the document intact without the reference", () => {
-    const text = renderedText(buildDocument()).join(" | ")
-
     expect(text).toContain("Prepared for")
-    expect(text).toContain("Travel Dates")
+    expect(text).toContain("16 July 2026")
   })
 
-  describe("travel dates label", () => {
-    // Mirrors the quote email summary block: every product reads "Travel Dates", never the
-    // per-product noun ("Journey"/"Stay"/"Tour").
-    it("labels the date line Travel Dates", () => {
-      const text = renderedText(buildDocument())
+  it("keeps the quote number out of the PDF viewer's title bar", () => {
+    // Document metadata is customer-visible chrome, so it follows the same rule as the page body.
+    const doc = QuoteDocument(data()) as React.ReactElement<{ title: string; subject: string }>
 
-      expect(text).toContain("Travel Dates")
-      expect(text).not.toContain("Journey")
-      expect(text).not.toContain("Stay")
-    })
+    expect(doc.props.title).toBe("Quotation — Mr & Mrs Sample Guest")
+    expect(doc.props.subject).toBe("Quotation")
   })
 
-  describe("prepared for", () => {
-    it("prints the client's phone and email under their name", () => {
-      const text = renderedText(buildDocument())
+  it("prints the client details and the train journey details", async () => {
+    const [first] = await pages()
 
-      expect(text).toContain("+27 82 555 0100")
-      expect(text).toContain("sample.guest@example.com")
-    })
+    expect(first).toContain("Client details")
+    expect(first).toContain("+27 82 555 0100")
+    expect(first).toContain("sample.guest@example.com")
+    expect(first).not.toContain("Address:")
+    expect(first).toContain("Train Journey details")
+    expect(first).toContain("Travel dates")
+    expect(first).toContain("The Blue Train")
+    expect(first).toContain("Pretoria to Cape Town")
+  })
 
-    it("omits the contact lines cleanly when neither is known", () => {
-      const doc = QuoteDocument({
-        ...sampleQuotePdfData(),
-        quoteNumber: QUOTE_NUMBER,
-        quoteDate: "2026-07-16",
-        customerPhone: null,
-        customerEmail: "  ",
-      }) as React.ReactElement
-      const text = renderedText(doc)
+  it("omits the contact rows cleanly when neither is known", async () => {
+    const text = (await pages({ customerPhone: null, customerEmail: "  " })).join(" ")
 
-      expect(text).not.toContain("+27 82 555 0100")
-      expect(text).not.toContain("  ")
-    })
+    expect(text).not.toContain("+27 82 555 0100")
+    expect(text).not.toContain("E-mail")
+  })
+
+  it("titles the document in the design's title case", async () => {
+    const [first] = await pages({ title: "QUOTATION" })
+
+    expect(first).toContain("Quotation")
+    expect(first).not.toContain("QUOTATION")
   })
 
   describe("itinerary", () => {
-    const blocks: QuotePdfData["itineraryBlocks"] = [
-      {
-        serviceType: "hotel",
-        title: "Ivory Manor",
-        contactDetails: { name: "Ivory Manor Boutique Hotel", description: "A boutique manor in Pretoria." },
-        serviceData: {
-          departureDate: "2027-03-15",
-          arrivalDate: "2027-03-16",
-          startTime: "14:00",
-          nights: 1,
-          isComplimentary: true,
-          inclusions: ["24-hour front desk"],
-        },
-        displayOrder: 1,
-      },
-      {
-        serviceType: "train",
-        title: "Rovos Rail",
-        contactDetails: { name: "Rovos Rail" },
-        serviceData: {
-          departureDate: "2027-03-16",
-          arrivalDate: "2027-03-25",
-          startTime: "12:00",
-          endTime: "10:00",
-          arrivalStation: "Pretoria",
-          durationDays: 10,
-          checkInOffsetMinutes: 120,
-          notes: "Gluten Free Meals Mrs Adams",
-        },
-        displayOrder: 2,
-      },
-    ]
-    const doc = () =>
-      QuoteDocument({
-        ...sampleQuotePdfData(),
-        quoteNumber: QUOTE_NUMBER,
-        quoteDate: "2026-07-16",
-        itineraryBlocks: blocks,
-      }) as React.ReactElement
-
-    it("prints no COMPLIMENTARY label and no guest notes", () => {
-      const text = renderedText(doc()).join(" | ")
+    it("prints no COMPLIMENTARY label and no guest notes", async () => {
+      const text = (await pages({ itineraryBlocks })).join(" ")
 
       expect(text).not.toMatch(/COMPLIMENTARY/)
       expect(text).not.toContain("Gluten Free Meals Mrs Adams")
     })
 
-    it("prints the train check-in and departure bullets", () => {
-      const text = renderedText(doc()).join(" | ")
+    it("sets each day's short facts on the first page", async () => {
+      const [first] = await pages({ itineraryBlocks })
 
-      expect(text).toContain("- Check in at 10h00")
-      expect(text).toContain("- Departure time: 12h00")
-      expect(text).not.toContain("Departs at")
+      expect(first).toContain("Check in from 14h00")
+      expect(first).toContain("Check in at 10h00 - Train departs at 12h00")
+      expect(first).toContain("Arrival at Pretoria station at 10h00 - Train arrival times cannot be guaranteed")
+      expect(first).not.toContain("Departure time:")
     })
 
-    it("prints the hotel description in italics instead of its facilities", () => {
-      const description = findTextElement(doc(), "A boutique manor in Pretoria.")
+    it("names Rovos Rail without an article in the package sentence", async () => {
+      const [first] = await pages({ itineraryBlocks })
 
-      expect(description?.style).toMatchObject({ fontFamily: "Carlito", fontStyle: "italic", fontSize: 8.5 })
-      // Carlito ships no bold-italic face, so the italic description must stay regular weight.
-      expect(description?.style).not.toHaveProperty("fontWeight")
-      expect(renderedText(doc()).join(" | ")).not.toContain("24-hour front desk")
+      expect(first).toContain("Nine nights on Rovos Rail")
+      expect(first).not.toContain("the Rovos Rail")
     })
 
-    it("prints the train arrival caveat in red", () => {
-      const caveat = findTextElement(doc(), "- Train arrival times cannot be guaranteed")
+    it("runs a flight's times on in its sentence, without a ' | '", async () => {
+      const [first] = await pages()
 
-      expect(caveat?.style).toMatchObject({ color: WARNING_TEXT_COLOR })
+      expect(first).toContain("in Economy departing at 10h00 for arrival at 12h15")
+      expect(first).not.toContain("Economy |")
+    })
+
+    it("heads a train's details \"<Operator> Inclusions\", not with its route", async () => {
+      const { text } = await detailsPage({ itineraryBlocks })
+
+      expect(text).toContain("Rovos Rail Inclusions")
+      expect(text).not.toContain("Rovos Rail Includes")
+    })
+
+    it("sets the package details after the disclaimer, with the hotel description in place of its facilities", async () => {
+      const [first, ...rest] = await pages({ itineraryBlocks })
+      const all = [first, ...rest].join(" ")
+
+      expect(first.indexOf("subject to availability")).toBeGreaterThanOrEqual(0)
+      expect(first.indexOf("subject to availability")).toBeLessThan(first.indexOf("Travel Package Details"))
+      expect(all).toContain("A boutique manor in Pretoria.")
+      expect(all).toContain("Onboard")
+      expect(all).toContain("All meals")
+      expect(all).not.toContain("24-hour front desk")
+    })
+
+    it("sets no colon at the end of any heading or bullet on the details page, and keeps the first page's", async () => {
+      const blocks = itineraryBlocks.map((block) =>
+        block.serviceType === "train"
+          ? {
+              ...block,
+              serviceData: {
+                ...block.serviceData,
+                inclusions: ["# Onboard:", "All meals", "Check-in 14:00 at Capital Park", "# Off-train:", "Flights"],
+                exclusions: ["Gratuities:"],
+              },
+            }
+          : block,
+      )
+      const overrides: Partial<QuotePdfData> = {
+        itineraryBlocks: blocks,
+        packageExcludesHeading: "Your Package Excludes:",
+        packageExcludesDefault: "Services not mentioned.",
+      }
+      const [first] = await pages(overrides)
+      const { text: second } = await detailsPage(overrides)
+
+      for (const text of [
+        "Travel Package Details",
+        "Rovos Rail Inclusions",
+        "Onboard",
+        "Off-train",
+        "Your Package Excludes",
+        "Gratuities",
+      ]) {
+        expect(second).toContain(text)
+        expect(second).not.toContain(`${text}:`)
+      }
+      // A colon inside a line is part of its sentence.
+      expect(second).toContain("Check-in 14:00 at Capital Park")
+      // So do the first page's labels (client markup, 2026-10-22).
+      for (const text of ["Prepared for", "Travel dates", "Sub Total incl. VAT", "Travel Package Includes"]) {
+        expect(first).toContain(text)
+        expect(first).not.toContain(`${text}:`)
+      }
+
+      // Page one's body carries none either; only the company footer (Tel:, Email: …) keeps its labels.
+      const footer = new Set(["Address:", "Tel:", "Cell:", "Email:", "Web:", "Company Registration", "VAT number"])
+      const pageCount = (await pages(overrides)).length
+      for (let page = 1; page <= pageCount; page++) {
+        const runs = (await pageRuns(overrides, page)).map((run) => run.str.trim()).filter(Boolean)
+        expect(runs.length).toBeGreaterThan(5)
+        expect(runs.filter((run) => run.endsWith(":") && !footer.has(run))).toEqual([])
+      }
+    })
+
+    it("sets a 26-character hotel name and the excludes heading on one line each", async () => {
+      // Wrapped, each would start a line at its first word only ("Ivory Manor" / "Boutique Hotel").
+      const printed = await lines({ itineraryBlocks, packageExcludesDefault: "Services not mentioned." })
+
+      expect(printed.some((line) => line.startsWith("Ivory Manor Boutique Hotel"))).toBe(true)
+      expect(printed.some((line) => line.startsWith("Your Package Excludes"))).toBe(true)
+      expect(printed.some((line) => line.startsWith("Your Package Excludes:"))).toBe(false)
+    })
+
+    it("keeps the details bullet column where it was, with the one-line titles clear of it", async () => {
+      // The product owner's constraint: widening the titles must not push or narrow the descriptions.
+      const overrides = { itineraryBlocks, packageExcludesDefault: "Services not mentioned." }
+      const runs = await pageRuns(overrides, (await detailsPage(overrides)).pageNumber)
+
+      for (const bullet of ["A boutique manor in Pretoria.", "Services not mentioned."]) {
+        expect(runOf(runs, bullet).x).toBeCloseTo(DETAILS_BULLET_TEXT_X, 1)
+      }
+      for (const title of ["Ivory Manor Boutique Hotel", "Your Package Excludes"]) {
+        expect(runOf(runs, title).right).toBeLessThanOrEqual(DETAILS_BULLET_COLUMN_X - DETAILS_TITLE_GAP)
+      }
+    })
+
+    it("still wraps a title too long for its column rather than run it into the bullets", async () => {
+      const longName = itineraryBlocks.map((block) =>
+        block.serviceType === "hotel"
+          ? { ...block, contactDetails: { ...block.contactDetails, name: "Kruger Shalati Train on the Bridge" } }
+          : block,
+      )
+      const printed = await lines({ itineraryBlocks: longName })
+
+      expect(printed.some((line) => line.startsWith("Kruger Shalati Train on the"))).toBe(true)
+      expect(printed.some((line) => line.startsWith("Kruger Shalati Train on the Bridge"))).toBe(false)
+    })
+
+    it("prints the company footer on the first page only", async () => {
+      const [first, ...rest] = await pages({ itineraryBlocks })
+
+      expect(first).toContain("Company Registration 2007/049324/23")
+      expect(rest.join(" ")).not.toContain("Company Registration")
     })
   })
 
-  it("keeps the quote number out of the PDF viewer's title bar", () => {
-    // Document metadata is customer-visible chrome, so it follows the same rule
-    // as the page body.
-    const doc = buildDocument()
-
-    expect(doc.props.title).toBe("Quotation — Mr & Mrs Sample Guest")
-    expect(doc.props.subject).toBe("Quotation")
-    expect(doc.props.title).not.toContain(QUOTE_NUMBER)
-  })
-
-  describe("agent commission", () => {
+  describe("pricing", () => {
     // sampleQuotePdfData ships subtotal: 91300, agentCommission: 5000, discount: 1300,
     // total: 85000 specifically to exercise these rows.
-    it("shows the subtotal and the discount above the net total", () => {
-      const text = renderedText(buildDocument()).join(" | ")
+    it("shows the subtotal and both deductions above the net total", async () => {
+      const [first] = await pages()
 
-      expect(text).toContain("Subtotal")
-      expect(text).toContain("Agent Commission")
-      expect(text).toContain("Discount")
+      expect(first).toContain("Sub Total incl. VAT")
+      expect(first).toContain("Agent Commission")
+      expect(first).toContain("Discount")
+      expect(first).toContain("Total for 2 Adults incl. VAT")
+      // One spelling across the whole box.
+      expect(first).not.toContain("incl VAT")
     })
 
-    it("renders nothing extra when there is no commission or discount", () => {
-      const doc = QuoteDocument({
-        ...sampleQuotePdfData(),
-        quoteNumber: QUOTE_NUMBER,
-        quoteDate: "2026-07-16",
+    it("renders only the total when there is no commission or discount", async () => {
+      const text = (await pages({ subtotal: undefined, agentCommission: 0, discount: 0, total: 85000 })).join(" ")
+
+      expect(text).not.toContain("Sub Total")
+      expect(text).not.toContain("Agent Commission")
+      expect(text).not.toContain("Discount")
+      expect(text).toContain("Total for 2 Adults incl. VAT")
+      expect(text).not.toContain("Total incl VAT:")
+    })
+
+    it("names the party in the total label, and prints the per-adult and per-child rows when given", async () => {
+      const [first] = await pages({
+        adults: 4,
+        children: 1,
+        perPersonTotals: { perAdult: 60_000, perChild: 25_000 },
+      })
+
+      expect(first).toContain("Total for 4 Adults & 1 Child incl. VAT")
+      expect(first).toMatch(/Total per Adult\s+R\s?60[\s ]?000,00/)
+      expect(first).toMatch(/Total per Child\s+R\s?25[\s ]?000,00/)
+    })
+
+    it("keeps the booking's own counts in the Guests row while the total label counts the paying pax", async () => {
+      // 2 adults + a 1-year-old: the Guests row still names the infant; the label and rows don't.
+      const [first] = await pages({
+        adults: 2,
+        children: 1,
+        payingPax: { adults: 2, children: 0 },
+        perPersonTotals: { perAdult: 42_500, perChild: null },
+      })
+
+      expect(first).toContain("2 Adults + 1 Child")
+      expect(first).toContain("Total for 2 Adults incl. VAT")
+      expect(first).not.toContain("Total per Child")
+    })
+
+    it("prints no per-person rows when none can be stated, and no child row on an adults-only booking", async () => {
+      const without = (await pages({ perPersonTotals: null })).join(" ")
+      expect(without).not.toContain("Total per")
+
+      // The Settings preview sample carries its own adults-only figure.
+      expect((await pages()).join(" ")).toMatch(/Total per Adult\s+R\s?42[\s ]?500,00/)
+
+      const adultsOnly = (await pages({ perPersonTotals: { perAdult: 42_500, perChild: null } })).join(" ")
+      expect(adultsOnly).toContain("Total per Adult")
+      expect(adultsOnly).not.toContain("Total per Child")
+    })
+
+    it("heads the block with the per-person rows, above the Sub Total when a deduction shows", async () => {
+      const [first] = await pages()
+
+      expect(first.indexOf("Total per Adult")).toBeGreaterThanOrEqual(0)
+      expect(first.indexOf("Total per Adult")).toBeLessThan(first.indexOf("Sub Total incl. VAT"))
+      expect(first.indexOf("Sub Total incl. VAT")).toBeLessThan(first.indexOf("Discount"))
+      expect(first.indexOf("Discount")).toBeLessThan(first.indexOf("Total for 2 Adults incl. VAT"))
+    })
+
+    it("heads the block with the per-person rows, above the grand total when nothing is deducted", async () => {
+      const [first] = await pages({
+        adults: 4,
+        children: 1,
         subtotal: undefined,
         agentCommission: 0,
         discount: 0,
-        total: 85000,
-      }) as React.ReactElement
-      const text = renderedText(doc).join(" | ")
+        perPersonTotals: { perAdult: 60_000, perChild: 25_000 },
+      })
 
-      expect(text).not.toContain("Subtotal")
-      expect(text).not.toContain("Agent Commission")
-      expect(text).not.toContain("Discount")
+      expect(first).not.toContain("Sub Total")
+      expect(first.indexOf("Total per Adult")).toBeGreaterThanOrEqual(0)
+      expect(first.indexOf("Total per Adult")).toBeLessThan(first.indexOf("Total per Child"))
+      expect(first.indexOf("Total per Child")).toBeLessThan(first.indexOf("Total for 4 Adults & 1 Child incl. VAT"))
     })
-  })
 
-  describe("discount", () => {
-    // The PDF only ever renders the `total` it's given — netting the discount out of it is the
-    // caller's job (see calculateQuoteTotals). This only checks the row itself stays hidden.
-    it("hides the Discount row when discountVisible is false", () => {
-      const doc = QuoteDocument({
-        ...sampleQuotePdfData(),
-        quoteNumber: QUOTE_NUMBER,
-        quoteDate: "2026-07-16",
-        agentCommission: 0,
-        discountVisible: false,
-      }) as React.ReactElement
-      const text = renderedText(doc).join(" | ")
+    it("hides the Discount row when discountVisible is false", async () => {
+      const text = (await pages({ agentCommission: 0, discountVisible: false })).join(" ")
 
       expect(text).not.toContain("Discount")
     })

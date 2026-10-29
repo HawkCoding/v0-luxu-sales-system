@@ -13,6 +13,17 @@ describe("SERVICES_WITH_UNITS_SELECT", () => {
     expect(SERVICES_WITH_UNITS_SELECT).toContain(column)
   })
 
+  it("lists every train fare override column (three kinds + when it was set) as an override column", () => {
+    expect(MANUAL_OVERRIDE_UNIT_COLUMNS).toEqual(
+      expect.arrayContaining([
+        "fare_override_adult",
+        "fare_override_child",
+        "fare_override_infant",
+        "fare_override_set_at",
+      ]),
+    )
+  })
+
   it("selects the units join at all", () => {
     expect(SERVICES_WITH_UNITS_SELECT).toContain("units:booking_service_units(")
   })

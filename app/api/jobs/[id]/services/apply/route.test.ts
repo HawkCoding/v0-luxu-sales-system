@@ -146,9 +146,39 @@ function withUnconfiguredHotelLeg(detail: PackageDetail): PackageDetail {
   }
 }
 
-function createSupabaseMock(bookingExists = true, commissionBonus = 0) {
+function createSupabaseMock(
+  bookingExists = true,
+  commissionBonus = 0,
+  options: {
+    /** pricing_snapshot of each of the quote's current line items. */
+    quoteLineSnapshots?: unknown[]
+    /** app_settings rows (the house default commission lives here). */
+    appSettings?: { key: string; value: string }[]
+    /** The quote's status — amend mode only prices an accepted quote. */
+    quoteStatus?: string
+    /** Cached fx_rates rows, base ZAR: { USD: 18 } reads "1 USD = 18 ZAR". */
+    cachedRates?: Record<string, number>
+  } = {},
+) {
   return {
     from: vi.fn((table: string) => {
+      // The route reads the quote's current Commission line so a ledger-set commission survives
+      // a rebuild instead of being replaced by the house default.
+      if (table === "quote_line_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({
+                data: (options.quoteLineSnapshots ?? []).map((pricing_snapshot) => ({ pricing_snapshot })),
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === "app_settings") {
+        return { select: vi.fn(() => ({ in: vi.fn(async () => ({ data: options.appSettings ?? [], error: null })) })) }
+      }
       if (table === "bookings") {
         return {
           select: vi.fn(() => ({
@@ -191,12 +221,6 @@ function createSupabaseMock(bookingExists = true, commissionBonus = 0) {
       if (table === "app_settings" || table === "suppliers" || table === "routes") {
         return { select: vi.fn(() => ({ in: vi.fn(async () => ({ data: [], error: null })) })) }
       }
-      // POST /services/apply re-sorts the legs into date order before pricing (persistServiceDateOrder).
-      // None of these fixtures carry a service_date, so the resort is a no-op -- an empty read is
-      // exactly right.
-      if (table === "booking_services") {
-        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
-      }
       if (table === "rate_types") {
         return {
           select: vi.fn(() => ({
@@ -212,7 +236,7 @@ function createSupabaseMock(bookingExists = true, commissionBonus = 0) {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { commission_bonus: commissionBonus, currency: "ZAR" },
+                data: { commission_bonus: commissionBonus, currency: "ZAR", status: options.quoteStatus ?? "draft" },
                 error: null,
               })),
             })),
@@ -222,7 +246,15 @@ function createSupabaseMock(bookingExists = true, commissionBonus = 0) {
       // The route reads the FX cache before pricing so a foreign supplier rate can be converted
       // into the quote's currency. Empty is the all-ZAR case, which needs no rate at all.
       if (table === "fx_rates") {
-        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
+        const rows = Object.entries(options.cachedRates ?? {}).map(([code, rate]) => ({
+          base_currency: "ZAR",
+          quote_currency: code,
+          rate,
+          as_of: "2026-10-07",
+          source: "frankfurter",
+          fetched_at: new Date().toISOString(),
+        }))
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: rows, error: null })) })) }
       }
       throw new Error(`Unexpected table ${table}`)
     }),
@@ -385,6 +417,24 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     expect(response.status).toBe(200)
   })
 
+  it("accepts zero nights (a same-day tour's span) instead of 400ing the whole request", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_SERVICE_ID,
+          selected: true,
+          nights: 0,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(response.status).toBe(200)
+  })
+
   it("drops an unusable client fx rate instead of 400ing the whole request", async () => {
     const response = await postApply({
       jobId: JOB_ID,
@@ -467,6 +517,235 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     expect(response.status).toBe(400)
     expect(payload.error).toMatch(/No meal plan selected/)
     expect(payload.incompleteLegs).toHaveLength(1)
+  })
+
+  describe("commission on a rebuild", () => {
+    const TRAIN_SELECTION = {
+      legId: TRAIN_SERVICE_ID,
+      selected: true,
+      units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+    }
+    const HOUSE_DEFAULT_10_PERCENT = [
+      { key: "default_commission_type", value: "percent" },
+      { key: "default_commission_value", value: "10" },
+    ]
+
+    function useSupabase(options: Parameters<typeof createSupabaseMock>[2]) {
+      helperMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase: createSupabaseMock(true, 0, options),
+          user: { id: "abababab-abab-4aba-8aba-abababababab", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane Doe", name: "Jane", surname: "Doe", email: "u@example.com" },
+        },
+      })
+    }
+
+    async function commissionLineAfterRebuild() {
+      const response = await postApply({ jobId: JOB_ID, quoteId: QUOTE_ID, travelDate: "2026-06-01", selections: [TRAIN_SELECTION] })
+      expect(response.status).toBe(200)
+      const payload = (await response.json()) as {
+        lineItems: { description: string; qty: number; unitPrice: number; total: number; pricingSnapshot?: { commission?: unknown } }[]
+      }
+      return payload.lineItems.find((li) => li.description === "Commission")
+    }
+
+    it("keeps a ledger-set per-person commission instead of replacing it with the house default", async () => {
+      // The quote's Commission line was set to R500 per person on the Quotes tab, when the
+      // booking held 1 traveller. The booking now holds 2 (see the bookings mock).
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [
+          null,
+          { commission: { type: "per_person", value: 500, amount: 500, source: "line", passengerCount: 1 } },
+        ],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      // Re-priced with the booking's current headcount: 500 × 2, not the house 10% (R200) and not ×1.
+      expect(commissionLine).toMatchObject({ qty: 2, unitPrice: 500, total: 1000 })
+      expect(commissionLine?.pricingSnapshot?.commission).toMatchObject({
+        type: "per_person",
+        value: 500,
+        amount: 1000,
+        passengerCount: 2,
+      })
+    })
+
+    it("re-prices a ledger-set percent commission against the new subtotal", async () => {
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [{ commission: { type: "percent", value: 25, amount: 999, source: "line" } }],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      // 25% of the rebuilt R2 000 train line.
+      expect(commissionLine).toMatchObject({ qty: 1, total: 500 })
+    })
+
+    it("falls back to the house default when the quote has no Commission line yet", async () => {
+      useSupabase({ appSettings: HOUSE_DEFAULT_10_PERCENT, quoteLineSnapshots: [null] })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      expect(commissionLine).toMatchObject({ qty: 1, total: 200 })
+    })
+
+    it("still gives a fresh quote carrying only an ad-hoc extra the house default", async () => {
+      // Extras carry no legId -- they don't mean the quote has been through Build Booking.
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [{ isExtra: true, legId: null, commission: null }],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      expect(commissionLine).toMatchObject({ qty: 1, total: 200 })
+    })
+
+    it("keeps a commission cleared on the ledger cleared, instead of re-adding the house default", async () => {
+      // Already built (its train line carries a legId), and the Commission line was since dropped
+      // by the ledger's clear.
+      useSupabase({
+        appSettings: HOUSE_DEFAULT_10_PERCENT,
+        quoteLineSnapshots: [{ legId: TRAIN_SERVICE_ID, commission: null }],
+      })
+
+      const commissionLine = await commissionLineAfterRebuild()
+
+      expect(commissionLine).toBeUndefined()
+    })
+  })
+
+  // Amend (accepted quote changed in place): the rates stamped on the accepted quote's own lines are
+  // the defaults (prefilled in the dialog), so existing lines keep their price unless the
+  // salesperson types a different rate — which then wins.
+  describe("amend: exchange rates from the accepted quote", () => {
+    const TRAIN_SELECTION = {
+      legId: TRAIN_SERVICE_ID,
+      selected: true,
+      units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+    }
+    const ACCEPTED_USD_LINE = {
+      source: "pricing_engine",
+      legId: TRAIN_SERVICE_ID,
+      sourceCurrency: "USD",
+      sourceUnitPrice: 100,
+      fxRate: 17.25,
+      fxRateAsOf: "2026-08-01",
+    }
+
+    function withCardCurrency(currency: string) {
+      const detail = buildDetail()
+      detail.legs[0] = {
+        ...detail.legs[0],
+        rateCards: detail.legs[0].rateCards.map((card) => ({ ...card, currency, pricePerPerson: 100 })),
+      }
+      helperMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+        detail,
+        services: [{ id: TRAIN_SERVICE_ID }],
+        units: [],
+      })
+    }
+
+    function useSupabase(options: Parameters<typeof createSupabaseMock>[2]) {
+      helperMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase: createSupabaseMock(true, 0, options),
+          user: { id: "abababab-abab-4aba-8aba-abababababab", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane Doe", name: "Jane", surname: "Doe", email: "u@example.com" },
+        },
+      })
+    }
+
+    async function adultLine(body: Record<string, unknown>) {
+      const response = await postApply({
+        jobId: JOB_ID,
+        quoteId: QUOTE_ID,
+        travelDate: "2026-06-01",
+        selections: [TRAIN_SELECTION],
+        ...body,
+      })
+      const payload = (await response.json()) as {
+        lineItems: { description: string; unitPrice: number; pricingSnapshot?: { fxRate?: number } }[]
+        fx: { prefilledCurrencies?: string[] }
+      }
+      return {
+        status: response.status,
+        line: payload.lineItems?.find((li) => li.description.endsWith("Adult")),
+        fx: payload.fx,
+      }
+    }
+
+    it("defaults an existing currency to the accepted quote's rate over the cache", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "accepted", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { status, line, fx } = await adultLine({ amend: true })
+
+      expect(status).toBe(200)
+      expect(line?.unitPrice).toBe(1725)
+      expect(line?.pricingSnapshot?.fxRate).toBe(17.25)
+      expect(fx.prefilledCurrencies).toEqual(["USD"])
+    })
+
+    it("prices identically when the dialog sends the prefilled rate back untouched", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "accepted", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { line } = await adultLine({ amend: true, fxRates: { USD: 17.25 } })
+
+      expect(line?.unitPrice).toBe(1725)
+      expect(line?.pricingSnapshot?.fxRate).toBe(17.25)
+    })
+
+    it("lets a rate the salesperson typed override the accepted-quote default", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "accepted", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { status, line } = await adultLine({ amend: true, fxRates: { USD: 19 } })
+
+      expect(status).toBe(200)
+      expect(line?.unitPrice).toBe(1900)
+    })
+
+    it("still uses today's rate for a currency only a new line uses", async () => {
+      withCardCurrency("EUR")
+      useSupabase({
+        quoteStatus: "accepted",
+        cachedRates: { USD: 18, EUR: 20 },
+        quoteLineSnapshots: [ACCEPTED_USD_LINE],
+      })
+
+      const { status, line } = await adultLine({ amend: true })
+
+      expect(status).toBe(200)
+      expect(line?.unitPrice).toBe(2000)
+    })
+
+    it("leaves a normal Build Booking on current rates (client rate over cache)", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "draft", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const cached = await adultLine({})
+      expect(cached.line?.unitPrice).toBe(1800)
+      expect(cached.fx.prefilledCurrencies).toBeUndefined()
+
+      const nudged = await adultLine({ fxRates: { USD: 19 } })
+      expect(nudged.line?.unitPrice).toBe(1900)
+    })
+
+    it("refuses amend pricing on a quote that isn't accepted", async () => {
+      withCardCurrency("USD")
+      useSupabase({ quoteStatus: "sent", cachedRates: { USD: 18 }, quoteLineSnapshots: [ACCEPTED_USD_LINE] })
+
+      const { status } = await adultLine({ amend: true })
+
+      expect(status).toBe(409)
+    })
   })
 
   it("returns 400 with the engine's message when a required suite type is missing", async () => {

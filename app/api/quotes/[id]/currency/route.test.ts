@@ -19,6 +19,8 @@ interface QuoteFixture {
   discount_type?: string | null
   discount_value?: number
   discount_amount?: number
+  /** Replaces the default LINES fixture. */
+  lines?: unknown[]
 }
 
 interface Captured {
@@ -103,7 +105,7 @@ function buildSupabase(quote: QuoteFixture, captured: Captured) {
       if (table === "quote_line_items") {
         return {
           select: () => ({
-            eq: () => ({ order: async () => ({ data: LINES, error: null }) }),
+            eq: () => ({ order: async () => ({ data: quote.lines ?? LINES, error: null }) }),
           }),
         }
       }
@@ -212,6 +214,64 @@ describe("POST /api/quotes/[id]/currency", () => {
 
     expect(captured.quoteUpdate?.discount_value).toBe(10)
     expect(captured.quoteUpdate?.discount_amount).toBe(250)
+  })
+
+  describe("Commission line breakdown", () => {
+    function commissionLine(commission: Record<string, unknown>, qty: number, unitPrice: number) {
+      return {
+        description: "Commission",
+        supplier_description: null,
+        qty,
+        unit_price: unitPrice,
+        total: unitPrice * qty,
+        sort_order: 1,
+        pricing_snapshot: {
+          ...LINES[0].pricing_snapshot,
+          baseUnitPrice: unitPrice,
+          commission,
+        },
+      }
+    }
+
+    async function convertedCommission(commission: Record<string, unknown>, qty: number, unitPrice: number) {
+      const captured: Captured = {}
+      authorise({ status: "draft", lines: [LINES[0], commissionLine(commission, qty, unitPrice)] }, captured)
+      const response = await post({ currency: "USD", rate: 2 })
+      expect(response.status).toBe(200)
+      const lines = captured.rpc?.p_line_items as {
+        unit_price: number
+        total: number
+        pricing_snapshot: { commission: Record<string, unknown> }
+      }[]
+      return lines[1]
+    }
+
+    it("converts a fixed commission's typed value, amount and bonus so the ledger and a rebuild agree", async () => {
+      const line = await convertedCommission(
+        { type: "fixed", value: 500, amount: 500, source: "line", bonus: 50 },
+        1,
+        550,
+      )
+      expect(line.pricing_snapshot.commission).toMatchObject({ type: "fixed", value: 1000, amount: 1000, bonus: 100 })
+      expect(line.unit_price).toBe(1100)
+    })
+
+    it("converts a per-person commission's value and keeps amount = value x headcount = line total", async () => {
+      const line = await convertedCommission(
+        { type: "per_person", value: 250, amount: 750, source: "line", passengerCount: 3, bonus: 0 },
+        3,
+        250,
+      )
+      expect(line.pricing_snapshot.commission).toMatchObject({ type: "per_person", value: 500, amount: 1500, bonus: 0 })
+      expect(line.unit_price).toBe(500)
+      expect(line.total).toBe(1500)
+    })
+
+    it("leaves a percent commission's value alone but converts its calculated amount", async () => {
+      const line = await convertedCommission({ type: "percent", value: 10, amount: 200, source: "line" }, 1, 200)
+      expect(line.pricing_snapshot.commission).toMatchObject({ type: "percent", value: 10, amount: 400 })
+      expect(line.pricing_snapshot.commission.bonus).toBeUndefined()
+    })
   })
 
   it("also converts a quote that is still pricing_incomplete", async () => {

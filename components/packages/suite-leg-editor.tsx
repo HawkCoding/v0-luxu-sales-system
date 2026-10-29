@@ -23,7 +23,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { PackageLeg, RateType, ServiceDateAnchor, SupplierRateCard } from "@/lib/types"
-import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
+import {
+  cardNightlyRoomRate,
+  describeCardRoomRateBreakdown,
+  type AccommodationPricingBasis,
+} from "@/lib/pricing/accommodation-basis"
 import {
   getSupplierVocabulary,
   isCoreBookingLeg,
@@ -38,6 +42,7 @@ import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { anchorPresetLabels } from "@/lib/packages/anchor-labels"
 import { formatPrimaryProductDuration } from "@/lib/enquiry/primary-product"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
+import { PerPersonPriceOverride } from "@/components/packages/per-person-price-override"
 // TODO: Supplier admin hidden from quote builder — for the booking worksheet, revisit later.
 // import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import {
@@ -141,6 +146,9 @@ interface RoomPriceOverrideProps {
   formatInQuoteCurrency: (amount: number, from: string) => string | null
   onChange: (next: number | null) => void
   onComplimentaryChange: (next: boolean) => void
+  /** A manual-pricing property has no rate card, so the typed price is the room's only price
+   *  rather than an override of one: the field is always open and has nothing to revert to. */
+  manual?: boolean
 }
 
 /**
@@ -164,6 +172,7 @@ function RoomPriceOverride({
   formatInQuoteCurrency,
   onChange,
   onComplimentaryChange,
+  manual = false,
 }: RoomPriceOverrideProps) {
   const currency = baseRateCard?.currency ?? fallbackCurrency
   // 0 is a real price (a comped room), so this is a null check, not a truthiness one.
@@ -178,7 +187,7 @@ function RoomPriceOverride({
   // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
   // and reverting collapses it again, so the two can never drift apart.
   const [requested, setRequested] = useState(false)
-  const expanded = requested || overridden
+  const expanded = manual || requested || overridden
 
   const price = unit.manualRoomPrice ?? 0
   const chargedNights = firstNightFree ? Math.max(0, nights - 1) : nights
@@ -190,29 +199,38 @@ function RoomPriceOverride({
   // against who is actually in the room -- the same sum the pricer does (hotelRateCardFares: an
   // unset child or infant fare means free, never "same as an adult"). Showing the bare
   // pricePerPerson here used to tell the consultant a double room cost half what it does.
-  const cardNightlyRoomRate =
-    baseRateCard === null
-      ? null
-      : basis === "per_room"
-        ? baseRateCard.pricePerPerson
-        : Math.round(
-            (unit.adultCount * baseRateCard.pricePerPerson +
-              unit.childCount * (baseRateCard.childPrice ?? 0) +
-              unit.infantCount * (baseRateCard.infantPrice ?? 0)) *
-              100,
-          ) / 100
+  const occupancy = {
+    adultCount: unit.adultCount,
+    childCount: unit.childCount,
+    infantCount: unit.infantCount,
+  }
+  const cardRoomRate = baseRateCard === null ? null : cardNightlyRoomRate(baseRateCard, basis, occupancy)
   const cardRateLabel = basis === "per_room" ? "per room per night" : "per night for this room"
+  // Under per_person the room's figure is the guests' fares added up. Spell the sum out, so a
+  // consultant whose rate sheet quotes the room sees at once that the card is being read per person
+  // (R8 260 for the room = 2 adults × R4 130) instead of an unexplained doubling.
+  const cardBreakdown =
+    baseRateCard !== null && basis === "per_person"
+      ? describeCardRoomRateBreakdown(baseRateCard, occupancy, (amount) =>
+          formatMoney(amount, baseRateCard.currency),
+        )
+      : null
 
   // What the quote will actually charge, whichever price the room is running on. A typed override
   // is always a room price, so it needs no occupancy sum.
-  const effectivePrice = overridden ? price : cardNightlyRoomRate
+  const effectivePrice = overridden ? price : cardRoomRate
+  // State the full stay and what the gift takes off it. "1 of 2 nights at R8 260 = R8 260" alone
+  // reads like nothing was discounted -- the same figure appears on both sides.
   const complimentarySummary =
     effectivePrice === null
       ? `First night complimentary · ${chargedNights} of ${nights} nights charged`
-      : `First night complimentary · ${chargedNights} of ${nights} nights at ${formatMoney(
+      : `First night complimentary · ${chargedNights} of ${nights} nights charged at ${formatMoney(
           effectivePrice,
           currency,
-        )} = ${formatMoney(Math.round(effectivePrice * chargedNights * 100) / 100, currency)}`
+        )} per room = ${formatMoney(Math.round(effectivePrice * chargedNights * 100) / 100, currency)} (full stay ${formatMoney(
+          Math.round(effectivePrice * nights * 100) / 100,
+          currency,
+        )}, ${formatMoney(Math.round(effectivePrice * (nights - chargedNights) * 100) / 100, currency)} free)`
 
   const complimentaryToggle = (
     <Button
@@ -237,13 +255,14 @@ function RoomPriceOverride({
       <div className="space-y-1.5 border-t pt-3 md:col-span-2 xl:col-span-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
-            {baseRateCard && cardNightlyRoomRate !== null ? (
+            {baseRateCard && cardRoomRate !== null ? (
               <>
                 Rate card{" "}
                 <span className="font-medium tabular-nums text-foreground">
-                  {formatMoney(cardNightlyRoomRate, baseRateCard.currency)}
+                  {formatMoney(cardRoomRate, baseRateCard.currency)}
                 </span>{" "}
                 {cardRateLabel}
+                {cardBreakdown ? ` (per person: ${cardBreakdown})` : ""}
               </>
             ) : (
               "No rate card price for this room yet"
@@ -273,7 +292,7 @@ function RoomPriceOverride({
     <div className="space-y-3 rounded-md border bg-muted/40 p-3 md:col-span-2 xl:col-span-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <Label>Price override</Label>
+          <Label>{manual ? "Room price" : "Price override"}</Label>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -303,7 +322,7 @@ function RoomPriceOverride({
             <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
               Complimentary
             </Badge>
-          ) : overridden ? (
+          ) : overridden && !manual ? (
             <Badge variant="secondary" className="h-5 text-[10px]">
               Overridden
             </Badge>
@@ -323,35 +342,39 @@ function RoomPriceOverride({
             data-slot="input-group-control"
             className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             placeholder={
-              cardNightlyRoomRate !== null
+              cardRoomRate !== null
                 ? // The room rate the override would replace, so typing the same number is a no-op
                   // rather than a silent halving of a shared room.
-                  cardNightlyRoomRate.toLocaleString("en-ZA", {
+                  cardRoomRate.toLocaleString("en-ZA", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })
                 : "Rate card price"
             }
-            aria-label={`Price override for room ${index + 1}`}
+            aria-label={`${manual ? "Room price" : "Price override"} for room ${index + 1}`}
             value={unit.manualRoomPrice ?? null}
             onValueChange={onChange}
           />
           <InputGroupAddon align="inline-end">
-            <InputGroupText className="text-xs">/ night</InputGroupText>
+            {/* Always a whole-room price, also on a per-person stay -- "/ night" alone left it open
+                whether to type one guest's fare or the room's. */}
+            <InputGroupText className="text-xs">/ room / night</InputGroupText>
           </InputGroupAddon>
         </InputGroup>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 px-2 text-xs"
-          onClick={() => {
-            setRequested(false)
-            onChange(null)
-          }}
-        >
-          Revert
-        </Button>
+        {manual ? null : (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 px-2 text-xs"
+            onClick={() => {
+              setRequested(false)
+              onChange(null)
+            }}
+          >
+            Revert
+          </Button>
+        )}
         {complimentaryToggle}
       </div>
 
@@ -369,19 +392,29 @@ function RoomPriceOverride({
           <p className="text-xs text-muted-foreground">
             {isComplimentary
               ? "The client's quote and voucher will show this room as complimentary."
-              : baseRateCard && cardNightlyRoomRate !== null
+              : manual
+                ? "Priced by hand — this property has no rate card."
+                : baseRateCard && cardRoomRate !== null
                 ? // A typed price is always a room price. Under per_person that means it replaces
                   // the card's whole per-guest sum for this room, not the single adult fare -- so
                   // the figure quoted here is the one the override actually has to beat.
-                  `Replaces the rate card's ${formatMoney(cardNightlyRoomRate, baseRateCard.currency)} ${cardRateLabel}.`
+                  `Replaces the rate card's ${formatMoney(cardRoomRate, baseRateCard.currency)} ${cardRateLabel}${
+                    cardBreakdown ? ` (per person: ${cardBreakdown})` : ""
+                  }.`
                 : "No rate card covers this room, so nothing is being replaced."}
           </p>
         </div>
       ) : (
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
-            Leave blank to keep pricing this room off the rate card.
-          </p>
+          {!manual ? (
+            <p className="text-xs text-muted-foreground">
+              Leave blank to keep pricing this room off the rate card.
+            </p>
+          ) : chargedNights > 0 ? (
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              Price required — the quote will flag this room until it&apos;s priced.
+            </p>
+          ) : null}
           {firstNightFree ? (
             <p className="text-xs text-emerald-600 dark:text-emerald-500">{complimentarySummary}</p>
           ) : null}
@@ -660,6 +693,7 @@ export function SuiteLegEditor({
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
   const isTour = leg.supplierKind === "tour_operator"
+  const isTrain = leg.supplierKind === "train_operator"
   const isAirline = leg.supplierKind === "airline"
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = !isCoreBookingLeg(leg, primarySupplierId)
@@ -826,7 +860,7 @@ export function SuiteLegEditor({
     (splitSummed.adultCount === expectedTotals.adultCount &&
       splitSummed.childCount === expectedTotals.childCount &&
       splitSummed.infantCount === expectedTotals.infantCount)
-  // "3 on this flight · booking has 2 (1 extra)" -- a deliberate extra ticket is allowed, so it is
+  // "3 on this flight · booking only has 2" -- a deliberate extra ticket is allowed, so it is
   // said out loud rather than blocked.
   const headcountNote =
     showPassengerWarnCheck && expectedTotals
@@ -914,7 +948,9 @@ export function SuiteLegEditor({
    * correctly — the server resolves the real card when it stamps the snapshot.
    */
   function resolveRoomRateCard(suiteTypeId: string | null, unitRateTypeId?: string | null) {
-    if (!(isHotel || isTour) || !suiteTypeId || !value.serviceDate) return null
+    // Train suites read it too: a typed per-person fare override shows the card's fares as its
+    // placeholders and takes the card's currency.
+    if (!(isHotel || isTour || isTrain) || !suiteTypeId || !value.serviceDate) return null
     const candidates = findRateCardCandidates(
       leg.rateCards,
       value.routeId ?? "",
@@ -923,7 +959,8 @@ export function SuiteLegEditor({
     )
     const selected = selectRateCard(
       candidates,
-      // Hotel rooms and tours can resolve their own rate type; unset falls back to the leg's.
+      // Hotel rooms, tours and train suites can resolve their own rate type; unset falls back to
+      // the leg's.
       unitRateTypeId ?? value.rateTypeId,
       leg.quoteRateTypeId,
       leg.baseRateTypeId,
@@ -984,8 +1021,9 @@ export function SuiteLegEditor({
             })
           }}
         >
-          <SelectTrigger id={`route-${leg.id}`}>
-            <SelectValue placeholder={routePlaceholder} />
+          {/* Shrinks and truncates a long route name on a phone instead of widening the dialog. */}
+          <SelectTrigger id={`route-${leg.id}`} className="min-w-0 max-w-full">
+            <SelectValue className="truncate" placeholder={routePlaceholder} />
           </SelectTrigger>
           <SelectContent>
             {routeOptions.map((route) => (
@@ -1044,6 +1082,7 @@ export function SuiteLegEditor({
         value={value.rateTypeId}
         onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
         id={`rate-type-${leg.id}`}
+        triggerClassName="max-w-full"
         inheritLabel={
           leg.inheritedRateTypeName
             ? `Supplier default (${leg.inheritedRateTypeName})`
@@ -1067,7 +1106,9 @@ export function SuiteLegEditor({
   // Tours show the rate type inside the tour-type card (see the units.map below) and the itinerary
   // at the bottom instead of here — everything else keeps the original single grid up top.
   const legFields = pricesByTypeOnly ? null : (
-    <div className="grid gap-3 md:grid-cols-2">
+    // grid-cols-1 (minmax(0, 1fr)) rather than the implicit auto column, which grows to fit a long
+    // unwrappable select value and pushes the whole dialog wider than a phone screen.
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {routeOrItineraryField}
 
       {isHotel ? (
@@ -1598,11 +1639,7 @@ export function SuiteLegEditor({
           {headcountNote ? (
             <p className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
               <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>
-                <span className="font-medium">{headcountNote}.</span>
-                {/* An empty unit does block (see the card below), so don't promise otherwise. */}
-                {emptyUnitIndexes.size === 0 ? " Priced for the people entered — this won't block the quote." : null}
-              </span>
+              <span className="font-medium">{headcountNote}.</span>
             </p>
           ) : null}
 
@@ -1615,8 +1652,50 @@ export function SuiteLegEditor({
             const bathroomTypeIds = selectedSuiteType?.bathroomTypeIds ?? []
             const bathroomTypeNames = selectedSuiteType?.bathroomTypes ?? []
 
+            // Each suite, room, cabin or tour can be sold at its own rate level (two suites of one
+            // type, one at Rack and one at STO) -- changing it here must not silently reprice every
+            // other unit on this leg. Unset inherits the leg's rate, and the inherit option names it
+            // so it's obvious this is optional. It sits beside the headcount it prices, not among
+            // the fittings, so the card reads "what suite" then "who, at what rate".
+            const unitRateBlock = showUnitRateType ? (
+              <div className="w-full min-w-0 space-y-1.5 sm:w-72">
+                <RateTypeSelect
+                  rateTypes={rateTypes}
+                  allowedRateTypeIds={leg.applicableRateTypeIds}
+                  value={unit.rateTypeId}
+                  onChange={(rateTypeId) => updateUnit(unit.id, { rateTypeId })}
+                  id={`rate-type-${leg.id}-${unit.id}`}
+                  // Tours and cruises show no leg-level rate field, so "the leg" would mean
+                  // nothing there -- they keep naming the default they actually fall back to.
+                  label={pricesByTypeOnly ? "Rate type" : `Rate for this ${vocab.unitNoun.toLowerCase()}`}
+                  triggerClassName="w-full"
+                  inheritLabel={
+                    pricesByTypeOnly
+                      ? value.rateTypeId
+                        ? `Leg default (${legRateTypeName})`
+                        : leg.inheritedRateTypeName
+                          ? `Supplier default (${leg.inheritedRateTypeName})`
+                          : "Supplier default"
+                      : legRateTypeName
+                        ? `Same as leg (${legRateTypeName})`
+                        : "Same as leg"
+                  }
+                />
+                {unit.rateTypeId &&
+                unit.suiteTypeId &&
+                leg.pricingMode !== "manual" &&
+                (pricesByTypeOnly || value.routeId) &&
+                !hasAnyRateCardForRateType(leg.rateCards, value.routeId ?? "", unit.suiteTypeId, unit.rateTypeId) ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    No {rateTypes.find((rt) => rt.id === unit.rateTypeId)?.name ?? "such"} rate card for this{" "}
+                    {vocab.suiteType.toLowerCase()} — pick another rate or add one in Suppliers.
+                  </p>
+                ) : null}
+              </div>
+            ) : null
+
             return (
-              <div key={unit.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
+              <div key={unit.id} className="grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
                 {/* Several tours stacked under one supplier otherwise look identical at a glance --
                     this index is the only thing that says which card is the next one to fill in. */}
                 {pricesByTypeOnly ? (
@@ -1669,45 +1748,9 @@ export function SuiteLegEditor({
                   ) : null}
                 </div>
 
-                {/* Each suite, room, cabin or tour can be sold at its own rate level (two suites of
-                    one type, one at Rack and one at STO) -- changing it here must not silently
-                    reprice every other unit on this leg. Unset inherits the leg's rate, and the
-                    inherit option names it so it's obvious this is optional. */}
-                {showUnitRateType ? (
-                  <div className="space-y-1.5">
-                    <RateTypeSelect
-                      rateTypes={rateTypes}
-                      allowedRateTypeIds={leg.applicableRateTypeIds}
-                      value={unit.rateTypeId}
-                      onChange={(rateTypeId) => updateUnit(unit.id, { rateTypeId })}
-                      id={`rate-type-${leg.id}-${unit.id}`}
-                      // Tours and cruises show no leg-level rate field, so "the leg" would mean
-                      // nothing there -- they keep naming the default they actually fall back to.
-                      label={pricesByTypeOnly ? "Rate type" : "Rate"}
-                      inheritLabel={
-                        pricesByTypeOnly
-                          ? value.rateTypeId
-                            ? `Leg default (${legRateTypeName})`
-                            : leg.inheritedRateTypeName
-                              ? `Supplier default (${leg.inheritedRateTypeName})`
-                              : "Supplier default"
-                          : legRateTypeName
-                            ? `Same as leg (${legRateTypeName})`
-                            : "Same as leg"
-                      }
-                    />
-                    {unit.rateTypeId &&
-                    unit.suiteTypeId &&
-                    leg.pricingMode !== "manual" &&
-                    (pricesByTypeOnly || value.routeId) &&
-                    !hasAnyRateCardForRateType(leg.rateCards, value.routeId ?? "", unit.suiteTypeId, unit.rateTypeId) ? (
-                      <p className="text-xs text-amber-600 dark:text-amber-500">
-                        No {rateTypes.find((rt) => rt.id === unit.rateTypeId)?.name ?? "such"} rate card for this{" "}
-                        {vocab.suiteType.toLowerCase()} — pick another rate or add one in Suppliers.
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
+                {/* Kinds without a headcount row have nothing to sit beside, so the rate keeps its
+                    place in the grid. */}
+                {!showPassengerSplit ? unitRateBlock : null}
 
                 {/* Fare currency stays a leg-level fact even for tours -- a manual fare is typed
                     once for the whole leg, not per unit -- so it keeps its old single placement. */}
@@ -1789,43 +1832,48 @@ export function SuiteLegEditor({
                 ) : null}
 
                 {showPassengerSplit ? (
-                  <div className="flex items-end gap-3 md:col-span-2 xl:col-span-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`adults-${leg.id}-${unit.id}`}>Adults</Label>
-                      <NumericInput
-                        id={`adults-${leg.id}-${unit.id}`}
-                        min="0"
-                        step="1"
-                        integer
-                        className="h-8 w-14 text-center"
-                        value={unit.adultCount}
-                        onValueChange={(next) => updateUnit(unit.id, { adultCount: next ?? 0 })}
-                      />
+                  // Footer row: who travels in this unit (left) and the rate they're priced at
+                  // (right). The divider separates it from the fittings above.
+                  <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-t pt-3 md:col-span-2 xl:col-span-3">
+                    <div className="flex items-end gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`adults-${leg.id}-${unit.id}`}>Adults</Label>
+                        <NumericInput
+                          id={`adults-${leg.id}-${unit.id}`}
+                          min="0"
+                          step="1"
+                          integer
+                          className="h-9 w-16 text-center"
+                          value={unit.adultCount}
+                          onValueChange={(next) => updateUnit(unit.id, { adultCount: next ?? 0 })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`children-${leg.id}-${unit.id}`}>Children</Label>
+                        <NumericInput
+                          id={`children-${leg.id}-${unit.id}`}
+                          min="0"
+                          step="1"
+                          integer
+                          className="h-9 w-16 text-center"
+                          value={unit.childCount}
+                          onValueChange={(next) => updateUnit(unit.id, { childCount: next ?? 0 })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`infants-${leg.id}-${unit.id}`}>Infants</Label>
+                        <NumericInput
+                          id={`infants-${leg.id}-${unit.id}`}
+                          min="0"
+                          step="1"
+                          integer
+                          className="h-9 w-16 text-center"
+                          value={unit.infantCount}
+                          onValueChange={(next) => updateUnit(unit.id, { infantCount: next ?? 0 })}
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`children-${leg.id}-${unit.id}`}>Children</Label>
-                      <NumericInput
-                        id={`children-${leg.id}-${unit.id}`}
-                        min="0"
-                        step="1"
-                        integer
-                        className="h-8 w-14 text-center"
-                        value={unit.childCount}
-                        onValueChange={(next) => updateUnit(unit.id, { childCount: next ?? 0 })}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor={`infants-${leg.id}-${unit.id}`}>Infants</Label>
-                      <NumericInput
-                        id={`infants-${leg.id}-${unit.id}`}
-                        min="0"
-                        step="1"
-                        integer
-                        className="h-8 w-14 text-center"
-                        value={unit.infantCount}
-                        onValueChange={(next) => updateUnit(unit.id, { infantCount: next ?? 0 })}
-                      />
-                    </div>
+                    {unitRateBlock}
                   </div>
                 ) : null}
 
@@ -1835,7 +1883,9 @@ export function SuiteLegEditor({
                     index={index}
                     nights={nights}
                     basis={value.accommodationPricingBasis}
-                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)}
+                    baseRateCard={
+                      leg.pricingMode === "manual" ? null : resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)
+                    }
                     fallbackCurrency={value.priceCurrency}
                     quoteCurrency={quoteCurrency}
                     formatInQuoteCurrency={formatInQuoteCurrency}
@@ -1843,6 +1893,7 @@ export function SuiteLegEditor({
                     onComplimentaryChange={(next) =>
                       updateUnit(unit.id, { complimentaryFirstNight: next })
                     }
+                    manual={leg.pricingMode === "manual"}
                   />
                 ) : null}
 
@@ -1858,7 +1909,50 @@ export function SuiteLegEditor({
                   />
                 ) : null}
 
-                {leg.pricingMode === "manual" ? (
+                {/* Train suites on a rate card can type their own per-person fares. A manual-
+                    pricing train already types every fare below, so it gets no override. */}
+                {isTrain && leg.pricingMode !== "manual" ? (
+                  <PerPersonPriceOverride
+                    values={{
+                      adult: unit.fareOverrideAdult ?? null,
+                      child: unit.fareOverrideChild ?? null,
+                      infant: unit.fareOverrideInfant ?? null,
+                    }}
+                    onChange={(patch) =>
+                      updateUnit(unit.id, {
+                        ...(patch.adult !== undefined ? { fareOverrideAdult: patch.adult } : {}),
+                        ...(patch.child !== undefined ? { fareOverrideChild: patch.child } : {}),
+                        ...(patch.infant !== undefined ? { fareOverrideInfant: patch.infant } : {}),
+                      })
+                    }
+                    onRevert={() =>
+                      updateUnit(unit.id, {
+                        fareOverrideAdult: null,
+                        fareOverrideChild: null,
+                        fareOverrideInfant: null,
+                      })
+                    }
+                    card={resolveRoomRateCard(unit.suiteTypeId, unit.rateTypeId)}
+                    noCardMessage={
+                      unit.suiteTypeId
+                        ? "No rate card price for this suite yet"
+                        : `Pick a ${vocab.suiteType.toLowerCase()} to see its rate card`
+                    }
+                    fallbackCurrency={value.priceCurrency}
+                    formatInQuoteCurrency={formatInQuoteCurrency}
+                    pax={{
+                      adultCount: unit.adultCount,
+                      childCount: unit.childCount,
+                      infantCount: unit.infantCount,
+                    }}
+                    subject={`${vocab.unitNoun} ${index + 1}`}
+                    note="A typed fare is final: the single supplement is not added on top of it."
+                    setAt={unit.fareOverrideSetAt ?? null}
+                  />
+                ) : null}
+
+                {/* A manual hotel types its price as a room price above, never as per-person fares. */}
+                {leg.pricingMode === "manual" && !isHotel ? (
                   <div className="flex flex-wrap items-end gap-3 md:col-span-2 xl:col-span-3">
                     <div className="space-y-1.5">
                       <Label>Adult fare</Label>
@@ -1912,8 +2006,11 @@ export function SuiteLegEditor({
                   </div>
                 ) : null}
 
+                {/* Spans the whole card so it always lands bottom-right. As a single grid cell it
+                    fell into column 1 of a fresh row after any full-width override row (hotel,
+                    tour, train fare), stranding it mid-left on its own. */}
                 {value.units.length > 1 ? (
-                  <div className="flex items-end justify-end">
+                  <div className="flex items-end justify-end md:col-span-2 xl:col-span-3">
                     <Button
                       type="button"
                       variant="outline"

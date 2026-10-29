@@ -5,6 +5,14 @@ import { INVOICE_PRODUCT_LABEL, invoiceRowsForBlock } from "@/lib/invoices/depar
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
 import { foldCommissionLines } from "@/lib/invoices/fold-commission-line"
+import {
+  INVOICE_TRANSPORT_REQUEST_COLUMNS,
+  resolveTransportLinePoints,
+  type InvoiceTransportRequest,
+} from "@/lib/invoices/transport-line-points"
+import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
+import { loadQuoteConfig } from "@/lib/quotes/load-quote-config"
+import type { PerPersonLine } from "@/lib/invoices/per-person-totals"
 import { logError } from "@/lib/error-log"
 import { primaryProductDurationCount, primaryProductOf } from "@/lib/enquiry/primary-product"
 import { nightsBetween } from "@/lib/packages/trip-date-range"
@@ -26,9 +34,19 @@ export interface InvoiceView {
   billing: InvoiceBillingParty
   departure: InvoiceDeparture | null
   items: InvoiceItem[]
+  /** Adults and paying children (resolvePayingPax) — the divisor of the "Total per Adult/Child" rows. */
+  pax: { adults: number; children: number }
+  /** The accepted quote's raw priced lines (commission unfolded), for derivePerPersonTotals. */
+  pricedLines: PerPersonLine[]
 }
 
-type CustomerRow = Pick<Database["public"]["Tables"]["customers"]["Row"], "phone" | "email">
+type CustomerRow = Pick<Database["public"]["Tables"]["customers"]["Row"], "phone" | "email"> &
+  Partial<
+    Pick<
+      Database["public"]["Tables"]["customers"]["Row"],
+      "address_line1" | "address_line2" | "city" | "province" | "postal_code" | "country"
+    >
+  >
 
 type BillingDetailsRow = Pick<
   Database["public"]["Tables"]["booking_reservation_details"]["Row"],
@@ -42,28 +60,65 @@ type BillingDetailsRow = Pick<
   | "billing_country"
 >
 
+interface PostalAddress {
+  line1?: string | null
+  line2?: string | null
+  city?: string | null
+  province?: string | null
+  postalCode?: string | null
+  country?: string | null
+}
+
+function postalAddressLines(address: PostalAddress): string[] {
+  return [
+    address.line1,
+    address.line2,
+    [address.city, address.province].filter(Boolean).join(", "),
+    address.postalCode,
+    address.country,
+  ]
+    .map((line) => line?.trim() ?? "")
+    .filter((line) => line.length > 0)
+}
+
 /**
- * The billing party is job-level, not customer-level: Company, VAT and address
- * come only from booking_reservation_details, with no fallback to the customer
- * profile. Phone and e-mail are the exception and still read the customer.
+ * The billing party is job-level, not customer-level: Company and VAT come only from
+ * booking_reservation_details, with no fallback to the customer profile. The address reads the
+ * booking first and falls back to the customer profile's address only when the booking has none
+ * at all (client request 2026-10-07: the profile address "is not pulling through") — a booking
+ * with any billing address line of its own never mixes in the customer's. Phone and e-mail still
+ * read the customer.
+ *
+ * The postal code is part of the address, on its own line under the town/province and above the
+ * country, as a South African postal address is written — not a separate "Code" field.
  */
 export function buildBillingParty(
   details: BillingDetailsRow | null | undefined,
   customer: CustomerRow | null | undefined,
 ): InvoiceBillingParty {
-  const addressLines = [
-    details?.billing_address_line1,
-    details?.billing_address_line2,
-    [details?.billing_city, details?.billing_province].filter(Boolean).join(", "),
-    details?.billing_country,
-  ]
-    .map((line) => line?.trim() ?? "")
-    .filter((line) => line.length > 0)
+  const bookingAddress = postalAddressLines({
+    line1: details?.billing_address_line1,
+    line2: details?.billing_address_line2,
+    city: details?.billing_city,
+    province: details?.billing_province,
+    postalCode: details?.billing_postal_code,
+    country: details?.billing_country,
+  })
+  const addressLines =
+    bookingAddress.length > 0
+      ? bookingAddress
+      : postalAddressLines({
+          line1: customer?.address_line1,
+          line2: customer?.address_line2,
+          city: customer?.city,
+          province: customer?.province,
+          postalCode: customer?.postal_code,
+          country: customer?.country,
+        })
 
   return {
     companyName: details?.billing_company_name ?? null,
     addressLines,
-    postalCode: details?.billing_postal_code ?? null,
     phone: customer?.phone ?? null,
     email: customer?.email ?? null,
     vatNumber: details?.billing_vat_number ?? null,
@@ -204,6 +259,33 @@ export function buildDeparture(
   }
 }
 
+/**
+ * When a priced line happens: its day comes from the snapshot's travelDate (the leg's own date the
+ * pricing engine priced), and its time from the one booked service block that starts that day for
+ * the same supplier. Several same-day blocks from one supplier (two transfers on the 25th) are told
+ * apart by the route the line priced; if that still leaves more than one, no time is printed rather
+ * than a guessed one.
+ */
+export function invoiceItemSchedule(
+  snapshot: PricingSnapshot | null,
+  blocks: readonly VoucherServiceBlock[],
+): Pick<InvoiceItem, "date" | "time"> {
+  const date = snapshot?.travelDate?.slice(0, 10) || null
+  if (!date) return { date: null, time: null }
+
+  const sameDay = blocks.filter(
+    (block) =>
+      block.serviceData.departureDate?.slice(0, 10) === date &&
+      (!snapshot?.supplierId || !block.supplierId || block.supplierId === snapshot.supplierId),
+  )
+  const byRoute =
+    sameDay.length > 1 && snapshot?.routeName
+      ? sameDay.filter((block) => block.serviceData.route === snapshot.routeName)
+      : sameDay
+  const times = new Set(byRoute.map((block) => block.serviceData.startTime ?? null).filter(Boolean))
+  return { date, time: times.size === 1 ? [...times][0] : null }
+}
+
 export function buildInvoiceItems(
   lineItems: Array<
     Pick<
@@ -211,18 +293,25 @@ export function buildInvoiceItems(
       "description" | "qty" | "unit_price" | "total" | "pricing_snapshot"
     >
   >,
+  blocks: readonly VoucherServiceBlock[] = [],
+  /** The booking's captured trips, so a transfer/rental line names its pick-up and drop-off. */
+  transportRequests: readonly InvoiceTransportRequest[] = [],
 ): InvoiceItem[] {
   // Commission is an internal figure, never a client-facing line. Fold it into the largest
   // travel line rather than dropping it, so the printed items still sum to the subtotal.
-  return foldCommissionLines(lineItems).map((item) => ({
-    pax: Number(item.qty ?? 0),
-    description: describeInvoiceLine(
-      item.description,
-      (item.pricing_snapshot as PricingSnapshot | null) ?? null,
-    ),
-    unitPrice: Number(item.unit_price ?? 0),
-    total: Number(item.total ?? 0),
-  }))
+  const folded = foldCommissionLines(lineItems)
+  const snapshots = folded.map((item) => (item.pricing_snapshot as PricingSnapshot | null) ?? null)
+  const transportPoints = resolveTransportLinePoints(snapshots, transportRequests)
+  return folded.map((item, index) => {
+    const snapshot = snapshots[index]
+    return {
+      pax: Number(item.qty ?? 0),
+      description: describeInvoiceLine(item.description, snapshot, transportPoints[index]),
+      unitPrice: Number(item.unit_price ?? 0),
+      total: Number(item.total ?? 0),
+      ...invoiceItemSchedule(snapshot, blocks),
+    }
+  })
 }
 
 export function buildPaxLabel(adults: number, children: number): string | null {
@@ -231,6 +320,51 @@ export function buildPaxLabel(adults: number, children: number): string | null {
     children > 0 ? `${children} Child${children === 1 ? "" : "ren"}` : "",
   ].filter(Boolean)
   return parts.length > 0 ? parts.join(", ") : null
+}
+
+const STOCK_JOURNEY_HEADING = "Your Journey"
+
+/**
+ * The journey block's heading. The approved invoice template reads "YOUR TRAIN JOURNEY:" on a rail
+ * booking, so the stock global wording ("Your Journey", shared with the itinerary) gains "Train"
+ * there; any heading an admin has typed — globally or per supplier kind — prints exactly as typed.
+ */
+export function invoiceJourneyHeading(setting: string | null | undefined, primarySupplierKind: SupplierKind | null): string {
+  const heading = setting?.trim() || STOCK_JOURNEY_HEADING
+  return heading === STOCK_JOURNEY_HEADING && primarySupplierKind === "train_operator" ? "Your Train Journey" : heading
+}
+
+/**
+ * The booking's captured trips, read only when the quote priced a transfer or rental. A failed read
+ * degrades to none — the lines then name the route, as they did before trips were read here.
+ */
+async function loadInvoiceTransportRequests(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  lineItems: Parameters<typeof buildInvoiceItems>[0],
+): Promise<InvoiceTransportRequest[]> {
+  const pricesTransport = lineItems.some((item) => {
+    const serviceType = (item.pricing_snapshot as PricingSnapshot | null)?.serviceType
+    return serviceType === "transfer" || serviceType === "rental"
+  })
+  if (!pricesTransport) return []
+
+  const { data, error } = await supabase
+    .from("booking_transport_requests")
+    .select(INVOICE_TRANSPORT_REQUEST_COLUMNS)
+    .eq("booking_id", bookingId)
+    .order("sort_order", { ascending: true })
+
+  if (error) {
+    void logError({
+      severity: "Warning",
+      source: "invoice-pdf",
+      message: "Invoice transfer pick-up/drop-off points could not be loaded",
+      details: { bookingId, error: error.message },
+    })
+    return []
+  }
+  return data ?? []
 }
 
 export interface BuildInvoiceViewOptions {
@@ -251,11 +385,11 @@ export async function buildInvoiceView(
   supabase: SupabaseClient<Database>,
   { bookingId, quoteId, journeyHeading, primarySupplierKind }: BuildInvoiceViewOptions,
 ): Promise<InvoiceView> {
-  const [{ data: booking }, { data: travellers }, { data: billingDetails }] = await Promise.all([
+  const [{ data: booking, error: bookingError }, { data: travellers }, { data: billingDetails }] = await Promise.all([
     supabase
       .from("bookings")
       .select(
-        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, primary_supplier_id, customer:customers(phone, email), route:routes(name)",
+        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, child_ages, no_of_suites, duration_nights, trip_start_date, trip_end_date, primary_supplier_id, customer:customers(phone, email, address_line1, address_line2, city, province, postal_code, country), route:routes(name)",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -273,10 +407,19 @@ export async function buildInvoiceView(
       .maybeSingle(),
   ])
 
+  if (bookingError) {
+    void logError({
+      severity: "Warning",
+      source: "invoice-pdf",
+      message: "Invoice booking details could not be loaded",
+      details: { bookingId, error: bookingError.message },
+    })
+  }
+
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
   const route = Array.isArray(booking?.route) ? booking.route[0] : booking?.route
 
-  let items: InvoiceItem[] = []
+  let lineItemRows: Parameters<typeof buildInvoiceItems>[0] = []
   // The invoice's quote is the accepted one, so its priced legs also scope the departure block
   // below — no second lookup needed. Empty means a manual quote, which stays unfiltered.
   let quoteLegIds: Set<string> | undefined
@@ -295,20 +438,24 @@ export async function buildInvoiceView(
         details: { bookingId, quoteId, error: error.message },
       })
     } else {
-      items = buildInvoiceItems(lineItems ?? [])
+      lineItemRows = lineItems ?? []
       const legIds = legIdsFromLineItems(lineItems)
       quoteLegIds = legIds.size > 0 ? legIds : undefined
     }
   }
 
   let departure: InvoiceDeparture | null = null
+  // Also dates the description table's lines (their clock time is the booked leg's own).
+  let blocks: VoucherServiceBlock[] = []
   try {
-    const { blocks } = await buildVoucherServiceBlocks(supabase, {
-      bookingId,
-      additionalServicesDetails: null,
-      legIds: quoteLegIds,
-      includeUnlinkedTransportRequests: false,
-    })
+    blocks = (
+      await buildVoucherServiceBlocks(supabase, {
+        bookingId,
+        additionalServicesDetails: null,
+        legIds: quoteLegIds,
+        includeUnlinkedTransportRequests: false,
+      })
+    ).blocks
     const primaryBlocks = selectPrimaryBlocks(blocks, booking?.primary_supplier_id ?? null, primarySupplierKind)
     departure = buildDeparture(primaryBlocks, journeyHeading, {
       tourName: route?.name ?? null,
@@ -327,6 +474,12 @@ export async function buildInvoiceView(
     })
   }
 
+  const items = buildInvoiceItems(
+    lineItemRows,
+    blocks,
+    await loadInvoiceTransportRequests(supabase, bookingId, lineItemRows),
+  )
+
   const guestNames = (travellers ?? [])
     .map((traveller) =>
       [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim(),
@@ -340,11 +493,38 @@ export async function buildInvoiceView(
       })
     : null
 
+  // Infants and over-age children projected out, bucketed by the same supplier the quote PDF uses
+  // (the quote's resolved primary supplier, else the booking's) so both divide by the same people.
+  let quotePrimarySupplierId: string | null = null
+  if (lineItemRows.length > 0) {
+    try {
+      const quoteConfig = await loadQuoteConfig(supabase, {
+        lineItems: lineItemRows.map((row) => ({ pricingSnapshot: row.pricing_snapshot as PricingSnapshot | null })),
+        bookingPrimarySupplierId: booking?.primary_supplier_id ?? null,
+      })
+      quotePrimarySupplierId = quoteConfig.primarySupplierId
+    } catch (err) {
+      void logError({
+        severity: "Warning",
+        source: "invoice-pdf",
+        message: "Invoice quote primary supplier could not be resolved",
+        details: { bookingId, quoteId, error: err instanceof Error ? err.message : String(err) },
+      })
+    }
+  }
+  const pax = await resolvePayingPax(
+    supabase,
+    booking,
+    payingPaxSupplierId(quotePrimarySupplierId, booking?.primary_supplier_id),
+  )
+
   return {
     consultant: resolvedConsultant?.key ?? null,
     guestNames,
     billing: buildBillingParty(billingDetails, customer),
     departure,
     items,
+    pax,
+    pricedLines: lineItemRows,
   }
 }

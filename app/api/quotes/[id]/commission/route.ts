@@ -6,6 +6,7 @@ import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } f
 import { buildCommissionBreakdown, calculateCommissionAmount } from "@/lib/pricing/commission"
 import { applyCommissionBonus, findCommissionLineIndex } from "@/lib/quotes/apply-commission-bonus"
 import { calculateQuoteTotals, roundMoney } from "@/lib/quotes/pricing-engine"
+import { normalizeHeadcount, PER_PERSON_NEEDS_HEADCOUNT_ERROR } from "@/lib/quotes/quote-adjustments"
 import type { Json } from "@/lib/supabase/types"
 import type { CommissionKind, QuoteLineItem } from "@/lib/types"
 
@@ -27,8 +28,10 @@ interface RouteParams {
 /**
  * Post-hoc editing of the quote's internal Commission line (type/value). Commission used to be
  * decided once in Build Booking before a quote existed; it now defaults to the house rate at
- * apply time (see lib/quotes/build-from-package.ts) and is edited here instead, on the Job
- * Quotes tab alongside Agent Commission and Discount.
+ * apply time (see lib/quotes/build-from-package.ts) and is edited afterwards.
+ *
+ * Legacy: the Quotes tab now saves through PATCH /api/quotes/[id]/adjustments. Kept for API
+ * compatibility, aligned to the same per-person rule (current booking headcount).
  *
  * Deliberately separate from PATCH /api/quotes/[id]: that route treats any changed
  * non-carry-over line as manual pricing and demands an override reason.
@@ -106,8 +109,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   )
 
   const booking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
-  const bookingHeadcount = (booking?.no_of_adults ?? 0) + (booking?.no_of_children ?? 0)
-  const passengerCount = existingBreakdown?.passengerCount ?? (bookingHeadcount > 0 ? bookingHeadcount : 1)
+  // Always the booking's current headcount (adults + children), same rule as
+  // lib/quotes/quote-adjustments.ts — a count frozen on the existing Commission line goes stale
+  // as soon as the booking's travellers change, and a silent fallback of 1 prices per-person ×1.
+  const passengerCount = normalizeHeadcount((booking?.no_of_adults ?? 0) + (booking?.no_of_children ?? 0))
+  if (parsed.type === "per_person" && parsed.value > 0 && passengerCount === 0) {
+    return jsonError(PER_PERSON_NEEDS_HEADCOUNT_ERROR, 400)
+  }
 
   const commissionAmount = calculateCommissionAmount({
     amountAfterMarkup: otherLinesSubtotal,
@@ -127,7 +135,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const commissionLine: QuoteLineItem = {
     description: "Commission",
     supplierDescription: null,
-    qty: isPerPerson ? Math.max(1, passengerCount) : 1,
+    qty: isPerPerson ? passengerCount : 1,
     unitPrice: isPerPerson ? parsed.value : commissionAmount,
     total: commissionAmount,
     pricingSnapshot: existingSnapshot

@@ -18,6 +18,8 @@ interface QuoteFixture {
   discount_amount?: number
   discount_visible?: boolean
   updated_at?: string
+  adults?: number
+  children?: number
 }
 
 interface Captured {
@@ -56,6 +58,7 @@ function buildSupabase(
                     discount_amount: quote.discount_amount ?? 0,
                     discount_visible: quote.discount_visible ?? true,
                     updated_at: quote.updated_at ?? UPDATED_AT,
+                    booking: { no_of_adults: quote.adults ?? 2, no_of_children: quote.children ?? 0 },
                   },
                   error: null,
                 }
@@ -143,12 +146,15 @@ describe("PATCH /api/quotes/[id]/discount", () => {
     expect(payload.total).toBe(90000)
   })
 
-  it("saves a per_person discount using the Commission line's passengerCount", async () => {
+  // Previously asserted the count came off the Commission line's stored passengerCount. That
+  // count is frozen at whatever the booking held when the line was built, so the rule is now the
+  // booking's CURRENT adults + children (see lib/quotes/quote-adjustments.ts).
+  it("saves a per_person discount using the booking's current headcount, not a stale Commission-line count", async () => {
     const captured: Captured = {}
     authorise(
-      { status: "draft", subtotal: 100000, total: 100000 },
+      { status: "draft", subtotal: 100000, total: 100000, adults: 3, children: 1 },
       captured,
-      [{ pricing_snapshot: { commission: { type: "percent", value: 10, amount: 9000, source: "line", passengerCount: 4 } } }],
+      [{ pricing_snapshot: { commission: { type: "percent", value: 10, amount: 9000, source: "line", passengerCount: 1 } } }],
     )
 
     const response = await patch({ type: "per_person", value: 500, visible: true, expectedUpdatedAt: UPDATED_AT })
@@ -156,6 +162,29 @@ describe("PATCH /api/quotes/[id]/discount", () => {
 
     expect(response.status).toBe(200)
     expect(payload.discountAmount).toBe(2000)
+  })
+
+  it("multiplies a per_person discount by the headcount even when the quote has no Commission line", async () => {
+    const captured: Captured = {}
+    authorise({ status: "draft", subtotal: 100000, total: 100000, adults: 4, children: 1 }, captured)
+
+    const response = await patch({ type: "per_person", value: 500, visible: true, expectedUpdatedAt: UPDATED_AT })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.discountAmount).toBe(2500)
+  })
+
+  it("rejects a per_person discount when the booking has no travellers", async () => {
+    const captured: Captured = {}
+    authorise({ status: "draft", subtotal: 100000, total: 100000, adults: 0, children: 0 }, captured)
+
+    const response = await patch({ type: "per_person", value: 500, visible: true, expectedUpdatedAt: UPDATED_AT })
+    const payload = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toMatch(/number of travellers/)
+    expect(captured.quoteUpdate).toBeUndefined()
   })
 
   it("hides the discount line while still netting it off the total", async () => {

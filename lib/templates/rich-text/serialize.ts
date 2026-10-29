@@ -14,12 +14,16 @@
 // Zero editor/Tiptap imports — pure string->string via DOMParser (available in
 // the browser and the jsdom test environment).
 
+import { fillEmptyParagraphs } from "@/lib/templates/empty-paragraphs"
+import { normalizeSpanFonts } from "@/lib/templates/rich-text/normalize-fonts"
 import { PRESERVED_BLOCK_TAG } from "@/lib/templates/rich-text/preserved-block-shared"
 import {
   isEmailInlineFontSize,
   isEmailTextColor,
   isEmailHighlightColor,
   isEmailInlineFontFamily,
+  isEmailLineHeight,
+  isEmailParagraphSpacingMargin,
 } from "@/lib/email/appearance"
 
 // Tags the editor schema represents faithfully. An element is left as-is only
@@ -78,27 +82,45 @@ function describeElement(el: Element): string {
   return TAG_FALLBACK_LABELS[el.tagName] ?? humanizeToken(el.tagName.toLowerCase())
 }
 
+type StyleValidators = Record<string, (value: string) => boolean>
+
 // Per-declaration validators for the styled-span allowlist below. Each
 // property may appear at most once; every declaration present must pass its
 // validator for the span to stay rich.
-const STYLED_SPAN_VALIDATORS: Record<string, (value: string) => boolean> = {
+const STYLED_SPAN_VALIDATORS: StyleValidators = {
   "font-size": isEmailInlineFontSize,
   "color": isEmailTextColor,
   "background-color": isEmailHighlightColor,
   "font-family": isEmailInlineFontFamily,
 }
 
+// Same idea for the block tags the toolbar's line and paragraph spacing
+// controls style (lib/templates/rich-text/line-height.ts, paragraph-spacing.ts):
+// a <p> or <li> stays rich only when its style is an allowlisted line-height
+// and/or an allowlisted `margin: 0 0 …`.
+const STYLED_BLOCK_VALIDATORS: StyleValidators = {
+  "line-height": isEmailLineHeight,
+  "margin": isEmailParagraphSpacingMargin,
+}
+
+const STYLE_VALIDATORS_BY_TAG: Record<string, StyleValidators> = {
+  SPAN: STYLED_SPAN_VALIDATORS,
+  P: STYLED_BLOCK_VALIDATORS,
+  LI: STYLED_BLOCK_VALIDATORS,
+}
+
 /**
- * True for a <span> whose only attribute is a `style` holding some subset of
- * `font-size` / `color` / `background-color` / `font-family` (each at most
- * once), every value allowlisted — the styled shapes the editor schema
- * (TextStyle + FontSize/Color/BackgroundColor/FontFamily) represents
- * faithfully, including any combination of the four on the same run. Anything else (an unrecognised
- * property, a duplicate, an off-list value, a class) is left opaque so it
- * can't be silently dropped or mixed up with an unrelated style.
+ * True for an element whose only attribute is a `style` holding some subset of
+ * the properties `validators` knows (each at most once), every value
+ * allowlisted. For a <span> that's `font-size` / `color` / `background-color`
+ * / `font-family` — the styled shapes the editor schema (TextStyle +
+ * FontSize/Color/BackgroundColor/FontFamily) represents faithfully, including
+ * any combination of the four on the same run; for a <p>/<li> it's
+ * `line-height` (BlockLineHeight) and/or `margin` (BlockParagraphSpacing). Anything else (an unrecognised property, a
+ * duplicate, an off-list value, a class) is left opaque so it can't be
+ * silently dropped or mixed up with an unrelated style.
  */
-function isAllowedStyledSpan(el: Element): boolean {
-  if (el.tagName !== "SPAN") return false
+function hasOnlyAllowedStyle(el: Element, validators: StyleValidators): boolean {
   const attrNames = el.getAttributeNames()
   if (attrNames.length !== 1 || attrNames[0] !== "style") return false
   const declarations = (el.getAttribute("style") ?? "")
@@ -114,17 +136,21 @@ function isAllowedStyledSpan(el: Element): boolean {
     const value = match[2].trim()
     if (seen.has(property)) return false
     seen.add(property)
-    const validate = STYLED_SPAN_VALIDATORS[property]
+    const validate = validators[property]
     if (!validate || !validate(value)) return false
   }
   return true
 }
 
-/** True when an element and every descendant are representable rich tags with no style/class. */
+/**
+ * True when an element and every descendant are representable rich tags with
+ * no class and no style beyond the allowlisted shapes above.
+ */
 function isPlainRich(el: Element): boolean {
   if (!RICH_TAGS.has(el.tagName)) return false
-  if (el.tagName === "SPAN" && el.hasAttribute("style")) {
-    if (!isAllowedStyledSpan(el)) return false
+  const styleValidators = STYLE_VALIDATORS_BY_TAG[el.tagName]
+  if (styleValidators && el.hasAttribute("style")) {
+    if (!hasOnlyAllowedStyle(el, styleValidators)) return false
   } else if (el.hasAttribute("style") || el.hasAttribute("class")) {
     return false
   }
@@ -184,18 +210,27 @@ export function toEditorHtml(source: string, blockTokens: string[]): ToEditorRes
     if (node.nodeType !== doc.ELEMENT_NODE) continue
     const el = node as Element
 
-    if (isPlainRich(el)) {
+    // Pasted Word/Outlook font sizes and families snap onto the allowlist so
+    // the paragraph stays editable (normalize-fonts.ts), and a stored blank
+    // line's <br> comes off (the editor adds its own). Only the editable copy
+    // changes: an element that still can't be represented keeps its exact
+    // original markup in the placeholder below.
+    const candidate = el.cloneNode(true) as Element
+    normalizeSpanFonts(candidate)
+    removeLoneParagraphBreak(candidate)
+
+    if (isPlainRich(candidate)) {
       // A block token nested inside inline/rich content would serialize to
       // invalid HTML after substitution (<p><div><table>...</p>). Leave it as
       // literal text but warn so the latent bug is visible.
-      for (const match of (el.textContent ?? "").matchAll(TOKEN_RE)) {
+      for (const match of (candidate.textContent ?? "").matchAll(TOKEN_RE)) {
         if (blockSet.has(match[1])) {
           warnings.push(
-            `{{${match[1]}}} is inside a <${el.tagName.toLowerCase()}>; it will produce invalid HTML when sent. Move it to its own line.`,
+            `{{${match[1]}}} is inside a <${candidate.tagName.toLowerCase()}>; it will produce invalid HTML when sent. Move it to its own line.`,
           )
         }
       }
-      out.push(el.cloneNode(true))
+      out.push(candidate)
       continue
     }
 
@@ -242,24 +277,64 @@ export function fromEditorHtml(editorHtml: string): string {
   }
 
   let result = parts.join("")
-  // Drop a single trailing empty paragraph artefact the editor appends.
-  result = result.replace(/<p><\/p>\s*$/, "")
-  return result
+  // The editor appends an empty paragraph after a final block token, table or
+  // list so there is somewhere to type (trailing-paragraph.ts): drop that
+  // artefact — also when a select-all line spacing change has styled it. After
+  // a paragraph it can't be the artefact, only the blank line the salesperson
+  // typed under their last sentence, so it stays (client, 2026-10-26: that line
+  // vanished on every save). Mirrors TrailingParagraph's own test.
+  const elements = Array.from(doc.body.children)
+  const beforeLast = elements.length >= 2 ? elements[elements.length - 2] : null
+  if (beforeLast?.tagName !== "P") {
+    result = result.replace(/<p(?: style="[^"]*")?><\/p>\s*$/, "")
+  }
+  // Every other empty paragraph is a blank line the user typed: give it a
+  // line's height in the email, as the editor does (empty-paragraphs.ts).
+  return fillEmptyParagraphs(result)
+}
+
+/** `<p><br></p>` (a stored blank line) -> `<p></p>`, in place; the editor renders its own break. */
+function removeLoneParagraphBreak(el: Element): void {
+  if (el.tagName !== "P") return
+  const meaningful = Array.from(el.childNodes).filter(
+    (child) => !(child.nodeType === child.TEXT_NODE && !(child.textContent ?? "").trim()),
+  )
+  if (meaningful.length === 1 && (meaningful[0] as Element).tagName === "BR") el.replaceChildren()
 }
 
 /**
  * Collapse `<li><p>x</p></li>` to `<li>x</li>`. The editor's listItem content is
  * `paragraph block*`, so bullets serialize with an inner <p> that renders extra
- * margin in email clients.
+ * margin in email clients. A style on the inner <p> (only ever an allowlisted
+ * line-height or paragraph spacing — the editor schema renders nothing else
+ * there) moves to the <li> so it isn't lost with the <p>; where both carry the
+ * same property, the <p>'s value wins, as it would have in the editor.
  */
 function unwrapListItemParagraphs(el: Element): string {
   if (el.tagName !== "UL" && el.tagName !== "OL") return el.outerHTML
   for (const li of Array.from(el.querySelectorAll("li"))) {
-    if (li.children.length === 1 && li.firstElementChild?.tagName === "P") {
-      li.innerHTML = li.firstElementChild.innerHTML
+    const paragraph = li.firstElementChild
+    if (li.children.length === 1 && paragraph?.tagName === "P") {
+      const paragraphStyle = paragraph.getAttribute("style")
+      if (paragraphStyle) li.setAttribute("style", mergeStyles(li.getAttribute("style"), paragraphStyle))
+      li.innerHTML = paragraph.innerHTML
     }
   }
   return el.outerHTML
+}
+
+/** `base` with `override`'s declarations layered on top, property by property. */
+function mergeStyles(base: string | null, override: string): string {
+  if (!base?.trim()) return override
+  const declarations = new Map<string, string>()
+  for (const style of [base, override]) {
+    for (const part of style.split(";")) {
+      const separator = part.indexOf(":")
+      if (separator === -1) continue
+      declarations.set(part.slice(0, separator).trim().toLowerCase(), part.slice(separator + 1).trim())
+    }
+  }
+  return Array.from(declarations, ([property, value]) => `${property}: ${value};`).join(" ")
 }
 
 /** True when source survives toEditorHtml -> fromEditorHtml unchanged (ignoring the editor pass). */
@@ -274,8 +349,12 @@ export function canRoundTrip(source: string, blockTokens: string[]): boolean {
  * serialization variants (`<br/>` vs `<br>`, ` ` vs `&nbsp;`) together while
  * still surfacing real structural loss — a dropped style attribute or missing
  * tag survives parse/serialize and therefore still fails the comparison.
+ * The two deliberate rewrites of the round trip (blank lines gain a <br>,
+ * pasted span fonts snap to the allowlist) are applied to both sides too, so
+ * they don't push a template out of the rich editor into source mode.
  */
 export function normalizeForCompare(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html")
+  const doc = new DOMParser().parseFromString(fillEmptyParagraphs(html), "text/html")
+  normalizeSpanFonts(doc.body)
   return doc.body.innerHTML.replace(/>\s+</g, "><").trim()
 }

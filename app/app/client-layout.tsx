@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import {
   LayoutDashboard, Kanban, Briefcase, Users,
   FolderOpen, Mail, Hotel, CalendarCheck,
-  FileCode, BarChart3, ClipboardList, Settings, Search,
+  FileCode, FileText, BarChart3, ClipboardList, Settings, Search,
   ChevronDown, ChevronLeft, ChevronUp, Menu, LogOut, Sun, Moon,
 } from "lucide-react"
 import { useState, useEffect, useRef, type ReactNode } from "react"
@@ -34,8 +34,9 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json())
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
   { label: "Enquiries", href: "/app/enquiries", icon: ClipboardList, permission: "view:jobs" },
-  { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
+  { label: "Quotes", href: "/app/quotes", icon: FileText, permission: "view:jobs" },
   { label: "Bookings", href: "/app/bookings", icon: CalendarCheck, permission: "view:jobs" },
+  { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
   { label: "Suppliers", href: "/app/suppliers", icon: Hotel, permission: "view:suppliers" },
   { label: "Documents", href: "/app/documents", icon: FolderOpen, permission: "view:documents" },
@@ -282,7 +283,9 @@ function AppShell({ children }: { children: ReactNode }) {
               }
               if (!("href" in item) || !item.permission || !can(item.permission)) return null
               const Icon = item.icon!
-              const active = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href!))
+              // Segment-bounded prefix match, so exactly one item lights up — `/app/quotes/<id>` is
+              // Quotes, and a future `/app/quotes-…` path could never also claim it.
+              const active = pathname === item.href || (item.href !== "/app" && pathname.startsWith(`${item.href}/`))
               const isEnquiries = item.href === "/app/enquiries"
               const isSettings = item.href === "/app/settings"
               const showBadge = isEnquiries && enquiriesCount > 0
@@ -292,6 +295,7 @@ function AppShell({ children }: { children: ReactNode }) {
                   key={item.href}
                   href={item.href!}
                   onClick={() => setMobileOpen(false)}
+                  aria-current={active ? "page" : undefined}
                   className={cn(
                     "sidebar-nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-all",
                     active ? "bg-accent-hover text-white shadow-sm" : "text-text-muted hover:text-text-heading hover:bg-bg-raised",

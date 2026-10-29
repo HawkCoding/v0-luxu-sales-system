@@ -340,6 +340,8 @@ describe("buildPackageQuoteLineItems", () => {
     expect(isMissingPricing(comped)).toBe(false)
     expect(charged.unitPrice).toBe(500)
     expect(charged.pricingSnapshot?.isComplimentaryTransport).toBeUndefined()
+    // A charged trip carries its request id too, so the invoice can name its pick-up/drop-off.
+    expect(charged.pricingSnapshot?.transportRequestId).toBe("request-charged")
   })
 
   it("prices a complimentary transfer at 0 with no rate card at all, unlike a plain unpriced request", async () => {
@@ -771,6 +773,106 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].total).toBe(2700)
     expect(lineItems[0].pricingSnapshot?.manualTransportPrice).toBe(900)
     expect(lineItems[0].pricingSnapshot?.manualTransportPriceBase).toBe(700)
+  })
+
+  describe("serviceEndDate", () => {
+    it("stamps a hotel line with its check-out date", async () => {
+      const hotelLeg = leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+        suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+        rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 1200 })],
+      })
+
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            serviceDate: "2026-09-05",
+            nights: 3,
+            units: [{ suiteTypeId: "room-std", adultCount: 2 }],
+          },
+        ],
+      })
+
+      expect(lineItems[0].pricingSnapshot?.travelDate).toBe("2026-09-05")
+      expect(lineItems[0].pricingSnapshot?.serviceEndDate).toBe("2026-09-08")
+    })
+
+    it("stamps a train line with its arrival date off the route duration", async () => {
+      const trainLeg = leg({
+        id: "leg-train",
+        supplierKind: "train_operator",
+        routes: [{ ...route("route-cpt", "supplier-leg-train", "CPT-PTA"), durationDays: 3 }],
+        suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe Double")],
+        rateCards: [rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 })],
+      })
+
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          booking: { id: JOB_ID, no_of_adults: 2, no_of_children: 0, no_of_suites: 1, child_ages: [], departure_date: "2026-09-01" },
+        }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            routeId: "route-cpt",
+            serviceDate: "2026-09-10",
+            units: [{ suiteTypeId: "suite-dlx", adultCount: 2 }],
+          },
+        ],
+      })
+
+      expect(lineItems[0].pricingSnapshot?.travelDate).toBe("2026-09-10")
+      expect(lineItems[0].pricingSnapshot?.serviceEndDate).toBe("2026-09-12")
+    })
+
+    it("stamps a rental line with its return date", async () => {
+      const rentalLeg = leg({
+        id: "leg-rental",
+        supplierKind: "vehicle_rental",
+        routes: [route("route-r", "supplier-leg-rental", "Self-drive")],
+        suiteTypes: [suiteType("vehicle-suv", "supplier-leg-rental", "SUV")],
+        rateCards: [rateCard({ id: "rc-suv", routeId: "route-r", suiteTypeId: "vehicle-suv", pricePerPerson: 700 })],
+      })
+
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              service_type: "rental",
+              route_id: null,
+              suite_type_id: "vehicle-suv",
+              service_id: "leg-rental",
+              pickup_point: "Cape Town Airport",
+              dropoff_point: "Cape Town Airport",
+              pickup_at: "2026-09-01T08:00:00Z",
+              price_override: null,
+              price_override_set_at: null,
+              price_override_set_by: null,
+              rental_details: { return_at: "2026-09-04T08:00:00Z" },
+            },
+          ],
+        }),
+        packageDetail: detail([rentalLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-rental", selected: true, routeId: "route-r", suiteTypeId: "vehicle-suv" }],
+      })
+
+      expect(lineItems[0].pricingSnapshot?.travelDate).toBe("2026-09-01")
+      expect(lineItems[0].pricingSnapshot?.serviceEndDate).toBe("2026-09-04")
+    })
   })
 
   it("marks fixed-price package legs as inclusions so they aren't read as unpriced", async () => {
@@ -1567,6 +1669,66 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].pricingSnapshot?.complimentaryNights).toBe(1)
   })
 
+  // LTT-26-0019: DaVinci Deluxe Room, STO R4 130 on a per-person card, two adults, two nights, the
+  // first gifted. The pricing itself is unchanged by the 2026-10 fix; what changed is that the
+  // overridden room's line now says what it is (a room price) and what it replaced (the room's
+  // R8 260, the figure Build Booking showed, not the bare R4 130 adult fare).
+  describe("a gifted first night on a per-person stay, card-priced then overridden (LTT-26-0019)", () => {
+    const hotelLeg = () =>
+      leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        routes: [route("route-bb", "supplier-leg-hotel", "Bed & Breakfast")],
+        suiteTypes: [suiteType("room-deluxe", "supplier-leg-hotel", "Deluxe Room")],
+        rateCards: [rateCard({ id: "rc-deluxe", routeId: "route-bb", suiteTypeId: "room-deluxe", pricePerPerson: 4130 })],
+      })
+
+    async function build(unit: { manualRoomPrice?: number }) {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [{ suiteTypeId: "room-deluxe", adultCount: 2, complimentaryFirstNight: true, ...unit }],
+          },
+        ],
+      })
+      return lineItems
+    }
+
+    it("charges two guests for the one paid night off the card (the gift is applied)", async () => {
+      const [line] = await build({})
+      expect(line.qty).toBe(2)
+      expect(line.unitPrice).toBe(4130)
+      expect(line.total).toBe(8260) // not 16 520: the gifted night is gone
+      expect(line.description).toMatch(/- Adult$/)
+      expect(line.pricingSnapshot?.unit).toBe("per person per night")
+      expect(describeQtyBasis(line)).toBe("2 guests × 1 night")
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+      expect(line.pricingSnapshot?.stayNights).toBe(2)
+    })
+
+    it("labels an overridden room per room and records the room's card rate it replaced", async () => {
+      const [line] = await build({ manualRoomPrice: 4750 })
+      expect(line.qty).toBe(1)
+      expect(line.unitPrice).toBe(4750)
+      expect(line.total).toBe(4750)
+      expect(line.description).not.toMatch(/- Adult$/)
+      expect(line.pricingSnapshot?.unit).toBe("per room per night")
+      expect(line.pricingSnapshot?.manualRoomPrice).toBe(4750)
+      expect(line.pricingSnapshot?.manualRoomPriceBase).toBe(8260)
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+      // The stay itself is still per person -- only this room's price was typed.
+      expect(line.pricingSnapshot?.accommodationPricingBasis).toBe("per_person")
+    })
+  })
+
   it("still emits a line for a one-night stay whose only night was gifted", async () => {
     const hotelLeg = leg({
       id: "leg-hotel",
@@ -1597,6 +1759,200 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems).toHaveLength(2)
     expect(lineItems.every((li) => li.qty === 0 && li.total === 0)).toBe(true)
     expect(lineItems[0].pricingSnapshot?.stayNights).toBe(1)
+  })
+
+  // LTT-26-0001: The Capital Menlyn Maine is set to manual pricing and has no rate cards; the build
+  // threw "No rate card for "Standard Room" on "Bed & Breakfast"" because the hotel branch never
+  // read the leg's pricing mode.
+  describe("a manual-pricing hotel with no rate cards (LTT-26-0001)", () => {
+    const manualHotel = () => ({
+      ...leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        routes: [route("route-bb", "supplier-leg-hotel", "Bed & Breakfast")],
+        suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard Room")],
+        rateCards: [],
+      }),
+      pricingMode: "manual" as const,
+    })
+
+    async function build(nights: number, unit: { manualRoomPrice?: number; complimentaryFirstNight?: boolean }) {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([manualHotel()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights,
+            units: [{ suiteTypeId: "room-std", adultCount: 2, ...unit }],
+          },
+        ],
+      })
+      return lineItems
+    }
+
+    it("prices a room off its typed room price", async () => {
+      const [line] = await build(2, { manualRoomPrice: 3500 })
+      expect(line.qty).toBe(2)
+      expect(line.unitPrice).toBe(3500)
+      expect(line.total).toBe(7000)
+      expect(line.pricingSnapshot?.pricingMode).toBe("manual")
+      expect(line.pricingSnapshot?.rateCardId).toBeNull()
+    })
+
+    it("emits an unpriced R0 room, flagged as missing pricing, instead of failing the build", async () => {
+      const lineItems = await build(2, {})
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0].qty).toBe(2)
+      expect(lineItems[0].total).toBe(0)
+      expect(lineItems[0].pricingSnapshot?.pricingMode).toBe("manual")
+      expect(lineItems[0].pricingSnapshot?.unit).toBe("per room per night")
+      expect(isMissingPricing(lineItems[0])).toBe(true)
+    })
+
+    it("needs no price at all for a one-night stay whose night was gifted", async () => {
+      const [line] = await build(1, { complimentaryFirstNight: true })
+      expect(line.qty).toBe(0)
+      expect(line.total).toBe(0)
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+      expect(isMissingPricing(line)).toBe(false)
+    })
+
+    it("still asks for a price on the nights left after the gift", async () => {
+      const [line] = await build(3, { complimentaryFirstNight: true })
+      expect(line.qty).toBe(2)
+      expect(line.total).toBe(0)
+      expect(line.pricingSnapshot?.complimentaryNights).toBe(1)
+    })
+  })
+
+  // Manual pricing is a switch on every supplier, so every kind must build with nothing typed (a
+  // flagged R0 line, never a "no rate card" error) and must ignore cards kept from before the switch.
+  describe("manual pricing on every supplier kind", () => {
+    const kinds: SupplierKind[] = [
+      "train_operator",
+      "hotel_property",
+      "transfers",
+      "vehicle_rental",
+      "tour_operator",
+      "airline",
+      "cruise_line",
+    ]
+
+    for (const kind of kinds) {
+      it(`builds a ${kind} leg with no typed price and ignores its old rate cards`, async () => {
+        const isTransport = kind === "transfers" || kind === "vehicle_rental"
+        const manualLeg = leg({
+          id: "leg-manual",
+          supplierKind: kind,
+          pricingMode: "manual",
+          routes: [route("route-m", "supplier-leg-manual", "Route")],
+          suiteTypes: [suiteType("type-m", "supplier-leg-manual", "Type")],
+          rateCards: [rateCard({ id: "rc-legacy", routeId: "route-m", suiteTypeId: "type-m", pricePerPerson: 999 })],
+        })
+
+        const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
+          supabase: buildSupabase({
+            transportRequests: isTransport
+              ? [
+                  {
+                    service_type: kind === "vehicle_rental" ? "rental" : "transfer",
+                    route_id: null,
+                    suite_type_id: "type-m",
+                    service_id: "leg-manual",
+                    pickup_point: "A",
+                    dropoff_point: "B",
+                    pickup_at: null,
+                    rental_details: null,
+                  },
+                ]
+              : [],
+          }),
+          packageDetail: detail([manualLeg]),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [
+            isTransport
+              ? { legId: "leg-manual", selected: true, routeId: "route-m" }
+              : {
+                  legId: "leg-manual",
+                  selected: true,
+                  routeId: "route-m",
+                  nights: 1,
+                  units: [{ suiteTypeId: "type-m", adultCount: 2, childCount: 1 }],
+                },
+          ],
+        })
+
+        expect(incompleteLegs).toEqual([])
+        expect(lineItems.length).toBeGreaterThan(0)
+        expect(lineItems.every((li) => li.unitPrice === 0)).toBe(true)
+        expect(lineItems.every((li) => li.pricingSnapshot?.rateCardId == null)).toBe(true)
+        expect(lineItems.some((li) => isMissingPricing(li))).toBe(true)
+      })
+    }
+  })
+
+  it("does not need a rate card for a rate-card hotel room whose only night was gifted", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 1,
+          units: [{ suiteTypeId: "room-std", complimentaryFirstNight: true, adultCount: 2 }],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].total).toBe(0)
+    expect(isMissingPricing(lineItems[0])).toBe(false)
+  })
+
+  it("still requires a rate card for a rate-card hotel room with nights left to charge", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [],
+    })
+
+    await expect(
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([hotelLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-hotel",
+            selected: true,
+            routeId: "route-bb",
+            nights: 2,
+            units: [{ suiteTypeId: "room-std", complimentaryFirstNight: true, adultCount: 2 }],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/No rate card for "Standard"/)
   })
 
   it("prices a tour leg off the tour type's route-agnostic card, whichever itinerary was booked", async () => {
@@ -2690,6 +3046,370 @@ describe("buildPackageQuoteLineItems", () => {
     expect(reversedAdult?.pricingSnapshot?.routeName).toBe("Pretoria → Cape Town")
     expect(reversedAdult?.pricingSnapshot?.routeReversed).toBe(true)
     expect(reversedAdult?.total).toBe(forwardAdult?.total)
+  })
+
+  describe("train per-person fare override", () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({
+          id: "rc-train",
+          routeId: "route-cpt",
+          suiteTypeId: "suite-dlx",
+          pricePerPerson: 10000,
+          childPrice: 5000,
+        }),
+      ],
+    })
+    function bookingFor(adults: number, children: number) {
+      return {
+        id: JOB_ID,
+        no_of_adults: adults,
+        no_of_children: children,
+        no_of_suites: 1,
+        child_ages: Array.from({ length: children }, () => 8),
+        departure_date: "2026-09-01",
+      }
+    }
+
+    it("prices the adult at the typed fare and leaves the blank child on the card", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 9000 },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.endsWith("- Adult"))
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(adultLine).toMatchObject({ qty: 2, unitPrice: 9000, total: 18000 })
+      expect(adultLine?.pricingSnapshot?.manualTrainFare).toBe(9000)
+      expect(adultLine?.pricingSnapshot?.manualTrainFareBase).toBe(10000)
+      // Still a rate-card line: the override replaces one number, not the pricing mode.
+      expect(adultLine?.pricingSnapshot?.pricingMode).toBe("rate_card")
+      expect(childLine).toMatchObject({ qty: 1, unitPrice: 5000, total: 5000 })
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBeUndefined()
+      // Client-facing description is unchanged by an override — no "manual"/"override" wording.
+      expect(adultLine?.description).toBe("Supplier leg-train - CPT-PTA — Deluxe - Adult")
+    })
+
+    it("falls a blank child back through the typed adult fare when the card sets no child price (overriddenFares)", async () => {
+      const noChildRateLeg = {
+        ...trainLeg,
+        rateCards: [rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 })],
+      }
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([noChildRateLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 9000 },
+            ],
+          },
+        ],
+      })
+
+      // A card with no child price means "child pays the adult fare" -- and the adult fare is now
+      // the typed one. Same chain transfers use.
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine?.unitPrice).toBe(9000)
+      // The inherited fare is still the consultant's typed number, so the line carries its
+      // provenance -- the card would have charged the child the card's adult fare.
+      expect(childLine?.pricingSnapshot).toMatchObject({
+        manualTrainFare: 9000,
+        manualTrainFareBase: 10000,
+        manualTrainFareInheritedFrom: "adult",
+      })
+    })
+
+    it("marks a child that inherited a typed R0 adult fare as comped, not unpriced", async () => {
+      const noChildRateLeg = {
+        ...trainLeg,
+        rateCards: [rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 })],
+      }
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([noChildRateLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 0 },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.endsWith("- Adult"))
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(adultLine).toMatchObject({ unitPrice: 0, total: 0 })
+      expect(childLine).toMatchObject({ unitPrice: 0, total: 0 })
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBe(0)
+      expect(lineItems.some(isMissingPricing)).toBe(false)
+    })
+
+    it("does not stamp inherited provenance on a child the card prices on its own", async () => {
+      // The card sets a child price, so a blank child fare prices off the card, not the typed adult.
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 0 },
+            ],
+          },
+        ],
+      })
+
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine?.unitPrice).toBe(5000)
+      expect(childLine?.pricingSnapshot?.manualTrainFareInheritedFrom).toBeUndefined()
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBeUndefined()
+    })
+
+    it("does not add the single supplement on top of a typed fare -- the typed fare is final", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(1, 0) }),
+        packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [{ suiteTypeId: "suite-dlx", adultCount: 1, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 }],
+          },
+        ],
+      })
+
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0]).toMatchObject({ qty: 1, unitPrice: 9000, total: 9000 })
+      expect(lineItems[0].description).not.toContain("single supplement")
+      expect(lineItems[0].pricingSnapshot?.singleSupplementPct).toBeNull()
+    })
+
+    it("keeps the card's single supplement for an adult when only child/infant fares were typed", async () => {
+      // Two solo suites sharing one override triple (child 4000 only): the lone adult was never
+      // touched by the override, so it still pays card + supplement; the lone child pays exactly
+      // the typed fare, no supplement.
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: { ...bookingFor(1, 1), no_of_suites: 2 } }),
+        packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 1, childCount: 0, infantCount: 0, fareOverrideChild: 4000 },
+              { suiteTypeId: "suite-dlx", adultCount: 0, childCount: 1, infantCount: 0, fareOverrideChild: 4000 },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.endsWith("- Adult"))
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(adultLine).toMatchObject({ qty: 1, unitPrice: 12500 })
+      expect(adultLine?.description).toContain("(25% single supplement included)")
+      expect(adultLine?.pricingSnapshot?.manualTrainFare).toBeUndefined()
+      expect(childLine).toMatchObject({ qty: 1, unitPrice: 4000 })
+      expect(childLine?.description).not.toContain("single supplement")
+      expect(childLine?.pricingSnapshot?.manualTrainFare).toBe(4000)
+      expect(childLine?.pricingSnapshot?.manualTrainFareBase).toBe(5000)
+    })
+
+    it("never merges two suites of the same type at different overrides (or one overridden, one on the card)", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: { ...bookingFor(6, 0), no_of_suites: 3 } }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 },
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 8000 },
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0 },
+            ],
+          },
+        ],
+      })
+
+      const adultPrices = lineItems
+        .filter((li) => li.description.endsWith("- Adult"))
+        .map((li) => [li.qty, li.unitPrice])
+        .sort((a, b) => a[1] - b[1])
+      expect(adultPrices).toEqual([
+        [2, 8000],
+        [2, 9000],
+        [2, 10000],
+      ])
+    })
+
+    it("merges two suites typed identically into one line", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: { ...bookingFor(4, 0), no_of_suites: 2 } }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 },
+              { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0, fareOverrideAdult: 9000 },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0]).toMatchObject({ qty: 4, unitPrice: 9000, total: 36000 })
+    })
+
+    it("stamps who set the override, and when, on the overridden line's snapshot", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 0) }),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                adultCount: 2,
+                childCount: 0,
+                infantCount: 0,
+                fareOverrideAdult: 9000,
+                fareOverrideSetAt: "2026-09-29T08:00:00Z",
+                fareOverrideSetByName: "Carmen Consultant",
+              },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems[0].pricingSnapshot).toMatchObject({
+        manualTrainFare: 9000,
+        manualTrainFareBase: 10000,
+        manualTrainFareSetAt: "2026-09-29T08:00:00Z",
+        manualTrainFareSetByName: "Carmen Consultant",
+      })
+    })
+
+    it("prices without a rate card when every passenger kind present has a typed fare", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+        packageDetail: detail([{ ...trainLeg, rateCards: [] }]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            priceCurrency: "ZAR",
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                adultCount: 2,
+                childCount: 1,
+                infantCount: 0,
+                fareOverrideAdult: 9000,
+                fareOverrideChild: 4000,
+              },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems.find((li) => li.description.endsWith("- Adult"))).toMatchObject({ unitPrice: 9000 })
+      const childLine = lineItems.find((li) => li.description.endsWith("- Child"))
+      expect(childLine).toMatchObject({ unitPrice: 4000 })
+      expect(childLine?.pricingSnapshot?.manualTrainFareBase).toBeNull()
+    })
+
+    it("still fails on a missing rate card when a present passenger kind is left blank", async () => {
+      await expect(
+        buildPackageQuoteLineItems({
+          supabase: buildSupabase({ booking: bookingFor(2, 1) }),
+          packageDetail: detail([{ ...trainLeg, rateCards: [] }]),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [
+            {
+              legId: "leg-train",
+              selected: true,
+              units: [
+                { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, infantCount: 0, fareOverrideAdult: 9000 },
+              ],
+            },
+          ],
+        }),
+      ).rejects.toThrow(/No rate card/)
+    })
+
+    it("ignores a fare override on a manual-pricing train leg (its fares are already typed)", async () => {
+      const manualTrain = { ...trainLeg, pricingMode: "manual" as const, rateCards: [] }
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: bookingFor(2, 0) }),
+        packageDetail: detail([manualTrain]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            priceCurrency: "ZAR",
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                adultCount: 2,
+                childCount: 0,
+                infantCount: 0,
+                manualAdultPrice: 7000,
+                fareOverrideAdult: 9000,
+              },
+            ],
+          },
+        ],
+      })
+
+      expect(lineItems[0]).toMatchObject({ unitPrice: 7000 })
+      expect(lineItems[0].pricingSnapshot?.manualTrainFare).toBeUndefined()
+    })
   })
 
   describe("manual pricing (e.g. airlines)", () => {

@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { useRef, useState } from "react"
 import { CheckCircle2, ChevronDown, FileText, Info, Send, ShieldAlert } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -20,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getPipelineStageLabel, type PipelineStage } from "@/lib/types"
 import { formatMoney } from "@/lib/money"
+import { getRecordTabHref } from "@/lib/booking-visibility"
 
 // final_payment_confirmation, cancel_reason and refund_capture have no owning
 // tab — all three are deliberately absent here, which is what makes `showFix`
@@ -134,6 +136,7 @@ export function StageTransitionModal({
   onSendDepositInvoice,
   onRecordBalancePayment,
 }: StageTransitionModalProps) {
+  const pathname = usePathname()
   const [overrideReason, setOverrideReason] = useState("")
   const [overrideOpen, setOverrideOpen] = useState(false)
   const overrideTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -280,7 +283,7 @@ export function StageTransitionModal({
                       {showFix ? (
                         <Button asChild size="sm" variant="outline">
                           <Link
-                            href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}
+                            href={getRecordTabHref(pathname, jobId, gateIdToTabPath(failure.gateId))}
                             onClick={onCancel}
                           >
                             Go to {gateIdToTabLabel(failure.gateId)} tab

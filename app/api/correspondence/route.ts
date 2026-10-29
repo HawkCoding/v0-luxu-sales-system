@@ -1,11 +1,16 @@
 import { z } from "zod"
 import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
+import { claimUnassignedBooking } from "@/lib/bookings/claim-unassigned-booking"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender, type ResolvedSenderReason } from "@/lib/email/resolve-sender"
 import { resolveSenderDisplayName } from "@/lib/email/sender-identity"
+import { renderSignatureFragment } from "@/lib/email/render-signature"
+import { resolveEmailSignature } from "@/lib/email/signature"
+import { extractSignatureSlot, replaceSignatureSlot } from "@/lib/templates/signature-slot"
+import { brandedEmailToPlainText } from "@/lib/email/plain-text"
 import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { staleVersionResponse } from "@/lib/concurrency"
@@ -32,15 +37,6 @@ import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-
 import type { PricingSnapshot } from "@/lib/types"
 
 export const runtime = "nodejs"
-
-function getPlainTextFromHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-}
 
 const PIPELINE_STAGE_VALUES = [
   "enquiry",
@@ -331,6 +327,16 @@ export async function POST(req: Request) {
     }
   }
 
+  // An unassigned enquiry belongs to whoever sends from it — otherwise there is no salesperson
+  // mailbox to send through and the send fails in production.
+  const claim = await claimUnassignedBooking(supabase, {
+    bookingId,
+    userId: auth.value.user.id,
+    actorName: profile.actorName,
+  })
+  if (!claim.ok) return safeSupabaseError("correspondence:claim-booking", claim.error)
+  booking.assigned_salesperson_id = claim.assignedSalespersonId ?? booking.assigned_salesperson_id
+
   // Send through the assigned salesperson's mailbox when configured;
   // fall back to the office-wide From address.
   const sender = await resolveSalespersonSender(supabase, booking.assigned_salesperson_id)
@@ -347,8 +353,17 @@ export async function POST(req: Request) {
     parsed.data.signatureBrandId,
   )
   const subject = parsed.data.subject.trim()
-  const bodyHtml = parsed.data.bodyHtml?.trim() || null
-  const text = parsed.data.text?.trim() || (bodyHtml ? getPlainTextFromHtml(bodyHtml) : null)
+  let bodyHtml = parsed.data.bodyHtml?.trim() || null
+  // A scheduled email's HTML was composed when it was drafted (a follow-up, two days
+  // before it goes out), so its signature can predate Settings or rendering changes made
+  // since. Re-render the signature slot now, for the same sender compose used.
+  if (bodyHtml && parsed.data.scheduledCorrespondenceId && extractSignatureSlot(bodyHtml) !== null) {
+    const signature = await resolveEmailSignature(booking.assigned_salesperson_id, parsed.data.signatureBrandId)
+    if (signature) {
+      bodyHtml = replaceSignatureSlot(bodyHtml, await renderSignatureFragment(signature)) ?? bodyHtml
+    }
+  }
+  const text = parsed.data.text?.trim() || (bodyHtml ? brandedEmailToPlainText(bodyHtml) : null)
 
   const baseAttachments: NonNullable<typeof parsed.data.attachments> = parsed.data.attachments ?? []
 
@@ -659,6 +674,16 @@ export async function POST(req: Request) {
     })
 
     if (followUp) {
+      // One pending follow-up per booking: the draft left by an earlier send of this quote (or of
+      // the quote it replaced) quotes a route, date or price the client has since been re-sent.
+      const { error: staleFollowUpError } = await supabase
+        .from("correspondences")
+        .update({ status: "cancelled" })
+        .eq("booking_id", bookingId)
+        .eq("kind", "quote_follow_up")
+        .eq("status", "scheduled")
+      if (staleFollowUpError) console.error("correspondence:cancel-stale-follow-up", staleFollowUpError)
+
       await supabase.from("correspondences").insert({
         booking_id: bookingId,
         channel: "email",

@@ -1,3 +1,5 @@
+const PDF_ASSETS = ["./assets/fonts/**", "./assets/brand/**"]
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
@@ -21,15 +23,19 @@ const nextConfig = {
       },
     ]
   },
-  // Document PDF fonts are read from disk at render time; make sure every
-  // serverless route that renders a voucher/itinerary/invoice PDF bundles them.
+  // Document PDF fonts, the page background and the fallback seal are read from disk at render
+  // time; make sure every serverless route that renders a quote/invoice/voucher/itinerary PDF
+  // bundles them.
   outputFileTracingIncludes: {
-    "/api/voucher/generate": ["./assets/fonts/**"],
-    "/api/vouchers/[id]/prepare-send": ["./assets/fonts/**"],
-    "/api/invoices/deposit": ["./assets/fonts/**"],
-    "/api/invoices/[id]/reminder": ["./assets/fonts/**"],
-    "/api/jobs/[id]/payment-received": ["./assets/fonts/**"],
-    "/api/pdf-preview/[type]": ["./assets/fonts/**"],
+    "/api/voucher/generate": PDF_ASSETS,
+    "/api/vouchers/[id]/prepare-send": PDF_ASSETS,
+    "/api/invoices/deposit": PDF_ASSETS,
+    "/api/invoices/[id]/reminder": PDF_ASSETS,
+    "/api/jobs/[id]/payment-received": PDF_ASSETS,
+    "/api/jobs/[id]/worksheet": PDF_ASSETS,
+    "/api/quotes/[id]/pdf": PDF_ASSETS,
+    "/api/correspondence": PDF_ASSETS,
+    "/api/pdf-preview/[type]": PDF_ASSETS,
   },
 }
 

@@ -14,6 +14,8 @@ vi.mock("@/lib/api/auth", () => ({
 vi.mock("@/lib/settings-access", () => ({
   requireSettingsWrite: settingsAccessMocks.requireSettingsWrite,
   getEmailSignatureSettings: settingsAccessMocks.getEmailSignatureSettings,
+  SIGNATURE_LINE_HIDDEN: "__hidden__",
+  HIDEABLE_SIGNATURE_KEYS: new Set(["signature_divisions_line", "signature_company_line"]),
 }))
 
 const auditMocks = vi.hoisted(() => ({
@@ -37,11 +39,13 @@ function makeRequest(body: unknown) {
 }
 
 function makeSupabase() {
+  const upsert = vi.fn(async (_rows: Array<{ key: string; value: string }>) => ({ error: null }))
   return {
+    upsert,
     from: vi.fn(() => ({
       select: vi.fn().mockReturnThis(),
       in: vi.fn(async () => ({ data: [], error: null })),
-      upsert: vi.fn(async () => ({ error: null })),
+      upsert,
     })),
   }
 }
@@ -103,6 +107,36 @@ describe("PATCH /api/settings/email-signature", () => {
     const body = await res.json()
 
     expect(body.signature_sender_layout).toBe("<p><strong>{{fullName}}</strong></p>")
+  })
+
+  it("stores a cleared line as the hidden marker so it stays cleared, and answers with the blank", async () => {
+    const supabase = makeSupabase()
+    settingsAccessMocks.requireSettingsWrite.mockResolvedValue({
+      ok: true,
+      value: { supabase, actorName: "Admin", userId: "admin-1" },
+    })
+
+    const res = await PATCH(makeRequest({ signature_divisions_line: "<p></p>" }))
+    const body = await res.json()
+
+    expect(supabase.upsert.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ key: "signature_divisions_line", value: "__hidden__" }),
+    ])
+    expect(body.signature_divisions_line).toBe("")
+  })
+
+  it("stores a blank on a line with no built-in default as a plain blank", async () => {
+    const supabase = makeSupabase()
+    settingsAccessMocks.requireSettingsWrite.mockResolvedValue({
+      ok: true,
+      value: { supabase, actorName: "Admin", userId: "admin-1" },
+    })
+
+    await PATCH(makeRequest({ signature_office_address: "" }))
+
+    expect(supabase.upsert.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ key: "signature_office_address", value: "" }),
+    ])
   })
 
   it("400s an empty body", async () => {

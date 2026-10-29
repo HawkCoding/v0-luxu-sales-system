@@ -484,6 +484,11 @@ export type Database = {
           child_count: number
           complimentary_first_night: boolean
           created_at: string
+          fare_override_adult: number | null
+          fare_override_child: number | null
+          fare_override_infant: number | null
+          fare_override_set_at: string | null
+          fare_override_set_by: string | null
           id: string
           infant_count: number
           manual_adult_price: number | null
@@ -510,6 +515,11 @@ export type Database = {
           child_count?: number
           complimentary_first_night?: boolean
           created_at?: string
+          fare_override_adult?: number | null
+          fare_override_child?: number | null
+          fare_override_infant?: number | null
+          fare_override_set_at?: string | null
+          fare_override_set_by?: string | null
           id?: string
           infant_count?: number
           manual_adult_price?: number | null
@@ -536,6 +546,11 @@ export type Database = {
           child_count?: number
           complimentary_first_night?: boolean
           created_at?: string
+          fare_override_adult?: number | null
+          fare_override_child?: number | null
+          fare_override_infant?: number | null
+          fare_override_set_at?: string | null
+          fare_override_set_by?: string | null
           id?: string
           infant_count?: number
           manual_adult_price?: number | null
@@ -4242,6 +4257,10 @@ export type Database = {
       next_booking_number_block: {
         Args: { p_count: number; p_product_code: string; p_year?: number }
         Returns: number
+      }
+      replace_booking_service_units: {
+        Args: { p_service_ids: string[]; p_units: Json }
+        Returns: undefined
       }
       replace_booking_transport_requests: {
         Args: {

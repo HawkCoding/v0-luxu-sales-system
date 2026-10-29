@@ -32,6 +32,7 @@ import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-t
 import { parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
 import { resolvePendingSendAction } from "@/lib/pipeline/pending-send-action"
 import { useRouter } from "next/navigation"
+import { getRecordHref } from "@/lib/booking-visibility"
 
 interface PipelineJob {
   id: string
@@ -209,7 +210,7 @@ export default function PipelinePage() {
       // here — hand off to the booking page, which can.
       const pendingSendAction = resolvePendingSendAction(payload.failures)
       if (pendingSendAction) {
-        router.push(`/app/bookings/${jobId}?send=${pendingSendAction}&stage=${toStage}`)
+        router.push(`${getRecordHref(jobId, job.stage)}?send=${pendingSendAction}&stage=${toStage}`)
         return
       }
 
@@ -337,7 +338,7 @@ export default function PipelinePage() {
               <NewEnquiryDialog
                 open={newEnquiryOpen}
                 onOpenChange={setNewEnquiryOpen}
-                onSaved={(jobId) => router.push(`/app/bookings/${jobId}?tab=quotes`)}
+                onSaved={(jobId) => router.push(`${getRecordHref(jobId, "enquiry")}?tab=quotes`)}
               />
             </>
           )}
@@ -392,7 +393,7 @@ export default function PipelinePage() {
 
           <div className="space-y-3">
             {filtered.map((b: any) => (
-              <Link key={b.id} href={`/app/bookings/${b.id}`}>
+              <Link key={b.id} href={getRecordHref(b.id, b.stage)}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
@@ -418,7 +419,7 @@ export default function PipelinePage() {
               </Link>
             ))}
             {filtered.length === 0 && (
-              <div className="text-center py-12 text-sm text-muted-foreground">No bookings found</div>
+              <div className="text-center py-12 text-sm text-muted-foreground">No jobs found</div>
             )}
           </div>
         </TabsContent>
@@ -510,7 +511,7 @@ export default function PipelinePage() {
           <p className="text-sm text-muted-foreground">Enquiries imported from pasted emails and text</p>
           <div className="space-y-3">
             {draftEnquiries.map((b: any) => (
-              <Link key={b.id} href={`/app/bookings/${b.id}`}>
+              <Link key={b.id} href={`/app/enquiries/${b.id}`}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
@@ -618,7 +619,7 @@ function PipelineCard({
     >
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-1 mb-1">
-          <Link href={`/app/bookings/${job.id}`} className="text-xs font-bold text-foreground hover:text-primary transition-colors">
+          <Link href={getRecordHref(job.id, job.stage)} className="text-xs font-bold text-foreground hover:text-primary transition-colors">
             {displayReference}
           </Link>
           <div className="flex items-center gap-1.5">

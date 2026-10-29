@@ -7,6 +7,8 @@ import { TextStyle, FontSize, FontFamily, Color, BackgroundColor } from "@tiptap
 import type { Extensions } from "@tiptap/react"
 import { PreservedBlock } from "@/lib/templates/rich-text/preserved-block"
 import { TrailingParagraph } from "@/lib/templates/rich-text/trailing-paragraph"
+import { BlockLineHeight } from "@/lib/templates/rich-text/line-height"
+import { BlockParagraphSpacing } from "@/lib/templates/rich-text/paragraph-spacing"
 
 export function buildEditorExtensions(): Extensions {
   return [
@@ -28,6 +30,11 @@ export function buildEditorExtensions(): Extensions {
     FontFamily,
     Color,
     BackgroundColor,
+    // Toolbar line and paragraph spacing: an allowlisted inline `line-height`
+    // and/or `margin: 0 0 …` on <p>/<li> (serialize.ts keeps only those exact
+    // shapes of styled block as rich content).
+    BlockLineHeight,
+    BlockParagraphSpacing,
     PreservedBlock,
     TrailingParagraph,
   ]

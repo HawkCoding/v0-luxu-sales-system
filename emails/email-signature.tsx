@@ -1,14 +1,24 @@
-import { Hr, Img, Link, Section, Text } from "@react-email/components"
+import { Hr, Img, Link, Text } from "@react-email/components"
 import type { CSSProperties } from "react"
 import { EMAIL_COLORS, SIGNATURE_BANNER_MAX_WIDTH, signatureBannerSize } from "@/lib/email/email-chrome"
-import { renderSenderLayout } from "@/lib/email/sender-layout"
+import { toInlineSignatureHtml } from "@/lib/email/signature-html"
+import { renderSenderLayout, SIGNATURE_TEXT_COLOR, styleSignatureLinks } from "@/lib/email/sender-layout"
 import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
 interface EmailSignatureProps {
   signature: ResolvedEmailSignature
 }
 
-const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" | ")
+/**
+ * Brand text fields are editor HTML, often wrapped in `<p>`. They're injected
+ * into a styled `<p>`, and a nested `<p>` closes it early — the content then
+ * falls out of the 10px style and renders at the client's default size. So
+ * flatten the paragraphs to `<br>`s first.
+ */
+const inlineHtml = (html: string) => toInlineSignatureHtml(html)
+
+/** Links in the small-print lines take the small-print colour, not a client's default blue. */
+const mutedLinks = (html: string) => styleSignatureLinks(inlineHtml(html), EMAIL_COLORS.mutedText)
 
 /**
  * Per-sender signature (name/title/contact) plus the picked division's
@@ -24,76 +34,98 @@ const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter
  * lib/email/sender-layout.ts), so they're injected via dangerouslySetInnerHTML
  * rather than built from JSX — the source of truth for their markup is
  * already-sanitized HTML, not React children.
+ *
+ * Every link in that HTML gets an inline colour matching its line (the
+ * sender block's dark text, the small print's muted tone) and no underline
+ * — see styleSignatureLinks. Badge links keep their own style below.
  */
 export function EmailSignature({ signature }: EmailSignatureProps) {
   const { fullName, jobTitle, tel, cell, fax, email, website, brand } = signature
 
+  // renderSenderLayout already styles its links in SIGNATURE_TEXT_COLOR.
   const senderHtml = renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website })
-  const smallPrintLine = joinParts([brand.registrationLine, brand.tradingHours])
   const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
 
+  // A one-cell table, not react-email's <Section> (which stamps align="center"
+  // on its table): the signature starts on the message's own left edge.
   return (
-    <Section style={block}>
-      <Text style={senderLines} dangerouslySetInnerHTML={{ __html: senderHtml }} />
+    <table role="presentation" width="100%" border={0} cellPadding={0} cellSpacing={0}>
+      <tbody>
+        <tr>
+          <td style={block}>
+            <Text style={senderLines} dangerouslySetInnerHTML={{ __html: senderHtml }} />
 
-      {brand.bannerUrl ? (
-        <Img alt={brand.name} src={brand.bannerUrl} {...bannerSize} style={banner} />
-      ) : null}
+            {brand.bannerUrl ? (
+              <Img alt={brand.name} src={brand.bannerUrl} {...bannerSize} style={banner} />
+            ) : null}
 
-      {brand.officeAddress ? (
-        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.officeAddress }} />
-      ) : null}
+            {brand.officeAddress ? (
+              <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.officeAddress) }} />
+            ) : null}
 
-      <Hr style={hr} />
+            <Hr style={hr} />
 
-      {brand.companyLine ? (
-        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.companyLine }} />
-      ) : null}
-      {smallPrintLine ? <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: smallPrintLine }} /> : null}
-      {brand.divisionsLine ? (
-        <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: brand.divisionsLine }} />
-      ) : null}
-      {brand.confidentiality ? (
-        <Text style={confidentiality} dangerouslySetInnerHTML={{ __html: brand.confidentiality }} />
-      ) : null}
+            {brand.companyLine ? (
+              <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.companyLine) }} />
+            ) : null}
+            {brand.registrationLine ? (
+              <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.registrationLine) }} />
+            ) : null}
+            {brand.tradingHours ? (
+              <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.tradingHours) }} />
+            ) : null}
+            {brand.divisionsLine ? (
+              <Text style={smallPrint} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.divisionsLine) }} />
+            ) : null}
+            {brand.confidentiality ? (
+              <Text style={confidentiality} dangerouslySetInnerHTML={{ __html: mutedLinks(brand.confidentiality) }} />
+            ) : null}
 
-      {brand.badges.length > 0 ? (
-        <table role="presentation" cellPadding={0} cellSpacing={0} style={badgeTable}>
-          <tbody>
-            <tr>
-              {brand.badges.map((badge, i) => {
-                const img = (
-                  <Img
-                    key={i}
-                    alt={badge.alt}
-                    src={badge.url}
-                    width={badge.width}
-                    height={badge.height}
-                    style={badgeImg}
-                  />
-                )
-                return (
-                  <td key={i} style={badgeCell}>
-                    {badge.href ? (
-                      <Link href={badge.href} style={badgeLink}>
-                        {img}
-                      </Link>
-                    ) : (
-                      img
-                    )}
-                  </td>
-                )
-              })}
-            </tr>
-          </tbody>
-        </table>
-      ) : null}
-    </Section>
+            {brand.badges.length > 0 ? (
+              <table role="presentation" cellPadding={0} cellSpacing={0} style={badgeTable}>
+                <tbody>
+                  <tr>
+                    {brand.badges.map((badge, i) => {
+                      const img = (
+                        <Img
+                          key={i}
+                          alt={badge.alt}
+                          src={badge.url}
+                          width={badge.width}
+                          height={badge.height}
+                          style={badgeImg}
+                        />
+                      )
+                      return (
+                        <td key={i} style={badgeCell}>
+                          {badge.href ? (
+                            <Link href={badge.href} style={badgeLink}>
+                              {img}
+                            </Link>
+                          ) : (
+                            img
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+            ) : null}
+          </td>
+        </tr>
+      </tbody>
+    </table>
   )
 }
 
+// The gap between the message and the signature. Padding on a <td>, because
+// that is what Outlook's Word engine keeps: it used to be a 16px margin-top on
+// the sender <p> inside this nested table, which Outlook dropped, so the
+// signature butted up against the last line of the message (client,
+// 2026-10-26). No side padding: the signature shares the message's left edge.
 const block = {
-  padding: "0 24px 0",
+  paddingTop: "16px",
 }
 
 // react-email's <Text> hardcodes line-height:24px on every <p>, applied
@@ -101,11 +133,11 @@ const block = {
 // 12-13px lines, not margin. Override it explicitly; the mso rule stops
 // Outlook's Word engine rounding it back up.
 const senderLines = {
-  margin: "16px 0 0",
+  margin: "0",
   fontSize: "13px",
   lineHeight: "16px",
   msoLineHeightRule: "exactly",
-  color: "#3d3831",
+  color: SIGNATURE_TEXT_COLOR,
 } as CSSProperties
 
 // Fluid-hybrid image: the width/height attributes (signatureBannerSize) size

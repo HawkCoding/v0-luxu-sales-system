@@ -8,11 +8,14 @@
 // the editor's own DOMParser-based serializer, which only runs in the
 // browser/jsdom.
 //
-// Kept deliberately narrower than the email body schema: no lists or block
-// tokens here, just inline formatting appropriate for a short signature
-// line — bold/italic/underline/strike, a link, and a styled span for
+// Kept deliberately narrower than the email body schema: no lists, block
+// tokens or line spacing here, just inline formatting appropriate for a short
+// signature line — bold/italic/underline/strike, a link, and a styled span for
 // font-size/color/background-color/font-family (validated against the same
-// allowlists the rich-text editor enforces client-side).
+// allowlists the rich-text editor enforces client-side). Line spacing is a
+// <p>/<li> style, and toInlineSignatureHtml drops the <p>s when the field is
+// embedded in the signature, so the signature editors (HtmlBodyEditor's
+// compact variant) don't offer it and a pasted one is stripped here.
 
 import sanitizeHtml from "sanitize-html"
 import {

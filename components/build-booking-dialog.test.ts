@@ -107,6 +107,9 @@ function unit(overrides: Partial<SuiteUnitState> & { suiteTypeId: string | null 
     manualRoomPrice: null,
     complimentaryFirstNight: false,
     manualTourPrice: null,
+    fareOverrideAdult: null,
+    fareOverrideChild: null,
+    fareOverrideInfant: null,
     rateTypeId: null,
     ...overrides,
   }

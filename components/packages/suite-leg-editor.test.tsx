@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SuiteLegEditor } from "./suite-leg-editor"
@@ -81,6 +82,9 @@ const mismatchedUnits: SuiteLegState["units"] = [
     manualRoomPrice: null,
     complimentaryFirstNight: false,
     manualTourPrice: null,
+    fareOverrideAdult: null,
+    fareOverrideChild: null,
+    fareOverrideInfant: null,
     rateTypeId: null,
   },
 ]
@@ -290,6 +294,172 @@ describe("SuiteLegEditor hotel date anchor", () => {
   })
 })
 
+describe("SuiteLegEditor train fare override", () => {
+  const trainLeg: PackageLeg = {
+    ...leg,
+    baseRateTypeId: "rate-1",
+    routes: [
+      {
+        id: "route-train",
+        supplierId: "supplier-1",
+        name: "Pretoria - Cape Town",
+        originLocationId: null,
+        destinationLocationId: null,
+        active: true,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+    suiteTypes: [
+      {
+        id: "suite-dlx",
+        supplierId: "supplier-1",
+        name: "Deluxe Suite",
+        active: true,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+    rateCards: [
+      {
+        id: "card-train",
+        routeId: "route-train",
+        suiteTypeId: "suite-dlx",
+        rateTypeId: "rate-1",
+        pricePerPerson: 10000,
+        childPrice: 5000,
+        infantPrice: null,
+        currency: "ZAR",
+        validFrom: "2026-01-01",
+        validTo: null,
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+  }
+
+  function trainState(overrides: Partial<SuiteLegState["units"][number]> = {}): SuiteLegState {
+    return {
+      ...makeLegState([
+        { ...mismatchedUnits[0], suiteTypeId: "suite-dlx", adultCount: 2, childCount: 1, ...overrides },
+      ]),
+      routeId: "route-train",
+    }
+  }
+
+  /** The editor is controlled, so a harness keeps typed values on screen like the dialog does. */
+  function Harness({ initial, legOverride }: { initial: SuiteLegState; legOverride?: PackageLeg }) {
+    const [value, setValue] = useState(initial)
+    return <SuiteLegEditor leg={legOverride ?? trainLeg} value={value} onChange={setValue} />
+  }
+
+  it("stays collapsed on a suite with no override, showing the card's per-person fares", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState()} onChange={vi.fn()} />)
+
+    expect(screen.getByText(/per person \(adult \/ child \/ infant\)/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/adult price override for suite 1/i)).not.toBeInTheDocument()
+  })
+
+  it("opens on request with an accessible adult/child/infant input each, the card fares as placeholders", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState()} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+
+    const adult = screen.getByLabelText(/adult price override for suite 1/i)
+    const child = screen.getByLabelText(/child price override for suite 1/i)
+    const infant = screen.getByLabelText(/infant price override for suite 1/i)
+    // Prefixed so a card fare never reads as a value already typed.
+    expect(adult).toHaveAttribute("placeholder", expect.stringMatching(/^Card: 10[\s ,]?000/))
+    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/^Card: 5[\s ,]?000/))
+    // No infant price on the card means infants travel free (rateCardFares), so 0 is what it replaces.
+    expect(infant).toHaveAttribute("placeholder", expect.stringMatching(/^Card: 0[.,]00$/))
+  })
+
+  it("moves focus to the adult fare when the override is opened", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState()} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+    expect(screen.getByLabelText(/adult price override for suite 1/i)).toHaveFocus()
+  })
+
+  it("doesn't steal focus when a saved override opens expanded", () => {
+    render(<SuiteLegEditor leg={trainLeg} value={trainState({ fareOverrideAdult: 9000 })} onChange={vi.fn()} />)
+
+    expect(screen.getByLabelText(/adult price override for suite 1/i)).not.toHaveFocus()
+  })
+
+  // overriddenFares: with no child price on the card, a blank child pays the adult fare in force --
+  // the typed one once there is one. The placeholder has to say that, not the card's adult price.
+  it("shows a blank child following the live adult fare when the card has no child price", () => {
+    const noChildCardLeg: PackageLeg = {
+      ...trainLeg,
+      rateCards: trainLeg.rateCards.map((rateCard) => ({ ...rateCard, childPrice: null })),
+    }
+    render(<Harness initial={trainState()} legOverride={noChildCardLeg} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+    const child = screen.getByLabelText(/child price override for suite 1/i)
+    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/^Same as adult: 10[\s ,]?000/))
+
+    fireEvent.change(screen.getByLabelText(/adult price override for suite 1/i), { target: { value: "9000" } })
+    expect(child).toHaveAttribute("placeholder", expect.stringMatching(/^Same as adult: 9[\s ,]?000/))
+  })
+
+  it("updates the live total as the adult fare is typed, keeping the blank child on the card", () => {
+    render(<Harness initial={trainState()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price for suite 1/i }))
+    fireEvent.change(screen.getByLabelText(/adult price override for suite 1/i), { target: { value: "9000" } })
+
+    // 2 adults × 9 000 + 1 child × 5 000 (card) = 23 000
+    expect(screen.getByTestId("per-person-override-total")).toHaveTextContent(/23[\s,]?000/)
+    expect(screen.getByTestId("per-person-override-total")).toHaveTextContent("2A / 1C / 0I")
+    expect(screen.getByText("Overridden")).toBeInTheDocument()
+  })
+
+  it("clears every fare in one update and collapses on Revert", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={trainLeg}
+        value={trainState({ fareOverrideAdult: 9000, fareOverrideChild: 4000 })}
+        onChange={onChange}
+      />,
+    )
+
+    expect(screen.getByLabelText(/adult price override for suite 1/i)).toHaveValue(9000)
+    fireEvent.click(screen.getByRole("button", { name: /revert/i }))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        units: [expect.objectContaining({ fareOverrideAdult: null, fareOverrideChild: null, fareOverrideInfant: null })],
+      }),
+    )
+  })
+
+  it("collapses back to the link after Revert when driven by real state", () => {
+    render(<Harness initial={trainState({ fareOverrideAdult: 9000 })} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /revert/i }))
+    expect(screen.queryByLabelText(/adult price override for suite 1/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /override price for suite 1/i })).toBeInTheDocument()
+  })
+
+  it("is not offered on a manual-pricing train, which already types every fare", () => {
+    render(
+      <SuiteLegEditor leg={{ ...trainLeg, pricingMode: "manual" }} value={trainState()} onChange={vi.fn()} />,
+    )
+
+    expect(screen.queryByRole("button", { name: /override price for suite 1/i })).not.toBeInTheDocument()
+  })
+
+  it("is not offered on a hotel room (it has its own room override)", () => {
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price/i }))
+    expect(screen.queryByLabelText(/adult price override/i)).not.toBeInTheDocument()
+  })
+})
+
 describe("SuiteLegEditor luggage storage", () => {
   it("renders unticked for a hotel leg with no saved flag", () => {
     render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
@@ -385,6 +555,34 @@ describe("SuiteLegEditor room price override", () => {
 
     expect(screen.getByText(/8[\s,]?500/)).toBeInTheDocument()
     expect(screen.getByText(/per night for this room/i)).toBeInTheDocument()
+    // ...and says how it got there, so a rate sheet that quotes the room shows up as a doubling.
+    // (The fixture room also holds a child, sharing free on a card with no child rate.)
+    expect(
+      screen.getByText(/\(per person: 2 adults × R\s?4[\s,]?250[.,]00 \+ 1 child free\)/),
+    ).toBeInTheDocument()
+  })
+
+  it("asks for the override as a whole-room price, and says what it replaces in the same terms", () => {
+    render(
+      <SuiteLegEditor leg={hotelLeg} value={makeHotelState({ manualRoomPrice: 4500 })} onChange={vi.fn()} />,
+    )
+
+    expect(screen.getByText("/ room / night")).toBeInTheDocument()
+    expect(
+      screen.getByText(/Replaces the rate card's R\s?8[\s,]?500[.,]00 per night for this room \(per person: 2 adults × /),
+    ).toBeInTheDocument()
+  })
+
+  it("does not break a per-room card down per guest", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), accommodationPricingBasis: "per_room" }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText(/\(per person:/)).not.toBeInTheDocument()
   })
 
   it("quotes the card as the room's flat nightly rate when the stay prices per room", () => {
@@ -409,8 +607,23 @@ describe("SuiteLegEditor room price override", () => {
       />,
     )
 
-    // Three nights, one gifted, two charged at R8 500 = R17 000 -- not 2 x R4 250.
-    expect(screen.getByText(/2 of 3 nights at .*=.*17[\s,]?000/)).toBeInTheDocument()
+    // Three nights, one gifted, two charged at R8 500 = R17 000 -- not 2 x R4 250. The full stay and
+    // the gift are stated too, so the discount is visible rather than implied.
+    expect(
+      screen.getByText(/2 of 3 nights charged at .*8[\s,]?500.* per room = .*17[\s,]?000.*full stay .*25[\s,]?500.*8[\s,]?500.* free/),
+    ).toBeInTheDocument()
+  })
+
+  it("costs a gifted first night off a typed room price the same way", () => {
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={makeHotelState({ complimentaryFirstNight: true, manualRoomPrice: 4750 })}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/9[\s,]?500[.,]00 for 2 nights of 3 \(first night complimentary\)/)).toBeInTheDocument()
   })
 })
 
@@ -747,6 +960,9 @@ function makeTourUnit(id: string, suiteTypeId: string | null): SuiteLegState["un
     manualRoomPrice: null,
     complimentaryFirstNight: false,
     manualTourPrice: null,
+    fareOverrideAdult: null,
+    fareOverrideChild: null,
+    fareOverrideInfant: null,
     rateTypeId: null,
   }
 }

@@ -2,8 +2,13 @@ import { z } from "zod"
 import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
-import { sanitizeSignatureHtml } from "@/lib/email/signature-html"
-import { getEmailSignatureSettings, requireSettingsWrite } from "@/lib/settings-access"
+import { isBlankSignatureHtml, sanitizeSignatureHtml } from "@/lib/email/signature-html"
+import {
+  getEmailSignatureSettings,
+  HIDEABLE_SIGNATURE_KEYS,
+  requireSettingsWrite,
+  SIGNATURE_LINE_HIDDEN,
+} from "@/lib/settings-access"
 
 export async function GET() {
   const auth = await requireAnyRole()
@@ -55,12 +60,19 @@ export async function PATCH(req: Request) {
   const parsed = patchSchema.safeParse(raw)
   if (!parsed.success) return jsonZodError(parsed.error, "Invalid input")
 
-  const updates = Object.entries(parsed.data)
+  const sanitized = Object.entries(parsed.data)
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => [
       key,
       RICH_TEXT_KEYS.has(key as SignaturePatchKey) ? sanitizeSignatureHtml(value as string) : value,
     ]) as [SignaturePatchKey, string][]
+
+  // A line cleared on purpose is stored as the hidden marker — a plain blank reads back as the
+  // built-in default, which is how "remove this line" used to snap straight back after saving.
+  const updates = sanitized.map(([key, value]) => [
+    key,
+    HIDEABLE_SIGNATURE_KEYS.has(key) && isBlankSignatureHtml(value) ? SIGNATURE_LINE_HIDDEN : value,
+  ]) as [SignaturePatchKey, string][]
 
   const { supabase } = auth.value
 
@@ -86,6 +98,8 @@ export async function PATCH(req: Request) {
 
   const before = Object.fromEntries(updates.map(([key]) => [key, existing[key] ?? null]))
   const after = Object.fromEntries(updates.map(([key, value]) => [key, value]))
+  // The editor adopts the response as the field's saved value, so it gets the cleared line, not the marker.
+  const saved = Object.fromEntries(updates.map(([key, value]) => [key, value === SIGNATURE_LINE_HIDDEN ? "" : value]))
 
   await writeAuditLog(supabase, {
     actor: auth.value.actorName,
@@ -98,5 +112,5 @@ export async function PATCH(req: Request) {
     meta: settingAuditMeta(updates.map(([key]) => key).join(",")),
   })
 
-  return Response.json(after)
+  return Response.json(saved)
 }

@@ -17,7 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
-import { dateOnly } from "@/lib/packages/trip-date-range"
+import { dateOnly, selectedRouteDurationDays, serviceDateSpan } from "@/lib/packages/trip-date-range"
 import { getBillableRentalDays } from "@/lib/packages/rental-days"
 import { resolveOverrideSetterNames } from "@/lib/quotes/room-override-provenance"
 import {
@@ -39,10 +39,15 @@ import {
   hotelRateCardFares,
   manualFares,
   overriddenFares,
+  overridesCoverEveryPresentKind,
   rateCardFares,
   type PassengerFare,
 } from "@/lib/pricing/passenger-fares"
-import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
+import {
+  accommodationPriceLabel,
+  cardNightlyRoomRate,
+  resolveAccommodationPricingBasis,
+} from "@/lib/pricing/accommodation-basis"
 import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 import { effectiveUnitRateTypeId } from "@/lib/packages/unit-rate-type"
 import { describeEmptyUnit, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
@@ -98,6 +103,17 @@ export interface PackageUnitSelection {
   /** Server-resolved provenance for manualTourPrice, same posture as manualRoomPriceSetAt/-Name. */
   manualTourPriceSetAt?: string | null
   manualTourPriceSetByName?: string | null
+  /** Train rate-card legs only (ignored on manual-priced legs and every other kind): consultant-
+   *  typed per-person fares for this suite, one per passenger kind, replacing the rate card's price
+   *  for that kind. A kind left null/absent prices off the card as usual (overriddenFares). A typed
+   *  fare is final -- the solo-suite single supplement is never added on top of it (see the unit
+   *  branch below). Denominated in the card's currency (else the leg's priceCurrency). */
+  fareOverrideAdult?: number | null
+  fareOverrideChild?: number | null
+  fareOverrideInfant?: number | null
+  /** Server-resolved provenance for the fare overrides, same posture as manualTourPriceSetAt/-Name. */
+  fareOverrideSetAt?: string | null
+  fareOverrideSetByName?: string | null
   /** Train, hotel, cruise and tour legs (see supportsUnitRateType): this unit's own rate type,
    *  overriding the leg's rateTypeId (PackageLegSelection below) -- two suites of the same type can
    *  be sold at different rate levels (one at Rack, one at STO). Null/absent falls back to the leg's
@@ -458,6 +474,9 @@ export async function buildPackageQuoteLineItems({
   // The date the current line's rate card was matched against (the leg's own service date, or
   // the quote-level travelDate when the leg has none).
   let activePricingDate: string = travelDate
+  // The last day the current line's service covers (train arrival, hotel check-out, rental
+  // return), stamped so the quote can show each line's date range. Null means a single day.
+  let activeServiceEndDate: string | null = null
   const childAges = job.child_ages ?? []
   // The booking's real headcount — used once, for the single whole-booking commission line,
   // not per line (a line's own qty may be nights/vehicles/rooms rather than passengers).
@@ -543,6 +562,20 @@ export async function buildPackageQuoteLineItems({
       setAt: string | null
       setByName: string | null
     } | null
+    /** Train rate-card legs only: this line's passenger kind had its per-person fare typed by a
+     * consultant rather than read off the card. Internal-only, same posture as transportOverride. */
+    trainFareOverride?: {
+      /** The typed per-person fare, in sourceCurrency. */
+      price: number
+      /** What the rate card would have charged per person for this kind, same currency. Null when
+       * no card covered the suite. */
+      basePrice: number | null
+      setAt: string | null
+      setByName: string | null
+      /** Set when this kind was left blank and took another kind's typed fare (a child on a card
+       * with no child price inherits the adult fare). */
+      inheritedFrom?: "adult" | null
+    } | null
     /** Hotels only: nights of this room's stay the hotel gifted, and the stay they were taken
      * from. `qty` is already the charged nights; these are carried so the quote view, the
      * worksheet and the client documents can still speak about the full stay. */
@@ -554,7 +587,8 @@ export async function buildPackageQuoteLineItems({
      * regardless of transportOverride/the rate card. See booking_transport_requests.complimentary. */
     isComplimentaryTransport?: boolean
     /** Transfers/rentals only: the booking_transport_requests row this line priced, so the voucher
-     * builder can match the complimentary flag back to the specific captured trip. */
+     * builder can match the complimentary flag back to the specific captured trip and the invoice
+     * can name the trip's pick-up/drop-off. */
     transportRequestId?: string | null
     /** Transfers only: which basis this specific row priced under, so a per-person transfer's
      * three lines (and any surviving per-vehicle sibling on the same leg) are explicable in the
@@ -595,6 +629,7 @@ export async function buildPackageQuoteLineItems({
     roomOverride,
     transportOverride,
     tourOverride,
+    trainFareOverride,
     complimentary,
     isComplimentaryTransport,
     transportRequestId,
@@ -662,6 +697,7 @@ export async function buildPackageQuoteLineItems({
         rateTypeName: rateTypeMeta?.name ?? null,
         rateTypeInherited: activeRateCard ? activeRateCardInherited : null,
         travelDate: activePricingDate,
+        serviceEndDate: activeServiceEndDate,
         passengerKind,
         // Already in the quote's currency, so downstream maths (markup, commission) never has to
         // know a conversion happened; the pre-conversion figure lives in sourceUnitPrice below.
@@ -714,12 +750,21 @@ export async function buildPackageQuoteLineItems({
               manualTourPriceSetByName: tourOverride.setByName,
             }
           : {}),
-        ...(isComplimentaryTransport
+        ...(trainFareOverride
           ? {
-              isComplimentaryTransport: true,
-              transportRequestId: transportRequestId ?? null,
+              manualTrainFare: trainFareOverride.price,
+              manualTrainFareBase: trainFareOverride.basePrice,
+              manualTrainFareSetAt: trainFareOverride.setAt,
+              manualTrainFareSetByName: trainFareOverride.setByName,
+              ...(trainFareOverride.inheritedFrom
+                ? { manualTrainFareInheritedFrom: trainFareOverride.inheritedFrom }
+                : {}),
             }
           : {}),
+        ...(isComplimentaryTransport ? { isComplimentaryTransport: true } : {}),
+        // Every priced trip, not just a comped one: the invoice names a transfer line by this
+        // trip's own pick-up/drop-off (lib/invoices/transport-line-points.ts).
+        ...(transportRequestId ? { transportRequestId } : {}),
         ...(transferPricingBasis ? { transferPricingBasis } : {}),
         ...(accommodationPricingBasis ? { accommodationPricingBasis } : {}),
         ...(qtyBasis ? { occupantCount: qtyBasis.occupants, chargedNights: qtyBasis.nights } : {}),
@@ -908,6 +953,7 @@ export async function buildPackageQuoteLineItems({
       const selection = getLegSelection(leg)
       const isHotel = leg.supplierKind === "hotel_property"
       const isTour = leg.supplierKind === "tour_operator"
+      const isTrain = leg.supplierKind === "train_operator"
       const isTransfer = leg.supplierKind === "transfers"
       const isVehicleRental = leg.supplierKind === "vehicle_rental"
       const isOptional = !isCoreLeg(leg)
@@ -953,6 +999,13 @@ export async function buildPackageQuoteLineItems({
       // rate-card season than the train still gets the right card.
       const legPricingDate = selection.serviceDate ?? travelDate
       activePricingDate = legPricingDate
+      activeServiceEndDate =
+        serviceDateSpan({
+          supplierKind: leg.supplierKind,
+          serviceDate: selection.serviceDate ?? null,
+          nights: selection.nights ?? null,
+          routeDurationDays: selectedRouteDurationDays(leg, routeId),
+        })?.end ?? null
       const supplierDescription = leg.supplierDescription ?? null
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
       /** The rate type a unit prices at: its own on the kinds that support one, else the leg's. The
@@ -1027,13 +1080,12 @@ export async function buildPackageQuoteLineItems({
         if (!suiteBelongsToLeg) {
           throw new Error(`Selected type is not available for leg: ${legLabel}`)
         }
-        const selected = getValidRateCard(
-          leg,
-          routeId,
-          suiteTypeId,
-          pricingDate,
-          unitRateTypeId ?? selection.rateTypeId,
-        )
+        // A manual-pricing supplier keeps any cards it had before the switch, but they are not
+        // used -- not even for the "was" figure or the currency of a typed price.
+        const selected =
+          leg.pricingMode === "manual"
+            ? null
+            : getValidRateCard(leg, routeId, suiteTypeId, pricingDate, unitRateTypeId ?? selection.rateTypeId)
         return {
           validRateCard: selected?.ok ? selected.card : null,
           rateTypeInherited: selected?.ok ? selected.inherited : null,
@@ -1080,6 +1132,9 @@ export async function buildPackageQuoteLineItems({
         const hotelUnit = resolveSupplierPriceLabel(leg.supplierKind, {
           accommodationPricingBasis: accommodationBasis,
         })
+        // A manual-pricing property has no rate cards: the room price typed in Build Booking is
+        // its only price, so a card is never looked up for it.
+        const isManualPricing = leg.pricingMode === "manual"
 
         // Occupancy no longer has to add up to the booking's travellers: a stay can hold more
         // people than the booking (an extra guest joining for the hotel only) or fewer (someone
@@ -1128,19 +1183,67 @@ export async function buildPackageQuoteLineItems({
               suiteTypeName,
               variantNames: specificUnitVariantNames(unitSelection),
               selectedVariantGroups: specificUnitVariantGroups(unitSelection),
-              unit: hotelUnit,
+              // The line is one room × charged nights at the typed room price, whatever the stay's
+              // basis -- so it says "per room per night". Labelling it with the stay's basis put
+              // "per person per night" beside a qty of nights, and made the per-adult/per-child split
+              // on client documents count the whole room as an adult fare.
+              unit: accommodationPriceLabel("per_room"),
               hideRoomConfig: true,
+              pricingMode: isManualPricing ? "manual" : "rate_card",
               sourceCurrency: overrideCurrency,
               accommodationPricingBasis: accommodationBasis,
               roomOverride: {
                 price: overridePrice,
-                basePrice: validRateCard?.pricePerPerson ?? null,
+                // What the card would have charged this room a night -- the figure Build Booking
+                // says the override replaces. Under per_person that is the occupants' fares summed,
+                // not the bare adult fare (which read as "replacing R4 130" for a R8 260 room).
+                basePrice: validRateCard
+                  ? cardNightlyRoomRate(validRateCard, accommodationBasis, {
+                      adultCount: unitSelection.adultCount ?? 0,
+                      childCount: unitSelection.childCount ?? 0,
+                      infantCount: unitSelection.infantCount ?? 0,
+                    })
+                  : null,
                 setAt: unitSelection.manualRoomPriceSetAt ?? null,
                 setByName: unitSelection.manualRoomPriceSetByName ?? null,
               },
               complimentary,
             })
             continue
+          }
+
+          // No typed price, and either nothing to read one from (a manual-pricing property) or
+          // nothing to charge (every night gifted). Neither needs a rate card, so the room reaches
+          // the quote as one line at R0 instead of failing the whole build: a manual room is then
+          // flagged unpriced (isMissingPricing) until a price is typed, and a fully gifted one is
+          // finished as it stands. A gifted room that does have a card still prices off it below.
+          if (isManualPricing || chargedNights === 0) {
+            const resolved = isManualPricing
+              ? { ...resolveManualUnit(unitSelection.suiteTypeId), validRateCard: null }
+              : resolveOverriddenUnit(unitSelection.suiteTypeId, legPricingDate, unitRateTypeId)
+            if (resolved.validRateCard === null) {
+              activeRateCard = null
+              activeRateCardInherited = false
+              addLineItem({
+                description: resolved.description,
+                qty: chargedNights,
+                unitPrice: 0,
+                supplierDescription,
+                suiteTypeId: unitSelection.suiteTypeId,
+                suiteTypeName: resolved.suiteTypeName,
+                variantNames: specificUnitVariantNames(unitSelection),
+                selectedVariantGroups: specificUnitVariantGroups(unitSelection),
+                // The price still to be typed is a room price (see RoomPriceOverride), whatever
+                // the stay's basis.
+                unit: accommodationPriceLabel("per_room"),
+                hideRoomConfig: true,
+                pricingMode: isManualPricing ? "manual" : "rate_card",
+                sourceCurrency: selection.priceCurrency ?? targetCurrency,
+                accommodationPricingBasis: accommodationBasis,
+                complimentary,
+              })
+              continue
+            }
           }
 
           // Each room resolves its own card, so two rooms of the same type on different rate types
@@ -1257,6 +1360,14 @@ export async function buildPackageQuoteLineItems({
           }
           const requestPricingDate = dateOnly(transportRequest?.pickup_at) ?? legPricingDate
           activePricingDate = requestPricingDate
+          const returnDate = isVehicleRental
+            ? dateOnly(
+                (Array.isArray(transportRequest?.rental_details)
+                  ? transportRequest?.rental_details[0]
+                  : transportRequest?.rental_details)?.return_at,
+              )
+            : null
+          activeServiceEndDate = returnDate && returnDate >= requestPricingDate ? returnDate : requestPricingDate
 
           const pointLabel =
             transportRequest?.pickup_point.trim() && transportRequest?.dropoff_point.trim()
@@ -1290,6 +1401,11 @@ export async function buildPackageQuoteLineItems({
           // rate card either), and forces the charged price to 0 regardless of what price_override
           // holds — the two fields are independent, mirroring the hotel first-night flag.
           const isComplimentary = transportRequest?.complimentary === true
+          // A manual-pricing supplier has no card to fall back to, so every trip takes the typed
+          // path: a blank price reaches the quote at R0 and is flagged unpriced (isMissingPricing)
+          // instead of failing the build with "no rate card".
+          const isManualPricing = leg.pricingMode === "manual"
+          const linePricingMode = isManualPricing ? "manual" : "rate_card"
 
           if (isTransfer && transferBasis === "per_person") {
             let validRateCard: SupplierRateCard | null
@@ -1298,7 +1414,7 @@ export async function buildPackageQuoteLineItems({
             let suiteTypeName: string | null
             let fares: PassengerFare[]
 
-            if (hasAnyOverride || isComplimentary) {
+            if (hasAnyOverride || isComplimentary || isManualPricing) {
               const resolved = resolveOverriddenUnit(suiteTypeId, requestPricingDate)
               validRateCard = resolved.validRateCard
               rateTypeInherited = resolved.rateTypeInherited
@@ -1353,6 +1469,7 @@ export async function buildPackageQuoteLineItems({
                 suiteTypeName,
                 unit: requestUnit,
                 hideVariantSuffix: true,
+                pricingMode: linePricingMode,
                 sourceCurrency: lineCurrency,
                 ...(overrideForKey !== null
                   ? {
@@ -1378,7 +1495,7 @@ export async function buildPackageQuoteLineItems({
             continue
           }
 
-          if (overridePrice !== null || isComplimentary) {
+          if (overridePrice !== null || isComplimentary || isManualPricing) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveOverriddenUnit(
               suiteTypeId,
               requestPricingDate,
@@ -1404,6 +1521,7 @@ export async function buildPackageQuoteLineItems({
               suiteTypeName,
               unit,
               hideVariantSuffix: isTransfer,
+              pricingMode: linePricingMode,
               sourceCurrency: overrideCurrency,
               ...(overridePrice !== null
                 ? {
@@ -1441,6 +1559,7 @@ export async function buildPackageQuoteLineItems({
             unit,
             hideVariantSuffix: isTransfer,
             sourceCurrency: validRateCard.currency,
+            transportRequestId: transportRequest?.id ?? null,
           })
         }
       } else {
@@ -1482,6 +1601,21 @@ export async function buildPackageQuoteLineItems({
 
         const isManualPricing = leg.pricingMode === "manual"
 
+        /** A train suite's per-person fare overrides, or null when it carries none. Only rate-card
+         *  train legs honour them -- a manual-priced leg already types its fares (manualAdultPrice
+         *  etc.), and every other kind has its own override (or none), so stray values elsewhere are
+         *  ignored rather than priced. */
+        function trainFareOverridesOf(
+          unitSelection: PackageUnitSelection,
+        ): { adult: number | null; child: number | null; infant: number | null } | null {
+          if (!isTrain || isManualPricing) return null
+          const adult = unitSelection.fareOverrideAdult ?? null
+          const child = unitSelection.fareOverrideChild ?? null
+          const infant = unitSelection.fareOverrideInfant ?? null
+          if (adult === null && child === null && infant === null) return null
+          return { adult, child, infant }
+        }
+
         // Price against the suite type, not each room's own configuration: multiple units booked
         // under the same suite type (e.g. 3 rooms of "Deluxe Double") combine into one line per
         // passenger type instead of splitting per room, even if their bed/bathroom setup differs.
@@ -1490,13 +1624,27 @@ export async function buildPackageQuoteLineItems({
         // silently merge into one averaged line. A tour unit carrying a flat price override is
         // never merged with anything else, even another unit of the same type -- it prices as a
         // single line at the typed amount, not decomposed per passenger type (see below).
+        //
+        // A train suite carrying a per-person fare override groups by its typed fare triple as
+        // well, so two suites of the same type at different overridden fares (or one overridden and
+        // one on the card) never merge into one line; two suites typed identically still share one.
         const unitsBySuiteType = new Map<string, PackageUnitSelection[]>()
         let tourOverrideGroupCounter = 0
         for (const unitSelection of units) {
           const hasTourOverride =
             isTour && unitSelection.manualTourPrice !== null && unitSelection.manualTourPrice !== undefined
+          const trainOverride = trainFareOverridesOf(unitSelection)
           const groupKey = hasTourOverride
             ? `tour-override::${tourOverrideGroupCounter++}`
+            : trainOverride
+              ? [
+                  "train-fare-override",
+                  unitSelection.suiteTypeId,
+                  effectiveRateTypeIdOf(unitSelection) ?? "",
+                  trainOverride.adult ?? "",
+                  trainOverride.child ?? "",
+                  trainOverride.infant ?? "",
+                ].join("::")
             : isManualPricing
               ? [
                   unitSelection.suiteTypeId,
@@ -1559,8 +1707,33 @@ export async function buildPackageQuoteLineItems({
           let passengerKinds: PassengerFare[]
           // Typed fares carry the leg's own currency; rate-card fares carry the card's.
           let lineSourceCurrency: string
+          // A group's units share an identical override triple by construction (see the grouping
+          // key above), so the first unit's overrides speak for the whole group.
+          const trainOverride = trainFareOverridesOf(groupUnits[0])
+          // The card's own per-kind fares, kept for the override note's "was" figure. Null when
+          // the group has no override, or has one but no card covered the suite.
+          let trainCardFares: PassengerFare[] | null = null
 
-          if (isManualPricing) {
+          if (trainOverride) {
+            // The card is only optional when every passenger kind this suite actually carries has
+            // a typed fare -- a blank kind still prices off the card, so a missing card there is
+            // the same hard error as with no override at all.
+            const groupPax = {
+              adultCount: groupUnits.reduce((sum, unitSelection) => sum + (unitSelection.adultCount ?? 0), 0),
+              childCount: groupUnits.reduce((sum, unitSelection) => sum + (unitSelection.childCount ?? 0), 0),
+              infantCount: groupUnits.reduce((sum, unitSelection) => sum + (unitSelection.infantCount ?? 0), 0),
+            }
+            const resolved = overridesCoverEveryPresentKind(trainOverride, groupPax)
+              ? resolveOverriddenUnit(suiteTypeId, legPricingDate, effectiveRateTypeIdOf(groupUnits[0]))
+              : resolveUnit(suiteTypeId, legPricingDate, effectiveRateTypeIdOf(groupUnits[0]))
+            description = resolved.description
+            suiteTypeName = resolved.suiteTypeName
+            activeRateCard = resolved.validRateCard
+            activeRateCardInherited = resolved.rateTypeInherited ?? false
+            passengerKinds = overriddenFares(resolved.validRateCard, trainOverride)
+            trainCardFares = resolved.validRateCard ? rateCardFares(resolved.validRateCard) : null
+            lineSourceCurrency = resolved.validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
+          } else if (isManualPricing) {
             const resolved = resolveManualUnit(suiteTypeId)
             description = resolved.description
             suiteTypeName = resolved.suiteTypeName
@@ -1587,6 +1760,32 @@ export async function buildPackageQuoteLineItems({
           }
 
           for (const { key, label, kind: linePassengerKind, unitPrice } of passengerKinds) {
+            // This kind's typed train fare, if any. A typed fare is FINAL: it is what the traveller
+            // pays, so the solo-suite single supplement is never added on top of it. The rule is
+            // per passenger kind, not per suite -- a suite overriding only its child/infant fares
+            // still prices its adult off the card, and since the override never touched the adult
+            // fare the card's single supplement still applies to a lone adult there.
+            const ownKindOverride =
+              trainOverride === null
+                ? null
+                : key === "adultCount"
+                  ? trainOverride.adult
+                  : key === "childCount"
+                    ? trainOverride.child
+                    : trainOverride.infant
+            // A blank child on a card with no child price inherits the typed adult fare through
+            // overriddenFares. That price is still the consultant's typed number, so the line has
+            // to carry the override's provenance: without it a typed R0 adult fare left the child
+            // line looking unpriced (isMissingPricing) and blocked sending the quote.
+            const inheritsAdultOverride =
+              ownKindOverride === null &&
+              key === "childCount" &&
+              trainOverride !== null &&
+              trainOverride.adult !== null &&
+              activeRateCard !== null &&
+              activeRateCard.childPrice === null
+            const kindOverride = inheritsAdultOverride ? unitPrice : ownKindOverride
+            const kindCardFare = trainCardFares?.find((fare) => fare.key === key)?.unitPrice ?? null
             // A unit occupied by exactly one traveller (of any age) pays the single supplement —
             // it's a solo room, not specifically a solo adult. Solo-room travellers can't merge
             // into the shared qty since they don't share its unit price, so they're tallied and
@@ -1607,6 +1806,7 @@ export async function buildPackageQuoteLineItems({
               const isSoloRoom =
                 !isManualPricing &&
                 !isTour &&
+                kindOverride === null &&
                 SUPPLIER_VOCABULARY[leg.supplierKind].showSingleSupplement &&
                 packageDetail.singleSupplementPct > 0 &&
                 adultCount + childCount + infantCount === 1
@@ -1653,6 +1853,17 @@ export async function buildPackageQuoteLineItems({
                   pricingMode: isManualPricing ? "manual" : "rate_card",
                   singleSupplementPct: isSolo ? packageDetail.singleSupplementPct : null,
                   sourceCurrency: lineSourceCurrency,
+                  ...(kindOverride !== null
+                    ? {
+                        trainFareOverride: {
+                          price: kindOverride,
+                          basePrice: kindCardFare,
+                          setAt: groupUnits[0].fareOverrideSetAt ?? null,
+                          setByName: groupUnits[0].fareOverrideSetByName ?? null,
+                          inheritedFrom: inheritsAdultOverride ? "adult" : null,
+                        },
+                      }
+                    : {}),
                 })
               }
             }
@@ -1706,7 +1917,10 @@ export async function buildPackageQuoteLineItems({
     lineItems.push({
       description: "Commission",
       supplierDescription: null,
-      qty: isPerPerson ? Math.max(1, travellerCount) : 1,
+      // qty must be the real headcount, even 0: PATCH /api/quotes/[id] re-derives every line's
+      // total as unitPrice × qty (resolveLineTotal), so padding a 0-traveller per-person line to
+      // qty 1 turned its R0 commission into value × 1 on save.
+      qty: isPerPerson ? travellerCount : 1,
       unitPrice: isPerPerson ? resolvedCommission.value : commissionAmount,
       total: commissionAmount,
       pricingSnapshot: {

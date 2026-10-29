@@ -61,7 +61,8 @@ export function formatBulletLinesInline(values: readonly string[] | null | undef
 
   const flush = () => {
     if (items.length === 0) return
-    groups.push(heading ? `${heading}: ${items.join(", ")}` : items.join(", "))
+    // A subheading typed with its own colon ("Onboard:") must not print "Onboard::".
+    groups.push(heading ? `${heading.replace(/:\s*$/, "")}: ${items.join(", ")}` : items.join(", "))
     items = []
   }
 
@@ -76,4 +77,40 @@ export function formatBulletLinesInline(values: readonly string[] | null | undef
   flush()
 
   return groups.join("; ")
+}
+
+/** A bullet line placed in a nested list: 1 = filled dot, 2 = ring one step in, 0 = unbulleted
+ * bold label heading a group of subheadings. */
+export interface NestedBulletLine {
+  text: string
+  level: 0 | 1 | 2
+  bold: boolean
+}
+
+/**
+ * Supplier inclusions as the SA-Rail PDF templates nest them: a `#` subheading prints bold at the
+ * first level ("Onboard:"), the items under it one level in; items before any subheading stay at
+ * the first level. A subheading followed straight away by another ("Long Journeys" over "Onboard:"
+ * and "Off-train:") heads a group rather than a list, so it becomes an unbulleted label instead of
+ * a bullet with nothing under it. Once a list has such a group, its other top-level subheadings
+ * ("Short Journeys", before the first group) are labels of the same rank, their items plain dots,
+ * so a sibling section never reads as one of the group's own subheadings.
+ */
+export function nestBulletLines(lines: readonly BulletLine[]): NestedBulletLine[] {
+  const headsGroup = (index: number) => lines[index].kind === "heading" && lines[index + 1]?.kind === "heading"
+  const hasGroups = lines.some((_, index) => headsGroup(index))
+  let inGroup = false
+  let underHeading = false
+  return lines.map((line, index) => {
+    if (line.kind === "heading") {
+      if (headsGroup(index) || (hasGroups && !inGroup)) {
+        inGroup = inGroup || headsGroup(index)
+        underHeading = false
+        return { text: line.text, level: 0, bold: true }
+      }
+      underHeading = true
+      return { text: line.text, level: 1, bold: true }
+    }
+    return { text: line.text, level: underHeading ? 2 : 1, bold: false }
+  })
 }

@@ -373,11 +373,12 @@ export async function resolveSharedEmailTokens(
       primarySupplierKind = await loadSupplierKind(supabase, primarySupplierId)
       suiteTokens = buildSuiteTokens(suiteSelections, primarySupplierKind)
 
-      // Narrowed to the primary product's own legs where it has any (F-P3-4), so a tour's dates
-      // aren't stretched by an add-on hotel or transfer.
+      // "Travel Dates" spans every leg (pre/post-night hotels, transfers, flights), not just the
+      // primary product's own dates.
       const journey = deriveJourneyFromBlocks(
         itineraryBlocks,
-        mapSupplierKindToServiceType(primarySupplierKind),
+        undefined,
+        primarySupplierKind ? mapSupplierKindToServiceType(primarySupplierKind) : undefined,
       ) ?? { start: null, end: null }
       trainDepartureDate = deriveTrainDepartureFromBlocks(
         itineraryBlocks,

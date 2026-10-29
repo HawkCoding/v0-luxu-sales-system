@@ -6,8 +6,9 @@ import {
   extractContentSlot,
   replaceContentSlot,
 } from "./content-slot"
-import { replaceSignatureSlot, SIGNATURE_SLOT_START } from "./signature-slot"
+import { extractSignatureSlot, replaceSignatureSlot, SIGNATURE_SLOT_START } from "./signature-slot"
 import { CHROME_CLASS_NAME } from "@/lib/email/email-chrome"
+import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
 const settingsMocks = vi.hoisted(() => ({
   getEmailBrandingSettings: vi.fn(),
@@ -32,6 +33,34 @@ const DEFAULT_BRANDING = {
   email_font_family: "Arial, sans-serif",
   email_font_size: "16px",
 } as const
+
+const LEONIE_SIGNATURE: ResolvedEmailSignature = {
+  profileId: "profile-1",
+  brandId: "brand-sa-rail",
+  fullName: "Leonie Burke",
+  jobTitle: "Tour Operating Consultant",
+  tel: "+27 (0)21 100 3596",
+  cell: null,
+  fax: null,
+  email: "reservations2@sa-rail.co.za",
+  website: "www.sa-rail.co.za",
+  brand: {
+    id: "brand-sa-rail",
+    slug: "sa-rail",
+    name: "SA Rail",
+    bannerUrl: "https://example.com/banner.png",
+    bannerWidth: 640,
+    bannerHeight: 160,
+    badges: [],
+    companyLine: "SA-Rail is a division of Luxus Travel & Tours.",
+    registrationLine: null,
+    tradingHours: null,
+    divisionsLine: null,
+    confidentiality: null,
+    officeAddress: null,
+    senderLayout: "",
+  },
+}
 
 import { composeEmail, composeFromTemplate } from "./compose-email"
 
@@ -179,6 +208,39 @@ describe("composeFromTemplate", () => {
     expect(composed.bodyHtml).toContain(styledSpan)
   })
 
+  it("carries toolbar line spacing inline on the sent paragraphs and list items", async () => {
+    const body =
+      '<p style="line-height: 2;">Spaced</p>' +
+      '<ul><li style="line-height: 1.15;">Item</li></ul>' +
+      '<p>Default <span style="font-size: 13px;">sized</span></p>'
+    const composed = await composeFromTemplate({ subject: "Hi", bodyHtml: body }, { tokens: {} })
+
+    expect(extractContentSlot(composed.bodyHtml)).toBe(body)
+    expect(composed.bodyHtml).toContain('<p style="line-height: 2;">Spaced</p>')
+    expect(composed.bodyHtml).toContain('<li style="line-height: 1.15;">Item</li>')
+    expect(composed.bodyHtml).toContain('<span style="font-size: 13px;">sized</span>')
+  })
+
+  it("sets the default line height on content blocks only, so an inline <p>/<li> value wins and spans inherit it", async () => {
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    const rules = composed.bodyHtml.split("</style>")[0]
+    const content = `\\.${CONTENT_CLASS_NAME.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}`
+    const lineHeightRuleFor = (selector: string) =>
+      new RegExp(`${content}[^{]*\\b${selector}\\b[^{]*\\{[^}]*line-height`).test(rules)
+    // The block rule keeps the 1.4 default for unstyled paragraphs...
+    expect(rules).toMatch(new RegExp(`${content} p[^{]*\\{[^}]*line-height: 1\\.4`))
+    expect(lineHeightRuleFor("p")).toBe(true)
+    // ...but never on span/a: a span's own 1.4 would hold a "Single"-spaced line open.
+    expect(lineHeightRuleFor("span")).toBe(false)
+    expect(lineHeightRuleFor("a")).toBe(false)
+    // Nothing forces it with !important, which would beat the inline value.
+    expect(rules).not.toContain("!important")
+  })
+
   it("keeps the font rule when edited content is spliced back into the slot", async () => {
     settingsMocks.getEmailBrandingSettings.mockResolvedValue({
       ...DEFAULT_BRANDING,
@@ -215,20 +277,65 @@ describe("composeFromTemplate", () => {
     expect(composed.bodyHtml).toContain("font-size: 16px")
   })
 
-  it("renders the Swirl page, Angora container and Swirl brand strip", async () => {
+  it.each(["top", "bottom"] as const)("renders a plain, left-aligned email (brand %s)", async (position) => {
+    settingsMocks.getDocumentBrandForEmail.mockResolvedValue({
+      brand: {
+        heading: "SA RAIL",
+        subheading: "THE BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI",
+        logoUrl: "https://example.com/seal.png",
+      },
+      position,
+    })
+    signatureMocks.resolveEmailSignature.mockResolvedValue(LEONIE_SIGNATURE)
+
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {}, senderProfileId: "profile-1" },
+    )
+
+    const html = composed.bodyHtml
+    // No fill anywhere: page, frame, brand strip, signature.
+    expect(html).not.toMatch(/background|bgcolor/i)
+    for (const legacy of ["#f4f1ee", "#e8e5df", "#f6f2ea", "#fbf8f3", "#e8dfd2", "#8a7f74"]) {
+      expect(html).not.toContain(legacy)
+    }
+    // Nothing centred: masthead, body and signature share one left edge.
+    expect(html).not.toMatch(/text-align:\s*center/)
+    expect(html).not.toMatch(/margin:\s*0 auto/)
+    // The frame fills the reading pane (no width cap that would wrap sentences early) and
+    // carries no align attribute (react-email's own centring).
+    expect(html).not.toMatch(/max-width:\s*640px/)
+    const frame = html.match(/<table[^>]*role="presentation"[^>]*width="100%"[^>]*>/)?.[0] ?? ""
+    expect(frame).not.toBe("")
+    expect(frame).not.toContain("align=")
+    // The strip keeps its divider line.
+    expect(html).toContain(position === "top" ? "border-bottom:1px solid #cfc7ba" : "border-top:1px solid #cfc7ba")
+  })
+
+  it("keeps the gap above the signature as padding on a <td>, which Outlook honours", async () => {
+    signatureMocks.resolveEmailSignature.mockResolvedValue(LEONIE_SIGNATURE)
+
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {}, senderProfileId: "profile-1" },
+    )
+
+    const signature = extractSignatureSlot(composed.bodyHtml) ?? ""
+    // (React hoists a <link rel="preload"> for the banner ahead of the table.)
+    expect(signature).toMatch(/^(<link[^>]*>)*<table[^>]*><tbody><tr><td style="padding-top:16px">/)
+    // The old margin on the sender <p>, which Outlook dropped, is gone.
+    expect(signature).not.toContain("margin:16px 0 0")
+  })
+
+  it("leaves no p:last-child rule for Outlook to misapply", async () => {
     const composed = await composeFromTemplate(
       { subject: "Hi", bodyHtml: "<p>Body</p>" },
       { tokens: {} },
     )
 
-    const html = composed.bodyHtml
-    expect(html).toMatch(/<body[^>]*background-color:#f4f1ee/)
-    expect(html).toContain("background-color:#e8e5df")
-    // Brand strip (bottom position in the default mock): Swirl fill, warm divider border.
-    expect(html).toMatch(/border-top:1px solid #cfc7ba;background-color:#f4f1ee/)
-    for (const legacy of ["#f6f2ea", "#fbf8f3", "#e8dfd2", "#8a7f74"]) {
-      expect(html).not.toContain(legacy)
-    }
+    const head = composed.bodyHtml.split("</style>")[0]
+    expect(head).not.toContain(":last-child")
+    expect(head).toMatch(new RegExp(`\\.${CONTENT_CLASS_NAME} p \\{\\s*margin: 0 0 8px;`))
   })
 
   it("applies a family-only head rule to the signature slot and brand strip", async () => {

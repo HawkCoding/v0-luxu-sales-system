@@ -21,7 +21,6 @@ import type { JourneyClass, RateAudience } from "@/lib/quotes/quote-config"
 import { fetchDefaultAgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
 import { resolveTransferPax } from "@/lib/pricing/transfer-basis"
-import { resolveServiceTiming } from "@/lib/packages/sort-legs-by-date"
 
 /** Kinds whose suite/room name gets a noun appended when the type name doesn't already carry
  * one (see formatSuitePhrase). Tour, airline and transfer labels feed different sentences
@@ -130,6 +129,8 @@ interface SupplierJoin {
    * operator publishes no check-in time. See buildTrainScheduleBullets in
    * lib/quotes/quote-presentation.ts. */
   check_in_offset_minutes?: number | null
+  /** Whether the supplier is a product sold on its own (both trains, Kruger Shalati). */
+  sells_standalone?: boolean | null
 }
 
 /** Mirrors `supplierLocationName` in lib/suppliers.ts against this join's shape -- trains print
@@ -380,7 +381,7 @@ function resolveInclusionList(
 /** "Twin bedded Deluxe Suite with a shower" — a unit's suite type, prefixed with its bed
  * configuration and suffixed with its bathroom (and bedroom layout), when the unit has those
  * selected, and the supplier-kind noun appended ("Suite"/"Room") when the type name doesn't
- * already carry one. A thin wrapper over formatSuitePhrase, shared with the
+ * already carry an accommodation noun of its own (a hotel's "Family Suite" stays as is). A thin wrapper over formatSuitePhrase, shared with the
  * {{suiteDescription}} email token so the two surfaces never diverge on grammar. Any part can be
  * absent (legacy rows, or a supplier that doesn't track that variant), in which case that part is
  * simply omitted. */
@@ -405,24 +406,41 @@ function composeUnitSuiteLabel(
  * see lib/quotes/quote-presentation.ts). Computed in the same pass so a supplier's setting can be
  * read without a second query. `phrasePattern` (suppliers.suite_phrase_pattern) is applied only to
  * the full-configuration branch, never to typeOnlyNames — the quote sentence keeps the default
- * grammar's plain type name regardless of a supplier's custom wording. */
+ * grammar's plain type name regardless of a supplier's custom wording.
+ *
+ * `compactNameCounts` is the invoice's shorter wording ("Double Deluxe Suite", see
+ * composeCompactSuiteLabel), counted the same way. Like typeOnlyNames it ignores the supplier's
+ * phrase pattern and quote_suite_detail. */
 function resolveLegSuiteNames(
   row: SelectionJoinRow,
   includeConfig: boolean,
   nounKind: SupplierKind | null,
   phrasePattern: string | null,
-): { names: string[]; typeOnlyNames: string[]; unitCount: number } {
+): {
+  names: string[]
+  typeOnlyNames: string[]
+  unitCount: number
+  /** `names` / `typeOnlyNames` with how many units carry each, in first-seen order. */
+  nameCounts: SuiteLabelCount[]
+  typeOnlyNameCounts: SuiteLabelCount[]
+  compactNameCounts: SuiteLabelCount[]
+} {
   const unitRows = [...(row.units ?? [])].sort((a, b) => a.sort_order - b.sort_order)
   const unitLabels: string[] = []
   const typeOnlyLabels: string[] = []
+  const compactLabels: string[] = []
   for (const unit of unitRows) {
     const suiteTypeName = firstRecord(unit.suite_types)?.name
+    const bedroomType = firstRecord(unit.bedroom_types)?.name
     const typeOnlyLabel = composeUnitSuiteLabel({ suiteTypeName, supplierKind: nounKind })
-    if (typeOnlyLabel) typeOnlyLabels.push(typeOnlyLabel)
+    if (typeOnlyLabel) {
+      typeOnlyLabels.push(typeOnlyLabel)
+      compactLabels.push(composeCompactSuiteLabel(typeOnlyLabel, bedroomType))
+    }
     const fullLabel = includeConfig
       ? composeUnitSuiteLabel({
           suiteTypeName,
-          bedroomType: firstRecord(unit.bedroom_types)?.name,
+          bedroomType,
           bedroomLayout: firstRecord(unit.bedroom_layouts)?.name,
           bathroomType: firstRecord(unit.bathroom_types)?.name,
           supplierKind: nounKind,
@@ -436,17 +454,46 @@ function resolveLegSuiteNames(
       names: Array.from(new Set(unitLabels)),
       typeOnlyNames: Array.from(new Set(typeOnlyLabels)),
       unitCount: unitRows.length,
+      nameCounts: countSuiteLabels(unitLabels),
+      typeOnlyNameCounts: countSuiteLabels(typeOnlyLabels),
+      compactNameCounts: countSuiteLabels(compactLabels),
     }
   }
   const legacyName = composeUnitSuiteLabel({
     suiteTypeName: firstRecord(row.suite_types)?.name,
     supplierKind: nounKind,
   })
+  const legacyCounts = legacyName ? [{ label: legacyName, count: 1 }] : []
   return {
     names: legacyName ? [legacyName] : [],
     typeOnlyNames: legacyName ? [legacyName] : [],
     unitCount: legacyName ? 1 : 0,
+    nameCounts: legacyCounts,
+    typeOnlyNameCounts: legacyCounts,
+    // A legacy leg-level row carries no bed type to lead with, so the type name stands alone.
+    compactNameCounts: legacyCounts,
   }
+}
+
+/** "Double" + "Deluxe Suite" → "Double Deluxe Suite" — the invoice's one-line suite label: the
+ * unit's bed type ahead of its type-only name, with none of the full phrase's "bedded", bathroom
+ * or layout wording (client request: the full phrase wrapped onto two lines beside "QTY:"). No bed
+ * type leaves the type-only name alone, and a type name that already names the bed ("Twin Deluxe
+ * Suite") isn't given it a second time. */
+function composeCompactSuiteLabel(typeOnlyLabel: string, bedroomType: string | null | undefined): string {
+  const bed = bedroomType?.trim()
+  if (!bed) return typeOnlyLabel
+  const escaped = bed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i").test(typeOnlyLabel) ? typeOnlyLabel : `${bed} ${typeOnlyLabel}`
+}
+
+type SuiteLabelCount = { label: string; count: number }
+
+/** ["Deluxe Suite", "Royal Suite", "Deluxe Suite"] → Deluxe Suite × 2, Royal Suite × 1. */
+function countSuiteLabels(labels: string[]): SuiteLabelCount[] {
+  const counts = new Map<string, number>()
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1)
+  return Array.from(counts, ([label, count]) => ({ label, count }))
 }
 
 /** Adults/children/infants captured across a leg's suite/room units — null when the leg has no
@@ -607,9 +654,6 @@ function transportRequestBlock(
     emergencyPhone: blockContext.supplier?.emergency_phone ?? blockContext.contactDetails.emergencyPhone ?? null,
   }
   const supplierContactName = request.supplier_contact_name ?? blockContext.supplier?.default_contact_name ?? null
-  // Read exactly as the saved leg order reads a pickup (resolveServiceTiming), so the itinerary
-  // sort and sortLegsByDate agree; a pickup at 00:00 means "no time typed".
-  const clockTime = resolveServiceTiming({ kind: "transfers", serviceDate: null, pickupAts: [request.pickup_at] }).time
 
   if (isFlight) {
     return {
@@ -641,7 +685,6 @@ function transportRequestBlock(
         footnote: request.voucher_footnote,
       },
       displayOrder: blockContext.displayOrder,
-      clockTime,
     }
   }
 
@@ -704,7 +747,6 @@ function transportRequestBlock(
       isComplimentary: blockContext.complimentaryTransportRequestIds?.has(request.id) ?? false,
     },
     displayOrder: blockContext.displayOrder,
-    clockTime,
   }
 }
 
@@ -746,7 +788,7 @@ export async function buildVoucherServiceBlocks(
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, luggage_storage_available,
-       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, check_in_offset_minutes, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, check_in_offset_minutes, sells_standalone, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
@@ -935,7 +977,7 @@ export async function buildVoucherServiceBlocks(
       supplier?.kind && SUITE_NOUN_KINDS.has(supplier.kind as SupplierKind)
         ? (supplier.kind as SupplierKind)
         : null
-    const { names: suiteNames, typeOnlyNames, unitCount } = resolveLegSuiteNames(
+    const { names: suiteNames, typeOnlyNames, unitCount, nameCounts, typeOnlyNameCounts, compactNameCounts } = resolveLegSuiteNames(
       row,
       serviceType === "train",
       nounKind,
@@ -952,6 +994,16 @@ export async function buildVoucherServiceBlocks(
         ? suiteName
         : suiteTypeOnlyName
       : null
+    // The same wording, unit by unit, so the quote sentence can count them ("in 2 Deluxe Suites").
+    // A hotel's room names never carry configuration (includeConfig is train-only), so its two
+    // lists are identical.
+    const itinerarySuiteCounts = isTrain
+      ? supplier?.quote_suite_detail === "full"
+        ? nameCounts
+        : typeOnlyNameCounts
+      : isHotel
+        ? nameCounts
+        : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,
       arrivalStation,
@@ -960,6 +1012,9 @@ export async function buildVoucherServiceBlocks(
       mealPlan: isHotel ? route?.name ?? null : null,
       suiteType: suiteName,
       itinerarySuiteType,
+      itinerarySuiteCounts: itinerarySuiteCounts && itinerarySuiteCounts.length > 0 ? itinerarySuiteCounts : null,
+      // Train only: a hotel's "Room Type" row already prints the room name alone.
+      invoiceSuiteCounts: isTrain && compactNameCounts.length > 0 ? compactNameCounts : null,
       numberOfSuites: unitCount > 0 ? unitCount : null,
       roomType: isHotel ? suiteName : null,
       isComplimentary: isHotel ? context.complimentaryLegIds?.has(row.package_leg_id) ?? false : null,
@@ -967,6 +1022,7 @@ export async function buildVoucherServiceBlocks(
         ? context.firstNightComplimentaryLegIds?.has(row.package_leg_id) ?? false
         : null,
       hasLuggageStorage: isHotel ? row.luggage_storage_available ?? false : null,
+      isStandaloneProduct: isHotel ? supplier?.sells_standalone === true : null,
       vehicleType: serviceType === "transfer" ? suite?.name ?? null : null,
       // A flight's cabin is the booked suite type — SUITE_NOUN_KINDS deliberately excludes airline,
       // so the name reads as typed ("Economy") and feeds the itinerary's "in Economy".
@@ -1023,13 +1079,6 @@ export async function buildVoucherServiceBlocks(
         contactDetails,
         serviceData,
         displayOrder,
-        // Only a flight's own departure is a real clock event here; the train's route schedule and
-        // a hotel's check-in are not (see sortItineraryBlocksChronologically).
-        clockTime: resolveServiceTiming({
-          kind: supplier?.kind ?? null,
-          serviceDate,
-          departureTime: row.departure_time,
-        }).time,
       },
     ]
   })

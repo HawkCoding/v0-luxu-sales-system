@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Boxes, Check, ChevronDown, ChevronUp, TriangleAlert } from "lucide-react"
+import { Boxes, Check, ChevronDown, ChevronUp, Pencil, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,8 +29,19 @@ import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
-import { isMissingPricing } from "@/lib/quotes/pricing-engine"
+import {
+  calculateQuoteTotals,
+  describeQtyBasis,
+  hasComplimentaryNight,
+  isMissingPricing,
+  resolveLineTotal,
+  stayNights,
+} from "@/lib/quotes/pricing-engine"
+import { AmendQuoteConfirmDialog } from "@/components/quotes/amend-quote-confirm-dialog"
+import { createAmendServicesTracker } from "@/lib/quotes/amend-quote"
+import { findChangedExistingLines, rebuildAcceptedQuoteFxRates } from "@/lib/quotes/amend-pricing"
 import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
+import { describeLineDate } from "@/lib/quotes/line-item-date"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { appendFieldDetails } from "@/lib/format-error-details"
@@ -42,6 +53,7 @@ import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { RoomOverrideNote } from "@/components/quotes/room-override-note"
 import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { TourOverrideNote } from "@/components/quotes/tour-override-note"
+import { TrainOverrideNote } from "@/components/quotes/train-override-note"
 import { useFxRates } from "@/lib/fx/use-fx-rates"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -52,9 +64,12 @@ import type { AgeBuckets } from "@/lib/pricing/age-buckets"
 import { deriveTripDateRangeFromStates, dateOnly } from "@/lib/packages/trip-date-range"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
 import {
+  adoptSavedServiceRows,
   applyAnchoredDates,
   buildDefaultLegStates,
+  findLegsChangedSince,
   hydrateFromSaved,
+  takeServerLegs,
   mergeLegStatesAfterRebuild,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   PASSENGER_SUM_SUPPLIER_KINDS,
@@ -71,6 +86,7 @@ import {
   type HotelAnchorContext,
   type SavedPackageState,
   type SavedSelectionRow,
+  type SavedServiceRowVersion,
   type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -89,10 +105,27 @@ interface BuildBookingDialogProps {
   /** Opens the dialog immediately on mount — used to skip the extra click right after a quote is created. */
   autoOpen?: boolean
   onAutoOpenHandled?: () => void
+  /** Present only for an ACCEPTED quote: the dialog runs in "Amend" mode — same build flow, but the
+   *  save is confirmed first and sent as `amend: true` (see lib/quotes/amend-quote.ts). */
+  amend?: AmendQuoteContext
+}
+
+/** The accepted quote's current money, so the amend confirmation can show old vs new total. */
+const AMEND_UNFINISHED_TOAST_ID = "amend-services-unfinished"
+
+export interface AmendQuoteContext {
+  currentTotal: number
+  /** The booking's pipeline stage — the confirmation warns when a higher total lands after the
+   *  voucher has gone out. */
+  bookingStage?: string | null
+  agentCommission: number
+  discountAmount: number
 }
 
 interface QuotePatchPayload {
   lineItems: QuoteLineItem[]
+  amend?: true
+  amendNote?: string
 }
 
 interface QuotePatchResponse {
@@ -101,6 +134,8 @@ interface QuotePatchResponse {
   total: number
   lineItems: QuoteLineItem[]
   updatedAt: string
+  amended?: boolean
+  warning?: string
 }
 
 export interface ServiceRow {
@@ -236,7 +271,7 @@ export function collectForeignCurrencies({
 
     if (state.kind === "transport") {
       for (const request of state.requests) {
-        if (request.priceOverride != null) {
+        if (request.priceOverride != null || leg.pricingMode === "manual") {
           found.add(state.priceCurrency)
           continue
         }
@@ -337,7 +372,21 @@ export function BuildBookingDialog({
   onApplied,
   autoOpen = false,
   onAutoOpenHandled,
+  amend,
 }: BuildBookingDialogProps) {
+  const isAmend = amend !== undefined
+  const [amendConfirmOpen, setAmendConfirmOpen] = useState(false)
+  /** Reused by "Save anyway" after a version conflict, so the note typed in the confirmation isn't lost. */
+  const lastAmendNoteRef = useRef<string | undefined>(undefined)
+  /** servicesWritten tracking for amend mode: Build (step 1) and Next (step 2) write to the booking's
+   *  services before the amendment is confirmed, so walking away afterwards leaves the booking and
+   *  the accepted quote disagreeing. The warning toast is persistent on purpose. */
+  const amendServicesRef = useRef(
+    createAmendServicesTracker({
+      warn: (message) => toast.warning(message, { id: AMEND_UNFINISHED_TOAST_ID, duration: Infinity }),
+      clearWarning: () => toast.dismiss(AMEND_UNFINISHED_TOAST_ID),
+    }),
+  )
   const { data: suppliers = [] } = useActiveSuppliers()
   const { data: rateTypesData } = useRateTypes()
   const rateTypes = useMemo(
@@ -364,12 +413,44 @@ export function BuildBookingDialog({
   const [incompleteLegs, setIncompleteLegs] = useState<IncompleteLeg[]>([])
   const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
+  // Latest legStates for async work (a draft restore reconciling against the server) that outlives
+  // the render it was started in.
+  const legStatesRef = useRef(legStates)
+  useEffect(() => {
+    legStatesRef.current = legStates
+  }, [legStates])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
   const [bucketsBySupplierId, setBucketsBySupplierId] = useState<Record<string, AgeBuckets>>({})
   const [bookingCounts, setBookingCounts] = useState<TravellerCounts | null>(null)
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const { rates: fxRates, asOf: fxAsOf, stale: fxStale, refresh: refreshFxRates, setRate: setFxRate } =
     useFxRates(open)
+  // Amend: the rates the accepted quote was priced at are PREFILLED over today's, so by default the
+  // existing lines keep their price. Every rate stays editable: a typed rate replaces its prefill,
+  // and the refresh button drops the prefill altogether (today's rates, as on a normal build). The
+  // hook's own load can't overwrite a prefill — it sits on top until one of those two happens. A
+  // currency only a new line uses was never prefilled and starts at today's rate.
+  const [typedFxCurrencies, setTypedFxCurrencies] = useState<string[]>([])
+  const [fxPrefillDropped, setFxPrefillDropped] = useState(false)
+  const acceptedFx = useMemo(
+    () => (isAmend ? rebuildAcceptedQuoteFxRates(existingLineItems, quoteCurrency, fxRates) : null),
+    [isAmend, existingLineItems, quoteCurrency, fxRates],
+  )
+  const pricingFxRates = useMemo(() => {
+    if (!acceptedFx || fxPrefillDropped) return fxRates
+    const prefill = Object.fromEntries(
+      Object.entries(acceptedFx.rates).filter(([code]) => !typedFxCurrencies.includes(code)),
+    )
+    return { ...fxRates, ...prefill }
+  }, [acceptedFx, fxPrefillDropped, fxRates, typedFxCurrencies])
+  function handleFxRateChange(currency: string, rate: number) {
+    setFxRate(currency, rate)
+    if (isAmend) setTypedFxCurrencies((prev) => (prev.includes(currency) ? prev : [...prev, currency]))
+  }
+  function handleFxRefresh() {
+    if (isAmend) setFxPrefillDropped(true)
+    return refreshFxRates()
+  }
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
@@ -418,6 +499,8 @@ export function BuildBookingDialog({
   const closeGuard = useDirtyCloseGuard({
     isDirty: quoteDraftDirty,
     onConfirmedClose: () => {
+      // Closing without a successful amend after a Next step already wrote the services.
+      if (isAmend) amendServicesRef.current.abandon()
       discardQuoteDraft()
       setOpen(false)
       reset()
@@ -442,6 +525,23 @@ export function BuildBookingDialog({
 
     if (legStatesRestorable && draft.legStates.length > 0) {
       setLegStates(draft.legStates)
+      // The draft carries the row versions it was typed against. Services belong to the booking, not
+      // the quote, so they may have been saved since (another quote's dialog, a movement-time edit,
+      // another window): keeping those stamps guarantees a 409 on Next. Refresh any leg that moved
+      // from the server, keep the draft's edits on the rest.
+      if (packageDetail) {
+        void reloadLatestLegs(packageDetail)
+          .then((reloaded) => {
+            if (reloaded.length > 0) {
+              toast.warning(
+                `${reloaded.join(", ")} changed since this draft was saved, so the latest saved version was loaded instead. Check it before continuing.`,
+              )
+            }
+          })
+          .catch(() => {
+            // Best-effort: the draft stays as restored and the next save overwrites, as for any save.
+          })
+      }
       // "confirm" needs previewLineItems, which isn't persisted (it's re-derived server-side) --
       // land one step back and let Next regenerate it.
       setStep(draft.step === "confirm" ? "configure" : draft.step)
@@ -669,6 +769,10 @@ export function BuildBookingDialog({
     setEditingTravellers(false)
     setTravellerDraft(null)
     clearQuoteConflict()
+    setAmendConfirmOpen(false)
+    amendServicesRef.current.reset()
+    setTypedFxCurrencies([])
+    setFxPrefillDropped(false)
   }
 
   // The Add-service picker opens on whatever this booking is actually for. Defaulting to Train was
@@ -735,6 +839,8 @@ export function BuildBookingDialog({
         return
       }
       const built = payload as BuildBookingResponse
+      // POST /build-booking adds/removes booking_services rows — a write, even before step 2.
+      if (isAmend) amendServicesRef.current.markWritten()
       setPackageDetail(built.packageDetail)
       // Rows added here start with no `legId` (addService can't know one yet). Without adopting the
       // ids the build just minted, a second Next -- Back, or adding another service -- would send
@@ -823,8 +929,7 @@ export function BuildBookingDialog({
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
 
   /** Re-reads booking_services.updated_at for every leg after a write this dialog made itself --
-   *  and the legs' sort_order with it, so a server-side date re-sort (POST /services/apply puts the
-   *  legs in date order when the quote is priced) shows up in the step 1 and step 2 lists. */
+   *  and the legs' sort_order with it, so the step 1 and step 2 lists follow what is saved. */
   async function refreshLegVersions() {
     const res = await fetch(`/api/jobs/${jobId}/services`)
     if (!res.ok) return
@@ -872,6 +977,44 @@ export function BuildBookingDialog({
         })
         .map(({ row }) => row),
     )
+  }
+
+  /**
+   * Pulls the server's current copy of every leg whose stored version no longer matches the stamp
+   * this dialog holds, and leaves every other leg's edits alone. Saving no longer checks versions
+   * (last save wins), so this is what stops a restored draft from silently writing old values over
+   * services saved since it was taken. Returns the labels of the legs that were reloaded, empty
+   * when nothing had moved.
+   */
+  async function reloadLatestLegs(detail: PackageDetail): Promise<string[]> {
+    const [servicesRes, transportRes] = await Promise.all([
+      fetch(`/api/jobs/${jobId}/services`),
+      fetch(`/api/jobs/${jobId}/transport-requests`),
+    ])
+    if (!servicesRes.ok) return []
+    const saved = (await servicesRes.json().catch(() => null)) as SavedPackageState | null
+    if (!saved?.selections) return []
+    const transportRows = transportRes.ok
+      ? ((await transportRes.json().catch(() => null)) as BookingTransportRequest[] | null) ?? []
+      : existingTransportRequests
+
+    const staleIds = new Set(findLegsChangedSince(legStatesRef.current, saved))
+    if (staleIds.size === 0) return []
+
+    const fresh = hydrateFromSaved(detail, saved, transportRows, {
+      primarySupplierId: saved.primarySupplierId ?? null,
+      tripStartDate: saved.tripStartDate ?? travelDate ?? null,
+      totalsBySupplierId: totalsBySupplierId,
+      quoteCurrency,
+    })
+    setSavedState(saved)
+    setExistingTransportRequests(transportRows)
+    setLegStates((prev) =>
+      applyAnchoredDates(detail, takeServerLegs(prev, fresh, staleIds), saved.primarySupplierId ?? null),
+    )
+
+    const labelByLegId = new Map(detail.legs.map((leg) => [leg.id, leg.label ?? leg.supplierName]))
+    return Array.from(staleIds).map((legId) => labelByLegId.get(legId) ?? "a service")
   }
 
   /**
@@ -1019,21 +1162,19 @@ export function BuildBookingDialog({
         return
       }
       // Adopt the row versions the save produced, so a second save in the same session doesn't
-      // 409 against stamps this very request moved on.
+      // 409 against stamps this very request moved on -- and the stored unit ids, which the
+      // pricing call below sends so the server can say who set each price override. A room added
+      // since the last save only had a draft id until now.
       const patchBody = (await patchRes.json().catch(() => null)) as
-        | { selections?: Array<{ package_leg_id: string; updated_at?: string | null }> }
+        | { selections?: SavedServiceRowVersion[] }
         | null
+      if (isAmend) amendServicesRef.current.markWritten()
+      const savedLegStates = patchBody?.selections
+        ? adoptSavedServiceRows(legStates, patchBody.selections)
+        : legStates
       if (patchBody?.selections) {
-        const versionByLegId = new Map(
-          patchBody.selections.map((row) => [row.package_leg_id, row.updated_at ?? null]),
-        )
-        setLegStates((prev) =>
-          prev.map((state) =>
-            versionByLegId.has(state.legId)
-              ? { ...state, updatedAt: versionByLegId.get(state.legId) ?? null }
-              : state,
-          ),
-        )
+        const savedSelections = patchBody.selections
+        setLegStates((prev) => adoptSavedServiceRows(prev, savedSelections))
       }
 
       // 2. Persist transport requests — pricing reads them from the DB in the next step.
@@ -1054,8 +1195,9 @@ export function BuildBookingDialog({
       if (savedTransportRows) setExistingTransportRequests(savedTransportRows)
 
       // 3. Price the quote from the persisted configuration. Commission is no longer decided
-      // here — the server prices the Commission line off the house default (see
-      // buildPackageQuoteLineItems), editable afterward on the Job Quotes tab.
+      // here — the server keeps the quote's current commission type + value (set on the Quotes
+      // tab), or the house default when the quote has never been built, and re-prices the amount
+      // (see services/apply/route.ts). A commission cleared on the ledger stays cleared.
       const res = await fetch(`/api/jobs/${jobId}/services/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1063,17 +1205,17 @@ export function BuildBookingDialog({
           jobId,
           quoteId,
           travelDate: derivedRange.start,
-          selections: toApplySelections(legStates),
+          selections: toApplySelections(savedLegStates),
           // Send the rates that were on screen so a hand-nudged rate prices the quote, rather
-          // than the server silently re-deriving a different one from its cache.
-          fxRates,
+          // than the server silently re-deriving a different one from its cache. On an amend these
+          // are the on-screen values — the accepted quote's prefilled rates plus anything typed.
+          fxRates: pricingFxRates,
+          // Amend: the server rebuilds the accepted quote's rates as defaults under these, so an
+          // untouched prefill prices exactly as accepted and a typed rate wins.
+          ...(isAmend ? { amend: true } : {}),
         }),
       })
       const payload = await res.json()
-      // Pricing puts the legs in date order and persists it. A moved leg's updated_at changed, so
-      // adopt the fresh versions (or the next save 409s against this very request) and let both
-      // step lists follow the new order. Reported on a failed price too -- the sort ran first.
-      if (payload?.legOrderChanged === true) await refreshLegVersions()
       if (!res.ok) {
         const baseMessage = typeof payload?.error === "string" ? payload.error : "Validation failed"
         setBuildError(appendFieldDetails(baseMessage, payload))
@@ -1089,7 +1231,7 @@ export function BuildBookingDialog({
     }
   }
 
-  async function applyToQuote(options?: { ignoreExpectedUpdatedAt: boolean }) {
+  async function applyToQuote(options?: { ignoreExpectedUpdatedAt?: boolean; amendNote?: string }) {
     if (previewLineItems.length === 0) return
     // The preview deliberately prices what it can; saving a quote that silently omits a leg is a
     // different matter. Guarded here as well as by the disabled button.
@@ -1098,7 +1240,12 @@ export function BuildBookingDialog({
       return
     }
     try {
-      await saveQuote({ lineItems: lineItemsToSave }, options)
+      const payload: QuotePatchPayload = isAmend
+        ? { lineItems: lineItemsToSave, amend: true, ...(options?.amendNote ? { amendNote: options.amendNote } : {}) }
+        : { lineItems: lineItemsToSave }
+      const saved = await saveQuote(payload, { ignoreExpectedUpdatedAt: options?.ignoreExpectedUpdatedAt })
+      setAmendConfirmOpen(false)
+      if (isAmend) amendServicesRef.current.complete()
       // Applying is the acceptance — stamp it rather than asking for a
       // separate click that gated nothing. Deliberately not gated on
       // `hasAutoFilledServices`: editing a field already flips that leg to
@@ -1106,17 +1253,36 @@ export function BuildBookingDialog({
       // there is usually nothing left marked auto. Only the first apply
       // stamps, so the record keeps whoever actually accepted the build.
       if (!confirmedStamp) await stampServicesConfirmed()
-      toast.success("Booking services applied to quote")
+      if (isAmend) {
+        toast.success(`Quote amended. New total ${formatMoney(saved.total, quoteCurrency)}. No emails were sent.`)
+        if (saved.warning) toast.warning(saved.warning)
+      } else {
+        toast.success("Booking services applied to quote")
+      }
       discardQuoteDraft()
       setOpen(false)
       reset()
       onApplied()
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to apply booking services"
+      setAmendConfirmOpen(false)
       setBuildError(message)
       toast.error(message)
     }
   }
+
+  // The figure the amend confirmation shows. The server recomputes it the same way (resolveLineTotal
+  // per line, then commission and discount off the subtotal), so this is a preview, not the record.
+  const amendedTotal = amend
+    ? calculateQuoteTotals(
+        lineItemsToSave.map((li) => ({ ...li, total: resolveLineTotal(li) })),
+        amend.agentCommission,
+        amend.discountAmount,
+      ).total
+    : 0
+  // With the FX lock in place, an existing line can only move if a supplier rate card was edited
+  // since the quote was accepted — listed on the confirmation rather than silently reverted.
+  const changedExistingLines = amend ? findChangedExistingLines(existingLineItems, lineItemsToSave) : []
 
   return (
     <Dialog
@@ -1130,12 +1296,22 @@ export function BuildBookingDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Boxes className="mr-2 h-4 w-4" />
-          Edit Quote
-        </Button>
+        {isAmend ? (
+          <Button variant="outline" size="sm" title="Change the services on this accepted quote without rewinding the booking">
+            <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            Amend
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">
+            <Boxes className="mr-2 h-4 w-4" />
+            Edit Quote
+          </Button>
+        )}
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl" {...closeGuard.contentProps}>
+      <DialogContent
+        className="max-h-[92vh] grid-cols-1 overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl [&>*]:min-w-0"
+        {...closeGuard.contentProps}
+      >
         <DiscardChangesDialog
           open={closeGuard.confirming}
           onKeepEditing={closeGuard.cancelDiscard}
@@ -1174,11 +1350,23 @@ export function BuildBookingDialog({
             </div>
           </div>
         )}
+        {isAmend && (
+          <div
+            role="note"
+            className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+          >
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
+            <span>
+              You are amending an accepted booking. Service details are saved to the booking when you
+              click Next; the quote price only changes after you confirm the amendment on the last step.
+            </span>
+          </div>
+        )}
         {step === "services" && (
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                Build this booking&apos;s services
+                {isAmend ? "Amend this booking's services" : <>Build this booking&apos;s services</>}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
@@ -1301,11 +1489,11 @@ export function BuildBookingDialog({
             <FxRateBanner
               foreignCurrencies={foreignCurrencies}
               quoteCurrency={quoteCurrency}
-              rates={fxRates}
+              rates={pricingFxRates}
               asOf={fxAsOf}
               stale={fxStale}
-              onRefresh={refreshFxRates}
-              onRateChange={setFxRate}
+              onRefresh={handleFxRefresh}
+              onRateChange={handleFxRateChange}
             />
 
             {!hasAutoFilledServices && confirmedStamp && (
@@ -1331,7 +1519,7 @@ export function BuildBookingDialog({
                         anchorContext={transferAnchorContext(leg.id)}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
-                        fxRates={fxRates}
+                        fxRates={pricingFxRates}
                         travelDate={travelDate}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                       />
@@ -1347,7 +1535,7 @@ export function BuildBookingDialog({
                         primarySupplierId={savedState?.primarySupplierId ?? null}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
-                        fxRates={fxRates}
+                        fxRates={pricingFxRates}
                       />
                     )}
                   </div>
@@ -1358,11 +1546,11 @@ export function BuildBookingDialog({
             <FxRateBanner
               foreignCurrencies={foreignCurrencies}
               quoteCurrency={quoteCurrency}
-              rates={fxRates}
+              rates={pricingFxRates}
               asOf={fxAsOf}
               stale={fxStale}
-              onRefresh={refreshFxRates}
-              onRateChange={setFxRate}
+              onRefresh={handleFxRefresh}
+              onRateChange={handleFxRateChange}
             />
 
             {validationErrors.length > 0 && (
@@ -1477,7 +1665,7 @@ export function BuildBookingDialog({
               <DialogTitle className="flex items-center gap-2">
                 {/* Nothing is being replaced on a first build — the old title
                     contradicted the body copy right below it. */}
-                {existingLineItemCount > 0 ? "Confirm replacement" : "Review quote lines"}
+                {isAmend ? "Review amendment" : existingLineItemCount > 0 ? "Confirm replacement" : "Review quote lines"}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
@@ -1532,10 +1720,11 @@ export function BuildBookingDialog({
               </div>
             )}
 
-            <div className="rounded-md border">
+            <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
+                    <th className="px-3 py-2 whitespace-nowrap">Date</th>
                     <th className="px-3 py-2">Description</th>
                     <th className="px-3 py-2 text-right">Qty</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Unit price</th>
@@ -1545,6 +1734,9 @@ export function BuildBookingDialog({
                 <tbody>
                   {lineItemsToSave.map((li, i) => (
                     <tr key={i} className="border-b last:border-0">
+                      <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                        {describeLineDate(li) ?? "—"}
+                      </td>
                       <td className="px-3 py-2 text-xs">
                         <div>
                           {li.description}
@@ -1569,6 +1761,7 @@ export function BuildBookingDialog({
                         <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <TourOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
+                        <TrainOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <CommissionBadge
                           commission={li.pricingSnapshot?.commission ?? null}
                           currency={quoteCurrency}
@@ -1578,6 +1771,17 @@ export function BuildBookingDialog({
                         <div>{li.qty}</div>
                         {li.pricingSnapshot?.unit ? (
                           <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
+                        ) : null}
+                        {/* Same qty explanation as the Quotes tab (job-quotes-tab.tsx): person-nights
+                            read as a headcount beside "per person per night", and once a night is
+                            gifted the qty is the charged nights, not the stay. */}
+                        {describeQtyBasis(li) ? (
+                          <div className="text-[11px] text-muted-foreground">{describeQtyBasis(li)}</div>
+                        ) : null}
+                        {hasComplimentaryNight(li) ? (
+                          <div className="text-[11px] text-emerald-600 dark:text-emerald-500">
+                            of {stayNights(li)} nights
+                          </div>
                         ) : null}
                       </td>
                       <td className="px-3 py-2 text-right text-xs whitespace-nowrap">{formatMoney(li.unitPrice, quoteCurrency)}</td>
@@ -1601,16 +1805,44 @@ export function BuildBookingDialog({
               {quoteConflict && (
                 <Button
                   variant="outline"
-                  onClick={() => applyToQuote({ ignoreExpectedUpdatedAt: true })}
+                  onClick={() =>
+                    applyToQuote({ ignoreExpectedUpdatedAt: true, amendNote: lastAmendNoteRef.current })
+                  }
                   disabled={applying || incompleteLegs.length > 0}
                 >
                   Save anyway
                 </Button>
               )}
-              <Button onClick={() => applyToQuote()} disabled={applying || incompleteLegs.length > 0}>
-                {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
-              </Button>
+              {isAmend ? (
+                <Button onClick={() => setAmendConfirmOpen(true)} disabled={applying || incompleteLegs.length > 0}>
+                  {applying ? "Amending…" : "Amend quote…"}
+                </Button>
+              ) : (
+                <Button onClick={() => applyToQuote()} disabled={applying || incompleteLegs.length > 0}>
+                  {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
+                </Button>
+              )}
             </DialogFooter>
+            {amend && (
+              <AmendQuoteConfirmDialog
+                open={amendConfirmOpen}
+                onOpenChange={(next) => {
+                  setAmendConfirmOpen(next)
+                  // Cancel / Escape on the confirmation: the services are saved, the price is not.
+                  if (!next) amendServicesRef.current.abandon()
+                }}
+                currentTotal={amend.currentTotal}
+                bookingStage={amend.bookingStage ?? null}
+                changedLines={changedExistingLines}
+                newTotal={amendedTotal}
+                currency={quoteCurrency}
+                saving={applying}
+                onConfirm={(note) => {
+                  lastAmendNoteRef.current = note
+                  void applyToQuote({ amendNote: note })
+                }}
+              />
+            )}
           </>
         )}
       </DialogContent>

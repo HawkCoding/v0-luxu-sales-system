@@ -1,8 +1,8 @@
 "use client"
 
 import { useJobDetail, useAssignableUsers } from "@/lib/use-data"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,6 +62,13 @@ import { useBookingNotes } from "@/lib/use-data"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getApiErrorMessage, parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
 import { resolvePendingSendAction } from "@/lib/pipeline/pending-send-action"
+import {
+  getCanonicalRecordPath,
+  getRecordNoun,
+  getRecordSection,
+  getSectionFromPathname,
+  RECORD_SECTIONS,
+} from "@/lib/booking-visibility"
 import { toast } from "sonner"
 
 interface JobPatchResponse {
@@ -171,9 +178,13 @@ const UNASSIGNED_VALUE = "__unassigned__"
 
 export default function JobDetailPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
+  // The pathname whose section has already been checked against the record — see the
+  // canonical-URL effect below.
+  const canonicalCheckedPathRef = useRef<string | null>(null)
   const { can } = useRole()
   const { user: authUser } = useAuth()
   const { others, setEditing } = useRecordPresence("job", id)
@@ -273,7 +284,7 @@ export default function JobDetailPage() {
     const targetStage = PIPELINE_STAGES.find((s) => s.key === stage)?.key ?? null
     if (!targetStage) return
 
-    router.replace(`/app/bookings/${id}`)
+    router.replace(pathname, { scroll: false })
     setPendingStage(targetStage)
     if (send === "deposit_invoice") {
       setDepositInvoiceOpen(true)
@@ -282,37 +293,79 @@ export default function JobDetailPage() {
     } else if (send === "voucher") {
       setVoucherOpen(true)
     }
-    // Only re-run when the URL actually changes; router/id are stable.
+    // Only re-run when the URL actually changes; router/pathname are stable for that URL.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
+
+  // Old and section-less links (`/app/bookings/<id>` for what is now a quote, `/app/jobs/<id>`)
+  // are swapped for the record's own section URL, so the sidebar, the back button and a refresh all
+  // agree. `history.replaceState` (synced into usePathname/useSearchParams since Next 14.1) swaps
+  // the URL without remounting the page. Checked once per pathname on first load: a stage change
+  // mid-session never moves the URL, and the pipeline's `?send=` hand-off is left to its own effect.
+  const recordStage = (data?.job?.stage as PipelineStage | undefined) ?? null
+  useEffect(() => {
+    if (canonicalCheckedPathRef.current === pathname) return
+    if (searchParams.get("send")) {
+      canonicalCheckedPathRef.current = pathname
+      return
+    }
+    if (!recordStage) return
+    canonicalCheckedPathRef.current = pathname
+
+    const canonicalPath = getCanonicalRecordPath(pathname, id, recordStage)
+    if (!canonicalPath) return
+    const params = new URLSearchParams(searchParams.toString())
+    if (activeTab === "enquiry") {
+      params.delete("tab")
+    } else {
+      params.set("tab", activeTab)
+    }
+    const query = params.toString()
+    window.history.replaceState(null, "", query ? `${canonicalPath}?${query}` : canonicalPath)
+  }, [activeTab, id, pathname, recordStage, searchParams])
 
   useEffect(() => {
     const next = (data?.job as { customerInvoiceNumber?: string | null } | undefined)?.customerInvoiceNumber ?? ""
     setInvoiceNumberDraft(next)
   }, [data?.job])
 
+  // The list this page was opened from, by URL first so it matches the highlighted sidebar item,
+  // then by the record's own stage. Lost records opened at /app/jobs/<id> fall back to Pipeline.
+  const backSection = getSectionFromPathname(pathname) ?? (recordStage ? getRecordSection(recordStage) : null)
+  const backTarget = backSection
+    ? {
+        href: RECORD_SECTIONS[backSection].href,
+        label: RECORD_SECTIONS[backSection].label,
+        listName: RECORD_SECTIONS[backSection].label.toLowerCase(),
+        noun: RECORD_SECTIONS[backSection].noun,
+      }
+    : { href: "/app/pipeline", label: "Pipeline", listName: "the pipeline", noun: "job" }
+
   if (hasLoadError) {
     const isNotFound = (error as { status?: number } | undefined)?.status === 404
+    const { noun } = backTarget
     return (
       <div className="p-6">
         <Alert>
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>{isNotFound ? "Booking not found" : "Could not load booking"}</AlertTitle>
+          <AlertTitle>
+            {isNotFound ? `${noun.charAt(0).toUpperCase()}${noun.slice(1)} not found` : `Could not load ${noun}`}
+          </AlertTitle>
           <AlertDescription>
             {isNotFound ? (
               <>
-                This booking does not exist, or you no longer have access to it.{" "}
-                <Link href="/app/bookings" className="underline">
-                  Return to bookings
+                This {noun} does not exist, or you no longer have access to it.{" "}
+                <Link href={backTarget.href} className="underline">
+                  Return to {backTarget.listName}
                 </Link>
                 .
               </>
             ) : (
               <>
-                {error instanceof Error ? error.message : "Something went wrong loading this booking."} Refresh the
+                {error instanceof Error ? error.message : `Something went wrong loading this ${noun}.`} Refresh the
                 page or{" "}
-                <Link href="/app/bookings" className="underline">
-                  return to bookings
+                <Link href={backTarget.href} className="underline">
+                  return to {backTarget.listName}
                 </Link>
                 .
               </>
@@ -728,10 +781,13 @@ export default function JobDetailPage() {
       <div className="p-6 space-y-6 max-w-5xl">
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Link href="/app/bookings">
-            <Button variant="ghost" size="sm"><ArrowLeft className="w-4 h-4" /></Button>
-          </Link>
+        <div className="flex items-start gap-3">
+          <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
+            <Link href={backTarget.href} aria-label={`Back to ${backTarget.label}`}>
+              <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{backTarget.label}</span>
+            </Link>
+          </Button>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-semibold text-foreground tracking-tight" style={{ fontFamily: "var(--font-inter)" }}>{job.jobNumber}</h1>
@@ -894,7 +950,8 @@ export default function JobDetailPage() {
               )}
               {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
                 <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
-                  <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+                  <XCircle className="w-4 h-4 mr-1" /> Cancel{" "}
+                  {getRecordNoun(job.stage).replace(/^./, (c) => c.toUpperCase())}
                 </Button>
               )}
             </div>
@@ -1032,7 +1089,10 @@ export default function JobDetailPage() {
             bookingNumber={job.jobNumber}
             travelDate={enquiry?.departureDate ?? null}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+            bookingHeadcount={(enquiry?.noOfAdults ?? 0) + (enquiry?.noOfChildren ?? 0)}
             emailImportNeedsReview={emailReviewBlocking}
+            bookingStage={job.stage}
+            bookingCancelledAt={job.cancelledAt ?? null}
             mutate={mutate}
             autoOpenBuildBookingQuoteId={autoOpenBuildBookingQuoteId}
             onAutoOpenBuildBookingHandled={() => setAutoOpenBuildBookingQuoteId(null)}

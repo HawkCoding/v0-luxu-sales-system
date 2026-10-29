@@ -41,6 +41,21 @@ describe("sanitizeSignatureHtml", () => {
     expect(sanitizeSignatureHtml(html)).toBe(html)
   })
 
+  it.each(["11px", "13px", "15px"])("keeps a span sized to the in-between %s step", (size) => {
+    const html = `<span style="font-size:${size}">sized</span>`
+    expect(sanitizeSignatureHtml(html)).toBe(html)
+    // The editor's own spaced form (`font-size: 13px;`) normalises to the same kept value.
+    expect(sanitizeSignatureHtml(`<span style="font-size: ${size};">sized</span>`)).toBe(html)
+  })
+
+  it("unwraps a span whose font size is off the allowlist", () => {
+    expect(sanitizeSignatureHtml('<span style="font-size:17px">x</span>')).toBe("x")
+  })
+
+  it("strips line spacing — signature fields are flattened inline, so they offer none", () => {
+    expect(sanitizeSignatureHtml('<p style="line-height: 1.5;">Leonie</p>')).toBe("<p>Leonie</p>")
+  })
+
   it("keeps a span combining every allowlisted property", () => {
     const html = '<span style="font-size:18px;color:#b42318;background-color:#dcfce7;font-family:Georgia, serif">x</span>'
     expect(sanitizeSignatureHtml(html)).toBe(html)

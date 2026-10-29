@@ -10,6 +10,13 @@
 // dropping any " | "-separated segment whose only content was an empty
 // field — e.g. a person with no fax number never leaves a bare "Fax: |" on
 // the line.
+//
+// It also owns styleSignatureLinks, which every signature block runs its
+// HTML through so links read as signature text instead of a client's
+// default blue.
+
+/** Text colour of the sender name/contact block (emails/email-signature.tsx) — and of its links. */
+export const SIGNATURE_TEXT_COLOR = "#3d3831"
 
 export interface SenderLayoutFields {
   fullName: string
@@ -92,7 +99,8 @@ function substituteTokens(text: string, fields: SenderLayoutFields): string {
  * already be sanitized — this module does no HTML sanitizing of its own,
  * only token substitution and escaping of the field values. Accepts
  * null/undefined defensively (a brand with no override resolves to one of
- * these upstream in some callers) rather than throwing.
+ * these upstream in some callers) rather than throwing. Every link comes
+ * back styled in SIGNATURE_TEXT_COLOR (see styleSignatureLinks).
  */
 export function renderSenderLayout(layoutHtml: string | null | undefined, fields: SenderLayoutFields): string {
   const source = layoutHtml?.trim() || DEFAULT_SENDER_LAYOUT
@@ -101,5 +109,120 @@ export function renderSenderLayout(layoutHtml: string | null | undefined, fields
     .map((line) => dropEmptyParts(line, fields))
     .filter((line) => line.trim().length > 0)
     .map((line) => substituteTokens(line, fields))
-  return lines.join("<br>")
+  return styleSignatureLinks(lines.join("<br>"), SIGNATURE_TEXT_COLOR)
+}
+
+const LINK_OR_SPAN_TAG_RE = /<(\/?)(a|span)(\s[^>]*)?>/gi
+const STYLE_ATTR_RE = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i
+const COLOR_DECLARATION_RE = /(?:^|;)\s*color\s*:\s*([^;]+)/i
+const TEXT_DECORATION_DECLARATION_RE = /(?:^|;)\s*text-decoration(?:-line)?\s*:/i
+// A span's colour is copied into a link's style attribute, so only plain colour syntax is carried over.
+const SAFE_COLOR_RE = /^[#a-z0-9(),.%\s]+$/i
+
+function styleAttrValue(attrs: string): string | null {
+  const match = attrs.match(STYLE_ATTR_RE)
+  return match ? (match[1] ?? match[2] ?? "") : null
+}
+
+function declaredColor(style: string | null): string | null {
+  const value = style?.match(COLOR_DECLARATION_RE)?.[1]?.trim()
+  return value && SAFE_COLOR_RE.test(value) ? value : null
+}
+
+const TAG_SPLIT_RE = /(<[^>]*>)/
+const ANCHOR_TAG_RE = /^<(\/?)a(?:\s[^>]*)?>$/i
+// An email address, a URL starting with http(s):// or www., or a phone
+// number starting with + or 0 — the forms Outlook, Gmail and Apple Mail
+// auto-link on the receiving side.
+const BARE_CONTACT_RE =
+  /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|\b(?:https?:\/\/|www\.)[^\s<]*[^\s<.,;:!?)'"]|(?:\+|\b0)\d[\d ()-]*\d/gi
+const PHONE_START_RE = /^(?:\+|0)\d/
+
+/**
+ * tel: href for a typed number, or null when it has too few or too many
+ * digits to be one. Drops the "(0)" and the 0 after +27 that people write
+ * but a dialler must not get: "+27 021 100 3596" → tel:+27211003596.
+ */
+function telHref(number: string): string | null {
+  const digits = number.replace(/\D/g, "")
+  if (digits.length < 9 || digits.length > 15) return null
+  const dialable = number.startsWith("+")
+    ? `+${number.replace(/\(0\)/g, "").replace(/\D/g, "").replace(/^270/, "27")}`
+    : digits
+  return `tel:${dialable}`
+}
+
+/**
+ * Wraps every email address, http(s)/www URL and phone number typed as plain
+ * text (outside an existing `<a>`) in a link. A signature layout can
+ * hard-code a shared address such as reservations@sa-rail.co.za instead of
+ * using {{email}}, and {{tel}}/{{cell}} fill in as plain text; left that way,
+ * the recipient's mail client links them itself in its default blue and
+ * underline, where styleSignatureLinks can't reach them.
+ */
+export function linkBareContacts(html: string): string {
+  let anchorDepth = 0
+  return html
+    .split(TAG_SPLIT_RE)
+    .map((chunk) => {
+      const anchor = chunk.match(ANCHOR_TAG_RE)
+      if (anchor) {
+        anchorDepth = Math.max(0, anchorDepth + (anchor[1] ? -1 : 1))
+        return chunk
+      }
+      if (chunk.startsWith("<") || anchorDepth > 0) return chunk
+      return chunk.replace(BARE_CONTACT_RE, (match) => {
+        const isUrl = /^(?:https?:\/\/|www\.)/i.test(match)
+        const isPhone = !isUrl && !match.includes("@") && PHONE_START_RE.test(match)
+        const href = isPhone
+          ? telHref(match)
+          : match.includes("@") && !isUrl
+            ? `mailto:${match}`
+            : /^https?:\/\//i.test(match) ? match : `https://${match}`
+        if (!href) return match
+        return `<a href="${href.replace(/"/g, "&quot;")}">${match}</a>`
+      })
+    })
+    .join("")
+}
+
+/**
+ * Gives every `<a>` in a signature fragment an inline colour and no
+ * underline, so a link reads as the signature text around it rather than a
+ * mail client's default blue. Inline is the only form that works: Outlook
+ * and Gmail ignore `color: inherit` on a link, and Gmail/iOS auto-link a
+ * bare address, URL or phone number in blue — an explicitly styled anchor
+ * covers both, so plain-text ones are first turned into links
+ * (linkBareContacts).
+ *
+ * A link inside a coloured `<span>` takes that span's colour (the author's
+ * choice); otherwise it takes `color`. A link that already declares a colour
+ * or text-decoration keeps it, which also makes this idempotent. Expects
+ * sanitized signature HTML (inline tags only, double-quoted attributes).
+ */
+export function styleSignatureLinks(html: string, color: string): string {
+  const spanColors: (string | null)[] = []
+  return linkBareContacts(html).replace(LINK_OR_SPAN_TAG_RE, (tag: string, closing: string, name: string, rawAttrs?: string) => {
+    const attrs = rawAttrs ?? ""
+    if (name.toLowerCase() === "span") {
+      if (closing) spanColors.pop()
+      else spanColors.push(declaredColor(styleAttrValue(attrs)))
+      return tag
+    }
+    if (closing) return tag
+
+    const existing = styleAttrValue(attrs)
+    const declarations = (existing ?? "").trim().replace(/;\s*$/, "").replace(/"/g, "&quot;")
+    const additions: string[] = []
+    if (!COLOR_DECLARATION_RE.test(declarations)) {
+      const inherited = [...spanColors].reverse().find((value) => value !== null)
+      additions.push(`color:${inherited ?? color}`)
+    }
+    if (!TEXT_DECORATION_DECLARATION_RE.test(declarations)) additions.push("text-decoration:none")
+    if (additions.length === 0) return tag
+
+    const style = [...additions, declarations].filter(Boolean).join(";")
+    const otherAttrs = existing === null ? attrs : attrs.replace(STYLE_ATTR_RE, "")
+    return `<${name}${otherAttrs} style="${style}">`
+  })
 }

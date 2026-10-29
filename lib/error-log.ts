@@ -6,6 +6,8 @@ export interface ErrorLogInput {
   source: string
   message: string
   details?: Record<string, unknown> | null
+  /** Diagnostic rows (e.g. slow-request traces) are born resolved so they don't inflate the unresolved badge. */
+  resolved?: boolean
 }
 
 export async function logError(input: ErrorLogInput): Promise<void> {
@@ -16,6 +18,7 @@ export async function logError(input: ErrorLogInput): Promise<void> {
       source: input.source,
       message: input.message,
       details: (input.details ?? null) as Json | null,
+      ...(input.resolved ? { resolved: true, resolved_at: new Date().toISOString() } : {}),
     })
   } catch (err) {
     console.error("[error-log] write failed", err, input)

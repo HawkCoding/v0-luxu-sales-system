@@ -9,8 +9,7 @@ import type { Quote } from "@/lib/types"
 import {
   describeQtyBasis,
   hasComplimentaryNight,
-  isComplimentaryRoom,
-  isComplimentaryTransport,
+  isComplimentaryLine,
   isDeliberateZeroCommission,
   isMissingPricing,
   stayNights,
@@ -23,6 +22,7 @@ import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { RoomOverrideNote } from "@/components/quotes/room-override-note"
 import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { TourOverrideNote } from "@/components/quotes/tour-override-note"
+import { TrainOverrideNote } from "@/components/quotes/train-override-note"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
@@ -30,14 +30,16 @@ import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
 import { QuoteAdjustmentsLedger } from "@/components/quotes/quote-adjustments-ledger"
 import { findCommissionLineIndex } from "@/lib/quotes/apply-commission-bonus"
+import { describeLineDate } from "@/lib/quotes/line-item-date"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
+import { amendIneligibilityReason } from "@/lib/quotes/amend-quote"
 import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
 /** Statuses whose services can still be rebuilt. Mirrors LOCKED_QUOTE_STATUSES in
  * app/api/quotes/[id]/route.ts — an accepted quote is the record of what was sold, so changing
- * it goes through Revise instead. Exported so the Enquiry tab's readiness panel can find a quote
+ * it goes through Amend (Build Booking in amend mode, confirmed) or Revise instead. Exported so the Enquiry tab's readiness panel can find a quote
  * to send Build Booking's primary action to, without re-deriving this rule. */
 export const BUILDABLE_QUOTE_STATUSES = [...EDITABLE_QUOTE_STATUSES, "sent", "expired"]
 
@@ -58,7 +60,14 @@ interface JobQuotesTabProps {
   bookingNumber: string
   travelDate: string | null
   customerName: string
+  /** The booking's current headcount (adults + children, infants excluded) — what a per-person
+   *  Commission/Discount on the adjustments ledger is multiplied by. */
+  bookingHeadcount: number
   emailImportNeedsReview?: boolean
+  /** The booking's pipeline stage and cancellation stamp — Amend is hidden on a closed, lost or
+   *  cancelled booking, by the same rule the PATCH route enforces (amendIneligibilityReason). */
+  bookingStage?: string | null
+  bookingCancelledAt?: string | null
   mutate: () => void
   autoOpenBuildBookingQuoteId?: string | null
   onAutoOpenBuildBookingHandled?: () => void
@@ -70,7 +79,10 @@ export function JobQuotesTab({
   bookingNumber,
   travelDate,
   customerName,
+  bookingHeadcount,
   emailImportNeedsReview = false,
+  bookingStage = null,
+  bookingCancelledAt = null,
   mutate,
   autoOpenBuildBookingQuoteId: externalAutoOpenBuildBookingQuoteId = null,
   onAutoOpenBuildBookingHandled,
@@ -221,6 +233,30 @@ export function JobQuotesTab({
                   )}
                   {can("edit:quotes") && (
                     <>
+                      {/* Amend: the fast in-place change to an accepted quote — no rewind, no emails.
+                          Revise below stays the full path. See lib/quotes/amend-quote.ts. */}
+                      {amendIneligibilityReason({
+                        quoteStatus: q.status,
+                        bookingStage,
+                        bookingCancelledAt,
+                      }) === null && (
+                        <BuildBookingDialog
+                          jobId={jobId}
+                          quoteId={q.id}
+                          quoteCurrency={q.currency}
+                          travelDate={travelDate}
+                          existingLineItemCount={q.lineItems.length}
+                          existingLineItems={q.lineItems}
+                          expectedUpdatedAt={q.updatedAt}
+                          onApplied={mutate}
+                          amend={{
+                            currentTotal: q.total,
+                            bookingStage,
+                            agentCommission: q.agentCommission ?? 0,
+                            discountAmount: q.discountAmount ?? 0,
+                          }}
+                        />
+                      )}
                       {(q.status === "sent" || q.status === "accepted" || q.status === "expired") && (
                         <ReviseQuoteDialog
                           quoteId={q.id}
@@ -290,10 +326,11 @@ export function JobQuotesTab({
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <table className="w-full table-fixed text-sm" style={{ fontFamily: "var(--font-inter)" }}>
+                <table className="w-full min-w-[640px] table-fixed text-sm" style={{ fontFamily: "var(--font-inter)" }}>
                   <thead>
                     <tr className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
-                      <th className="pb-2 w-[40%]">Description</th>
+                      <th className="pb-2 pr-4 w-28">Date</th>
+                      <th className="pb-2 w-[34%]">Description</th>
                       <th className="pb-2 pl-4 text-right w-16">Qty</th>
                       <th className="pb-2 pl-6 text-right w-28">Unit Price</th>
                       <th className="pb-2 pl-6 text-right w-28">Total</th>
@@ -306,9 +343,12 @@ export function JobQuotesTab({
                       // in this table — see components/quotes/quote-adjustments-ledger.tsx.
                       if (i === findCommissionLineIndex(q.lineItems)) return null
                       const isExtra = li.pricingSnapshot?.isExtra === true
-                      const isComplimentary = isComplimentaryRoom(li) || isComplimentaryTransport(li)
+                      const isComplimentary = isComplimentaryLine(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
+                        <td className="py-2 pr-4 text-xs text-muted-foreground" data-testid="quote-line-date">
+                          {describeLineDate(li) ?? "—"}
+                        </td>
                         <td className="py-2 text-xs text-foreground break-words">
                           {li.description}
                           {isExtra ? (
@@ -321,6 +361,7 @@ export function JobQuotesTab({
                           <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                           <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                           <TourOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
+                          <TrainOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                         </td>
                         <td className="py-2 pl-4 text-xs text-right text-muted-foreground">
                           <div>{li.qty}</div>
@@ -336,7 +377,7 @@ export function JobQuotesTab({
                               is longer, and the client documents still say so. */}
                           {hasComplimentaryNight(li) ? (
                             <div className="text-[10px] text-emerald-600 dark:text-emerald-500">
-                              of {stayNights(li)}
+                              of {stayNights(li)} nights
                             </div>
                           ) : null}
                         </td>
@@ -378,7 +419,12 @@ export function JobQuotesTab({
                 </table>
               </div>
               <div className="mt-3">
-                <QuoteAdjustmentsLedger quote={q} editable={canEditLines} onSaved={mutate} />
+                <QuoteAdjustmentsLedger
+                  quote={q}
+                  editable={canEditLines}
+                  bookingHeadcount={bookingHeadcount}
+                  onSaved={mutate}
+                />
               </div>
               {q.overrideReason && (
                 <div className="mt-3 p-2 bg-payment-yellow/10 rounded-md">

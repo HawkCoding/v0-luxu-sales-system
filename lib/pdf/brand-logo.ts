@@ -1,6 +1,6 @@
 import fs from "fs"
 import path from "path"
-import { FOOTER_BRAND_LOCAL_PATH } from "@/lib/assets/footer-brand"
+import { DOCUMENT_BRAND_LOGO_LOCAL_PATH } from "@/lib/assets/footer-brand"
 
 // Server-only module: the brand logo is resolved to bytes at render time, then
 // handed to the PDF document as a prop. react-pdf renders synchronously, so the
@@ -31,7 +31,7 @@ function readCommittedLogo(): BrandLogoImage | null {
   if (cache.has(DISK_KEY)) return cache.get(DISK_KEY) ?? null
   let result: BrandLogoImage | null
   try {
-    const file = path.join(process.cwd(), ...FOOTER_BRAND_LOCAL_PATH.split("/"))
+    const file = path.join(process.cwd(), ...DOCUMENT_BRAND_LOGO_LOCAL_PATH.split("/"))
     result = { data: fs.readFileSync(file), format: "png" }
   } catch {
     result = null

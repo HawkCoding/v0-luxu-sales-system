@@ -219,7 +219,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     </div>
   </div>
 
-<div class="guidance">Please hand to your service provider. Pre-payment was made by Luxus Travel &amp; Tours for all services mentioned below. Guests must settle extras direct with the service providers.</div>
+<div class="guidance">Please hand to your service provider. Pre-payment was made by Luxus Travel &amp; Tours for all services mentioned below. Guests must settle extras directly with the service providers.</div>
 
 
   <div class="section">
@@ -232,7 +232,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
 
       <div class="info-row">
         <div class="info-label">Number of Guests</div>
-        <div class="info-value">2 adults</div>
+        <div class="info-value">2 Adults</div>
       </div>
 
       <div class="info-row info-row-shaded">

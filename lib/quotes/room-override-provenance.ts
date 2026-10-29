@@ -113,3 +113,46 @@ export async function loadTourOverrideProvenance(
 
   return provenance
 }
+
+/**
+ * Who put a train suite's per-person fare override there, and when — read from
+ * booking_service_units rather than taken from the request, same reasoning as
+ * loadRoomOverrideProvenance. The three fares (adult/child/infant) share one stamp.
+ *
+ * Filtered on fare_override_set_at rather than the three amounts: PATCH /api/jobs/[id]/services
+ * stamps it exactly when at least one fare is set and clears it otherwise, so it is the one column
+ * that says "this suite carries an override".
+ *
+ * Safe to call with an empty id list. Units with no override (or ids that don't resolve) are
+ * simply absent from the map.
+ */
+export async function loadTrainFareOverrideProvenance(
+  supabase: SupabaseClient<Database>,
+  unitIds: readonly string[],
+): Promise<Map<string, RoomOverrideProvenance>> {
+  const provenance = new Map<string, RoomOverrideProvenance>()
+  const ids = Array.from(new Set(unitIds.filter(Boolean)))
+  if (ids.length === 0) return provenance
+
+  const { data: units, error } = await supabase
+    .from("booking_service_units")
+    .select("id, fare_override_set_at, fare_override_set_by")
+    .in("id", ids)
+    .not("fare_override_set_at", "is", null)
+
+  if (error || !units || units.length === 0) return provenance
+
+  const nameByUserId = await resolveOverrideSetterNames(
+    supabase,
+    units.map((unit) => unit.fare_override_set_by),
+  )
+
+  for (const unit of units) {
+    provenance.set(unit.id, {
+      setAt: unit.fare_override_set_at,
+      setByName: unit.fare_override_set_by ? nameByUserId.get(unit.fare_override_set_by) ?? null : null,
+    })
+  }
+
+  return provenance
+}

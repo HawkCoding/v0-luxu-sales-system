@@ -22,7 +22,6 @@ const defaultDevQuickLoginEmails = [
   "monade@luxustravel.co.za",
   "douwlien@luxustravel.co.za",
 ]
-const defaultDevQuickLoginPasswords = ["password123"]
 
 interface DevQuickLoginCandidates {
   email: string
@@ -73,10 +72,7 @@ function getDevQuickLoginCandidates() {
     ...splitCommaSeparatedValues(configuredEmail).map((email) => email.toLowerCase()),
     ...defaultDevQuickLoginEmails,
   ])
-  const candidatePasswords = dedupeValues([
-    ...splitCommaSeparatedValues(rawPasswords),
-    ...defaultDevQuickLoginPasswords,
-  ])
+  const candidatePasswords = dedupeValues(splitCommaSeparatedValues(rawPasswords))
 
   if (candidateEmails.length === 0 || candidatePasswords.length === 0) {
     return null

@@ -949,6 +949,10 @@ export interface PricingSnapshot {
    * (manual-pricing legs). */
   rateTypeInherited?: boolean | null
   travelDate: string
+  /** YYYY-MM-DD, the last day this line's service covers (train arrival, hotel check-out, rental
+   *  return). Stamped at build time from 2026-10; absent on older lines and on extras, where
+   *  lib/quotes/line-item-date.ts falls back to the stay length or the start date alone. */
+  serviceEndDate?: string | null
   passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
   baseUnitPrice: number
   markupPct: number
@@ -1003,7 +1007,9 @@ export interface PricingSnapshot {
   isComplimentaryTransport?: boolean | null
   /** Transfer/rental legs only: the booking_transport_requests row this line priced, so the
    *  voucher builder can match a complimentary flag back to the specific captured trip (unlike
-   *  hotels, whose complimentary flag is per-leg, transfers are per-request). */
+   *  hotels, whose complimentary flag is per-leg, transfers are per-request), and the invoice can
+   *  name the trip's pick-up/drop-off. Stamped on comped lines only until 2026-10; older charged
+   *  lines lack it and are matched heuristically (lib/invoices/transport-line-points.ts). */
   transportRequestId?: string | null
   /** Transfers only: which pricing basis this specific line priced under. Present on every
    *  transfer line once any transfer supplier has adopted per-person pricing, so a leg mixing a
@@ -1023,6 +1029,20 @@ export interface PricingSnapshot {
   manualTourPriceBase?: number | null
   manualTourPriceSetAt?: string | null
   manualTourPriceSetByName?: string | null
+  /** Train rate-card legs only: the consultant-typed per-person fare that replaced the rate card
+   *  for this line's passenger kind on this suite, in sourceCurrency. Stamped only on a line whose
+   *  own kind was overridden (a kind left blank prices off the card and carries none of this).
+   *  Internal-only, same posture as manualTransportPrice. */
+  manualTrainFare?: number | null
+  /** The rate card's per-person fare for this kind that the override replaced, same currency. Null
+   *  when the suite had no valid card at all. */
+  manualTrainFareBase?: number | null
+  manualTrainFareSetAt?: string | null
+  manualTrainFareSetByName?: string | null
+  /** Set when this line's own kind was left blank and it took another kind's typed fare instead —
+   *  a child on a card with no child price follows the typed adult fare (see overriddenFares). The
+   *  fare is still the consultant's number, so the line carries manualTrainFare like a typed one. */
+  manualTrainFareInheritedFrom?: "adult" | null
   /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
   unit?: string | null
   /** Hotel per-person legs only: how the line's qty was arrived at. The qty on such a line is
@@ -1740,5 +1760,5 @@ export const VOUCHER_TEMPLATE_DEFAULTS: VoucherTemplate = {
   footer_phone: "",
   footer_email: "",
   guidance_text:
-    "Please hand to your service provider. Pre-payment was made by Luxus Travel & Tours for all services mentioned below. Guests must settle extras direct with the service providers.",
+    "Please hand to your service provider. Pre-payment was made by Luxus Travel & Tours for all services mentioned below. Guests must settle extras directly with the service providers.",
 }

@@ -53,9 +53,28 @@ export function useFilterParams<T extends Record<string, string | undefined>>(
 
   const values = useMemo(() => ({ ...urlValues, ...pending }), [urlValues, pending])
 
+  // A pending edit is dropped only once the URL has caught up to it. Dropping it as soon as
+  // router.replace() is called would flash the input back to the stale URL value until the
+  // navigation lands, swallowing whatever was typed in that window.
+  useEffect(() => {
+    setPending((prev) => {
+      const settled = (Object.keys(prev) as (keyof T)[]).filter(
+        (key) => timers.current[key] === undefined && urlValues[key] === (prev[key] ?? defaults[key]),
+      )
+      if (settled.length === 0) return prev
+      const next = { ...prev }
+      for (const key of settled) delete next[key]
+      return next
+    })
+  }, [urlValues, pending, defaults])
+
+  // Latest URL params, so a debounced commit never rebuilds the query from a stale render.
+  const searchParamsRef = useRef(searchParams)
+  searchParamsRef.current = searchParams
+
   const commit = useCallback(
     (key: keyof T, value: string | undefined) => {
-      const params = new URLSearchParams(searchParams.toString())
+      const params = new URLSearchParams(searchParamsRef.current.toString())
       const isDefault = value === undefined || value === defaults[key]
       if (isDefault) {
         params.delete(key as string)
@@ -65,7 +84,7 @@ export function useFilterParams<T extends Record<string, string | undefined>>(
       const query = params.toString()
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
     },
-    [defaults, pathname, router, searchParams],
+    [defaults, pathname, router],
   )
 
   const setValue = useCallback(
@@ -77,20 +96,15 @@ export function useFilterParams<T extends Record<string, string | undefined>>(
 
       if (options?.debounceMs) {
         timers.current[key] = setTimeout(() => {
+          delete timers.current[key]
           commit(key, value)
-          setPending((prev) => {
-            const next = { ...prev }
-            delete next[key]
-            return next
-          })
+          // Re-render so the settle effect can drop this edit if the URL already matches.
+          setPending((prev) => ({ ...prev }))
         }, options.debounceMs)
       } else {
+        delete timers.current[key]
         commit(key, value)
-        setPending((prev) => {
-          const next = { ...prev }
-          delete next[key]
-          return next
-        })
+        setPending((prev) => ({ ...prev }))
       }
     },
     [commit],

@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
+import { FORWARD_STAGES } from "@/lib/pipeline/validate-transition"
+import type { PipelineStage } from "@/lib/types"
 
 type QuoteBalanceRow = Pick<
   Database["public"]["Tables"]["quotes"]["Row"],
@@ -39,7 +41,7 @@ export async function calculateInvoiceBalance(
   supabase: SupabaseClient<Database>,
   bookingId: string,
 ): Promise<InvoiceBalance> {
-  const [{ data: quote, error: quoteError }, { data: payments, error: paymentsError }] =
+  const [{ data: acceptedQuote, error: quoteError }, { data: payments, error: paymentsError }] =
     await Promise.all([
       supabase
         .from("quotes")
@@ -54,6 +56,34 @@ export async function calculateInvoiceBalance(
 
   if (quoteError) throw quoteError
   if (paymentsError) throw paymentsError
+
+  // A stage override can move a booking past acceptance (e.g. an online booking) without the quote
+  // ever being flipped to accepted. Bill the newest live quote then, matching what the invoice
+  // dialog shows, instead of dead-ending the next step.
+  let quote = acceptedQuote
+  if (!quote) {
+    const { data: booking, error: bookingError } = await supabase
+      .from("bookings")
+      .select("stage")
+      .eq("id", bookingId)
+      .maybeSingle()
+    if (bookingError) throw bookingError
+    // Only once the booking is actually past acceptance; before that an unaccepted quote is not billable.
+    const stageIndex = FORWARD_STAGES.indexOf((booking?.stage ?? "") as PipelineStage)
+    const pastAcceptance = stageIndex >= FORWARD_STAGES.indexOf("accepted")
+    const { data: liveQuote, error: liveError } = pastAcceptance ? await supabase
+      .from("quotes")
+      .select("id, subtotal, total, currency, status, created_at, agent_commission, discount_amount, discount_visible")
+      .eq("booking_id", bookingId)
+      .in("status", ["sent", "draft"])
+      .gt("total", 0)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle() : { data: null, error: null }
+    if (liveError) throw liveError
+    quote = liveQuote
+  }
+
   if (!quote || quote.total <= 0) {
     throw new Error("A priced quote is required before generating an invoice")
   }

@@ -1,4 +1,4 @@
-import { toSignatureBrand, type SignatureBrand } from "@/lib/email/signature-brands"
+import { toSignatureBrand, type SignatureBrand, type SignatureBrandRow } from "@/lib/email/signature-brands"
 import { getEmailSignatureSettings } from "@/lib/settings-access"
 import { createServiceClient } from "@/lib/supabase/server"
 
@@ -16,6 +16,24 @@ export interface ResolvedEmailSignature {
 }
 
 /**
+ * Unsaved per-brand text overrides layered over the stored `signature_brands`
+ * row — used by the Settings preview to render the editor's draft. Callers
+ * must pass already-sanitized HTML (sanitizeSignatureHtml).
+ */
+export type SignatureBrandRowOverrides = Partial<
+  Pick<
+    SignatureBrandRow,
+    | "company_line"
+    | "registration_line"
+    | "trading_hours"
+    | "divisions_line"
+    | "confidentiality"
+    | "office_address"
+    | "sender_layout"
+  >
+>
+
+/**
  * Resolve the outgoing-email signature for a sender. SMTP/IMAP only
  * transport a message — nothing appends a signature client-side — so this
  * merges the per-person `email_signatures` row (admin-edited in Settings)
@@ -31,6 +49,7 @@ export interface ResolvedEmailSignature {
 export async function resolveEmailSignature(
   profileId: string | null | undefined,
   brandId?: string | null,
+  brandOverrides?: SignatureBrandRowOverrides,
 ): Promise<ResolvedEmailSignature | null> {
   if (!profileId) return null
 
@@ -66,7 +85,14 @@ export async function resolveEmailSignature(
     const brands = brandRows ?? []
     if (brands.length === 0) return null
 
-    const brandRow = (brandId && brands.find((b) => b.id === brandId)) || brands[0]
+    const requestedRow = brandId ? brands.find((b) => b.id === brandId) : undefined
+    // Draft overrides only ever apply to the brand they were written for —
+    // never to the fallback brand an unknown/disabled id falls through to.
+    const brandRow = requestedRow
+      ? brandOverrides
+        ? { ...requestedRow, ...brandOverrides }
+        : requestedRow
+      : brands[0]
 
     const profileName = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim()
     const fullName = signature?.full_name?.trim() || profileName

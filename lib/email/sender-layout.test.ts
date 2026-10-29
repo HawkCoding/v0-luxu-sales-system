@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { renderSenderLayout, DEFAULT_SENDER_LAYOUT, type SenderLayoutFields } from "./sender-layout"
+import {
+  linkBareContacts,
+  renderSenderLayout,
+  styleSignatureLinks,
+  DEFAULT_SENDER_LAYOUT,
+  SIGNATURE_TEXT_COLOR,
+  type SenderLayoutFields,
+} from "./sender-layout"
+
+const LINK_STYLE = `style="color:${SIGNATURE_TEXT_COLOR};text-decoration:none"`
 
 const FULL: SenderLayoutFields = {
   fullName: "Leonie Burke",
@@ -16,10 +25,42 @@ describe("renderSenderLayout", () => {
     const html = renderSenderLayout("", FULL)
     expect(html).toBe(
       "<strong>Leonie Burke</strong> | <em>Tour Operating Consultant</em><br>" +
-        'Tel: +27 (0)21 100 3596 | Cell: +27 (0)81 580 6471 | Fax: +27 (0)86 598 0812<br>' +
-        'Email: <a href="mailto:reservations@sa-rail.co.za">reservations@sa-rail.co.za</a> | ' +
-        'Web: <a href="https://www.sa-rail.co.za">www.sa-rail.co.za</a>',
+        `Tel: <a href="tel:+27211003596" ${LINK_STYLE}>+27 (0)21 100 3596</a> | ` +
+        `Cell: <a href="tel:+27815806471" ${LINK_STYLE}>+27 (0)81 580 6471</a> | ` +
+        `Fax: <a href="tel:+27865980812" ${LINK_STYLE}>+27 (0)86 598 0812</a><br>` +
+        `Email: <a href="mailto:reservations@sa-rail.co.za" ${LINK_STYLE}>reservations@sa-rail.co.za</a> | ` +
+        `Web: <a href="https://www.sa-rail.co.za" ${LINK_STYLE}>www.sa-rail.co.za</a>`,
     )
+  })
+
+  it("styles the phone, email and website links in the signature text colour, never the client's default blue", () => {
+    const html = renderSenderLayout("", FULL)
+    const anchors = html.match(/<a\b[^>]*>/g) ?? []
+    expect(anchors).toHaveLength(5)
+    for (const anchor of anchors) {
+      expect(anchor).toContain("color:#3d3831")
+      expect(anchor).toContain("text-decoration:none")
+    }
+    expect(html).not.toMatch(/blue|#0000ee|#1155cc/i)
+  })
+
+  it("styles links the admin authored in the layout too", () => {
+    const html = renderSenderLayout('{{fullName}}<br><a href="https://luxus.example">Book online</a>', FULL)
+    expect(html).toContain(`<a href="https://luxus.example" ${LINK_STYLE}>Book online</a>`)
+  })
+
+  it("gives a link inside a coloured span that span's colour", () => {
+    const html = renderSenderLayout('<span style="color:#1f4e79">{{email}}</span>', FULL)
+    expect(html).toBe(
+      '<span style="color:#1f4e79"><a href="mailto:reservations@sa-rail.co.za" style="color:#1f4e79;text-decoration:none">' +
+        "reservations@sa-rail.co.za</a></span>",
+    )
+  })
+
+  it("links a shared address the layout hard-codes instead of using {{email}}/{{website}}", () => {
+    const html = renderSenderLayout("{{fullName}}<br>Email: reservations@sa-rail.co.za | Web: www.sa-rail.co.za", FULL)
+    expect(html).toContain(`<a href="mailto:reservations@sa-rail.co.za" ${LINK_STYLE}>reservations@sa-rail.co.za</a>`)
+    expect(html).toContain(`<a href="https://www.sa-rail.co.za" ${LINK_STYLE}>www.sa-rail.co.za</a>`)
   })
 
   it("falls back to DEFAULT_SENDER_LAYOUT when the layout is blank", () => {
@@ -67,11 +108,92 @@ describe("renderSenderLayout", () => {
 
   it("strips an existing https:// prefix from website before re-adding it", () => {
     const html = renderSenderLayout("{{website}}", { ...FULL, website: "https://www.sa-rail.co.za" })
-    expect(html).toBe('<a href="https://www.sa-rail.co.za">https://www.sa-rail.co.za</a>')
+    expect(html).toBe(`<a href="https://www.sa-rail.co.za" ${LINK_STYLE}>https://www.sa-rail.co.za</a>`)
   })
 
   it("keeps a static segment with no tokens even when every field is empty", () => {
     const html = renderSenderLayout("<em>Team</em> | {{jobTitle}}", { ...FULL, jobTitle: null })
     expect(html).toBe("<em>Team</em>")
+  })
+})
+
+describe("styleSignatureLinks", () => {
+  const MUTED = "#6b6258"
+
+  it("adds an inline colour and drops the underline on a bare link", () => {
+    expect(styleSignatureLinks('Visit <a href="https://sa-rail.co.za">sa-rail.co.za</a>', MUTED)).toBe(
+      'Visit <a href="https://sa-rail.co.za" style="color:#6b6258;text-decoration:none">sa-rail.co.za</a>',
+    )
+  })
+
+  it("styles every link, including mailto and tel", () => {
+    const html = styleSignatureLinks(
+      '<a href="mailto:a@b.com">a@b.com</a> | <a href="tel:+27211003596">021 100 3596</a>',
+      MUTED,
+    )
+    expect(html.match(/style="color:#6b6258;text-decoration:none"/g)).toHaveLength(2)
+  })
+
+  it("takes the colour of the nearest coloured span around the link", () => {
+    const html = styleSignatureLinks(
+      '<span style="font-size:12px;color:rgb(68, 80, 90)">Divisions: <span style="font-size:10px"><a href="https://x.example">X</a></span></span> <a href="https://y.example">Y</a>',
+      MUTED,
+    )
+    expect(html).toContain('<a href="https://x.example" style="color:rgb(68, 80, 90);text-decoration:none">X</a>')
+    // Outside the span again, the line colour applies.
+    expect(html).toContain('<a href="https://y.example" style="color:#6b6258;text-decoration:none">Y</a>')
+  })
+
+  it("ignores background-color when looking for a span's colour", () => {
+    const html = styleSignatureLinks(
+      '<span style="background-color:#ffff00"><a href="https://x.example">X</a></span>',
+      MUTED,
+    )
+    expect(html).toContain('style="color:#6b6258;text-decoration:none"')
+  })
+
+  it("keeps a colour or decoration the link already declares, and is idempotent", () => {
+    const once = styleSignatureLinks('<a href="https://x.example" style="color:#123456">X</a>', MUTED)
+    expect(once).toBe('<a href="https://x.example" style="text-decoration:none;color:#123456">X</a>')
+    expect(styleSignatureLinks(once, MUTED)).toBe(once)
+  })
+
+  it("links and styles an address or URL typed as plain text, so the recipient's client can't link it in blue", () => {
+    const html = styleSignatureLinks(
+      'Email: <span style="font-size:12px">reservations@sa-rail.co.za</span> | Web: www.sa-rail.co.za.',
+      MUTED,
+    )
+    expect(html).toBe(
+      'Email: <span style="font-size:12px"><a href="mailto:reservations@sa-rail.co.za" style="color:#6b6258;text-decoration:none">' +
+        "reservations@sa-rail.co.za</a></span> | Web: " +
+        '<a href="https://www.sa-rail.co.za" style="color:#6b6258;text-decoration:none">www.sa-rail.co.za</a>.',
+    )
+    expect(styleSignatureLinks(html, MUTED)).toBe(html)
+  })
+
+  it("links and styles a typed phone number, dialling without the trunk 0", () => {
+    const html = styleSignatureLinks("Tel: +27 021 100 3596 | Cell: 081 580 6471", MUTED)
+    expect(html).toBe(
+      'Tel: <a href="tel:+27211003596" style="color:#6b6258;text-decoration:none">+27 021 100 3596</a> | ' +
+        'Cell: <a href="tel:0815806471" style="color:#6b6258;text-decoration:none">081 580 6471</a>',
+    )
+  })
+
+  it("leaves registration numbers, hours and dates in the small print unlinked", () => {
+    const line = "Registered in South Africa CK2007/049324/23 | Mon - Fri 08h30 to 16h00 | Since 07 October 2014"
+    expect(linkBareContacts(line)).toBe(line)
+  })
+
+  it("keeps an https URL as typed and never double-links text already inside a link", () => {
+    expect(linkBareContacts("See https://sa-rail.co.za/trains")).toBe(
+      'See <a href="https://sa-rail.co.za/trains">https://sa-rail.co.za/trains</a>',
+    )
+    const linked = '<a href="mailto:a@b.co.za">a@b.co.za</a> <a href="https://www.x.example"><strong>www.x.example</strong></a>'
+    expect(linkBareContacts(linked)).toBe(linked)
+  })
+
+  it("leaves non-link tags and text alone", () => {
+    const html = "<strong>Bold</strong> <em>italic</em> <abbr>abbr</abbr>"
+    expect(styleSignatureLinks(html, MUTED)).toBe(html)
   })
 })

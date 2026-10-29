@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
+import { getRecordHref } from "@/lib/booking-visibility"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
 import { useClubNames, useCustomerDetail } from "@/lib/use-data"
 import {
@@ -1178,7 +1179,7 @@ export function CustomerDetailView({
             <p className="text-sm text-muted-foreground">No bookings found for this customer.</p>
           )}
           {bookings.map((booking) => (
-            <Link key={booking.id} href={`/app/bookings/${booking.id}`}>
+            <Link key={booking.id} href={getRecordHref(booking.id, booking.stage)}>
               <div className="rounded-lg border p-3 hover:bg-accent transition-colors">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -1230,7 +1231,7 @@ export function CustomerDetailView({
         <NewEnquiryDialog
           open={newBookingOpen}
           onOpenChange={setNewBookingOpen}
-          onSaved={(jobId) => router.push(`/app/bookings/${jobId}?tab=quotes`)}
+          onSaved={(jobId) => router.push(`${getRecordHref(jobId, "enquiry")}?tab=quotes`)}
           presetCustomer={{
             id: customer.id,
             title: customer.title,

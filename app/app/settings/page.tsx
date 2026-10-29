@@ -58,8 +58,10 @@ import {
 import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
+import { UploadRequirementsList } from "@/components/upload-requirements-list"
+import { LOGO_UPLOAD_REQUIREMENTS, pngLogoUploadError, uploadErrorMessage } from "@/lib/upload-limits"
 import { Switch } from "@/components/ui/switch"
-import { ReportingAccessSwitch } from "@/components/settings/reporting-access-switch"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { AlertTriangle, ArrowRight, BarChart3, Clock, FlaskConical, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, SlidersHorizontal, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
@@ -420,10 +422,6 @@ function UserManagementCard() {
               <CardDescription className="text-xs mt-1">
                 Add users, manage roles, reset passwords, deactivate accounts, or permanently delete users.
               </CardDescription>
-              <p className="mt-1.5 flex items-start gap-1.5 text-xs text-muted-foreground">
-                <BarChart3 className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span>Reporting is hidden for everyone until switched on here.</span>
-              </p>
             </div>
             <Button
               size="sm"
@@ -482,15 +480,13 @@ function UserManagementCard() {
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 items-center justify-between gap-3 border-t pt-2 sm:justify-end sm:border-t-0 sm:pt-0">
-                      <ReportingAccessSwitch
-                        id={`reporting-access-${u.userId}`}
-                        userName={displayName}
-                        checked={u.canViewReporting}
-                        saving={isSavingReporting}
-                        disabled={isBusy}
-                        onCheckedChange={(next) => void handleToggleReporting(u, next)}
-                      />
+                    <div className="flex shrink-0 items-center justify-end gap-2">
+                      {isSavingReporting && (
+                        <Spinner
+                          className="size-3.5 text-muted-foreground"
+                          aria-label={`Saving reporting access for ${displayName}`}
+                        />
+                      )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" aria-label={`Actions for ${displayName}`}>
@@ -547,6 +543,13 @@ function UserManagementCard() {
                           >
                             <Pencil className="h-4 w-4" />
                             Edit details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => void handleToggleReporting(u, !u.canViewReporting)}
+                            disabled={isBusy || isSavingReporting}
+                          >
+                            <BarChart3 className="h-4 w-4" />
+                            {u.canViewReporting ? "Remove reporting access" : "Allow reporting"}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -642,7 +645,7 @@ function UserManagementCard() {
                 </Label>
                 <p id="new-user-reporting-help" className="text-xs text-muted-foreground">
                   Shows the Reporting page and report exports. Off by default; you can change it
-                  later from the user list.
+                  later from the user&apos;s actions menu.
                 </p>
               </div>
               <Switch
@@ -966,8 +969,10 @@ function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLo
   }, [])
 
   const handleLogoUpload = async (file: File) => {
-    if (file.type !== "image/png") {
-      toast.error("The logo must be a PNG image.")
+    const fileError = pngLogoUploadError(file)
+    if (fileError) {
+      toast.error(fileError)
+      if (logoInputRef.current) logoInputRef.current.value = ""
       return
     }
 
@@ -990,8 +995,7 @@ function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLo
       body.append("file", file)
       const res = await fetch("/api/settings/app-logo", { method: "POST", body })
       if (!res.ok) {
-        const { error: message } = await res.json().catch(() => ({ error: "" }))
-        throw new Error(message || "upload failed")
+        throw new Error(await uploadErrorMessage(res, "Failed to upload logo"))
       }
       const { url } = (await res.json()) as { url: string }
       setLogoUrl(url)
@@ -1087,10 +1091,10 @@ function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLo
                     </Button>
                   )}
                 </div>
+                <UploadRequirementsList requirements={LOGO_UPLOAD_REQUIREMENTS} />
                 <p className="text-[11px] text-muted-foreground max-w-xs">
-                  PNG, up to 5 MB, square recommended. Without a logo the app shows the
-                  company name's initials. The browser tab icon updates on next reload;
-                  removing it clears the tab icon entirely.
+                  No logo? The app shows the company initials. The browser tab icon
+                  updates after a page reload.
                 </p>
               </div>
             )}
@@ -1317,7 +1321,7 @@ function SessionTimeoutSettingsCard({ canEdit }: { canEdit: boolean }) {
 }
 
 function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
-  const [enabled, setEnabled] = useState(true)
+  const [enabled, setEnabled] = useState(false)
   const [cadenceInput, setCadenceInput] = useState("3,7")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

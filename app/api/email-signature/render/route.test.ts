@@ -119,6 +119,37 @@ describe("POST /api/email-signature/render", () => {
     expect(body.html).toContain("Leonie Burke")
   })
 
+  it("renders unsaved draft overrides, sanitized the same way the brand PATCH does", async () => {
+    makeAuth("admin")
+    signatureMocks.resolveEmailSignature.mockResolvedValue(SAMPLE_SIGNATURE)
+
+    const res = await POST(
+      makeRequest({
+        brandId: BRAND_ID,
+        draft: { companyLine: "<p>Draft co</p><script>bad()</script>", tradingHours: null },
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(signatureMocks.resolveEmailSignature).toHaveBeenCalledWith(SELF_ID, BRAND_ID, {
+      company_line: "<p>Draft co</p>",
+      trading_hours: null,
+    })
+  })
+
+  it("400s a draft field over the brand PATCH length limit", async () => {
+    makeAuth("admin")
+    const res = await POST(makeRequest({ brandId: BRAND_ID, draft: { companyLine: "x".repeat(2001) } }))
+    expect(res.status).toBe(400)
+    expect(signatureMocks.resolveEmailSignature).not.toHaveBeenCalled()
+  })
+
+  it("still 403s a consultant previewing another profile with a draft", async () => {
+    makeAuth("consultant")
+    const res = await POST(makeRequest({ brandId: BRAND_ID, profileId: OTHER_ID, draft: { companyLine: "x" } }))
+    expect(res.status).toBe(403)
+  })
+
   it("returns an empty fragment when the signature cannot be resolved", async () => {
     makeAuth("consultant")
     signatureMocks.resolveEmailSignature.mockResolvedValue(null)

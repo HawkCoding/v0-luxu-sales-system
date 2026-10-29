@@ -2,6 +2,7 @@ import nodemailer from "nodemailer"
 import { Resend } from "resend"
 import { formatFromHeader } from "@/lib/email/sender-identity"
 import { sendViaSalespersonSmtp } from "@/lib/email/smtp-transport"
+import { finalizeContentSlot } from "@/lib/templates/email-spacing"
 import {
   applyEmailTestMode,
   EmailTestModeError,
@@ -193,8 +194,13 @@ export interface SendEmailOptions {
  * The single choke point every outbound email passes through. Test mode is
  * enforced here — before any provider is chosen — so no send path, present or
  * future, can reach a customer while the switch is on.
+ *
+ * The content slot's spacing is written inline here too, so Outlook keeps the
+ * paragraph gaps and blank lines (lib/templates/email-spacing.ts). Only the
+ * outgoing copy changes: callers keep — and store — the editor's own markup.
  */
-export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
+export async function sendEmail(input: SendEmailOptions): Promise<SendEmailResult> {
+  const options: SendEmailOptions = input.html ? { ...input, html: finalizeContentSlot(input.html) } : input
   const intendedRecipients = normalizeRecipients(options.to)
   const fallbackProvider = options.salespersonCredentialId
     ? "smtp"

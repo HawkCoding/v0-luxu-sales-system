@@ -45,6 +45,13 @@ describe("toEditorHtml", () => {
     expect(warnings).toEqual([])
   })
 
+  it.each(["11px", "13px", "15px"])("leaves an in-between %s font-size span as rich content", (size) => {
+    const src = `<p>Hi <span style="font-size: ${size}">sized</span> text</p>`
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+    expect(canRoundTrip(src, BLOCK_TOKENS)).toBe(true)
+  })
+
   it("lifts an off-allowlist font-size span into an opaque placeholder", () => {
     const src = '<p>Hi <span style="font-size: 72px">huge</span></p>'
     const { html } = toEditorHtml(src, BLOCK_TOKENS)
@@ -132,6 +139,61 @@ describe("toEditorHtml", () => {
     expect(html).toContain("data-preserved-block")
   })
 
+  it.each(["1", "1.15", "1.5", "2"])("leaves a paragraph with an allowlisted line-height of %s as rich content", (value) => {
+    const src = `<p style="line-height: ${value};">Spaced</p><p>Plain</p>`
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+    expect(html).not.toContain("data-preserved-block")
+  })
+
+  it.each([
+    ["None", "margin: 0px;"],
+    ["None, unitless", "margin: 0;"],
+    ["16px", "margin: 0px 0px 16px;"],
+    ["24px, as the toolbar writes it", "margin: 0 0 24px;"],
+    ["32px, four-value form", "margin: 0px 0px 32px 0px;"],
+    ["with line spacing", "line-height: 1.5; margin: 0px 0px 24px;"],
+  ])("leaves a paragraph with allowlisted paragraph spacing (%s) as rich content", (_label, style) => {
+    const src = `<p style="${style}">Spaced</p><p>Plain</p>`
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).not.toContain("data-preserved-block")
+    expect(canRoundTrip(src, BLOCK_TOKENS)).toBe(true)
+  })
+
+  it("leaves list items with an allowlisted line-height as rich content", () => {
+    const src = '<ul><li style="line-height: 1.5;">One</li><li>Two</li></ul>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(normalizeForCompare(html)).toBe(normalizeForCompare(src))
+    expect(canRoundTrip(src, BLOCK_TOKENS)).toBe(true)
+  })
+
+  it.each([
+    ["an off-allowlist number", "line-height: 1.4"],
+    ["a px value", "line-height: 24px"],
+    ["a CSS injection attempt", "line-height: 1.5; background: url(evil)"],
+    ["a property the toolbar never sets on a block", "padding: 0"],
+    ["a duplicate line-height", "line-height: 1.5; line-height: 2"],
+    ["an off-allowlist bottom margin", "margin: 0px 0px 13px"],
+    ["a top margin", "margin: 8px 0px 16px"],
+    ["a side margin", "margin: 0px 4px 16px"],
+    ["a two-value margin", "margin: 0px 16px"],
+    ["a longhand bottom margin", "margin-bottom: 16px"],
+    ["a duplicate margin", "margin: 0px 0px 16px; margin: 0px 0px 24px"],
+  ])("lifts a paragraph styled with %s into an opaque placeholder", (_label, style) => {
+    const { html } = toEditorHtml(`<p style="${style}">x</p>`, BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a list whose item carries an off-allowlist line-height into an opaque placeholder", () => {
+    const { html } = toEditorHtml('<ul><li style="line-height: 3">x</li></ul>', BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
+  it("lifts a line-height paragraph that also carries a class into an opaque placeholder", () => {
+    const { html } = toEditorHtml('<p class="foo" style="line-height: 1.5">x</p>', BLOCK_TOKENS)
+    expect(html).toContain("data-preserved-block")
+  })
+
   it("does not treat a non-block token as a block", () => {
     const src = "<p>Hello {{customerName}}</p>"
     const { html } = toEditorHtml(src, BLOCK_TOKENS)
@@ -172,8 +234,92 @@ describe("fromEditorHtml", () => {
     expect(fromEditorHtml(editorHtml)).toBe("<ul><li>one</li><li>two</li></ul>")
   })
 
-  it("strips a single trailing empty paragraph", () => {
-    expect(fromEditorHtml("<p>body</p><p></p>")).toBe("<p>body</p>")
+  it("moves a line-height on a list item's inner <p> to the <li> when unwrapping", () => {
+    const editorHtml = '<ul><li><p style="line-height: 1.5;">one</p></li><li style="line-height: 2;"><p>two</p></li></ul>'
+    expect(fromEditorHtml(editorHtml)).toBe(
+      '<ul><li style="line-height: 1.5;">one</li><li style="line-height: 2;">two</li></ul>',
+    )
+  })
+
+  it("merges an inner <p>'s spacing into the <li>'s own style when unwrapping, the <p> winning a clash", () => {
+    const editorHtml =
+      '<ul><li style="line-height: 2;"><p style="margin: 0px 0px 24px;">one</p></li>' +
+      '<li style="margin: 0px 0px 16px;"><p style="margin: 0px;">two</p></li></ul>'
+    expect(fromEditorHtml(editorHtml)).toBe(
+      '<ul><li style="line-height: 2; margin: 0px 0px 24px;">one</li><li style="margin: 0px;">two</li></ul>',
+    )
+  })
+
+  it("strips the empty paragraph the editor appends after a final block token", () => {
+    const editorHtml = '<p>body</p><div data-preserved-block data-label="X" data-token="quoteSummaryTable"></div><p></p>'
+    expect(fromEditorHtml(editorHtml)).toBe("<p>body</p>{{quoteSummaryTable}}")
+  })
+
+  it("strips the empty paragraph the editor appends after a final list", () => {
+    expect(fromEditorHtml("<p>body</p><ul><li><p>one</p></li></ul><p></p>")).toBe("<p>body</p><ul><li>one</li></ul>")
+  })
+
+  it("strips a trailing artefact paragraph that a select-all line spacing change styled", () => {
+    const editorHtml = '<div data-preserved-block data-label="X" data-token="quoteSummaryTable"></div><p style="line-height: 2;"></p>'
+    expect(fromEditorHtml(editorHtml)).toBe("{{quoteSummaryTable}}")
+  })
+
+  it("strips the lone empty paragraph of an empty editor", () => {
+    expect(fromEditorHtml("<p></p>")).toBe("")
+  })
+
+  // The editor only appends its own empty paragraph after a non-paragraph, so one after a
+  // paragraph is the blank line the salesperson typed under their last sentence (client, 2026-10-26).
+  it("keeps a blank line typed after the last paragraph", () => {
+    expect(fromEditorHtml("<p>Kind regards,</p><p></p>")).toBe("<p>Kind regards,</p><p><br></p>")
+    expect(fromEditorHtml('<p>body</p><p style="line-height: 2;"></p>')).toBe('<p>body</p><p style="line-height: 2;"><br></p>')
+  })
+
+  it("keeps a typed trailing blank line stable across load -> save", () => {
+    const saved = fromEditorHtml("<p>Kind regards,</p><p></p>")
+    const { html } = toEditorHtml(saved, BLOCK_TOKENS)
+    expect(fromEditorHtml(html)).toBe(saved)
+  })
+
+  it("writes a blank line as a paragraph holding a break, so it keeps its height in the email", () => {
+    expect(fromEditorHtml('<p>Dear X</p><p style="line-height: 1.15; margin: 0px;"></p><p>Thanks</p>')).toBe(
+      '<p>Dear X</p><p style="line-height: 1.15; margin: 0px;"><br></p><p>Thanks</p>',
+    )
+  })
+})
+
+describe("blank lines and pasted fonts (client, 2026-10-20)", () => {
+  const CALIBRI = "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif"
+
+  it("loads a stored blank line as an empty paragraph and writes it back unchanged", () => {
+    const stored = '<p>a</p><p style="margin: 0px;"><br></p><p>b</p>'
+    const { html } = toEditorHtml(stored, BLOCK_TOKENS)
+    expect(html).toBe('<p>a</p><p style="margin: 0px;"></p><p>b</p>')
+    expect(fromEditorHtml(html)).toBe(stored)
+    expect(canRoundTrip(stored, BLOCK_TOKENS)).toBe(true)
+  })
+
+  it("keeps a paragraph of pasted Outlook text editable, with its font mapped to Calibri", () => {
+    const stored =
+      '<p><span style="font-size: 12pt; font-family: Calibri, sans-serif; color: rgb(38, 38, 38);">Feel free to send me a few pictures.</span></p>'
+    const { html } = toEditorHtml(stored, BLOCK_TOKENS)
+    expect(html).not.toContain("data-preserved-block")
+    expect(html).toContain(`font-size: 16px; font-family: ${CALIBRI}; color: rgb(38, 38, 38);`)
+    expect(canRoundTrip(stored, BLOCK_TOKENS)).toBe(true)
+  })
+
+  it("keeps a paragraph with an Outlook emoji run editable, dropping the emoji font", () => {
+    const stored =
+      '<p><span style="font-size: 12pt; font-family: Calibri, sans-serif;">Welcome home! </span><span style="font-size: 12pt; font-family: &quot;Segoe UI Emoji&quot;, sans-serif;">😊</span></p>'
+    const { html } = toEditorHtml(stored, BLOCK_TOKENS)
+    expect(html).not.toContain("data-preserved-block")
+    expect(html).not.toContain("Segoe UI Emoji")
+  })
+
+  it("keeps the original bytes of an element that is still locked after mapping fonts", () => {
+    const table = '<table><tbody><tr><td><span style="font-size: 12pt">x</span></td></tr></tbody></table>'
+    const restored = fromEditorHtml(toEditorHtml(table, BLOCK_TOKENS).html)
+    expect(restored).toBe(table)
   })
 })
 

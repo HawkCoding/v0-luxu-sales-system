@@ -33,6 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { formatMoney } from "@/lib/money"
 import { replaceContentSlot } from "@/lib/templates/content-slot"
+import { finalizeContentSlot } from "@/lib/templates/email-spacing"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
@@ -195,6 +196,10 @@ export function QuotePreviewSendDialog({
     if (signatureHtml !== null) out = replaceSignatureSlot(out, signatureHtml) ?? out
     return out
   }, [html, content, signatureHtml])
+  // What the iframe shows: finalHtml with the spacing sendEmail writes inline on the way out
+  // (lib/templates/email-spacing.ts), so the preview is the email that arrives. Display only —
+  // the send posts finalHtml, and the editor keeps `content`, neither of them inlined.
+  const displayHtml = useMemo(() => finalizeContentSlot(finalHtml), [finalHtml])
 
   async function loadPreview() {
     setLoadingPreview(true)
@@ -561,7 +566,7 @@ export function QuotePreviewSendDialog({
                   title="Quote email preview"
                   className="h-[420px] w-full bg-white md:h-full"
                   sandbox=""
-                  srcDoc={finalHtml}
+                  srcDoc={displayHtml}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

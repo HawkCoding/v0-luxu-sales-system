@@ -25,6 +25,7 @@ import {
   hasAnyRateCardForRateType,
 } from "@/lib/rate-cards/resolve"
 import { resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
+import { overridesCoverEveryPresentKind } from "@/lib/pricing/passenger-fares"
 import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { effectiveUnitRateTypeId, supportsUnitRateType } from "@/lib/packages/unit-rate-type"
@@ -97,6 +98,16 @@ export interface SuiteUnitState {
   manualTourPrice: number | null
   /** Read-only provenance for the override, stamped server-side. Never sent back on save. */
   manualTourPriceSetAt?: string | null
+  /** Train rate-card legs only: consultant-typed per-person fares for this suite, one per
+   *  passenger kind, replacing the rate card's price for that kind on this booking. Null leaves
+   *  that kind on its card. A typed fare is final (no single supplement on top). Deliberately NOT
+   *  manualAdultPrice/… above: those belong to manual-pricing legs, and stale values left there
+   *  would otherwise silently become overrides. Booking-scoped and one-shot. */
+  fareOverrideAdult: number | null
+  fareOverrideChild: number | null
+  fareOverrideInfant: number | null
+  /** Read-only provenance for the fare override, stamped server-side. Never sent back on save. */
+  fareOverrideSetAt?: string | null
   /** Train, hotel, cruise and tour legs (supportsUnitRateType): this unit's own rate type,
    *  overriding the leg's rateTypeId (SuiteLegState.rateTypeId) -- two suites of the same type can
    *  be sold at different rate levels. Null falls back to the leg's rate type. Airlines keep one
@@ -203,6 +214,10 @@ export interface SavedSelectionUnitRow {
   complimentary_first_night?: boolean | null
   manual_tour_price?: number | null
   manual_tour_price_set_at?: string | null
+  fare_override_adult?: number | null
+  fare_override_child?: number | null
+  fare_override_infant?: number | null
+  fare_override_set_at?: string | null
   rate_type_id?: string | null
 }
 
@@ -291,6 +306,10 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
     complimentaryFirstNight: false,
     manualTourPrice: null,
     manualTourPriceSetAt: null,
+    fareOverrideAdult: null,
+    fareOverrideChild: null,
+    fareOverrideInfant: null,
+    fareOverrideSetAt: null,
     rateTypeId: null,
   }
 }
@@ -902,6 +921,43 @@ export function mergeLegStatesAfterRebuild(
   })
 }
 
+/**
+ * Ids of the legs whose stored row version no longer matches the stamp `states` holds -- what the
+ * services PATCH would 409 on. A leg the server no longer has, or a state with no stamp yet, is
+ * not reported: neither can be written against a stale version.
+ */
+export function findLegsChangedSince(
+  states: readonly ApplyLegState[],
+  saved: Pick<SavedPackageState, "selections">,
+): string[] {
+  const storedByLegId = new Map(saved.selections.map((row) => [row.package_leg_id, row.updated_at ?? null]))
+  return states.flatMap((state) => {
+    const stored = storedByLegId.get(state.legId)
+    if (!stored || !state.updatedAt) return []
+    return Date.parse(stored) !== Date.parse(state.updatedAt) ? [state.legId] : []
+  })
+}
+
+/**
+ * Replaces the named legs in `local` with their freshly hydrated server state; every other leg
+ * keeps its in-memory edits. A leg whose kind changed, or that has no fresh counterpart, is left
+ * alone -- the same fallback mergeLegStatesAfterRebuild takes.
+ */
+export function takeServerLegs(
+  local: readonly ApplyLegState[],
+  fresh: readonly ApplyLegState[],
+  legIds: ReadonlySet<string>,
+): ApplyLegState[] {
+  const freshByLegId = new Map(fresh.map((state) => [state.legId, state]))
+  return local.map((state) => {
+    if (!legIds.has(state.legId)) return state
+    const replacement = freshByLegId.get(state.legId)
+    if (!replacement) return state
+    if (replacement.kind !== state.kind || replacement.supplierKind !== state.supplierKind) return state
+    return replacement
+  })
+}
+
 /** Hydrates dialog state from the booking's saved selections and transport requests. Legs with
  * no saved row (shouldn't happen after package assign seeds them, but defensive) get defaults. */
 export function hydrateFromSaved(
@@ -960,6 +1016,10 @@ export function hydrateFromSaved(
         complimentaryFirstNight: unit.complimentary_first_night ?? false,
         manualTourPrice: unit.manual_tour_price ?? null,
         manualTourPriceSetAt: unit.manual_tour_price_set_at ?? null,
+        fareOverrideAdult: unit.fare_override_adult ?? null,
+        fareOverrideChild: unit.fare_override_child ?? null,
+        fareOverrideInfant: unit.fare_override_infant ?? null,
+        fareOverrideSetAt: unit.fare_override_set_at ?? null,
         rateTypeId: unit.rate_type_id ?? null,
       }))
 
@@ -1077,6 +1137,10 @@ export interface PackageSelectionsPatchBody {
       complimentaryFirstNight: boolean
       /** Tour legs only — the server rejects it on any other supplier kind. */
       manualTourPrice: number | null
+      /** Train legs only — the server rejects any of these on any other supplier kind. */
+      fareOverrideAdult: number | null
+      fareOverrideChild: number | null
+      fareOverrideInfant: number | null
       /** Train, hotel, cruise and tour legs only (supportsUnitRateType) — the server rejects it on
        *  any other supplier kind. */
       rateTypeId: string | null
@@ -1084,13 +1148,30 @@ export interface PackageSelectionsPatchBody {
   }>
 }
 
+/** A unit's train fare overrides as sent to the server: the unit's own values on a train leg, all
+ *  null everywhere else (the server refuses a non-null override on any other kind). */
+function trainFareOverridePayload(
+  supplierKind: SupplierKind,
+  unit: SuiteUnitState,
+): { fareOverrideAdult: number | null; fareOverrideChild: number | null; fareOverrideInfant: number | null } {
+  const isTrain = supplierKind === "train_operator"
+  return {
+    fareOverrideAdult: isTrain ? unit.fareOverrideAdult ?? null : null,
+    fareOverrideChild: isTrain ? unit.fareOverrideChild ?? null : null,
+    fareOverrideInfant: isTrain ? unit.fareOverrideInfant ?? null : null,
+  }
+}
+
+// Deliberately sends no expectedUpdatedAt: the team is small and talks to each other, so the last
+// save wins rather than 409ing on a row version that moved for reasons the consultant can't see
+// (a restored draft, another quote's dialog, a movement-time edit). The server still enforces the
+// check for any caller that does send a stamp.
 export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelectionsPatchBody {
   return {
     selections: states.map((state) => {
       if (state.kind === "transport") {
         return {
           packageLegId: state.legId,
-          ...(state.updatedAt ? { expectedUpdatedAt: state.updatedAt } : {}),
           selected: state.selected,
           routeId: state.routeId,
           rateTypeId: state.rateTypeId,
@@ -1103,7 +1184,6 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
       }
       return {
         packageLegId: state.legId,
-        ...(state.updatedAt ? { expectedUpdatedAt: state.updatedAt } : {}),
         selected: state.selected,
         routeId: state.routeId,
         routeReversed: state.reversed,
@@ -1165,11 +1245,49 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
+          ...trainFareOverridePayload(state.supplierKind, unit),
           rateTypeId: supportsUnitRateType(state.supplierKind) ? unit.rateTypeId : null,
         })),
       }
     }),
   }
+}
+
+/** The slice of PATCH /api/jobs/[id]/services' reload response adoptSavedServiceRows reads. */
+export interface SavedServiceRowVersion {
+  package_leg_id: string
+  updated_at?: string | null
+  units?: Array<{ id: string; sort_order: number }> | null
+}
+
+/**
+ * Folds a PATCH /services response back into the dialog's leg states: each leg's new row version
+ * (so a second save doesn't 409 against the stamp this one moved on) and each unit's stored id.
+ *
+ * The ids matter because POST /services/apply looks up who set each override by unit id, and a
+ * unit added since the last save only has a draft id until now. The PATCH writes units in the
+ * order it was sent them (sort_order = index), so the reloaded units line up with the state's by
+ * position; a leg whose unit count doesn't match (a response this state didn't produce) is left
+ * alone rather than guessed at.
+ */
+export function adoptSavedServiceRows(
+  states: ApplyLegState[],
+  rows: readonly SavedServiceRowVersion[],
+): ApplyLegState[] {
+  const rowByLegId = new Map(rows.map((row) => [row.package_leg_id, row]))
+  return states.map((state) => {
+    const row = rowByLegId.get(state.legId)
+    if (!row) return state
+    const updatedAt = row.updated_at ?? null
+    if (state.kind === "transport") return { ...state, updatedAt }
+
+    const savedUnits = (row.units ?? []).slice().sort((a, b) => a.sort_order - b.sort_order)
+    const units =
+      savedUnits.length === state.units.length
+        ? state.units.map((unit, index) => ({ ...unit, id: savedUnits[index]?.id ?? unit.id }))
+        : state.units
+    return { ...state, updatedAt, units }
+  })
 }
 
 /** PUT /api/jobs/[id]/transport-requests body. */
@@ -1287,11 +1405,17 @@ export interface ApplyLegSelectionPayload {
     complimentaryFirstNight: boolean
     /** Tour legs only: replaces the rate-card-computed total for this unit. */
     manualTourPrice: number | null
+    /** Train legs only: per-person fares replacing the rate card's for each kind. */
+    fareOverrideAdult: number | null
+    fareOverrideChild: number | null
+    fareOverrideInfant: number | null
     /** Train, hotel, cruise and tour legs only: this unit's own rate type, overriding the leg's
      *  rateTypeId below. */
     rateTypeId?: string | null
   }>
   nights?: number
+  /** Hotel legs only: the stay's own pricing basis, overriding the property's default. */
+  accommodationPricingBasis?: AccommodationPricingBasis
   /** Per-leg rate type override; omitted falls back to the system default. */
   rateTypeId?: string
   /** The currency this leg's hand-typed prices are in; converted into the quote currency at
@@ -1346,6 +1470,7 @@ export function toApplySelections(
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
+          ...trainFareOverridePayload(state.supplierKind, unit),
           rateTypeId: supportsUnitRateType(state.supplierKind) ? unit.rateTypeId ?? undefined : undefined,
         })),
       nights: legStatesOwnSpan(state.supplierKind)
@@ -1353,6 +1478,11 @@ export function toApplySelections(
           ? Math.max(1, state.nights ?? 1)
           : state.nights ?? undefined
         : undefined,
+      // Without this the pricer fell back to the property's default, so flipping "Price this
+      // stay per room" in Build Booking saved but never changed the quote.
+      ...(state.supplierKind === "hotel_property"
+        ? { accommodationPricingBasis: state.accommodationPricingBasis }
+        : {}),
       rateTypeId: state.rateTypeId ?? undefined,
       priceCurrency: state.priceCurrency,
       commissionOverride,
@@ -1471,7 +1601,15 @@ export function validateConfigureState(
         // Route + type resolved: check pricing exists before the salesperson hits Next and gets
         // a build-time error that's harder to connect back to this row.
         const pricingDate = dateOnly(request.pickupAt)
-        if (request.routeId && request.suiteTypeId && pricingDate) {
+        // A trip that never reads the card -- manual-pricing supplier, a typed price, or comped --
+        // can't be missing one (same rule as the pricing engine's transport branch).
+        const readsCard =
+          leg.pricingMode !== "manual" &&
+          request.priceOverride == null &&
+          request.priceOverrideChild == null &&
+          request.priceOverrideInfant == null &&
+          !request.complimentary
+        if (readsCard && request.routeId && request.suiteTypeId && pricingDate) {
           const pricingError = describeMissingRateCard(
             leg,
             request.routeId,
@@ -1521,6 +1659,24 @@ export function validateConfigureState(
         leg.pricingMode !== "manual" &&
         (unit.manualRoomPrice ?? null) === null &&
         (unit.manualTourPrice ?? null) === null &&
+        // A room whose every night is gifted charges nothing, so it reads no card either (same
+        // rule as the pricing engine's hotel branch).
+        !(state.supplierKind === "hotel_property" && unit.complimentaryFirstNight && (state.nights ?? 1) <= 1) &&
+        // A train suite whose typed fares cover every passenger kind it carries never reads the
+        // card either. One that leaves a present kind blank still prices that kind off the card,
+        // so the card stays required (same rule as the pricing engine, via the shared helper).
+        !(
+          state.supplierKind === "train_operator" &&
+          overridesCoverEveryPresentKind(
+            {
+              adult: unit.fareOverrideAdult ?? null,
+              child: unit.fareOverrideChild ?? null,
+              infant: unit.fareOverrideInfant ?? null,
+            },
+            unit,
+          ) &&
+          (unit.fareOverrideAdult !== null || unit.fareOverrideChild !== null || unit.fareOverrideInfant !== null)
+        ) &&
         // A tour operator's rate cards carry no route (isTypePricedSupplier), so an itinerary-less
         // tour leg still has everything it needs to price -- routeId is never a precondition for
         // it, unlike every other kind here.
@@ -1644,7 +1800,7 @@ export function headcountLegNoun(kind: SupplierKind): string {
 
 /**
  * The one-line note shown on a leg whose headcount differs from the booking's, e.g.
- * "3 on this flight · booking has 2 (1 extra)". When only the adult/child/infant mix differs, the
+ * "3 on this flight · booking only has 2". When only the adult/child/infant mix differs, the
  * two mixes are spelled out instead, since "3 · booking has 3" would read as no difference at all.
  */
 export function formatHeadcountDifference(
@@ -1657,10 +1813,9 @@ export function formatHeadcountDifference(
   if (difference.mixOnly) {
     return `${formatPassengerMix(summed)} on this ${legNoun} · booking has ${formatPassengerMix(totals)}`
   }
-  const amount = Math.abs(difference.delta)
-  return `${difference.onLeg} on this ${legNoun} · booking has ${difference.booking} (${amount} ${
-    difference.delta > 0 ? "extra" : "fewer"
-  })`
+  return `${difference.onLeg} on this ${legNoun} · booking ${difference.delta > 0 ? "only has" : "has"} ${
+    difference.booking
+  }`
 }
 
 export interface HeadcountWarning {

@@ -54,12 +54,36 @@ export function isComplimentaryTour(lineItem: QuoteLineItem): boolean {
 }
 
 /**
+ * True when a train fare was deliberately typed as R0 (a comped fare) rather than left unpriced —
+ * including a blank child fare that followed a typed R0 adult fare (see build-from-package.ts).
+ * `manualTrainFare` only exists on train rate-card lines, so this can't misfire elsewhere. See the
+ * per-suite fare override in the Build Booking dialog.
+ */
+export function isComplimentaryTrainFare(lineItem: QuoteLineItem): boolean {
+  return lineItem.pricingSnapshot?.manualTrainFare === 0
+}
+
+/**
  * True when a transfer/rental trip was deliberately marked complimentary — a dedicated flag,
  * independent of `manualTransportPrice`, so a comped trip is distinguishable from one that was
  * simply typed as R0. See the toggle in transport-leg-editor.tsx.
  */
 export function isComplimentaryTransport(lineItem: QuoteLineItem): boolean {
   return lineItem.pricingSnapshot?.isComplimentaryTransport === true
+}
+
+/**
+ * True when a line was deliberately comped by the consultant — a room, tour or train fare typed as
+ * R0, or a transfer marked complimentary. One place to ask "is this zero on purpose?" so the quote
+ * view and isMissingPricing can't drift apart as new override kinds are added.
+ */
+export function isComplimentaryLine(lineItem: QuoteLineItem): boolean {
+  return (
+    isComplimentaryRoom(lineItem) ||
+    isComplimentaryTour(lineItem) ||
+    isComplimentaryTrainFare(lineItem) ||
+    isComplimentaryTransport(lineItem)
+  )
 }
 
 /**
@@ -156,12 +180,10 @@ export function isMissingPricing(lineItem: QuoteLineItem): boolean {
   return (
     lineItem.unitPrice === 0 &&
     !isFixedPackageInclusion(lineItem) &&
-    !isComplimentaryRoom(lineItem) &&
-    !isComplimentaryTour(lineItem) &&
+    !isComplimentaryLine(lineItem) &&
     // A one-night stay with its only night gifted charges nothing and prices nothing — that is a
     // finished line, not an unpriced one.
     !hasComplimentaryNight(lineItem) &&
-    !isComplimentaryTransport(lineItem) &&
     !isFreeInfant(lineItem) &&
     !isFreeHotelOccupant(lineItem) &&
     !isDeliberateZeroCommission(lineItem)

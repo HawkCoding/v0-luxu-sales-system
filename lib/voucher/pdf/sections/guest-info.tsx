@@ -1,35 +1,38 @@
 import { Text, View } from "@react-pdf/renderer"
 import type { VoucherData } from "@/lib/generate-voucher"
 import { formatGuestCountText } from "@/lib/voucher/guest-count-text"
-import type { voucherStyles } from "../styles"
+import type { VoucherStyles } from "../styles"
 import { InfoRow } from "./info-row"
-
-type Styles = ReturnType<typeof voucherStyles>
 
 interface GuestInfoProps {
   data: VoucherData
-  styles: Styles
+  styles: VoucherStyles
+  /** The template's hand-over note, printed small at the foot of the guest box. */
+  guidance?: string | null
 }
 
-export function GuestInfo({ data, styles }: GuestInfoProps) {
-  // Alternating bands, the way the legacy voucher shaded every other row of its guest table.
-  let rowIndex = 0
-  const nextShaded = () => rowIndex++ % 2 === 0
+/** "A, B, C" → "A, B and C" — the template names the party the way a sentence would. */
+export function joinGuestNames(names: string): string {
+  const last = names.lastIndexOf(", ")
+  return last < 0 ? names : `${names.slice(0, last)} and ${names.slice(last + 2)}`
+}
 
+/** One line per room when the roster records who shares with whom, else the party on one line. */
+export function guestNamesValue(data: Pick<VoucherData, "guestNames" | "guestNameLines">): string {
+  const lines = (data.guestNameLines ?? []).map((line) => line.trim()).filter(Boolean)
+  return lines.length > 0 ? lines.join("\n") : joinGuestNames(data.guestNames)
+}
+
+export function GuestInfo({ data, styles, guidance }: GuestInfoProps) {
   return (
-    <View style={styles.section} wrap={false}>
-      <Text style={styles.sectionTitle}>Guest Information</Text>
-      <InfoRow label="Guest Names" value={data.guestNames} styles={styles} shaded={nextShaded()} />
-      <InfoRow
-        label="Number of Guests"
-        value={formatGuestCountText(data.passengerTotals)}
-        styles={styles}
-        shaded={nextShaded()}
-      />
-      <InfoRow label="Consultant" value={data.consultantName} styles={styles} shaded={nextShaded()} />
+    <View style={[styles.box, styles.guestBox]} wrap={false}>
+      <InfoRow label="Guest Names" value={guestNamesValue(data)} styles={styles} />
+      <InfoRow label="Number of Guests" value={formatGuestCountText(data.passengerTotals)} styles={styles} />
+      <InfoRow label="Consultant" value={data.consultantName} styles={styles} />
       {data.specialRequests ? (
-        <InfoRow label="Special Requests" value={data.specialRequests} styles={styles} shaded={nextShaded()} />
+        <InfoRow label="Special Requests" value={data.specialRequests} styles={styles} />
       ) : null}
+      {guidance?.trim() ? <Text style={styles.guidance}>{guidance.trim()}</Text> : null}
     </View>
   )
 }

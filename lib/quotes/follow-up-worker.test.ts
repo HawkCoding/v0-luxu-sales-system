@@ -42,6 +42,14 @@ vi.mock("@/lib/templates/get-template", () => ({
   getTemplate: templateMocks.getTemplate,
 }))
 
+const sharedTokenMocks = vi.hoisted(() => ({
+  resolveSharedEmailTokens: vi.fn(),
+}))
+
+vi.mock("@/lib/templates/resolve-shared-tokens", () => ({
+  resolveSharedEmailTokens: sharedTokenMocks.resolveSharedEmailTokens,
+}))
+
 import { runQuoteFollowUpWorker } from "./follow-up-worker"
 
 const QUOTE_ID = "00000000-0000-4000-8000-000000000aaa"
@@ -185,8 +193,43 @@ describe("runQuoteFollowUpWorker", () => {
       subject: "Following up on your enquiry — {{jobNumber}}",
       bodyHtml: "<p>Dear {{customerName}}, quote {{jobNumber}} was sent on {{lastSentDate}}.</p>",
     })
+    sharedTokenMocks.resolveSharedEmailTokens.mockResolvedValue({
+      tokens: {
+        customerName: "Shared Name",
+        jobNumber: "SHARED-0000",
+        lastSentDate: "—",
+        supplierName: "Rovos Rail",
+        clientSurname: "Smith",
+        direction: "Pretoria to Cape Town",
+        departureDateShort: "14 Nov 2026",
+      },
+      blocks: {},
+      primarySupplierId: null,
+      primarySupplierKind: null,
+    })
     emailMocks.sendEmail.mockResolvedValue({ success: true, provider: "mailpit", providerMessageId: "msg1", error: null })
     logErrorMocks.logError.mockResolvedValue(undefined)
+  })
+
+  it("resolves booking tokens in the subject (regression: {{supplierName}} etc. sent literally)", async () => {
+    templateMocks.getTemplate.mockResolvedValue({
+      key: "follow_up",
+      subject: "Re: {{supplierName}} | {{clientSurname}} - {{direction}} - {{departureDateShort}}",
+      bodyHtml: "<p>Dear {{customerName}}, sent on {{lastSentDate}}.</p>",
+    })
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking(),
+    })
+
+    await runQuoteFollowUpWorker(supabase as never)
+
+    expect(sharedTokenMocks.resolveSharedEmailTokens).toHaveBeenCalledWith(expect.anything(), BOOKING_ID)
+    const call = emailMocks.sendEmail.mock.calls[0][0] as { subject: string; html: string }
+    expect(call.subject).toBe("Re: Rovos Rail | Smith - Pretoria to Cape Town - 14 Nov 2026")
+    // The worker's own values still win over the shared ones.
+    expect(call.html).toContain("Dear Jane Smith")
+    expect(call.html).not.toContain("Shared Name")
   })
 
   it("returns zeros when follow-ups are globally disabled", async () => {

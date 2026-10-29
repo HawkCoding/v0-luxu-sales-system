@@ -1,17 +1,23 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
+import { quoteBuiltWithoutCommission, readQuoteCommissionSetting } from "@/lib/quotes/apply-commission-bonus"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
-import { loadRoomOverrideProvenance, loadTourOverrideProvenance } from "@/lib/quotes/room-override-provenance"
+import {
+  loadRoomOverrideProvenance,
+  loadTourOverrideProvenance,
+  loadTrainFareOverrideProvenance,
+} from "@/lib/quotes/room-override-provenance"
 import { describeValidationIssue } from "@/lib/api/describe-zod-issue"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { getCachedRates } from "@/lib/fx/rates"
 import { getDefaultCommission } from "@/lib/pricing/default-commission"
 import { BASE_CURRENCY, formatMoney, isSupportedCurrency, normaliseCurrency } from "@/lib/money"
 import { MissingFxRateError, roundFxRate } from "@/lib/pricing/convert-currency"
-import { persistServiceDateOrder } from "@/lib/packages/persist-service-date-order"
+import { mergeAmendFxRates, rebuildAcceptedQuoteFxRates } from "@/lib/quotes/amend-pricing"
+import type { PricingSnapshot } from "@/lib/types"
 
 /**
  * Build Booking's equivalent of POST /api/packages/[slug]/apply: prices booking_services instead
@@ -65,6 +71,11 @@ const unitSelectionSchema = z.object({
   complimentaryFirstNight: z.boolean().optional(),
   /** Tour legs only: the typed flat price that replaces this unit's rate-card-computed total. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
+  /** Train rate-card legs only: per-person fares replacing the rate card's for each passenger kind
+   * (blank kinds stay on the card). The pricing engine ignores them on any other kind. */
+  fareOverrideAdult: z.number().nonnegative().nullable().optional(),
+  fareOverrideChild: z.number().nonnegative().nullable().optional(),
+  fareOverrideInfant: z.number().nonnegative().nullable().optional(),
   /** Train, hotel, cruise and tour legs (supportsUnitRateType): this unit's own rate type,
    * overriding the leg-level rateTypeId below. The pricing engine ignores it on any other kind. */
   rateTypeId: z.string().uuid().nullable().optional(),
@@ -84,7 +95,12 @@ const applyServicesSchema = z.object({
         serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable().optional(),
         suiteTypeId: z.string().uuid().optional(),
         units: z.array(unitSelectionSchema).optional(),
-        nights: z.number().int().positive().optional(),
+        // 0 is a same-day tour. Hotel pricing floors nights at 1 (build-from-package.ts), so a 0
+        // here can never under-charge a stay.
+        nights: z.number().int().nonnegative().optional(),
+        /** Hotel legs only: the stay's own basis (Build Booking's "Price this stay per room").
+         * Omitted falls back to the property's default inside the pricer. */
+        accommodationPricingBasis: z.enum(["per_person", "per_room"]).optional(),
         rateTypeId: z.string().uuid().optional(),
         /** Manual-pricing legs and transfer/rental overrides: the currency the typed fares on
          * this leg are in. Rate-card legs ignore it and use the card's own currency. Read
@@ -111,6 +127,13 @@ const applyServicesSchema = z.object({
    * cache already has a fallback for, not something worth blocking a save over.
    */
   fxRates: z.record(z.string(), z.number()).optional(),
+  /**
+   * Amend mode (an ACCEPTED quote changed in place — lib/quotes/amend-quote.ts): the rates the
+   * accepted quote was priced at, rebuilt server-side from its own line snapshots, become the
+   * defaults over the cache; `fxRates` (what the salesperson typed) still wins over them. A currency
+   * only a new line uses takes the current rate.
+   */
+  amend: z.literal(true).optional(),
 })
 
 interface RouteParams {
@@ -154,9 +177,13 @@ export async function POST(req: Request, { params }: RouteParams) {
   // and so foreign supplier rates convert into the currency this quote is already denominated in.
   const { data: quoteRow } = await supabase
     .from("quotes")
-    .select("commission_bonus, currency")
+    .select("commission_bonus, currency, status")
     .eq("id", parsed.quoteId)
     .maybeSingle()
+
+  if (parsed.amend && quoteRow?.status !== "accepted") {
+    return NextResponse.json({ error: "Only an accepted quote can be amended." }, { status: 409 })
+  }
 
   const quoteCurrency = normaliseCurrency(quoteRow?.currency)
   const commissionBonus = Number(quoteRow?.commission_bonus ?? 0)
@@ -186,22 +213,33 @@ export async function POST(req: Request, { params }: RouteParams) {
       ([currency, rate]) => isSupportedCurrency(currency) && Number.isFinite(rate) && rate > 0 && rate <= 10_000,
     ).map(([currency, rate]) => [currency, roundFxRate(rate)]),
   )
+  // Read once: amend mode rebuilds the accepted quote's FX rates from these snapshots, and the
+  // commission carry-over below reads the same rows.
+  const { data: quoteLineRows, error: quoteLinesError } = await supabase
+    .from("quote_line_items")
+    .select("pricing_snapshot")
+    .eq("quote_id", parsed.quoteId)
+    .order("sort_order")
+  if (quoteLinesError) return safeSupabaseError("services-apply:load-quote-lines", quoteLinesError)
+  const quoteLineSnapshots = (quoteLineRows ?? []).map((row) => row.pricing_snapshot)
+
   // What the salesperson saw wins over the cache, so the preview they approved is the price that
-  // gets saved. The base currency is pinned to 1 regardless of what the client sent.
-  const effectiveRates = { ...fx.rates, ...clientRates, [BASE_CURRENCY]: 1 }
+  // gets saved. On an amend the accepted quote's own rates are the defaults between the two: an
+  // untouched prefill prices existing lines exactly as accepted, and a typed rate still wins. The
+  // base currency is pinned to 1 regardless of what was sent.
+  const acceptedFx = parsed.amend
+    ? rebuildAcceptedQuoteFxRates(
+        quoteLineSnapshots.map((snapshot) => ({ pricingSnapshot: snapshot as PricingSnapshot | null })),
+        quoteCurrency,
+        { ...fx.rates, ...clientRates },
+      )
+    : null
+  const effectiveRates = acceptedFx
+    ? mergeAmendFxRates({ cachedRates: fx.rates, accepted: acceptedFx.rates, clientRates })
+    : { ...fx.rates, ...clientRates, [BASE_CURRENCY]: 1 }
 
-  // Building the quote is the moment the legs are put in date order: every service is dated and
-  // saved by now (the dialog's PATCH /services and PUT /transport-requests land first), and the
-  // package detail loaded below walks the legs by sort_order -- so the quote lines, and the invoice
-  // built from them, follow the itinerary. A moved leg's updated_at changes, so the response says
-  // so and the dialog re-reads the versions before its next save.
-  const reorder = await persistServiceDateOrder(supabase, id)
-  if (reorder.error) {
-    // Ordering is presentation, not pricing: a failure here must not cost the salesperson the quote.
-    console.error("services-apply:date-order", reorder.error)
-  }
-  const legOrderChanged = reorder.changedServiceIds.length > 0
-
+  // The package detail loaded below walks the legs by sort_order -- the order the salesperson
+  // arranged them in step 1 -- so the quote lines, and the invoice built from them, follow it.
   const { detail } = await loadBookingServicesPackageDetail(
     supabase,
     id,
@@ -215,9 +253,10 @@ export async function POST(req: Request, { params }: RouteParams) {
   const unitIds = parsed.selections.flatMap((selection) =>
     (selection.units ?? []).map((unit) => unit.unitId).filter((unitId): unitId is string => Boolean(unitId)),
   )
-  const [roomOverrideProvenance, tourOverrideProvenance] = await Promise.all([
+  const [roomOverrideProvenance, tourOverrideProvenance, trainFareOverrideProvenance] = await Promise.all([
     loadRoomOverrideProvenance(supabase, unitIds),
     loadTourOverrideProvenance(supabase, unitIds),
+    loadTrainFareOverrideProvenance(supabase, unitIds),
   ])
 
   const selections = parsed.selections.map((selection) => ({
@@ -225,22 +264,33 @@ export async function POST(req: Request, { params }: RouteParams) {
     units: selection.units?.map((unit) => {
       const roomProvenance = unit.unitId ? roomOverrideProvenance.get(unit.unitId) : undefined
       const tourProvenance = unit.unitId ? tourOverrideProvenance.get(unit.unitId) : undefined
+      const fareProvenance = unit.unitId ? trainFareOverrideProvenance.get(unit.unitId) : undefined
       return {
         ...unit,
         manualRoomPriceSetAt: roomProvenance?.setAt ?? null,
         manualRoomPriceSetByName: roomProvenance?.setByName ?? null,
         manualTourPriceSetAt: tourProvenance?.setAt ?? null,
         manualTourPriceSetByName: tourProvenance?.setByName ?? null,
+        fareOverrideSetAt: fareProvenance?.setAt ?? null,
+        fareOverrideSetByName: fareProvenance?.setByName ?? null,
       }
     }),
   }))
 
+  // Commission is no longer decided in Build Booking, and no leg carries an override. A rebuild
+  // keeps the commission type + value the quote already carries (set on the Quotes-tab ledger,
+  // PATCH /api/quotes/[id]/adjustments) -- it used to be replaced by the house default, silently
+  // discarding the salesperson's choice. Only the amount is re-priced, against the new subtotal
+  // and the booking's current headcount. A quote that has never been built falls back to the
+  // house default from Settings, so Apply still prices one unattended.
+  const quoteCommission = readQuoteCommissionSetting(quoteLineSnapshots)
+  // A quote Build Booking already priced, with its Commission cleared on the ledger since, keeps
+  // no commission — the house default is only for a quote that has never been built.
+  const commissionCleared = quoteBuiltWithoutCommission(quoteLineSnapshots)
+
   try {
-    // Commission is no longer decided in Build Booking -- a leg that carries no override (every
-    // leg, now that the UI never sets one) falls back to the house default from Settings, so
-    // Apply still prices a Commission line unattended. It stays fully editable afterward on the
-    // Job Quotes tab (PATCH /api/quotes/[id]/commission).
-    const defaultCommission = await getDefaultCommission(supabase)
+    const defaultCommission =
+      quoteCommission ?? (commissionCleared ? null : await getDefaultCommission(supabase))
 
     const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
       supabase,
@@ -280,29 +330,34 @@ export async function POST(req: Request, { params }: RouteParams) {
     const pricedALeg = lineItems.some((item) => item.pricingSnapshot?.legId)
     if (incompleteLegs.length > 0 && !pricedALeg) {
       return NextResponse.json(
-        { error: incompleteLegs[0].message, incompleteLegs, legOrderChanged },
+        { error: incompleteLegs[0].message, incompleteLegs },
         { status: 400 },
       )
     }
 
     return NextResponse.json({
-      // Built legs first, in date order; extras always follow them.
+      // Built legs first, in the salesperson's step 1 order; extras always follow them.
       lineItems: [...lineItems, ...extraLineItems],
       incompleteLegs,
       currency: quoteCurrency,
       // Let the dialog render its mixed-currency banner without a second round trip.
-      fx: { rates: effectiveRates, asOf: fx.rows[0]?.asOf ?? null, stale: fx.stale },
-      legOrderChanged,
+      fx: {
+        rates: effectiveRates,
+        asOf: fx.rows[0]?.asOf ?? null,
+        stale: fx.stale,
+        // Amend only: currencies whose default rate came from the accepted quote, not today's.
+        ...(acceptedFx ? { prefilledCurrencies: acceptedFx.prefilledCurrencies } : {}),
+      },
     })
   } catch (error) {
     // A missing rate is the salesperson's problem to fix (refresh or type one), not a server
     // fault -- surface it the same way an unpriced rate card is surfaced.
     if (error instanceof MissingFxRateError) {
-      return NextResponse.json({ error: error.message, legOrderChanged }, { status: 400 })
+      return NextResponse.json({ error: error.message }, { status: 400 })
     }
     const message = error instanceof Error ? error.message : "Failed to build service line items"
     const status = message === "Job not found" ? 404 : 400
 
-    return NextResponse.json({ error: message, legOrderChanged }, { status })
+    return NextResponse.json({ error: message }, { status })
   }
 }

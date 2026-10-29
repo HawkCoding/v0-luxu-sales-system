@@ -65,13 +65,20 @@ export async function GET(req: Request) {
   // booking's train (via route → supplier); files scoped to a supplier category
   // apply when that supplier is of the same kind; a file pinned to a route only
   // applies on that exact route; unscoped files always apply.
-  let bookingSupplierId: string | null = null
-  let bookingSupplierKind: string | null = null
-  let bookingRouteId: string | null = null
+  // A standalone hotel booking (e.g. Kruger Shalati) has no route, so its supplier is reached
+  // through bookings.primary_supplier_id -- set at intake, before Build Booking has created any
+  // services -- and through the booking's services; all of those suppliers count too.
+  const bookingSupplierIds = new Set<string>()
+  const bookingSupplierKinds = new Set<string>()
+  // A route pin matches the booking's own route or any selected leg's route: a stay's meal plan
+  // and a transfer's leg live on the service, never on bookings.route_id.
+  const bookingRouteIds = new Set<string>()
   if (bookingId) {
     const { data: booking, error: bookingError } = await supabase
       .from("bookings")
-      .select("id, route_id, route:routes(supplier:suppliers(id, kind))")
+      .select(
+        "id, route_id, route:routes(supplier:suppliers(id, kind)), primary_supplier:suppliers!bookings_primary_supplier_id_fkey(id, kind), services:booking_services(selected, route_id, supplier:suppliers(id, kind))",
+      )
       .eq("id", bookingId)
       .maybeSingle()
 
@@ -79,14 +86,29 @@ export async function GET(req: Request) {
     if (!booking) return jsonError("Booking not found", 404)
 
     const route = Array.isArray(booking.route) ? booking.route[0] : booking.route
-    const supplier = route
+    const routeSupplier = route
       ? Array.isArray(route.supplier)
         ? route.supplier[0]
         : route.supplier
       : null
-    bookingSupplierId = supplier?.id ?? null
-    bookingSupplierKind = supplier?.kind ?? null
-    bookingRouteId = booking.route_id
+    const primarySupplier = Array.isArray(booking.primary_supplier)
+      ? booking.primary_supplier[0]
+      : booking.primary_supplier
+    // Category files follow the booking's headline supplier: the route's, else the primary one.
+    const headlineSupplier = routeSupplier ?? primarySupplier ?? null
+    if (routeSupplier?.id) bookingSupplierIds.add(routeSupplier.id)
+    if (primarySupplier?.id) bookingSupplierIds.add(primarySupplier.id)
+    if (headlineSupplier?.kind) bookingSupplierKinds.add(headlineSupplier.kind)
+    if (booking.route_id) bookingRouteIds.add(booking.route_id)
+
+    for (const service of booking.services ?? []) {
+      if (service.selected === false) continue
+      const supplier = Array.isArray(service.supplier) ? service.supplier[0] : service.supplier
+      if (supplier?.id) bookingSupplierIds.add(supplier.id)
+      // A train route's supplier still owns the category match; a route-less booking takes its legs'.
+      if (!routeSupplier && supplier?.kind) bookingSupplierKinds.add(supplier.kind)
+      if (service.route_id) bookingRouteIds.add(service.route_id)
+    }
   }
 
   const { data: rows, error } = await supabase
@@ -103,9 +125,9 @@ export async function GET(req: Request) {
       if (!bookingId) return true
       // Unscoped files always apply; a route pin narrows a supplier match further.
       if (row.supplier_id === null && row.supplier_kind === null) return true
-      if (row.route_id !== null) return row.route_id === bookingRouteId
-      if (row.supplier_id !== null) return row.supplier_id === bookingSupplierId
-      return row.supplier_kind === bookingSupplierKind
+      if (row.route_id !== null) return bookingRouteIds.has(row.route_id)
+      if (row.supplier_id !== null) return bookingSupplierIds.has(row.supplier_id)
+      return row.supplier_kind !== null && bookingSupplierKinds.has(row.supplier_kind)
     })
     .map((row) => ({
       id: row.id,

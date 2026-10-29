@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { BookingTransportRequest, PackageDetail, PackageLeg, SupplierKind } from "@/lib/types"
 import { joinAppZoneDateTime, splitAppZoneDateTime } from "@/lib/date-time-field"
 import {
+  adoptSavedServiceRows,
   applyAnchoredAirlineDates,
   applyAnchoredDates,
   applyAnchoredHotelDates,
@@ -10,9 +11,11 @@ import {
   buildDefaultLegStates,
   collectHeadcountWarnings,
   createDraftTransportRequest,
+  findLegsChangedSince,
   getTransferAnchorContext,
   hydrateFromSaved,
   mergeLegStatesAfterRebuild,
+  takeServerLegs,
   toApplySelections,
   toHotelAnchorContext,
   toPackageSelectionsPatch,
@@ -1260,6 +1263,16 @@ describe("tour date anchors", () => {
 })
 
 describe("toApplySelections", () => {
+  it("sends a hotel stay's own pricing basis so the per-room toggle reaches the pricer", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    suiteState(states, "leg-hotel").accommodationPricingBasis = "per_room"
+
+    const selections = toApplySelections(states)
+
+    expect(selections.find((s) => s.legId === "leg-hotel")?.accommodationPricingBasis).toBe("per_room")
+    expect(selections.find((s) => s.legId === "leg-train")).not.toHaveProperty("accommodationPricingBasis")
+  })
+
   it("sends units for suite legs and a fallback vehicle category for transport legs", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
     const train = suiteState(states, "leg-train")
@@ -1284,6 +1297,10 @@ describe("toApplySelections", () => {
         manualRoomPrice: null,
         complimentaryFirstNight: false,
         manualTourPrice: null,
+        // No fare typed on this suite, so the train fare override goes out as all-null.
+        fareOverrideAdult: null,
+        fareOverrideChild: null,
+        fareOverrideInfant: null,
         suiteTypeId: "suite-1",
         bedroomTypeId: null,
         bedroomLayoutId: null,
@@ -1306,6 +1323,153 @@ describe("toApplySelections", () => {
     const transferSel = selections.find((s) => s.legId === "leg-transfer")
     expect(transferSel?.suiteTypeId).toBe("vehicle-1")
     expect(transferSel?.units).toBeUndefined()
+  })
+})
+
+// POST /services/apply looks up who set each price override by unit id, so the ids it is sent
+// must be the ones PATCH /services just wrote -- a draft id (or a stale one) resolves to nothing
+// and the quote's "set by X on date" note silently disappears.
+describe("adoptSavedServiceRows", () => {
+  it("adopts each leg's new version and its units' stored ids by position", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    const train = suiteState(states, "leg-train")
+    train.units[0].suiteTypeId = "suite-1"
+    train.units[0].fareOverrideAdult = 9000
+    expect(train.units[0].id.startsWith("draft-")).toBe(true)
+
+    const next = adoptSavedServiceRows(states, [
+      { package_leg_id: "leg-train", updated_at: "2026-09-30T10:00:00.000Z", units: [{ id: "unit-saved-1", sort_order: 0 }] },
+      { package_leg_id: "leg-transfer", updated_at: "2026-09-30T10:00:01.000Z", units: [] },
+    ])
+
+    const nextTrain = suiteState(next, "leg-train")
+    expect(nextTrain.updatedAt).toBe("2026-09-30T10:00:00.000Z")
+    expect(nextTrain.units[0]).toMatchObject({ id: "unit-saved-1", fareOverrideAdult: 9000 })
+    expect(transportState(next, "leg-transfer").updatedAt).toBe("2026-09-30T10:00:01.000Z")
+    // The pricing payload now carries the stored id the provenance lookup keys on.
+    expect(toApplySelections(next).find((s) => s.legId === "leg-train")?.units?.[0].unitId).toBe("unit-saved-1")
+    // Pure: the input states are untouched.
+    expect(train.units[0].id.startsWith("draft-")).toBe(true)
+  })
+
+  it("orders the saved units by sort_order before lining them up", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    const train = suiteState(states, "leg-train")
+    train.units = [
+      { ...train.units[0], id: "draft-a" },
+      { ...train.units[0], id: "draft-b" },
+    ]
+
+    const next = adoptSavedServiceRows(states, [
+      {
+        package_leg_id: "leg-train",
+        units: [
+          { id: "saved-b", sort_order: 1 },
+          { id: "saved-a", sort_order: 0 },
+        ],
+      },
+    ])
+
+    expect(suiteState(next, "leg-train").units.map((unit) => unit.id)).toEqual(["saved-a", "saved-b"])
+  })
+
+  it("leaves a leg's unit ids alone when the saved unit count doesn't line up", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    const before = suiteState(states, "leg-train").units.map((unit) => unit.id)
+
+    const next = adoptSavedServiceRows(states, [
+      {
+        package_leg_id: "leg-train",
+        updated_at: "2026-09-30T10:00:00.000Z",
+        units: [
+          { id: "x", sort_order: 0 },
+          { id: "y", sort_order: 1 },
+          { id: "z", sort_order: 2 },
+        ],
+      },
+    ])
+
+    expect(suiteState(next, "leg-train").units.map((unit) => unit.id)).toEqual(before)
+    expect(suiteState(next, "leg-train").updatedAt).toBe("2026-09-30T10:00:00.000Z")
+  })
+})
+
+// A restored draft or a long-idle dialog holds row versions that something else may have moved --
+// including the same user in another window or a system write. These two helpers let the dialog
+// reload only the legs whose version moved and keep the rest of the user's edits.
+describe("findLegsChangedSince / takeServerLegs", () => {
+  function savedWith(versions: Record<string, string>): Pick<SavedPackageState, "selections"> {
+    return {
+      selections: Object.entries(versions).map(([legId, updated_at]) => ({
+        package_leg_id: legId,
+        updated_at,
+      })) as unknown as SavedPackageState["selections"],
+    }
+  }
+
+  it("reports only the legs whose stored version differs from the held stamp", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: "2026-09-30T10:00:00.000Z",
+    })) as ApplyLegState[]
+
+    const changed = findLegsChangedSince(
+      states,
+      savedWith({
+        "leg-train": "2026-09-30T10:00:00.000Z",
+        "leg-transfer": "2026-09-30T11:30:00.000Z",
+      }),
+    )
+
+    expect(changed).toEqual(["leg-transfer"])
+  })
+
+  it("treats the same instant in a different format as unchanged", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: "2026-09-30T10:00:00.000Z",
+    })) as ApplyLegState[]
+
+    expect(findLegsChangedSince(states, savedWith({ "leg-train": "2026-09-30T10:00:00+00:00" }))).toEqual([])
+  })
+
+  it("ignores a leg the server no longer has and a state with no stamp yet", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: state.legId === "leg-train" ? null : "2026-09-30T10:00:00.000Z",
+    })) as ApplyLegState[]
+
+    expect(findLegsChangedSince(states, savedWith({ "leg-train": "2026-10-01T00:00:00.000Z" }))).toEqual([])
+    expect(findLegsChangedSince(states, savedWith({ "someone-else": "2026-10-01T00:00:00.000Z" }))).toEqual([])
+  })
+
+  it("takes the server state for the named legs only and keeps every other edit", () => {
+    const local = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    const fresh = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals }).map((state) => ({
+      ...state,
+      updatedAt: "2026-10-01T09:00:00.000Z",
+    })) as ApplyLegState[]
+    const localTrain = suiteState(local, "leg-train")
+    localTrain.units[0].adultCount = 7
+    const localTransfer = transportState(local, "leg-transfer")
+    localTransfer.bookingDate = "2026-01-01"
+
+    const next = takeServerLegs(local, fresh, new Set(["leg-transfer"]))
+
+    expect(transportState(next, "leg-transfer").updatedAt).toBe("2026-10-01T09:00:00.000Z")
+    expect(transportState(next, "leg-transfer").bookingDate).toBeNull()
+    expect(suiteState(next, "leg-train").units[0].adultCount).toBe(7)
+    expect(suiteState(next, "leg-train").updatedAt).toBe(suiteState(local, "leg-train").updatedAt)
+    // Pure: the input is untouched.
+    expect(transportState(local, "leg-transfer").bookingDate).toBe("2026-01-01")
+  })
+
+  it("leaves a leg alone when the server state has no counterpart for it", () => {
+    const local = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+
+    const next = takeServerLegs(local, [], new Set(["leg-train"]))
+
+    expect(next).toEqual(local)
   })
 })
 
@@ -1837,7 +2001,7 @@ describe("collectHeadcountWarnings", () => {
     const warnings = collectHeadcountWarnings(pkg, states, hotelTotals)
     expect(warnings).toHaveLength(1)
     expect(warnings[0].legId).toBe("leg-hotel")
-    expect(warnings[0].message).toBe("3 on this stay · booking has 2 (1 extra)")
+    expect(warnings[0].message).toBe("3 on this stay · booking only has 2")
   })
 
   it("says how many fewer when a hotel room holds fewer people than the booking", () => {
@@ -1847,7 +2011,7 @@ describe("collectHeadcountWarnings", () => {
     hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 1 }
 
     const warnings = collectHeadcountWarnings(pkg, states, hotelTotals)
-    expect(warnings[0].message).toBe("1 on this stay · booking has 2 (1 fewer)")
+    expect(warnings[0].message).toBe("1 on this stay · booking has 2")
   })
 
   it("spells out both mixes when the count matches but the adult/child/infant split doesn't", () => {
@@ -1973,5 +2137,186 @@ describe("mergeLegStatesAfterRebuild", () => {
     const merged = mergeLegStatesAfterRebuild([], next)
 
     expect(merged).toEqual(next)
+  })
+})
+
+describe("train fare override", () => {
+  function savedTrain(unit: Partial<SavedPackageState["selections"][number]["units"][number]>): SavedPackageState {
+    return {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-train",
+          package_leg_id: "leg-train",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-train",
+          route_id: "route-1",
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-02",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              suite_type_id: "suite-1",
+              bedroom_type_id: null,
+              bedroom_layout_id: null,
+              bathroom_type_id: null,
+              adult_count: 2,
+              child_count: 1,
+              infant_count: 0,
+              sort_order: 0,
+              ...unit,
+            },
+          ],
+        },
+      ],
+    }
+  }
+
+  it("round-trips a saved override through hydrate, the PATCH payload and the apply payload", () => {
+    const states = hydrateFromSaved(
+      pkg,
+      savedTrain({
+        fare_override_adult: 9000,
+        fare_override_child: null,
+        fare_override_infant: 0,
+        fare_override_set_at: "2026-09-29T08:00:00Z",
+      }),
+      [],
+      { tripStartDate: "2026-09-01" },
+    )
+    const [hydratedUnit] = suiteState(states, "leg-train").units
+    expect(hydratedUnit).toMatchObject({
+      fareOverrideAdult: 9000,
+      fareOverrideChild: null,
+      fareOverrideInfant: 0,
+      fareOverrideSetAt: "2026-09-29T08:00:00Z",
+    })
+
+    const patchUnit = toPackageSelectionsPatch(states).selections.find((s) => s.packageLegId === "leg-train")
+      ?.units?.[0]
+    expect(patchUnit).toMatchObject({ fareOverrideAdult: 9000, fareOverrideChild: null, fareOverrideInfant: 0 })
+    // Provenance is the server's to stamp; the client never sends it back.
+    expect(patchUnit).not.toHaveProperty("fareOverrideSetAt")
+
+    const applyUnit = toApplySelections(states).find((s) => s.legId === "leg-train")?.units?.[0]
+    expect(applyUnit).toMatchObject({ fareOverrideAdult: 9000, fareOverrideChild: null, fareOverrideInfant: 0 })
+  })
+
+  it("hydrates a unit saved before the override existed as not overridden", () => {
+    const states = hydrateFromSaved(pkg, savedTrain({}), [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-train").units[0]).toMatchObject({
+      fareOverrideAdult: null,
+      fareOverrideChild: null,
+      fareOverrideInfant: null,
+    })
+  })
+
+  it("never sends a fare override off a non-train leg, even if the unit somehow carries one", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01", totalsBySupplierId: totals })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", fareOverrideAdult: 500 }
+
+    const patchUnit = toPackageSelectionsPatch(states).selections.find((s) => s.packageLegId === "leg-hotel")
+      ?.units?.[0]
+    expect(patchUnit?.fareOverrideAdult).toBeNull()
+    const applyUnit = toApplySelections(states).find((s) => s.legId === "leg-hotel")?.units?.[0]
+    expect(applyUnit?.fareOverrideAdult).toBeNull()
+  })
+
+  describe("missing rate card", () => {
+    // The train's only card starts 2026-01-01, so a 2025 service date has no card at all.
+    function uncoveredTrain(patch: Partial<SuiteLegState["units"][number]>) {
+      const states = buildDefaultLegStates(pkg, { tripStartDate: "2025-06-01", totalsBySupplierId: totals })
+      const train = suiteState(states, "leg-train")
+      train.serviceDate = "2025-06-01"
+      train.units[0] = { ...train.units[0], suiteTypeId: "suite-1", adultCount: 2, childCount: 1, ...patch }
+      return validateConfigureState(pkg, states, { totalsBySupplierId: totals })
+    }
+
+    it("still blocks with no override", () => {
+      expect(uncoveredTrain({}).some((e) => e.includes("rate card"))).toBe(true)
+    })
+
+    it("does not block when every passenger kind the suite carries has a typed fare", () => {
+      // 2 adults + 1 child, no infants: adult and child typed is enough -- infant is irrelevant.
+      const errors = uncoveredTrain({ fareOverrideAdult: 9000, fareOverrideChild: 4500 })
+      expect(errors.some((e) => e.includes("rate card"))).toBe(false)
+    })
+
+    it("still blocks when a present kind is left blank, because that kind prices off the card", () => {
+      const errors = uncoveredTrain({ fareOverrideAdult: 9000 })
+      expect(errors.some((e) => e.includes("rate card"))).toBe(true)
+    })
+
+    // LTT-26-0001: a hotel with no rate cards at all, gifted or priced by hand.
+    describe("hotel room", () => {
+      function cardlessHotel(
+        patch: Partial<SuiteLegState["units"][number]>,
+        nights: number,
+        pricingMode: "rate_card" | "manual" = "rate_card",
+      ) {
+        const hotelPkg = detail([{ ...hotelLeg, rateCards: [], pricingMode }])
+        const states = buildDefaultLegStates(hotelPkg, { tripStartDate: "2026-09-01" })
+        const hotel = suiteState(states, "leg-hotel")
+        hotel.selected = true
+        hotel.routeId = "route-bb"
+        hotel.nights = nights
+        hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", adultCount: 2, ...patch }
+        return validateConfigureState(hotelPkg, states)
+      }
+
+      it("blocks a charged night with no card", () => {
+        expect(cardlessHotel({}, 1).some((e) => e.includes("rate card"))).toBe(true)
+      })
+
+      it("does not block a one-night stay whose night was gifted", () => {
+        expect(cardlessHotel({ complimentaryFirstNight: true }, 1).some((e) => e.includes("rate card"))).toBe(false)
+      })
+
+      it("still blocks a gifted first night when later nights are charged off the card", () => {
+        expect(cardlessHotel({ complimentaryFirstNight: true }, 2).some((e) => e.includes("rate card"))).toBe(true)
+      })
+
+      it("never asks a manual-pricing hotel for a card", () => {
+        expect(cardlessHotel({}, 2, "manual").some((e) => e.includes("rate card"))).toBe(false)
+      })
+    })
+
+    describe("transfer", () => {
+      function cardlessTransfer(
+        patch: Partial<ReturnType<typeof transportState>["requests"][number]>,
+        pricingMode: "rate_card" | "manual" = "rate_card",
+      ) {
+        const transferPkg = detail([{ ...transferLeg, rateCards: [], pricingMode }])
+        const states = buildDefaultLegStates(transferPkg, { tripStartDate: "2026-09-01" })
+        const transfer = transportState(states, "leg-transfer")
+        transfer.selected = true
+        transfer.requests[0] = {
+          ...transfer.requests[0],
+          routeId: "route-transfer-1",
+          suiteTypeId: "vehicle-1",
+          pickupAt: "2026-09-01T10:00:00Z",
+          ...patch,
+        }
+        return validateConfigureState(transferPkg, states)
+      }
+
+      it("blocks a trip that prices off a missing card", () => {
+        expect(cardlessTransfer({}).some((e) => e.includes("rate card"))).toBe(true)
+      })
+
+      it("does not block a manual-pricing supplier, a typed price, or a comped trip", () => {
+        expect(cardlessTransfer({}, "manual").some((e) => e.includes("rate card"))).toBe(false)
+        expect(cardlessTransfer({ priceOverride: 800 }).some((e) => e.includes("rate card"))).toBe(false)
+        expect(cardlessTransfer({ complimentary: true }).some((e) => e.includes("rate card"))).toBe(false)
+      })
+    })
   })
 })

@@ -63,6 +63,18 @@ export interface VoucherServiceBlockData {
    *  `suiteType` above stays the full phrase for the voucher/invoice/worksheet. Absent on blocks
    *  built before this field existed, in which case callers fall back to `suiteType`. */
   itinerarySuiteType?: string | null
+  /** Train & hotel: how many of the leg's suites/rooms are of each kind, in unit order, worded as
+   *  the quote itinerary sentence names them (itinerarySuiteType's wording for a train, roomType's
+   *  for a hotel) -- so the quote can say "in 2 Deluxe Suites" or "in a Classic Room and 2 Deluxe
+   *  Rooms". Absent on blocks built before this field existed, in which case callers fall back to
+   *  `numberOfSuites`. */
+  itinerarySuiteCounts?: Array<{ label: string; count: number }> | null
+  /** Train-only: the invoice's short suite wording, bed type + suite type and nothing more
+   *  ("Double Deluxe Suite", "Twin Royal Suite"), with how many units carry each, in unit order --
+   *  so the invoice's Suite Type row fits one line per type beside "QTY:" where the full phrase
+   *  (`suiteType`, still what the voucher prints) wrapped. Absent on blocks built before this field
+   *  existed, in which case the invoice falls back to `suiteType`. */
+  invoiceSuiteCounts?: Array<{ label: string; count: number }> | null
   numberOfSuites?: number | null
   roomType?: string | null
   nights?: number | null
@@ -77,6 +89,9 @@ export interface VoucherServiceBlockData {
   /** Hotel-only: the property lets guests store luggage at reception. Prints a suffix on the quote
    *  itinerary's check-out line only — never shown on the voucher. */
   hasLuggageStorage?: boolean | null
+  /** Hotel-only: the property is a product sold on its own (Kruger Shalati), not an add-on stay —
+   *  the quote's details page heads it "<Brand> Inclusions" like the trains. */
+  isStandaloneProduct?: boolean | null
   vehicleType?: string | null
   pickup?: string | null
   dropoff?: string | null
@@ -130,16 +145,17 @@ export interface VoucherServiceBlock {
   supplierContactName?: string | null
   contactDetails: VoucherServiceBlockContact
   serviceData: VoucherServiceBlockData
+  /** booking_services.sort_order -- the order the salesperson arranged the legs in (step 1). */
   displayOrder: number
-  /** HH:MM of a real clock event -- a flight's departure, a transfer's pickup -- else null/absent.
-   *  Same-day blocks with one are put in clock order (sortItineraryBlocksChronologically). Unlike
-   *  `serviceData.startTime`, never a supplier or app default such as a hotel's check-in time. */
-  clockTime?: string | null
 }
 
 export interface VoucherData {
   voucherNumber: string
   guestNames: string
+  /** "Guest Names" one line per room ("Mrs A and Mr B"), from the Reservation tab's "Room with"
+   * field (lib/voucher/guest-rooms.ts). Absent when no room arrangement was recorded — the PDF then
+   * prints `guestNames` on one line. */
+  guestNameLines?: string[] | null
   consultantName: string
   supplierName: string
   supplierDescription?: string | null
@@ -364,9 +380,9 @@ export function generateVoucherHTML(
     })
     .join("\n")
 
-  // Preview mirrors lib/voucher/pdf/styles.ts pt-for-pt at the "compact" density (the only
-  // density the voucher ever renders at); the PDF is the source of truth — update both when the
-  // design changes. See lib/voucher/pdf/density.ts for the numbers being mirrored.
+  // Preview of the pre-2026-09 voucher layout. The PDF (lib/voucher/pdf/styles.ts) has since moved
+  // to the SA-Rail document design — patterned page, Swirl boxes, Manrope — and this preview has
+  // not followed yet; the rows themselves still come from the same voucherRowsForBlock.
   const rule = tintWithWhite(t.accent_colour, 0.45)
   const ruleFaint = tintWithWhite(t.section_bg, 0.3)
   const frameOuter = tintWithWhite(t.accent_colour, 0.9)

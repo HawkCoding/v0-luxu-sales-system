@@ -45,7 +45,11 @@ On the **Guests** card:
    residence where known.
 4. Tick **Primary guest** on the traveller the booking bills to. Only one guest can be
    primary; ticking a different one moves the flag.
-5. **Room with** and **Room type** are free text, shown on the Worksheet PDF only.
+5. **Room with** and **Room type** are free text, shown on the Worksheet PDF. **Room with**
+   also groups the guests on the Travel Voucher, one line per room: enter the room-mate's
+   name, or give everyone sharing the same room label (for example `Room 1`). Filling it
+   in on one guest of a pair is enough; left blank for everyone, the voucher lists all the
+   guests on one line.
 6. Click **Save guests**.
 
 **Fill from customer profile** fills blank fields on existing rows from the customer

@@ -84,7 +84,7 @@ export function voucherRowsForBlock(
     if (d.boardingPoint) rows.push({ label: "Boarding Point", value: d.boardingPoint })
     if (d.arrivalPoint) rows.push({ label: "Arrival Point", value: d.arrivalPoint })
     if (d.durationDays != null) {
-      rows.push({ label: "Duration", value: `${d.durationDays} ${d.durationDays === 1 ? "day" : "days"}` })
+      rows.push({ label: "Duration", value: `${d.durationDays} ${d.durationDays === 1 ? "Day" : "Days"}` })
     }
     rows.push({ label: "Departure Date", value: fmtWithTime(departureDate, d.startTime) ?? "—" })
     rows.push({ label: "Arrival Date", value: fmtWithTime(arrivalDate, d.endTime) ?? "TBC" })

@@ -29,26 +29,34 @@ export interface SignatureRow {
   website: string | null
 }
 
-/** Upsert the email_signatures row for a profile. No-op when every field is blank/absent. */
+const SIGNATURE_FIELD_KEYS = ["full_name", "job_title", "tel", "cell", "fax", "email", "website"] as const
+
+/**
+ * Upsert the email_signatures row for a profile. Only the signature fields
+ * present in `fields` are written — an absent key leaves the stored column
+ * alone, a blank string clears it to null (readers treat null exactly like a
+ * missing row, falling back to the profile name/email). No-op when no
+ * signature field is present at all, so a mailbox-only PATCH never touches
+ * the signature. `fields` may carry unrelated keys (the credential payload);
+ * they are ignored.
+ */
 export async function upsertEmailSignature(
   supabase: SupabaseClient<Database>,
   profileId: string,
   fields: SignatureFields,
 ): Promise<{ error: string | null }> {
-  const hasAnyField = Object.values(fields).some((value) => value !== undefined && value !== "")
+  const row: Database["public"]["Tables"]["email_signatures"]["Insert"] = { profile_id: profileId }
+  let hasAnyField = false
+  for (const key of SIGNATURE_FIELD_KEYS) {
+    const value = fields[key]
+    if (value === undefined) continue
+    hasAnyField = true
+    row[key] = value.trim() || null
+  }
   if (!hasAnyField) return { error: null }
 
-  const { error } = await supabase.from("email_signatures").upsert({
-    profile_id: profileId,
-    full_name: fields.full_name || null,
-    job_title: fields.job_title || null,
-    tel: fields.tel || null,
-    cell: fields.cell || null,
-    fax: fields.fax || null,
-    email: fields.email || null,
-    website: fields.website || null,
-    updated_at: new Date().toISOString(),
-  })
+  row.updated_at = new Date().toISOString()
+  const { error } = await supabase.from("email_signatures").upsert(row)
 
   return { error: error?.message ?? null }
 }

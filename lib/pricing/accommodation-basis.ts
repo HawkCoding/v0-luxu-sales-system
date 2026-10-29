@@ -1,4 +1,5 @@
 import type { SupplierKind } from "@/lib/types"
+import { hotelRateCardFares, type FareRateCard } from "@/lib/pricing/passenger-fares"
 
 /**
  * How a hotel stay prices: separate adult/child/infant fares per night ("per_person", the
@@ -45,4 +46,61 @@ export function resolveAccommodationPricingBasis(input: {
  */
 export function accommodationPriceLabel(basis: AccommodationPricingBasis): string {
   return basis === "per_room" ? "per room per night" : "per person per night"
+}
+
+/** Who sleeps in one room -- the three counts a per-person hotel card is read against. */
+export interface RoomOccupancy {
+  adultCount: number
+  childCount: number
+  infantCount: number
+}
+
+/**
+ * What a rate card charges one room for one night. Under per_room the card's price already is the
+ * room's nightly rate; under per_person it is a fare per guest, so the room costs the card read
+ * against who is actually in it (hotelRateCardFares: an unset child or infant fare means free).
+ *
+ * A typed room price override replaces exactly this figure, so the leg editor (what the override
+ * "replaces") and the pricer (the manualRoomPriceBase stamped on the quote line) both read it from
+ * here -- they used to disagree, the editor quoting the room's sum and the line the bare adult fare.
+ */
+export function cardNightlyRoomRate(
+  card: FareRateCard,
+  basis: AccommodationPricingBasis,
+  occupancy: RoomOccupancy,
+): number {
+  if (basis === "per_room") return card.pricePerPerson
+  const sum = hotelRateCardFares(card).reduce(
+    (total, fare) => total + Math.max(0, occupancy[fare.key]) * fare.unitPrice,
+    0,
+  )
+  return Math.round(sum * 100) / 100
+}
+
+/**
+ * How a per-person card adds up to the room's nightly rate, e.g. "2 adults × R4 130,00" or
+ * "2 adults × R4 130,00 + 1 child free". Shown beside the room's nightly figure so a consultant
+ * whose rate sheet quotes the room (not the guest) can see at once that the card is being read per
+ * person -- otherwise R8 260 "per night for this room" reads as an unexplained doubling. Null when
+ * nobody is in the room yet.
+ */
+export function describeCardRoomRateBreakdown(
+  card: FareRateCard,
+  occupancy: RoomOccupancy,
+  formatAmount: (amount: number) => string,
+): string | null {
+  const nouns: Record<keyof RoomOccupancy, [string, string]> = {
+    adultCount: ["adult", "adults"],
+    childCount: ["child", "children"],
+    infantCount: ["infant", "infants"],
+  }
+  const parts = hotelRateCardFares(card)
+    .filter((fare) => occupancy[fare.key] > 0)
+    .map((fare) => {
+      const count = occupancy[fare.key]
+      const [one, many] = nouns[fare.key]
+      const who = `${count} ${count === 1 ? one : many}`
+      return fare.unitPrice > 0 ? `${who} × ${formatAmount(fare.unitPrice)}` : `${who} free`
+    })
+  return parts.length > 0 ? parts.join(" + ") : null
 }
