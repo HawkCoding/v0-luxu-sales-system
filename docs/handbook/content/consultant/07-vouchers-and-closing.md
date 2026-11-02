@@ -104,8 +104,11 @@ gross profit on this booking.
 
 ## The Documents tab and the Documents library
 
-The **Documents** tab on a booking lists every PDF generated for it — worksheets,
-quotes, invoices, vouchers, itineraries — with a generation timestamp on each.
+The **Documents** tab on a booking has two lists. **Generated** holds every PDF the system
+has produced for it — worksheets, quotes, invoices, vouchers, itineraries — with a
+generation timestamp on each. **Uploaded** holds the files added by hand.
+
+Generated PDFs can be downloaded but not deleted. To replace one, generate it again.
 
 The global **Documents** page, in the sidebar, lists every generated PDF across every
 booking. Use it when you know what you're after but not which booking it's on.
@@ -117,18 +120,15 @@ Search by booking number or customer name, or narrow the list with the filters: 
 generated-date range. Click **Download** on any row, or click the row itself to jump to
 that booking.
 
-## Attachments
+## Uploading files
 
-The **Attachments** tab is separate from Documents. Documents are PDFs the system
-generates; attachments are files a consultant uploads by hand — a proof of payment, a
-signed form, anything else worth keeping against the booking.
+The **Uploaded** list on the **Documents** tab is for files a consultant adds by hand — a
+proof of payment, a signed form, anything else worth keeping against the booking.
 
-To add one: choose a file, pick a **Kind** (Other, Proof of payment, Summary PDF, Invoice
-PDF, Quote PDF, Voucher PDF), and click **Upload**. PDF, JPG, PNG, WebP, DOCX or XLSX,
-10 MB by default.
+To add one: choose a file, pick a **Kind** (Other or Proof of payment), and click
+**Upload**. PDF, JPG, PNG, WebP, DOCX or XLSX, 10 MB by default.
 
-Each uploaded file can be downloaded or deleted from the same tab — deleting requires
-permission, and is not offered to every role.
+Each uploaded file can be downloaded or deleted from the same list.
 
 ## Closing the booking
 
@@ -138,5 +138,5 @@ on the booking.
 
 Nothing about generating or sending documents changes once a booking reaches **Closed** —
 the voucher, invoice and worksheet already sent stay exactly as they were sent, and the
-Documents and Attachments tabs stay exactly as populated as before. Closed simply marks
+Documents tab stays exactly as populated as before. Closed simply marks
 the booking as finished business.

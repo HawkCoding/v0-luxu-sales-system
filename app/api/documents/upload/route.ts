@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { writeAuditLog } from "@/lib/audit-write"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
+import { UPLOADABLE_DOCUMENT_KINDS } from "@/lib/documents/uploaded-documents"
 import {
   getAttachmentAllowedMimeTypes,
   getAttachmentMaxSizeMb,
@@ -10,18 +11,9 @@ import {
 const ATTACHMENTS_BUCKET = "attachments"
 const SIGNED_URL_EXPIRY_SECONDS = 3600
 
-const DOCUMENT_KINDS = [
-  "quote_pdf",
-  "invoice_pdf",
-  "voucher_pdf",
-  "summary_pdf",
-  "proof_of_payment",
-  "other",
-] as const
-
 const uploadFieldsSchema = z.object({
   booking_id: z.string().uuid(),
-  kind: z.enum(DOCUMENT_KINDS),
+  kind: z.enum(UPLOADABLE_DOCUMENT_KINDS),
 })
 
 function sanitiseFileName(name: string): string {
