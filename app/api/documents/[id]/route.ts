@@ -2,6 +2,7 @@ import { requireAnyRole, requireUser } from "@/lib/api/auth"
 import { writeAuditLog } from "@/lib/audit-write"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { downloadNameForStoredFile } from "@/lib/documents/file-names"
+import { isUploadedDocument } from "@/lib/documents/uploaded-documents"
 
 const ATTACHMENTS_BUCKET = "attachments"
 const PAYMENT_PROOFS_BUCKET = "payment-proofs"
@@ -86,12 +87,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { data: doc, error: fetchError } = await supabase
     .from("documents")
-    .select("id, booking_id, kind, storage_path, file_name, payment_id")
+    .select("id, booking_id, kind, status, storage_path, file_name, payment_id")
     .eq("id", id)
     .maybeSingle()
 
   if (fetchError) return safeSupabaseError("documents:delete:fetch", fetchError)
   if (!doc) return jsonError("Document not found", 404)
+  // Checked before storage is touched. Stage gates and the quote, invoice and voucher records rely
+  // on generated PDFs, and regenerating is how one gets replaced.
+  if (!isUploadedDocument(doc)) return jsonError("Generated documents can't be deleted", 403)
 
   if (doc.storage_path) {
     const { bucket, objectPath } = resolveStorageLocation(doc.storage_path, doc.kind)

@@ -27,6 +27,7 @@ interface DocRow {
   id: string
   booking_id: string
   kind: string
+  status?: string
   storage_path: string | null
   file_name: string | null
   payment_id?: string | null
@@ -211,6 +212,7 @@ describe("DELETE /api/documents/[id]", () => {
       id: DOC_ID,
       booking_id: BOOKING_ID,
       kind: "other",
+      status: "received",
       storage_path: STORAGE_PATH,
       file_name: "doc.pdf",
     })
@@ -229,6 +231,7 @@ describe("DELETE /api/documents/[id]", () => {
       id: DOC_ID,
       booking_id: BOOKING_ID,
       kind: "proof_of_payment",
+      status: "received",
       storage_path: `${BOOKING_ID}/proof_of_payment/p-abc-proof.pdf`,
       file_name: "proof.pdf",
       payment_id: "00000000-0000-4000-8000-00000000bbbb",
@@ -236,5 +239,21 @@ describe("DELETE /api/documents/[id]", () => {
     const res = await DELETE(new Request("http://localhost", { method: "DELETE" }), { params })
     expect(res.status).toBe(204)
     expect(paymentsUpdate).toHaveBeenCalledWith({ proof_storage_path: null })
+  })
+
+  it.each(["generated", "sent"])("refuses a %s PDF and leaves its file and row alone", async (status) => {
+    const { removeFn, documentsDelete } = makeManagerAuth({
+      id: DOC_ID,
+      booking_id: BOOKING_ID,
+      kind: "voucher_pdf",
+      status,
+      storage_path: "vouchers/LTT-26-0001/voucher.pdf",
+      file_name: "voucher.pdf",
+    })
+    const res = await DELETE(new Request("http://localhost", { method: "DELETE" }), { params })
+    expect(res.status).toBe(403)
+    expect(removeFn).not.toHaveBeenCalled()
+    expect(documentsDelete).not.toHaveBeenCalled()
+    expect(auditMocks.writeAuditLog).not.toHaveBeenCalled()
   })
 })

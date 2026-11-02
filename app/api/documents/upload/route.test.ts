@@ -182,6 +182,24 @@ describe("POST /api/documents/upload", () => {
     )
   })
 
+  it("accepts a proof_of_payment upload", async () => {
+    const { documentsInsert } = makeAuth()
+    const res = await POST(makeFormRequest({ kind: "proof_of_payment" }))
+    expect(res.status).toBe(200)
+    expect(documentsInsert).toHaveBeenCalledWith(expect.objectContaining({ kind: "proof_of_payment" }))
+  })
+
+  it.each(["voucher_pdf", "invoice_pdf", "quote_pdf", "summary_pdf"])(
+    "returns 400 for %s, which the stage gates would count as the generated document",
+    async (kind) => {
+      const { documentsInsert, storageUpload } = makeAuth()
+      const res = await POST(makeFormRequest({ kind }))
+      expect(res.status).toBe(400)
+      expect(storageUpload).not.toHaveBeenCalled()
+      expect(documentsInsert).not.toHaveBeenCalled()
+    },
+  )
+
   it("does not return raw storage path", async () => {
     makeAuth()
     const res = await POST(makeFormRequest())

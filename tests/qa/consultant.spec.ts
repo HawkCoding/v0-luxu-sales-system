@@ -474,7 +474,7 @@ test("C9 — upload proof of payment", async ({ page }) => {
     const target = (bookings ?? [])[0]
     expect(target, "a booking to attach a proof to").toBeTruthy()
 
-    await gotoJobTab(page, target!.id, "attachments")
+    await gotoJobTab(page, target!.id, "documents")
     await page.locator("#attachment-file").setInputFiles({
       name: "qa-proof-of-payment.pdf",
       mimeType: "application/pdf",

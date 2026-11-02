@@ -43,7 +43,6 @@ import { JobTransferTimesTab } from "@/components/job-transfer-times-tab"
 import { JobPaymentsTab } from "@/components/job-payments-tab"
 import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
-import { JobAttachmentsTab } from "@/components/job-attachments-tab"
 import { JobInternalNotesTab } from "@/components/job-internal-notes-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
 import { BookingStageStepper } from "@/components/booking-stage-stepper"
@@ -85,7 +84,6 @@ type JobDetailTab =
   | "payments"
   | "correspondence"
   | "documents"
-  | "attachments"
   | "notes"
   | "audit"
 
@@ -98,12 +96,13 @@ const JOB_DETAIL_TABS = new Set<JobDetailTab>([
   "payments",
   "correspondence",
   "documents",
-  "attachments",
   "notes",
   "audit",
 ])
 
 function parseJobDetailTab(value: string | null): JobDetailTab {
+  // Attachments merged into Documents; saved links to the old tab still land on those files.
+  if (value === "attachments") return "documents"
   return value && JOB_DETAIL_TABS.has(value as JobDetailTab) ? (value as JobDetailTab) : "enquiry"
 }
 
@@ -1056,7 +1055,6 @@ export default function JobDetailPage() {
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs">Documents ({documents.length})</TabsTrigger>
-          <TabsTrigger value="attachments" className="text-xs">Attachments</TabsTrigger>
           <TabsTrigger value="notes" className="text-xs">Notes</TabsTrigger>
           <TabsTrigger value="audit" className="text-xs">Audit Log</TabsTrigger>
         </TabsList>
@@ -1154,15 +1152,6 @@ export default function JobDetailPage() {
             onChange={mutate}
             loading={isLoading}
             error={error as Error | null}
-          />
-        </TabsContent>
-        <TabsContent value="attachments">
-          <JobAttachmentsTab
-            bookingId={id}
-            documents={documents}
-            loading={isLoading}
-            error={error as Error | null}
-            onChange={mutate}
           />
         </TabsContent>
         <TabsContent value="notes" forceMount className="data-[state=inactive]:hidden">
