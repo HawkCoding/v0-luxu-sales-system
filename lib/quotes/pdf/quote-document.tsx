@@ -139,7 +139,9 @@ const SECTION_RIGHT = 14.8
 /** Box columns: labels at 54.7 / 329.1, values at 155.1 / 408.8. */
 const BOX_RIGHT_COLUMN = 274.4
 const LEFT_LABEL = 100.4
-const RIGHT_LABEL = 79.7
+// Narrowed from 79.7 so the longest label ("Travel dates") starts under the "Train Journey details"
+// heading and long date ranges keep the freed width on one line.
+const RIGHT_LABEL = 52
 /** "Phone" / "E-mail" — the client column's values sit right after the widest label. */
 const CLIENT_LABEL = 40
 /** Date / title column of both package tables (51.7 → 187.5). */
