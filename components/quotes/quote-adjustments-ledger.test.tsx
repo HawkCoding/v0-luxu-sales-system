@@ -113,6 +113,26 @@ describe("QuoteAdjustmentsLedger", () => {
     expect(screen.queryByText("/ pax")).not.toBeInTheDocument()
   })
 
+  it("counts a typed commission straight away, without touching the type toggle", () => {
+    render(<QuoteAdjustmentsLedger quote={buildQuote()} editable bookingHeadcount={4} onSaved={vi.fn()} />)
+
+    fireEvent.change(document.getElementById(`quote-adjustments-${QUOTE_ID}-commission-value`) as HTMLElement, {
+      target: { value: "10" },
+    })
+
+    // 10% of R200 000 — the toggle shows "%" by default, so typing alone activates it.
+    expect(within(commissionRow()).getByText(`+ ${money(20_000, "ZAR")}`)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument()
+  })
+
+  it("picking a type without a value is not a change", () => {
+    render(<QuoteAdjustmentsLedger quote={buildQuote()} editable bookingHeadcount={4} onSaved={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("radio", { name: "Fixed amount" }))
+
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument()
+  })
+
   it("re-counts a saved per-person commission with the current headcount and offers Save", () => {
     // Saved when the booking held 1 traveller; it now holds 5.
     const quote = buildQuote({

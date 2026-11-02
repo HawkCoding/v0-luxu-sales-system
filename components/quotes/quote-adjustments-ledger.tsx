@@ -210,7 +210,9 @@ export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quote.updatedAt])
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
+  // A type picked with no value is "no commission", same as nothing saved.
+  const comparableDraft = draft.commissionValue === null ? { ...draft, commissionType: null } : draft
+  const dirty = JSON.stringify(comparableDraft) !== JSON.stringify(saved)
 
   // Client-side preview. Reuses the exact function the API route calls, fed the same booking
   // headcount (adults + children), so a per-person Commission/Discount previews exactly what Save
@@ -308,10 +310,6 @@ export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSa
   }
 
   async function save() {
-    if (draft.commissionType !== null && draft.commissionValue === null) {
-      toast.error("Choose a commission value, or clear the commission type.")
-      return
-    }
     if (draft.discountShown && draft.discountType === null) {
       toast.error("Choose a discount type.")
       return
@@ -388,7 +386,7 @@ export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSa
               label="Commission type"
               value={commissionActiveType}
               onChange={(kind) =>
-                setDraft((d) => ({ ...d, commissionType: kind, commissionValue: d.commissionValue ?? 0 }))
+                setDraft((d) => ({ ...d, commissionType: kind }))
               }
             />
             <ValueInput
@@ -396,7 +394,11 @@ export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSa
               type={commissionActiveType}
               value={draft.commissionValue}
               currency={quote.currency}
-              onChange={(value) => setDraft((d) => ({ ...d, commissionValue: value }))}
+              // The toggle shows "%" while the type is still null, so typing must activate it —
+              // otherwise the value is silently ignored until a toggle button is clicked.
+              onChange={(value) =>
+                setDraft((d) => ({ ...d, commissionType: d.commissionType ?? "percent", commissionValue: value }))
+              }
             />
           </>
         }
