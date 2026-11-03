@@ -508,7 +508,7 @@ function formatPart(part: PaxGroupPricePart, money: (n: number) => string): stri
   const noun = part.kind === "adult" ? (one ? "Adult" : "Adults") : one ? "Child" : "Children"
   let text = `${part.count} ${noun} x ${money(part.perPerson)}`
   if (!one) text += part.kind === "adult" ? " per person" : " per child"
-  if (part.supplement) text += " (single, supplement incl.)"
+  if (part.supplement) text += " (single supplement incl.)"
   const label = part.rateLabel?.trim()
   if (label) text += ` (${label})`
   return text
