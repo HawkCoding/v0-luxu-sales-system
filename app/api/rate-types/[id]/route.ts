@@ -15,6 +15,9 @@ const patchSchema = z
     audience: z.enum(["international", "resident"]).nullable().optional(),
     /** Client-facing {{rateLabel}} text, e.g. "SADC Resident special". Null falls back to `name`. */
     clientLabel: z.string().trim().max(100).nullable().optional(),
+    /** The short tag client documents print after a price on a suite line, e.g. "SA" for
+     * "2 Adults x R23 800,00 per person (SA)". Null or blank prints nothing. */
+    shortLabel: z.string().trim().max(20).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: "No fields to update" })
 
@@ -130,6 +133,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (parsed.data.audience !== undefined) updates.audience = parsed.data.audience
   if (parsed.data.clientLabel !== undefined) {
     updates.client_label = parsed.data.clientLabel?.trim() || null
+  }
+  if (parsed.data.shortLabel !== undefined) {
+    // Documents add the brackets themselves, so a typed "(SA)" is stored as "SA".
+    updates.short_label = parsed.data.shortLabel?.replace(/^\(+|\)+$/g, "").trim() || null
   }
 
   const { data, error } = await supabase

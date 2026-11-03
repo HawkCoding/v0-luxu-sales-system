@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { JobReservationTab } from "./job-reservation-tab"
 import type { Customer } from "@/lib/types"
-import type { JobReservationDetails, JobTraveller } from "@/lib/use-data"
+import type { JobPaxGroup, JobReservationDetails, JobTraveller } from "@/lib/use-data"
 
 // This card used to also render a "From enquiry: …" hint sourced from the enquiry's
 // "Briefly explain additional services" free text, which made the Special requests card look
@@ -207,5 +207,107 @@ describe("JobReservationTab — club member numbers", () => {
     expect(screen.getByDisplayValue("RR-1")).toBeInTheDocument()
     expect(screen.getAllByPlaceholderText("Club / programme")).toHaveLength(1)
     expect(screen.getByRole("button", { name: /^club member number$/i })).toBeInTheDocument()
+  })
+})
+
+describe("JobReservationTab — suites (pax groups)", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function guest(overrides: Partial<JobTraveller>): JobTraveller {
+    return {
+      id: "t1",
+      prefix: "",
+      firstName: "Jun",
+      lastName: "Chen",
+      idPassport: "A1",
+      dateOfBirth: "",
+      residence: "",
+      roomWith: "Ling",
+      roomType: "Twin",
+      isChild: false,
+      isPrimary: true,
+      sortOrder: 0,
+      clubMemberships: [],
+      paxGroupId: "g1",
+      ...overrides,
+    }
+  }
+
+  const suites: JobPaxGroup[] = [
+    { id: "g1", position: 1, label: null, autoLabel: "Twin Deluxe Suite 1", adults: 1, children: 0, infants: 0 },
+    { id: "g2", position: 2, label: "Kids", autoLabel: "Twin Deluxe Suite 2", adults: 0, children: 2, infants: 0 },
+  ]
+
+  function setupWithSuites(travellers: JobTraveller[], paxGroups: JobPaxGroup[]) {
+    useDataMocks.useJobTravellers.mockReturnValue({
+      data: { travellers, paxComparison: null, paxGroups },
+      isLoading: false,
+      error: undefined,
+      mutate: vi.fn(),
+    })
+    useDataMocks.useJobReservationDetails.mockReturnValue({
+      data: reservationDetails(),
+      isLoading: false,
+      error: undefined,
+      mutate: vi.fn(),
+    })
+    return render(
+      <JobReservationTab
+        bookingId="booking-1"
+        reservationFormReceivedAt={null}
+        mutateJob={vi.fn()}
+        customer={null}
+        stage="accepted"
+      />,
+    )
+  }
+
+  it("replaces Room with / Room type with a Suite select, and summarises who is placed", () => {
+    setupWithSuites(
+      [guest({}), guest({ id: "t2", firstName: "Ling", lastName: "Tsai", isPrimary: false, sortOrder: 1 }), guest({ id: "t3", firstName: "", lastName: "", paxGroupId: null, sortOrder: 2 })],
+      suites,
+    )
+    expect(screen.queryByPlaceholderText("Room with")).not.toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Suite for Jun Chen" })).toHaveTextContent(
+      /^Suite 1 · Twin Deluxe Suite$/,
+    )
+    expect(screen.getByRole("combobox", { name: "Suite for guest 3" })).toHaveTextContent("Not placed yet")
+    expect(screen.getByText(/Suites: 2 of 3 guests placed/)).toBeInTheDocument()
+    expect(screen.getByText("Suite 1 has 2 guests placed; it is booked for 1.")).toBeInTheDocument()
+  })
+
+  it("lists the guests by suite, read-only and in position order, with the unplaced last", () => {
+    setupWithSuites(
+      [
+        guest({ id: "t3", firstName: "", lastName: "", paxGroupId: null, sortOrder: 0 }),
+        guest({ id: "t1", prefix: "Mr", sortOrder: 1 }),
+        guest({ id: "t2", prefix: "Mrs", firstName: "Ling", lastName: "Tsai", isPrimary: false, sortOrder: 2 }),
+      ],
+      suites,
+    )
+    const list = screen.getByText("By suite").closest("details")
+    expect(list).toHaveAttribute("open")
+    const lines = within(list as HTMLElement)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent)
+    expect(lines).toEqual([
+      "Suite 1 · Twin Deluxe Suite 1 — Mr Jun Chen, Mrs Ling Tsai",
+      "Suite 2 · Kids — nobody placed yet",
+      "Not placed yet — Guest 1",
+    ])
+  })
+
+  it("names a typed suite as typed in its select", () => {
+    setupWithSuites([guest({ paxGroupId: "g2", isChild: true })], suites)
+    expect(screen.getByRole("combobox", { name: "Suite for Jun Chen" })).toHaveTextContent(/^Suite 2 · Kids$/)
+  })
+
+  it("is unchanged on a booking without suites", () => {
+    setupWithSuites([guest({ paxGroupId: null })], [])
+    expect(screen.getByPlaceholderText("Room with")).toHaveValue("Ling")
+    expect(screen.queryByRole("combobox", { name: /Suite for/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/guests placed/)).not.toBeInTheDocument()
   })
 })

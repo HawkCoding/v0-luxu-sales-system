@@ -33,6 +33,8 @@ import { upsertGeneratedDocument } from "@/lib/documents/upsert-generated-docume
 import type { PricingSnapshot } from "@/lib/types"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
+import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
+import { blockScopeTagger, resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 
 export const QUOTE_BUCKET = "quotes"
 
@@ -223,6 +225,12 @@ export async function ensureQuotePdf(
     booking,
     payingPaxSupplierId(quoteConfig.primarySupplierId, booking?.primary_supplier_id),
   )
+  // A booking split into pax groups prints one line per suite in place of the per-person rows, on
+  // the same gross figure; null (no groups, or a quote priced before them) keeps those rows.
+  const paxGroupPricing = await resolvePaxGroupPricing(supabase, {
+    lines: lineItems ?? [],
+    target: Number(quote.subtotal ?? quote.total),
+  })
 
   let pdfBuffer: Buffer
   try {
@@ -257,6 +265,8 @@ export async function ensureQuotePdf(
         children: pax.children,
         total: Number(quote.subtotal ?? quote.total),
       }),
+      paxGroupPricing,
+      itineraryScopeTag: blockScopeTagger(lineItems ?? [], paxGroupNoun(primarySupplierKind)),
       subtotal: quote.subtotal,
       agentCommission: Number(quote.agent_commission ?? 0),
       discount: Number(quote.discount_amount ?? 0),

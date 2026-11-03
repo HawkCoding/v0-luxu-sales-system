@@ -398,6 +398,41 @@ export type Database = {
         }
         Relationships: []
       }
+      booking_pax_groups: {
+        Row: {
+          booking_id: string
+          created_at: string
+          id: string
+          label: string | null
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          position: number
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_pax_groups_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_reservation_details: {
         Row: {
           agency_address: string | null
@@ -501,6 +536,8 @@ export type Database = {
           manual_tour_price_set_at: string | null
           manual_tour_price_set_by: string | null
           origin: Database["public"]["Enums"]["service_origin"]
+          pax_group_ids: string[]
+          rate_splits: Json
           rate_type_id: string | null
           service_id: string
           sort_order: number
@@ -532,6 +569,8 @@ export type Database = {
           manual_tour_price_set_at?: string | null
           manual_tour_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          pax_group_ids?: string[]
+          rate_splits?: Json
           rate_type_id?: string | null
           service_id: string
           sort_order?: number
@@ -563,6 +602,8 @@ export type Database = {
           manual_tour_price_set_at?: string | null
           manual_tour_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          pax_group_ids?: string[]
+          rate_splits?: Json
           rate_type_id?: string | null
           service_id?: string
           sort_order?: number
@@ -947,6 +988,7 @@ export type Database = {
           luggage_count: number | null
           notes: string | null
           passenger_count: number | null
+          pax_group_ids: string[]
           pickup_at: string | null
           pickup_point: string
           price_override: number | null
@@ -980,6 +1022,7 @@ export type Database = {
           luggage_count?: number | null
           notes?: string | null
           passenger_count?: number | null
+          pax_group_ids?: string[]
           pickup_at?: string | null
           pickup_point: string
           price_override?: number | null
@@ -1013,6 +1056,7 @@ export type Database = {
           luggage_count?: number | null
           notes?: string | null
           passenger_count?: number | null
+          pax_group_ids?: string[]
           pickup_at?: string | null
           pickup_point?: string
           price_override?: number | null
@@ -2899,6 +2943,7 @@ export type Database = {
           is_default: boolean
           is_standard: boolean
           name: string
+          short_label: string | null
           sort_order: number
           updated_at: string
         }
@@ -2912,6 +2957,7 @@ export type Database = {
           is_default?: boolean
           is_standard?: boolean
           name: string
+          short_label?: string | null
           sort_order?: number
           updated_at?: string
         }
@@ -2925,6 +2971,7 @@ export type Database = {
           is_default?: boolean
           is_standard?: boolean
           name?: string
+          short_label?: string | null
           sort_order?: number
           updated_at?: string
         }
@@ -3993,6 +4040,7 @@ export type Database = {
           is_child: boolean
           is_primary: boolean
           last_name: string
+          pax_group_id: string | null
           prefix: string | null
           residence: string | null
           room_type: string | null
@@ -4010,6 +4058,7 @@ export type Database = {
           is_child?: boolean
           is_primary?: boolean
           last_name: string
+          pax_group_id?: string | null
           prefix?: string | null
           residence?: string | null
           room_type?: string | null
@@ -4027,6 +4076,7 @@ export type Database = {
           is_child?: boolean
           is_primary?: boolean
           last_name?: string
+          pax_group_id?: string | null
           prefix?: string | null
           residence?: string | null
           room_type?: string | null
@@ -4039,6 +4089,13 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "travellers_pax_group_id_fkey"
+            columns: ["pax_group_id"]
+            isOneToOne: false
+            referencedRelation: "booking_pax_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -4258,6 +4315,10 @@ export type Database = {
         Args: { p_count: number; p_product_code: string; p_year?: number }
         Returns: number
       }
+      replace_booking_pax_groups: {
+        Args: { p_booking_id: string; p_groups: Json }
+        Returns: undefined
+      }
       replace_booking_service_units: {
         Args: { p_service_ids: string[]; p_units: Json }
         Returns: undefined
@@ -4366,12 +4427,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
+  TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never) = never,
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4395,11 +4456,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
+  TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never) = never,
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4420,11 +4481,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
+  TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never) = never,
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4445,11 +4506,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never) = never,
+    : never = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4462,11 +4523,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never) = never,
+    : never = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4555,4 +4616,3 @@ export const Constants = {
     },
   },
 } as const
-

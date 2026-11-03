@@ -1,15 +1,60 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
+import type { PackageDetail, PaxGroupMeta } from "@/lib/types"
+import { buildPackageQuoteLineItems, calculateQuoteTotals, findPrimaryLegId } from "@/lib/quotes/build-from-package"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
-import { bookingServicesToLegSelections, loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
+import {
+  bookingServicesToLegSelections,
+  loadBookingServicesPackageDetail,
+  type BookingServicesData,
+} from "@/lib/quotes/adapters/from-booking-services"
 import { getDefaultCommission } from "@/lib/pricing/default-commission"
 import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
 import { getCachedRates } from "@/lib/fx/rates"
 import { BASE_CURRENCY } from "@/lib/money"
+import { paxGroupNamesFromSuiteTypes, resolvePaxGroupMetas } from "@/lib/pax-groups/labels"
 
 type ServiceClient = SupabaseClient<Database>
+
+/**
+ * The booking's pax groups with their printed names, for the pricing engine to stamp onto the
+ * primary service's lines. Empty when the booking has fewer than 2 groups (it then prices and reads
+ * exactly as before), and when the groups can't be read: the names only label the quote, so a
+ * failed read must not cost the booking its draft quote.
+ */
+async function loadPaxGroupMetas(
+  supabase: ServiceClient,
+  bookingId: string,
+  detail: PackageDetail,
+  units: BookingServicesData["units"],
+): Promise<PaxGroupMeta[]> {
+  const { data: groupRows, error: groupsError } = await supabase
+    .from("booking_pax_groups")
+    .select("id, position, label")
+    .eq("booking_id", bookingId)
+    .order("position", { ascending: true })
+  if (groupsError || !groupRows || groupRows.length < 2) return []
+
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("primary_supplier_id")
+    .eq("id", bookingId)
+    .maybeSingle()
+  if (bookingError) return []
+
+  const primaryLegId = findPrimaryLegId(detail.legs, booking?.primary_supplier_id ?? null)
+  const primaryLeg = detail.legs.find((leg) => leg.id === primaryLegId)
+  const primaryUnits = units
+    .filter((unit) => unit.service_id === primaryLegId)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((unit) => ({
+      paxGroupIds: Array.isArray(unit.pax_group_ids) ? unit.pax_group_ids : [],
+      suiteTypeId: unit.suite_type_id,
+      bedroomTypeId: unit.bedroom_type_id,
+    }))
+  return resolvePaxGroupMetas(groupRows, primaryUnits, paxGroupNamesFromSuiteTypes(primaryLeg?.suiteTypes ?? []))
+}
 
 /**
  * The rate types the auto-quote prices against -- the same precedence the Build Booking dialog
@@ -83,6 +128,7 @@ export async function createDraftQuoteForBooking({
       // rates come along; getCachedRates never calls out, keeping intake off a third party's
       // latency.
       const fx = await getCachedRates(supabase)
+      const paxGroups = await loadPaxGroupMetas(supabase, bookingId, detail, units)
 
       const built = await buildPackageQuoteLineItems({
         supabase,
@@ -95,6 +141,7 @@ export async function createDraftQuoteForBooking({
         quoteCurrency: BASE_CURRENCY,
         fxRates: fx.rates,
         fxRateAsOf: fx.rows[0]?.asOf ?? null,
+        paxGroups,
       })
       lineItems = built.lineItems
       // A flight leg with no fare typed in yet still counts as "not fully priced" -- same bar as

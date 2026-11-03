@@ -48,6 +48,7 @@ export default function RateTypesPage() {
   const [editName, setEditName] = useState("")
   const [editAudience, setEditAudience] = useState<"any" | "international" | "resident">("any")
   const [editClientLabel, setEditClientLabel] = useState("")
+  const [editShortLabel, setEditShortLabel] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -98,6 +99,7 @@ export default function RateTypesPage() {
     setEditName(rt.name)
     setEditAudience(rt.audience ?? "any")
     setEditClientLabel(rt.clientLabel ?? "")
+    setEditShortLabel(rt.shortLabel ?? "")
   }
 
   const cancelEdit = () => {
@@ -105,6 +107,7 @@ export default function RateTypesPage() {
     setEditName("")
     setEditAudience("any")
     setEditClientLabel("")
+    setEditShortLabel("")
   }
 
   const saveEdit = async (id: string) => {
@@ -116,6 +119,7 @@ export default function RateTypesPage() {
         name: trimmed,
         audience: editAudience === "any" ? null : editAudience,
         clientLabel: editClientLabel.trim() || null,
+        shortLabel: editShortLabel.trim() || null,
       },
       "Rate type updated",
     )
@@ -123,6 +127,7 @@ export default function RateTypesPage() {
     setEditName("")
     setEditAudience("any")
     setEditClientLabel("")
+    setEditShortLabel("")
   }
 
   const create = async () => {
@@ -231,6 +236,15 @@ export default function RateTypesPage() {
                           {AUDIENCE_LABELS[rt.audience]}
                         </Badge>
                       )}
+                      {editingId !== rt.id && rt.shortLabel && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs shrink-0"
+                          title="Short label printed on quotes"
+                        >
+                          ({rt.shortLabel})
+                        </Badge>
+                      )}
                     </div>
                     {canEdit && (
                       <div className="flex items-center gap-1 shrink-0">
@@ -291,7 +305,7 @@ export default function RateTypesPage() {
                     )}
                   </div>
                   {editingId === rt.id && (
-                    <div className="flex items-center gap-2 pl-9">
+                    <div className="flex flex-wrap items-start gap-2 pl-9">
                       <div className="space-y-1">
                         <Label htmlFor={`rt-audience-${rt.id}`} className="text-xs text-muted-foreground">
                           Audience
@@ -326,6 +340,27 @@ export default function RateTypesPage() {
                           maxLength={100}
                           className="h-8"
                         />
+                      </div>
+                      <div className="space-y-1 w-full">
+                        <Label htmlFor={`rt-short-label-${rt.id}`} className="text-xs text-muted-foreground">
+                          Short label (on quotes)
+                        </Label>
+                        <Input
+                          id={`rt-short-label-${rt.id}`}
+                          value={editShortLabel}
+                          onChange={(e) => setEditShortLabel(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void saveEdit(rt.id)
+                            if (e.key === "Escape") cancelEdit()
+                          }}
+                          aria-describedby={`rt-short-label-help-${rt.id}`}
+                          placeholder="e.g. SA"
+                          maxLength={20}
+                          className="h-8 w-32"
+                        />
+                        <p id={`rt-short-label-help-${rt.id}`} className="text-xs text-muted-foreground">
+                          Printed after prices on suite lines, e.g. SA or TW. Leave blank to print nothing.
+                        </p>
                       </div>
                     </div>
                   )}

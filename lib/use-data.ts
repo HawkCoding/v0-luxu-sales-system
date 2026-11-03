@@ -181,6 +181,20 @@ export interface JobTraveller {
   isPrimary: boolean
   sortOrder: number
   clubMemberships: ClubMembership[]
+  /** The traveller's suite (booking_pax_groups.id); null = not placed yet. */
+  paxGroupId?: string | null
+}
+
+/** One suite a guest can be placed in -- see lib/packages/booking-pax-groups.ts PaxGroupSummary. */
+export interface JobPaxGroup {
+  id: string
+  position: number
+  /** The typed name, or null for autoLabel. */
+  label: string | null
+  autoLabel: string
+  adults: number
+  children: number
+  infants: number
 }
 
 export function useClubNames() {
@@ -197,7 +211,7 @@ export interface JobPaxComparison {
 }
 
 export function useJobTravellers(bookingId: string | null | undefined) {
-  return useSWR<{ travellers: JobTraveller[]; paxComparison: JobPaxComparison | null }>(
+  return useSWR<{ travellers: JobTraveller[]; paxComparison: JobPaxComparison | null; paxGroups?: JobPaxGroup[] }>(
     bookingId ? `/api/jobs/${bookingId}/travellers` : null,
     fetcher,
     swrOptions,

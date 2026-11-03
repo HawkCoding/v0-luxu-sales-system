@@ -1,7 +1,8 @@
 ﻿"use client"
 
-import { useState } from "react"
-import { ArrowLeftRight, ChevronDown, Gift, Info, Plus, Trash2, TriangleAlert } from "lucide-react"
+import { useEffect, useState } from "react"
+import { ArrowLeftRight, ChevronDown, Copy, Gift, Info, MinusCircle, Plus, Trash2, TriangleAlert } from "lucide-react"
+import { BufferedInput } from "@/components/ui/buffered-input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -58,8 +59,17 @@ import {
   type SuiteUnitState,
   type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
-import { supportsUnitRateType } from "@/lib/packages/unit-rate-type"
+import { effectiveUnitRateTypeId, supportsUnitRateType } from "@/lib/packages/unit-rate-type"
 import { describeEmptyUnitSentence, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
+import { supportsRateSplits, unitServesGroup } from "@/lib/packages/pax-groups"
+import { canExcludeGroupFromLeg, describeSharedNote, trimRateSplitsToCounts } from "@/lib/packages/pax-group-toggles"
+import {
+  removeFromGroupButtonId,
+  type PaxGroupEditorContext,
+} from "@/components/packages/pax-group-editor-context"
+import { PaxGroupPicker } from "@/components/packages/pax-group-picker"
+import { GroupPaxHint, GroupSharedNote, LegGroupHelper, sumGroupPax } from "@/components/packages/pax-group-unit-notes"
+import { RatePerGuestRows, RatePerGuestSwitch } from "@/components/packages/unit-rate-splits"
 import { resolveDirectedEndpointCodes, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import {
   findRateCardCandidates,
@@ -70,6 +80,7 @@ import {
 import { RateTypeSelect } from "@/components/rate-type-select"
 import { CurrencySelect } from "@/components/currency-select"
 import { formatMoney, BASE_CURRENCY } from "@/lib/money"
+import { rateCardFares } from "@/lib/pricing/passenger-fares"
 import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 
 const NONE_VALUE = "__none"
@@ -268,7 +279,7 @@ function RoomPriceOverride({
               "No rate card price for this room yet"
             )}
           </span>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <Button
               type="button"
               size="sm"
@@ -612,6 +623,9 @@ interface SuiteLegEditorProps {
   /** Base-currency rates, used only for the live "↳ R x @ rate" preview under a typed fare. The
    *  authoritative conversion happens server-side at pricing time. */
   fxRates?: FxRateMap
+  /** Group mode only (2+ units on the booking's primary leg): the pax-group additions -- card
+   *  headings, the For control, Suite name, the per-suite filter. Absent renders exactly as before. */
+  paxGroups?: PaxGroupEditorContext
 }
 
 // Names the anchor leg on the buttons once it has resolved, falling back to the primary product's
@@ -690,6 +704,7 @@ export function SuiteLegEditor({
   rateTypes = [],
   quoteCurrency = BASE_CURRENCY,
   fxRates = { [BASE_CURRENCY]: 1 },
+  paxGroups,
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
   const isTour = leg.supplierKind === "tour_operator"
@@ -831,20 +846,56 @@ export function SuiteLegEditor({
   function updateUnit(id: string, patch: Partial<SuiteUnitState>) {
     const units = value.units.map((unit) =>
       unit.id === id
-        ? {
+        ? // A headcount cut below the unit's per-guest rates drops split guests from the end.
+          trimRateSplitsToCounts({
             ...unit,
             ...patch,
             // Bed/layout/bathroom choices only make sense for the currently selected suite type.
             ...(patch.suiteTypeId !== undefined
               ? { bedroomTypeId: null, bedroomLayoutId: null, bathroomTypeId: null }
               : {}),
-          }
+          })
         : unit,
     )
 
     const routePatch = patch.suiteTypeId !== undefined ? deriveTourRoutePatch(units) : {}
 
     onChange({ ...value, units, ...routePatch })
+  }
+
+  // ---- Pax groups (group mode only: paxGroups is absent on a booking with fewer than 2 suites) ----
+  const groupMode = paxGroups !== undefined
+  const groupNoun = paxGroups?.noun ?? "Suite"
+  const groupList = paxGroups?.groups ?? []
+  const groupIds = groupList.map((group) => group.id)
+  const isPrimaryLeg = groupMode && leg.id === paxGroups?.primaryLegId
+  const activeGroupId = paxGroups?.activeGroupId ?? null
+  const activeGroup = activeGroupId ? groupList.find((group) => group.id === activeGroupId) ?? null : null
+  const unitNounTitle = vocab.unitNoun.charAt(0).toUpperCase() + vocab.unitNoun.slice(1)
+  // Units keep their own numbers in the per-suite view ("Room 3" stays "Room 3").
+  const shownUnits = value.units
+    .map((unit, index) => ({ unit, index }))
+    .filter(({ unit }) => !activeGroup || unitServesGroup(unit, activeGroup.id))
+  const canRemoveFromActive =
+    activeGroup !== null && !isPrimaryLeg && canExcludeGroupFromLeg(value, activeGroup.id, groupIds)
+  // Moves focus to a just-added unit's first select, once it has rendered.
+  const [focusUnitId, setFocusUnitId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusUnitId) return
+    document.getElementById(`suite-type-${leg.id}-${focusUnitId}`)?.focus()
+    setFocusUnitId(null)
+  }, [focusUnitId, leg.id])
+  const [ratePerGuestOpenIds, setRatePerGuestOpenIds] = useState<ReadonlySet<string>>(new Set())
+  function setRatePerGuestOpen(unitId: string, open: boolean) {
+    setRatePerGuestOpenIds((current) => {
+      const next = new Set(current)
+      if (open) next.add(unitId)
+      else next.delete(unitId)
+      return next
+    })
+  }
+  function groupOfUnit(unit: SuiteUnitState) {
+    return isPrimaryLeg ? groupList.find((group) => group.id === unit.paxGroupIds[0]) ?? null : null
   }
 
   const splitSummed = value.units.reduce(
@@ -1164,12 +1215,18 @@ export function SuiteLegEditor({
   return (
     // border-2 (vs. a unit card's plain border below) so one supplier's whole leg reads as a
     // distinct block -- with several tours/suites stacked underneath each other the single-width
-    // border made it easy to lose track of which fields belonged to which leg.
-    <div className="space-y-3 rounded-md border-2 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    // border made it easy to lose track of which fields belonged to which leg. The frame and the
+    // header's rule use accent tokens because the default border is under 3:1 on this surface.
+    <section
+      aria-labelledby={`service-title-${leg.id}`}
+      className="space-y-3 rounded-md border-2 border-accent p-3 dark:border-accent-link"
+    >
+      <div className="-mx-3 -mt-3 flex flex-wrap items-center justify-between gap-3 rounded-t-sm border-b-2 border-accent bg-muted px-3 py-2.5 only:-mb-3 only:rounded-b-sm only:border-b-0 dark:border-accent-link">
         <div className="min-w-[160px] flex-1">
           <div className="flex items-center gap-1.5">
-            <div className="text-sm font-medium">{leg.label ?? leg.supplierName}</div>
+            <h3 id={`service-title-${leg.id}`} className="font-sans text-lg font-semibold tracking-normal">
+              {leg.label ?? leg.supplierName}
+            </h3>
             {value.origin === "auto" && (
               <Badge
                 variant="secondary"
@@ -1180,7 +1237,7 @@ export function SuiteLegEditor({
               </Badge>
             )}
           </div>
-          <div className="text-xs text-muted-foreground">{leg.supplierName}</div>
+          <div className="text-xs text-foreground">{leg.supplierName}</div>
         </div>
         {isHotel || isAirline || isTour ? null : (
           <div className="space-y-1">
@@ -1214,7 +1271,7 @@ export function SuiteLegEditor({
             {tourEndDateError ? (
               <p className="text-xs text-destructive">{tourEndDateError}</p>
             ) : value.nights !== null ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-foreground">
                 {formatPrimaryProductDuration(value.nights, vocab.primaryProduct.durationUnit)}
               </p>
             ) : null}
@@ -1236,7 +1293,30 @@ export function SuiteLegEditor({
           />
           {optional ? "Include in quote & voucher" : "Always included"}
         </label>
+        {canRemoveFromActive && included && activeGroup && paxGroups ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            id={removeFromGroupButtonId(leg.id)}
+            aria-label={`Remove ${leg.label ?? leg.supplierName} from ${groupNoun} ${activeGroup.position}`}
+            onClick={() => paxGroups.onRemoveFromLeg(leg.id, activeGroup.id)}
+          >
+            <MinusCircle className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+            Remove from {groupNoun} {activeGroup.position}
+          </Button>
+        ) : null}
       </div>
+
+      {included && activeGroup && !isPrimaryLeg ? (
+        <LegGroupHelper
+          legName={leg.label ?? leg.supplierName}
+          supplierName={leg.supplierName}
+          isHotel={isHotel}
+          noun={groupNoun}
+          position={activeGroup.position}
+        />
+      ) : null}
 
       {included ? (
         <>
@@ -1587,10 +1667,15 @@ export function SuiteLegEditor({
             </div>
           ) : null}
 
+          {/* The primary leg's tally, Spread evenly and Add suite live in All suites and the group
+              bar; a suite's own tab shows just its card. */}
+          {activeGroup && isPrimaryLeg ? null : (
+          <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">
               {vocab.unitNounPlural.charAt(0).toUpperCase() + vocab.unitNounPlural.slice(1)}
-              {showHeadcountTally && expectedTotals ? (
+              {/* The leg-wide tally means nothing in one suite's view. */}
+              {showHeadcountTally && expectedTotals && !activeGroup ? (
                 <span
                   className={cn(
                     "ml-2 font-normal",
@@ -1603,7 +1688,7 @@ export function SuiteLegEditor({
                   {splitSummed.infantCount}/{expectedTotals.infantCount} infants
                 </span>
               ) : null}
-              {showHeadcountTally && expectedTotals && !splitMatches ? (
+              {showHeadcountTally && expectedTotals && !splitMatches && !activeGroup ? (
                 <Button
                   type="button"
                   size="sm"
@@ -1622,17 +1707,32 @@ export function SuiteLegEditor({
               type="button"
               size="sm"
               variant="outline"
+              id={groupMode ? `add-unit-${leg.id}` : undefined}
               onClick={() => {
+                if (activeGroup && !isPrimaryLeg) {
+                  // In a suite's own view a new unit is that suite's alone, holding its guests.
+                  const added = {
+                    ...createDraftUnit(sumGroupPax(groupList, [activeGroup.id])),
+                    paxGroupIds: [activeGroup.id],
+                  }
+                  const units = [...value.units, added]
+                  onChange({ ...value, units, ...deriveTourRoutePatch(units) })
+                  setFocusUnitId(added.id)
+                  return
+                }
                 // Tours are independent activities, not sleeping/seating slots -- a new tour is
                 // almost always the same travellers doing something else, so prefill it with the
                 // booking's full headcount instead of 0/0/0. Trains/hotels/airlines keep the old
                 // blank-unit behaviour since Spread evenly is what reconciles those.
-                const units = [...value.units, createDraftUnit(isTour ? expectedTotals ?? undefined : undefined)]
+                const added = createDraftUnit(isTour ? expectedTotals ?? undefined : undefined)
+                const units = [...value.units, added]
                 onChange({ ...value, units, ...deriveTourRoutePatch(units) })
+                if (groupMode) setFocusUnitId(added.id)
               }}
             >
               <Plus className="mr-1 h-3 w-3" />
               Add {vocab.unitNoun}
+              {activeGroup && !isPrimaryLeg ? ` for ${groupNoun} ${activeGroup.position}` : null}
             </Button>
           </div>
 
@@ -1642,8 +1742,39 @@ export function SuiteLegEditor({
               <span className="font-medium">{headcountNote}.</span>
             </p>
           ) : null}
+          </>
+          )}
 
-          {value.units.map((unit, index) => {
+          {shownUnits.map(({ unit, index }) => {
+            const unitGroup = groupOfUnit(unit)
+            const groupPosition = unitGroup?.position ?? index + 1
+            const unitLabel = `${vocab.unitNoun} ${index + 1}`
+            const servesOnlyActive =
+              activeGroup !== null && unit.paxGroupIds.length === 1 && unit.paxGroupIds[0] === activeGroup.id
+            const unitGuests = unit.adultCount + unit.childCount + unit.infantCount
+            const unitSuiteType = leg.suiteTypes.find((suiteType) => suiteType.id === unit.suiteTypeId)
+            const capacity = unitSuiteType?.passengerCapacity
+            const overCapacity =
+              groupMode && capacity != null && unit.adultCount + unit.childCount > capacity
+            const showRatePerGuest =
+              (groupMode || unit.rateSplits.length > 0) &&
+              supportsRateSplits(leg.supplierKind, leg.pricingMode) &&
+              showUnitRateType &&
+              unitGuests >= 2
+            const ratePerGuestOn = unit.rateSplits.length > 0 || ratePerGuestOpenIds.has(unit.id)
+            const unitEffectiveRateId = effectiveUnitRateTypeId(leg.supplierKind, unit.rateTypeId, value.rateTypeId)
+            const unitRateName = unit.rateTypeId
+              ? rateTypes.find((rt) => rt.id === unit.rateTypeId)?.name ?? "its own rate"
+              : value.rateTypeId
+                ? legRateTypeName ?? "the leg's rate"
+                : leg.inheritedRateTypeName ?? "the supplier default"
+            const guestRateNoCard = (rateTypeId: string): string | null =>
+              unit.suiteTypeId &&
+              leg.pricingMode !== "manual" &&
+              (pricesByTypeOnly || value.routeId) &&
+              !hasAnyRateCardForRateType(leg.rateCards, value.routeId ?? "", unit.suiteTypeId, rateTypeId)
+                ? `No ${rateTypes.find((rt) => rt.id === rateTypeId)?.name ?? "such"} rate card for this ${vocab.suiteType.toLowerCase()} — pick another rate or add one in Suppliers.`
+                : null
             const selectedSuiteType = leg.suiteTypes.find((suiteType) => suiteType.id === unit.suiteTypeId)
             const bedroomTypeIds = selectedSuiteType?.bedroomTypeIds ?? []
             const bedroomTypeNames = selectedSuiteType?.bedroomTypes ?? []
@@ -1691,25 +1822,89 @@ export function SuiteLegEditor({
                     {vocab.suiteType.toLowerCase()} — pick another rate or add one in Suppliers.
                   </p>
                 ) : null}
+                {showRatePerGuest ? (
+                  <RatePerGuestSwitch
+                    unitId={unit.id}
+                    checked={ratePerGuestOn}
+                    unitNoun={vocab.unitNoun}
+                    rateName={unitRateName}
+                    onCheckedChange={(checked) => {
+                      setRatePerGuestOpen(unit.id, checked)
+                      // Off clears at once -- it is cheap to redo.
+                      if (!checked) updateUnit(unit.id, { rateSplits: [] })
+                    }}
+                  />
+                ) : null}
               </div>
             ) : null
 
+            // A suite with nobody in it blocks Next in group mode, whatever the kind -- the card
+            // says so in the suite's own words.
+            const emptyMessage = unitGroup
+              ? unitGuests === 0
+                ? `${groupNoun} ${groupPosition} has nobody in it — add guests or remove the ${vocab.unitNoun}.`
+                : null
+              : emptyUnitIndexes.has(index)
+                ? describeEmptyUnitSentence(leg.supplierKind, index)
+                : null
+
             return (
               <div key={unit.id} className="grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
-                {/* Several tours stacked under one supplier otherwise look identical at a glance --
-                    this index is the only thing that says which card is the next one to fill in. */}
-                {pricesByTypeOnly ? (
+                {groupMode ? (
+                  <div className="flex flex-wrap items-start justify-between gap-2 md:col-span-2 xl:col-span-3">
+                    {unitGroup ? (
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <h4 className="font-sans text-sm font-semibold tracking-normal">
+                          {groupNoun} {unitGroup.position}
+                        </h4>
+                        <span className="text-xs text-muted-foreground">Prints as &ldquo;{unitGroup.label}&rdquo;</span>
+                      </div>
+                    ) : (
+                      <>
+                        <h4 className="font-sans text-sm font-semibold tracking-normal">
+                          {unitNounTitle} {index + 1}
+                        </h4>
+                        <PaxGroupPicker
+                          groups={groupList}
+                          value={unit.paxGroupIds}
+                          onChange={(paxGroupIds) => updateUnit(unit.id, { paxGroupIds })}
+                          activeGroupId={activeGroupId}
+                          noun={groupNoun}
+                          itemNoun={vocab.unitNoun}
+                          itemNumber={index + 1}
+                          legName={leg.label ?? leg.supplierName}
+                        />
+                      </>
+                    )}
+                  </div>
+                ) : pricesByTypeOnly ? (
+                  // Several tours stacked under one supplier otherwise look identical at a glance --
+                  // this index is the only thing that says which card is the next one to fill in.
                   <p className="text-xs font-medium text-muted-foreground md:col-span-2 xl:col-span-3">
                     {vocab.unitNoun.charAt(0).toUpperCase() + vocab.unitNoun.slice(1)} {index + 1}
                   </p>
                 ) : null}
-                {emptyUnitIndexes.has(index) ? (
+                {activeGroup && !unitGroup ? (
+                  <GroupSharedNote
+                    text={describeSharedNote(unit.paxGroupIds, activeGroup.id, groupList, groupNoun, isHotel)}
+                  />
+                ) : null}
+                {emptyMessage ? (
                   <p
                     role="alert"
                     className="flex items-start gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive md:col-span-2 xl:col-span-3"
                   >
                     <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    <span>{describeEmptyUnitSentence(leg.supplierKind, index)}</span>
+                    <span>{emptyMessage}</span>
+                  </p>
+                ) : null}
+                {overCapacity && unitSuiteType ? (
+                  <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400 md:col-span-2 xl:col-span-3">
+                    <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>
+                      {unitGroup ? `${groupNoun} ${unitGroup.position}` : `This ${vocab.unitNoun}`} has{" "}
+                      {unit.adultCount + unit.childCount} guests; a {unitSuiteType.name} takes {capacity}.
+                    </span>
                   </p>
                 ) : null}
                 <div className="space-y-1.5">
@@ -1831,6 +2026,26 @@ export function SuiteLegEditor({
                   </div>
                 ) : null}
 
+                {/* The suite's printed name sits in the fittings grid (the free cell after the
+                    bathroom), so the heading row stays one line. */}
+                {unitGroup ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`suite-name-${unitGroup.id}`}>{groupNoun} name</Label>
+                    <BufferedInput
+                      id={`suite-name-${unitGroup.id}`}
+                      className="h-9 w-full"
+                      maxLength={60}
+                      placeholder={unitGroup.autoLabel}
+                      aria-describedby={`suite-name-help-${unitGroup.id}`}
+                      value={unitGroup.typedLabel ?? ""}
+                      onValueChange={(next) => paxGroups?.onLabelChange(unitGroup.id, next.trim() || null)}
+                    />
+                    <p id={`suite-name-help-${unitGroup.id}`} className="text-xs text-muted-foreground">
+                      Printed on the quote, invoice and emails. Leave blank to use the automatic name.
+                    </p>
+                  </div>
+                ) : null}
+
                 {showPassengerSplit ? (
                   // Footer row: who travels in this unit (left) and the rate they're priced at
                   // (right). The divider separates it from the fittings above.
@@ -1875,6 +2090,37 @@ export function SuiteLegEditor({
                     </div>
                     {unitRateBlock}
                   </div>
+                ) : null}
+
+                {groupMode && !unitGroup ? (
+                  <GroupPaxHint
+                    ids={unit.paxGroupIds}
+                    pax={{ adultCount: unit.adultCount, childCount: unit.childCount, infantCount: unit.infantCount }}
+                    groups={groupList}
+                    noun={groupNoun}
+                    itemNoun={vocab.unitNoun}
+                    onMatch={() => updateUnit(unit.id, sumGroupPax(groupList, unit.paxGroupIds))}
+                  />
+                ) : null}
+
+                {showRatePerGuest && ratePerGuestOn ? (
+                  <RatePerGuestRows
+                    unit={unit}
+                    rateTypes={rateTypes}
+                    allowedRateTypeIds={leg.applicableRateTypeIds}
+                    unitRateTypeId={unitEffectiveRateId}
+                    rateName={unitRateName}
+                    unitNoun={vocab.unitNoun}
+                    onChange={(rateSplits) => updateUnit(unit.id, { rateSplits })}
+                    noCardWarning={guestRateNoCard}
+                    rateCardPrice={(rateTypeId, kind) => {
+                      // Same lookup as the card's "Rate card …" footer, for this guest's rate.
+                      const card = resolveRoomRateCard(unit.suiteTypeId, rateTypeId ?? unit.rateTypeId)
+                      if (!card) return null
+                      const fare = rateCardFares(card).find((candidate) => candidate.key === `${kind}Count`)
+                      return fare ? formatMoney(fare.unitPrice, card.currency) : null
+                    }}
+                  />
                 ) : null}
 
                 {isHotel ? (
@@ -2009,16 +2255,46 @@ export function SuiteLegEditor({
                 {/* Spans the whole card so it always lands bottom-right. As a single grid cell it
                     fell into column 1 of a fresh row after any full-width override row (hotel,
                     tour, train fare), stranding it mid-left on its own. */}
-                {value.units.length > 1 ? (
+                {unitGroup && paxGroups ? (
+                  // A suite of the primary leg: Duplicate, and Remove (confirmed by the dialog).
+                  <div className="flex items-end justify-end gap-2 md:col-span-2 xl:col-span-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Duplicate ${groupNoun} ${unitGroup.position}`}
+                      onClick={() => paxGroups.onDuplicateGroup(unitGroup.id)}
+                    >
+                      <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+                      Duplicate {groupNoun.toLowerCase()}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Remove ${groupNoun} ${unitGroup.position}`}
+                      onClick={() => paxGroups.onRemoveGroup(unitGroup.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : value.units.length > 1 && (!activeGroup || servesOnlyActive) ? (
+                  // In a suite's own view only a unit that suite has alone can be deleted here; a
+                  // shared one is narrowed with its For control, or deleted in All suites.
                   <div className="flex items-end justify-end md:col-span-2 xl:col-span-3">
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
-                      aria-label={`Remove ${vocab.unitNoun} ${index + 1}`}
+                      aria-label={
+                        activeGroup
+                          ? `Remove ${unitLabel} from ${groupNoun} ${activeGroup.position}`
+                          : `Remove ${vocab.unitNoun} ${index + 1}`
+                      }
                       onClick={() => {
                         const units = value.units.filter((item) => item.id !== unit.id)
                         onChange({ ...value, units, ...deriveTourRoutePatch(units) })
+                        if (groupMode) document.getElementById(`add-unit-${leg.id}`)?.focus()
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -2062,6 +2338,6 @@ export function SuiteLegEditor({
           /> */}
         </>
       ) : null}
-    </div>
+    </section>
   )
 }

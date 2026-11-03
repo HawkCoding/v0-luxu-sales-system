@@ -421,6 +421,7 @@ describe("hydrateFromSaved", () => {
     infantCount: null,
     priceOverrideChild: null,
     priceOverrideInfant: null,
+    paxGroupIds: [],
     sortOrder: 0,
     createdAt: "",
     updatedAt: "",
@@ -1311,6 +1312,9 @@ describe("toApplySelections", () => {
         manualAdultPrice: null,
         manualChildPrice: null,
         manualInfantPrice: null,
+        // No pax groups and nobody on another rate: shared by every group, all at the unit's rate.
+        paxGroupIds: [],
+        rateSplits: [],
       },
     ])
     expect(trainSel?.commissionOverride).toEqual({ type: "percent", value: 10 })
@@ -2318,5 +2322,141 @@ describe("train fare override", () => {
         expect(cardlessTransfer({ complimentary: true }).some((e) => e.includes("rate card"))).toBe(false)
       })
     })
+  })
+})
+
+describe("pax groups and rate splits in the dialog state", () => {
+  const GROUP_1 = "group-1"
+  const GROUP_2 = "group-2"
+
+  function savedWithUnits(units: SavedPackageState["selections"][number]["units"], legId = "leg-train"): SavedPackageState {
+    return {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      paxGroups: [{ id: GROUP_1, position: 1, label: null }],
+      selections: [
+        {
+          id: `sel-${legId}`,
+          package_leg_id: legId,
+          selected: true,
+          supplier_id: `supplier-${legId}`,
+          route_id: null,
+          route_reversed: false,
+          suite_type_id: null,
+          service_date: "2026-09-02",
+          nights: 1,
+          date_anchor: null,
+          rate_type_id: null,
+          notes: null,
+          units,
+        },
+      ],
+    }
+  }
+
+  function savedUnit(overrides: Record<string, unknown>) {
+    return {
+      id: "unit-1",
+      suite_type_id: "suite-1",
+      bedroom_type_id: null,
+      bedroom_layout_id: null,
+      bathroom_type_id: null,
+      adult_count: 2,
+      child_count: 0,
+      infant_count: 0,
+      sort_order: 0,
+      ...overrides,
+    }
+  }
+
+  it("starts a new unit and a new trip shared by every group, with nobody on another rate", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    expect(suiteState(states, "leg-train").units[0]).toMatchObject({ paxGroupIds: [], rateSplits: [] })
+    expect(transportState(states, "leg-transfer").requests[0].paxGroupIds).toEqual([])
+  })
+
+  it("hydrates a unit's groups and rate splits, dropping malformed splits", () => {
+    const states = hydrateFromSaved(
+      pkg,
+      savedWithUnits([
+        savedUnit({
+          pax_group_ids: [GROUP_1],
+          rate_splits: [
+            { rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 },
+            { rateTypeId: "", adultCount: 1 },
+            "junk",
+          ],
+        }),
+      ]),
+      [],
+      { tripStartDate: "2026-09-01" },
+    )
+    expect(suiteState(states, "leg-train").units[0]).toMatchObject({
+      paxGroupIds: [GROUP_1],
+      rateSplits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+    })
+  })
+
+  it("hydrates a row from before pax groups as shared, at the unit's own rate", () => {
+    const states = hydrateFromSaved(pkg, savedWithUnits([savedUnit({})]), [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-train").units[0]).toMatchObject({ paxGroupIds: [], rateSplits: [] })
+  })
+
+  it("never hydrates rate splits onto a hotel room", () => {
+    const states = hydrateFromSaved(
+      pkg,
+      savedWithUnits(
+        [savedUnit({ suite_type_id: "room-1", rate_splits: [{ rateTypeId: "rate-tw", adultCount: 1 }] })],
+        "leg-hotel",
+      ),
+      [],
+      { tripStartDate: "2026-09-01" },
+    )
+    expect(suiteState(states, "leg-hotel").units[0].rateSplits).toEqual([])
+  })
+
+  it("sends the groups with the PATCH only when given, and every unit's groups and train/tour/cruise splits", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    const train = suiteState(states, "leg-train")
+    const split = { rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }
+    train.units[0] = { ...train.units[0], paxGroupIds: [GROUP_1], rateSplits: [split] }
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.units[0] = { ...hotel.units[0], suiteTypeId: "room-1", paxGroupIds: [GROUP_1, GROUP_2], rateSplits: [split] }
+
+    expect(toPackageSelectionsPatch(states)).not.toHaveProperty("paxGroups")
+
+    const body = toPackageSelectionsPatch(states, [
+      { id: GROUP_1, label: "Parents" },
+      { id: GROUP_2, label: null },
+    ])
+    expect(body.paxGroups).toEqual([
+      { id: GROUP_1, label: "Parents" },
+      { id: GROUP_2, label: null },
+    ])
+    const units = (legId: string) => body.selections.find((s) => s.packageLegId === legId)?.units
+    expect(units("leg-train")?.[0]).toMatchObject({ paxGroupIds: [GROUP_1], rateSplits: [split] })
+    // A hotel prices the room, so a stray split never reaches the server (it would 400).
+    expect(units("leg-hotel")?.[0]).toMatchObject({ paxGroupIds: [GROUP_1, GROUP_2], rateSplits: [] })
+
+    const applied = toApplySelections(states)
+    expect(applied.find((s) => s.legId === "leg-hotel")?.units?.[0]).toMatchObject({
+      paxGroupIds: [GROUP_1, GROUP_2],
+      rateSplits: [],
+    })
+  })
+
+  it("sends each trip's groups, defaulting a row read before the column existed to shared", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
+    const transfer = transportState(states, "leg-transfer")
+    transfer.selected = true
+    const legacy = { ...transfer.requests[0], id: "legacy" } as Partial<BookingTransportRequest>
+    delete legacy.paxGroupIds
+    transfer.requests = [
+      { ...transfer.requests[0], paxGroupIds: [GROUP_2] },
+      legacy as BookingTransportRequest,
+    ]
+    const body = toTransportRequestsPut(states, [])
+    expect(body.transportRequests.map((request) => request.paxGroupIds)).toEqual([[GROUP_2], []])
   })
 })

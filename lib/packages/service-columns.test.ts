@@ -24,6 +24,12 @@ describe("SERVICES_WITH_UNITS_SELECT", () => {
     )
   })
 
+  // The PATCH writes both through replace_booking_service_units; dropping either from the read would
+  // silently un-group a booking (or flatten its per-guest rates) the next time Build Booking saves.
+  it.each(["pax_group_ids", "rate_splits"])("selects the unit's %s column", (column) => {
+    expect(SERVICES_WITH_UNITS_SELECT).toContain(column)
+  })
+
   it("selects the units join at all", () => {
     expect(SERVICES_WITH_UNITS_SELECT).toContain("units:booking_service_units(")
   })

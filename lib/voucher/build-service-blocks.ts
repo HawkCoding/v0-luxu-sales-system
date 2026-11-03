@@ -202,6 +202,8 @@ interface SelectionUnitJoinRow {
   adult_count: number | null
   child_count: number | null
   infant_count: number | null
+  /** The pax groups the unit serves; a primary-leg unit in group mode names exactly its own. */
+  pax_group_ids?: string[] | null
   suite_types: { name: string | null } | { name: string | null }[] | null
   bedroom_types: { name: string | null } | { name: string | null }[] | null
   bedroom_layouts: { name: string | null } | { name: string | null }[] | null
@@ -685,6 +687,8 @@ function transportRequestBlock(
         footnote: request.voucher_footnote,
       },
       displayOrder: blockContext.displayOrder,
+      legId: request.service_id,
+      transportRequestId: request.id,
     }
   }
 
@@ -747,6 +751,8 @@ function transportRequestBlock(
       isComplimentary: blockContext.complimentaryTransportRequestIds?.has(request.id) ?? false,
     },
     displayOrder: blockContext.displayOrder,
+    legId: request.service_id,
+    transportRequestId: request.id,
   }
 }
 
@@ -791,7 +797,7 @@ export async function buildVoucherServiceBlocks(
        suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, quote_suite_detail, suite_phrase_pattern, check_in_offset_minutes, sells_standalone, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
-       units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
+       units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, pax_group_ids, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
     .eq("booking_id", context.bookingId)
 
@@ -997,10 +1003,18 @@ export async function buildVoucherServiceBlocks(
     // The same wording, unit by unit, so the quote sentence can count them ("in 2 Deluxe Suites").
     // A hotel's room names never carry configuration (includeConfig is train-only), so its two
     // lists are identical.
+    // A train split into pax groups (two or more units, each its own group) names each suite's bed
+    // type too, so the bullet says which suites — "in 5 Twin Deluxe Suites and a Double Deluxe
+    // Suite", as the invoice counts them — rather than "in 6 Deluxe Suites".
+    const unitRowsOfLeg = row.units ?? []
+    const splitIntoGroups =
+      unitRowsOfLeg.length >= 2 && unitRowsOfLeg.every((unit) => (unit.pax_group_ids ?? []).length === 1)
     const itinerarySuiteCounts = isTrain
       ? supplier?.quote_suite_detail === "full"
         ? nameCounts
-        : typeOnlyNameCounts
+        : splitIntoGroups
+          ? compactNameCounts
+          : typeOnlyNameCounts
       : isHotel
         ? nameCounts
         : null
@@ -1079,6 +1093,8 @@ export async function buildVoucherServiceBlocks(
         contactDetails,
         serviceData,
         displayOrder,
+        // row.package_leg_id holds the booking_services.id (see serviceRowToSelectionRow).
+        legId: row.package_leg_id,
       },
     ]
   })

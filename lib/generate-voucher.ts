@@ -111,6 +111,10 @@ export interface VoucherServiceBlockData {
   guestBreakdown?: VoucherServiceBlockGuestBreakdown | null
   /** Total passengers on a transfer trip, from the captured transport request. */
   passengerCount?: number | null
+  /** A transfer only some pax groups take: whose it is ("Twin Deluxe Suite 6 – Mr A and Mrs B")
+   *  and how many they are, from those groups' suites rather than the vehicle's passenger count.
+   *  Set by the voucher (scopeTransferBlocksToPaxGroups); absent prints the trip's own count. */
+  paxGroupGuests?: { lines: string[]; adults: number; children: number; infants: number } | null
   /** "1st seating meals; Nonsmoking" — composed from the booking's reservation-details form,
    * repeated on every train block since the train operator acts on seating/smoking. */
   requestsLine?: string | null
@@ -147,6 +151,12 @@ export interface VoucherServiceBlock {
   serviceData: VoucherServiceBlockData
   /** booking_services.sort_order -- the order the salesperson arranged the legs in (step 1). */
   displayOrder: number
+  /** The booking_services row (leg) the block describes -- what a priced line's snapshot.legId
+   *  names, so a document can say which pax groups the service is for. Absent on hand-built blocks. */
+  legId?: string | null
+  /** The booking_transport_requests row a transfer/rental/flight block describes (snapshot
+   *  .transportRequestId). Absent on every other block. */
+  transportRequestId?: string | null
 }
 
 export interface VoucherData {

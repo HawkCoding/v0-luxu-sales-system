@@ -1,6 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import type { InvoiceBillingParty, InvoiceDeparture, InvoiceItem } from "@/lib/invoices/pdf/invoice-document"
+import type {
+  InvoiceBillingParty,
+  InvoiceDeparture,
+  InvoiceGuestCell,
+  InvoiceItem,
+} from "@/lib/invoices/pdf/invoice-document"
+import { numberTravellersByPaxGroup } from "@/lib/pax-groups/booking-pax-groups"
+import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
+import { lineScopeTag } from "@/lib/quotes/resolve-pax-group-pricing"
 import { INVOICE_PRODUCT_LABEL, invoiceRowsForBlock } from "@/lib/invoices/departure-rows"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
@@ -31,6 +39,9 @@ export interface InvoiceView {
   consultant: string | null
   /** Traveller names from the reservation form, printed as Guest 1 / Guest 2. */
   guestNames: string[]
+  /** The travellers numbered by pax group ("Guest 2.1:"), unplaced last as "Guest:". Null when the
+   *  booking isn't split into groups or nobody is placed — the guest grid then numbers guestNames. */
+  numberedGuests: InvoiceGuestCell[] | null
   billing: InvoiceBillingParty
   departure: InvoiceDeparture | null
   items: InvoiceItem[]
@@ -296,22 +307,62 @@ export function buildInvoiceItems(
   blocks: readonly VoucherServiceBlock[] = [],
   /** The booking's captured trips, so a transfer/rental line names its pick-up and drop-off. */
   transportRequests: readonly InvoiceTransportRequest[] = [],
+  /** What a pax group is called ("Suite"; paxGroupNoun) in the "(Suite 2 only)" tag a line gets
+   *  when only some groups take its service. Lines of a booking without groups are never tagged. */
+  paxGroupNounLabel = "Suite",
+  /** Collapse rows that print alike (collapseRepeatedInvoiceItems) — set when the invoice prints
+   *  per-suite prices, which already split the money. */
+  collapseRepeats = false,
 ): InvoiceItem[] {
   // Commission is an internal figure, never a client-facing line. Fold it into the largest
   // travel line rather than dropping it, so the printed items still sum to the subtotal.
   const folded = foldCommissionLines(lineItems)
   const snapshots = folded.map((item) => (item.pricing_snapshot as PricingSnapshot | null) ?? null)
   const transportPoints = resolveTransportLinePoints(snapshots, transportRequests)
-  return folded.map((item, index) => {
+  const items = folded.map((item, index) => {
     const snapshot = snapshots[index]
+    const description = describeInvoiceLine(item.description, snapshot, transportPoints[index])
+    const tag = lineScopeTag(lineItems, snapshot, paxGroupNounLabel)
     return {
       pax: Number(item.qty ?? 0),
-      description: describeInvoiceLine(item.description, snapshot, transportPoints[index]),
+      description: tag ? `${description} ${tag}` : description,
       unitPrice: Number(item.unit_price ?? 0),
       total: Number(item.total ?? 0),
       ...invoiceItemSchedule(snapshot, blocks),
     }
   })
+  return collapseRepeats ? collapseRepeatedInvoiceItems(items) : items
+}
+
+/** A line's description with its "(Child)" fare marker taken out — the adult and child fares of one
+ *  service describe the same service. */
+function withoutChildMarker(description: string): string {
+  return description.replace(/\s\(Child\)/g, "").trim()
+}
+
+/**
+ * The description table of a booking split into pax groups: lines that print the same date, time
+ * and service (an adult and a child fare, or one train's SA and TW rate slices) collapse to the first
+ * of them, in order — the per-suite prices below already say who pays what. "(Child)" is dropped
+ * from a row that stands for several lines. Rows that differ in anything printed are kept.
+ */
+export function collapseRepeatedInvoiceItems(items: readonly InvoiceItem[]): InvoiceItem[] {
+  const kept: InvoiceItem[] = []
+  const byKey = new Map<string, { index: number; merged: number }>()
+  for (const item of items) {
+    const key = [item.date ?? "", item.time ?? "", withoutChildMarker(item.description)].join("|")
+    const seen = byKey.get(key)
+    if (seen) {
+      seen.merged += 1
+      continue
+    }
+    byKey.set(key, { index: kept.length, merged: 1 })
+    kept.push(item)
+  }
+  for (const { index, merged } of byKey.values()) {
+    if (merged > 1) kept[index] = { ...kept[index], description: withoutChildMarker(kept[index].description) }
+  }
+  return kept
 }
 
 export function buildPaxLabel(adults: number, children: number): string | null {
@@ -367,6 +418,45 @@ async function loadInvoiceTransportRequests(
   return data ?? []
 }
 
+/**
+ * The invoice's guest grid numbered by pax group — "Guest 2.1:", "Guest 2.2:", … in group then
+ * roster order, with guests not yet placed last as "Guest:". Null when no traveller is placed in a
+ * group (the grid then numbers the names 1, 2, 3 as before) or the groups can't be read.
+ */
+export function numberedGuestCells<T extends { pax_group_id?: string | null }>(
+  travellers: readonly T[],
+  groups: readonly { id: string; position: number }[],
+  nameOf: (traveller: T) => string,
+): InvoiceGuestCell[] | null {
+  const numbered = numberTravellersByPaxGroup(travellers, groups)
+  if (!numbered) return null
+  const cells = numbered
+    .map(({ traveller, number }) => ({ label: number ? `Guest ${number}:` : "Guest:", name: nameOf(traveller) }))
+    .filter((cell) => cell.name)
+  return cells.length > 0 ? cells : null
+}
+
+async function loadNumberedGuests<T extends { pax_group_id?: string | null }>(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  travellers: readonly T[],
+  nameOf: (traveller: T) => string,
+): Promise<InvoiceGuestCell[] | null> {
+  // Only a booking whose roster places someone in a group has groups worth reading.
+  if (!travellers.some((traveller) => traveller.pax_group_id)) return null
+  try {
+    const { data, error } = await supabase
+      .from("booking_pax_groups")
+      .select("id, position")
+      .eq("booking_id", bookingId)
+      .order("position", { ascending: true })
+    if (error || !data) return null
+    return numberedGuestCells(travellers, data, nameOf)
+  } catch {
+    return null
+  }
+}
+
 export interface BuildInvoiceViewOptions {
   bookingId: string
   quoteId: string | null
@@ -395,7 +485,7 @@ export async function buildInvoiceView(
       .maybeSingle(),
     supabase
       .from("travellers")
-      .select("prefix, first_name, last_name, sort_order")
+      .select("prefix, first_name, last_name, sort_order, pax_group_id")
       .eq("booking_id", bookingId)
       .order("sort_order"),
     supabase
@@ -478,13 +568,13 @@ export async function buildInvoiceView(
     lineItemRows,
     blocks,
     await loadInvoiceTransportRequests(supabase, bookingId, lineItemRows),
+    paxGroupNoun(primarySupplierKind),
   )
 
-  const guestNames = (travellers ?? [])
-    .map((traveller) =>
-      [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim(),
-    )
-    .filter(Boolean)
+  const travellerName = (traveller: { prefix: string | null; first_name: string; last_name: string }) =>
+    [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim()
+  const guestNames = (travellers ?? []).map(travellerName).filter(Boolean)
+  const numberedGuests = await loadNumberedGuests(supabase, bookingId, travellers ?? [], travellerName)
 
   const resolvedConsultant = booking
     ? await resolveConsultant(supabase, {
@@ -521,6 +611,7 @@ export async function buildInvoiceView(
   return {
     consultant: resolvedConsultant?.key ?? null,
     guestNames,
+    numberedGuests,
     billing: buildBillingParty(billingDetails, customer),
     departure,
     items,

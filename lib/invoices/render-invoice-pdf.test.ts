@@ -12,6 +12,8 @@ import { buildDeparture } from "./build-invoice-view"
 import { extractPdfPageTexts, extractPdfText } from "@/lib/pdf/extract-text.fixtures"
 import { makeBankingSettings } from "@/lib/settings-access.fixtures"
 import { renderInvoicePdf } from "./render-invoice-pdf"
+import { allocatePaxGroups } from "@/lib/quotes/pax-group-pricing"
+import { CARMEN_RATE_LABELS, CARMEN_SUBTOTAL, carmenQuoteLines } from "@/lib/pax-groups/carmen-sample.fixtures"
 
 const banking = makeBankingSettings({
   bank_name: "Example Bank",
@@ -874,5 +876,149 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(text).toContain("Email proof of payment directly to your consultant.")
     expect(text).toContain("Reservations can only be confirmed once payment has been received.")
     expect(text).not.toContain("Please note that the")
+  })
+})
+
+describe("renderInvoicePdf pax groups", { timeout: 30_000 }, () => {
+  const pricing = allocatePaxGroups({
+    lines: carmenQuoteLines(),
+    target: CARMEN_SUBTOTAL,
+    rateLabels: CARMEN_RATE_LABELS,
+  })
+  const discounted: InvoiceTotals = {
+    ...depositTotals,
+    subtotalInclVat: CARMEN_SUBTOTAL,
+    discount: 27_240,
+    discountVisible: true,
+    totalInclVat: 245_160,
+    perAdult: 20_000,
+    perChild: 10_000,
+    paxGroupPricing: pricing,
+  }
+
+  function invoice(overrides: Partial<InvoicePdfData>): Promise<Buffer> {
+    return renderInvoicePdf({
+      invoiceNumber: "42810",
+      bookingNumber: "LTT-26-0052",
+      customerName: "Mr Jun Chen",
+      issueDate: "2026-06-03",
+      dueDate: null,
+      departure: null,
+      items,
+      totals: discounted,
+      banking,
+      ...overrides,
+    })
+  }
+
+  /** Each printed line, its whitespace (the money's non-breaking spaces too) collapsed. */
+  async function printedLines(buffer: Buffer): Promise<string[]> {
+    return (await extractPdfText(buffer)).split("\n").map((line) => line.replace(/[\s ]+/g, " ").trim())
+  }
+
+  it("prints one block per suite under a 'Price per suite' heading, in place of Total per Adult / Child, above the gross Sub Total", async () => {
+    const lines = await printedLines(await invoice({}))
+    const text = lines.join("\n")
+
+    expect(text).not.toContain("Total per Adult")
+    expect(text).not.toContain("Total per Child")
+    const heading = lines.indexOf("Price per suite")
+    const suite1 = lines.findIndex((line) => line.startsWith("Twin Deluxe Suite 1"))
+    const suite2 = lines.findIndex((line) => line.startsWith("Twin Deluxe Suite 2"))
+    const suite6 = lines.findIndex((line) => line.startsWith("Double Deluxe Suite 6"))
+    const subTotal = lines.findIndex((line) => line.startsWith("Sub Total incl. VAT:"))
+    expect(heading).toBeGreaterThan(-1)
+    expect(heading).toBeLessThan(suite1)
+    // Suite 2's name, then one line per part with no "&", its subtotal beside the name.
+    const suite2Block = lines.slice(suite2, suite2 + 4).join("\n")
+    expect(suite2Block).toContain("1 Adult x R24 100,00 (SA)")
+    expect(suite2Block).toContain("1 Adult x R29 400,00 (TW)")
+    expect(suite2Block).toContain("R53 500,00")
+    expect(suite2Block).not.toContain("&")
+    expect(suite1).toBeLessThan(suite2)
+    expect(suite6).toBeGreaterThan(suite2)
+    expect(suite6).toBeLessThan(subTotal)
+    // The suites add up to the gross Sub Total; the discount comes off below them.
+    expect(lines[subTotal]).toMatch(/R272 400,00$/)
+    expect(lines.findIndex((line) => line.startsWith("Discount:"))).toBeGreaterThan(subTotal)
+  })
+
+  it("names the party in the grand total in group mode only", async () => {
+    const grouped = (await printedLines(await invoice({}))).join("\n")
+    expect(grouped).toContain("Total for 8 Adults & 4 Children")
+    expect(grouped).not.toMatch(/^Total incl\. VAT:/m)
+
+    const flat = (await printedLines(await invoice({ totals: { ...discounted, paxGroupPricing: null } }))).join("\n")
+    expect(flat).toContain("Total incl. VAT:")
+    expect(flat).not.toContain("Total for 8 Adults")
+    expect(flat).not.toContain("Price per suite")
+  })
+
+  it("heads the suites with the group noun of the main product", async () => {
+    const text = (await printedLines(await invoice({ totals: { ...discounted, paxGroupNoun: "Room" } }))).join("\n")
+    expect(text).toContain("Price per room")
+  })
+
+  it("puts a suite's name on its first line, each part indented under it, the subtotal level with the name", async () => {
+    const buffer = await invoice({})
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
+    const document = await pdfjs.getDocument({ data: new Uint8Array(buffer), useSystemFonts: false }).promise
+    const pages = await Promise.all(
+      Array.from({ length: document.numPages }, async (_, index) =>
+        (await (await document.getPage(index + 1)).getTextContent()).items.flatMap((item) =>
+          "str" in item ? [{ str: item.str.replace(/ /g, " "), x: item.transform[4], y: item.transform[5] }] : [],
+        ),
+      ),
+    )
+    const runs = pages.find((page) => page.some((run) => run.str.startsWith("Twin Deluxe Suite 1"))) ?? []
+    const first = runs.find((run) => run.str.startsWith("Twin Deluxe Suite 1"))
+    const part = runs.find((run) => run.str.startsWith("2 Adults x R23 800,00 per person"))
+    const amount = runs.find((run) => run.str === "R47 600,00")
+    const subTotal = runs.find((run) => run.str.startsWith("Sub Total incl. VAT:"))
+    expect(first && part && amount && subTotal).toBeTruthy()
+    if (!first || !part || !amount || !subTotal) return
+    // Inside the narrow column (which starts with the ladder's labels), the part indented under the
+    // name, the subtotal level with the name.
+    expect(first.x).toBeCloseTo(subTotal.x, 0)
+    expect(part.x).toBeGreaterThan(first.x + 5)
+    expect(part.y).toBeLessThan(first.y)
+    expect(amount.y).toBeCloseTo(first.y, 0)
+  })
+
+  it("keeps the per-person rows when the pricing has no lines", async () => {
+    const text = await extractPdfText(await invoice({ totals: { ...discounted, paxGroupPricing: null } }))
+    expect(text).toContain("Total per Adult")
+    expect(text).not.toContain("Twin Deluxe Suite")
+  })
+
+  it("numbers the guest grid by suite, two to a row, unplaced guests last", async () => {
+    const buffer = await invoice({
+      guestNames: ["Mr Wei Lin", "Mrs Mei Wang", "Mr Jun Chen", "Mr Late Booker"],
+      numberedGuests: [
+        { label: "Guest 1.1:", name: "Mr Wei Lin" },
+        { label: "Guest 1.2:", name: "Mrs Mei Wang" },
+        { label: "Guest 2.1:", name: "Mr Jun Chen" },
+        { label: "Guest:", name: "Mr Late Booker" },
+      ],
+    })
+    const runs = await pageOneRuns(buffer)
+
+    expect(valueAfter(runs, "Guest 1.1:").str).toBe("Mr Wei Lin")
+    expect(valueAfter(runs, "Guest 1.2:").str).toBe("Mrs Mei Wang")
+    expect(valueAfter(runs, "Guest 2.1:").str).toBe("Mr Jun Chen")
+    expect(valueAfter(runs, "Guest:").str).toBe("Mr Late Booker")
+    // Two to a row: 1.1 | 1.2, then 2.1 | the unplaced guest.
+    expect(Math.abs(runOf(runs, "Guest 1.1:").y - runOf(runs, "Guest 1.2:").y)).toBeLessThan(0.5)
+    expect(Math.abs(runOf(runs, "Guest 2.1:").y - runOf(runs, "Guest:").y)).toBeLessThan(0.5)
+    expect(runOf(runs, "Guest 2.1:").y).toBeLessThan(runOf(runs, "Guest 1.1:").y)
+    expect(runs.some((run) => run.str === "Guest 1:")).toBe(false)
+  })
+
+  it("numbers the guests 1, 2, 3 as before without numbered guests", async () => {
+    const runs = await pageOneRuns(
+      await invoice({ guestNames: ["Mr A One", "Mrs B Two", "Mr C Three"], numberedGuests: null }),
+    )
+    expect(valueAfter(runs, "Guest 1:").str).toBe("Mr A One")
+    expect(valueAfter(runs, "Guest 3:").str).toBe("Mr C Three")
   })
 })

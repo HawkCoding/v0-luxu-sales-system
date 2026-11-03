@@ -86,6 +86,8 @@ const mismatchedUnits: SuiteLegState["units"] = [
     fareOverrideChild: null,
     fareOverrideInfant: null,
     rateTypeId: null,
+    paxGroupIds: [],
+    rateSplits: [],
   },
 ]
 
@@ -964,6 +966,8 @@ function makeTourUnit(id: string, suiteTypeId: string | null): SuiteLegState["un
     fareOverrideChild: null,
     fareOverrideInfant: null,
     rateTypeId: null,
+    paxGroupIds: [],
+    rateSplits: [],
   }
 }
 

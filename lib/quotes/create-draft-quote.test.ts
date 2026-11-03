@@ -200,6 +200,87 @@ describe("createDraftQuoteForBooking", () => {
     })
   })
 
+  it("names the booking's pax groups off the primary service's units and hands them to the engine", async () => {
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: {
+        id: BOOKING_ID,
+        legs: [
+          {
+            id: "svc-hotel",
+            supplierId: "sup-hotel",
+            supplierKind: "hotel_property",
+            sortOrder: 1,
+            suiteTypes: [{ id: "room-ocean", name: "Ocean View Room" }],
+          },
+          {
+            id: "svc-train",
+            supplierId: "sup-train",
+            supplierKind: "train_operator",
+            sortOrder: 0,
+            suiteTypes: [
+              { id: "suite-dlx", name: "Deluxe Suite", bedroomTypeIds: ["bed-twin"], bedroomTypes: ["Twin"] },
+            ],
+          },
+        ],
+      },
+      services: [{ id: "svc-train" }, { id: "svc-hotel" }],
+      units: [
+        { id: "u-hotel", service_id: "svc-hotel", sort_order: 0, suite_type_id: "room-ocean", bedroom_type_id: null, pax_group_ids: ["g2"] },
+        { id: "u2", service_id: "svc-train", sort_order: 1, suite_type_id: "suite-dlx", bedroom_type_id: null, pax_group_ids: ["g2"] },
+        { id: "u1", service_id: "svc-train", sort_order: 0, suite_type_id: "suite-dlx", bedroom_type_id: "bed-twin", pax_group_ids: ["g1"] },
+        { id: "u3", service_id: "svc-train", sort_order: 2, suite_type_id: "suite-dlx", bedroom_type_id: null, pax_group_ids: ["g3"] },
+      ],
+    })
+    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({ lineItems: [], incompleteLegs: [] })
+    const { supabase } = createSupabaseMock({
+      bookings: [{ id: BOOKING_ID, primary_supplier_id: "sup-train" }],
+      booking_pax_groups: [
+        { id: "g3", booking_id: BOOKING_ID, position: 3, label: "Grandparents" },
+        { id: "g1", booking_id: BOOKING_ID, position: 1, label: null },
+        { id: "g2", booking_id: BOOKING_ID, position: 2, label: null },
+        { id: "g-other", booking_id: "another-booking", position: 1, label: "Not ours" },
+      ],
+    })
+
+    await createDraftQuoteForBooking({
+      supabase: supabase as never,
+      bookingId: BOOKING_ID,
+      bookingNumber: "BT-2026-0001",
+      travelDate: "2026-09-01",
+    })
+
+    expect(buildMocks.buildPackageQuoteLineItems).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paxGroups: [
+          { id: "g1", position: 1, label: "Twin Deluxe Suite 1" },
+          { id: "g2", position: 2, label: "Deluxe Suite 2" },
+          { id: "g3", position: 3, label: "Grandparents" },
+        ],
+      }),
+    )
+  })
+
+  it("hands the engine no pax groups for a booking with a single group or none", async () => {
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: { id: BOOKING_ID, legs: [{ id: "svc-1" }] },
+      services: [{ id: "svc-1" }],
+      units: [],
+    })
+    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({ lineItems: [], incompleteLegs: [] })
+    const { supabase } = createSupabaseMock({
+      booking_pax_groups: [{ id: "g1", booking_id: BOOKING_ID, position: 1, label: null }],
+    })
+
+    await createDraftQuoteForBooking({
+      supabase: supabase as never,
+      bookingId: BOOKING_ID,
+      bookingNumber: "BT-2026-0001",
+      travelDate: "2026-09-01",
+    })
+
+    expect(buildMocks.buildPackageQuoteLineItems).toHaveBeenCalledWith(expect.objectContaining({ paxGroups: [] }))
+  })
+
   it("still creates the quote and surfaces the engine's error as a warning when pricing throws", async () => {
     adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
       detail: { id: BOOKING_ID, legs: [{ id: "svc-1" }] },

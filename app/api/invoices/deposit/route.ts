@@ -13,7 +13,8 @@ import { logError } from "@/lib/error-log"
 import { getPaymentMethod } from "@/lib/payment-methods"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
-import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
+import { buildGuestInfoBlock, childAgesForTravellers } from "@/lib/templates/guest-info-block"
+import { buildGuestHeadings, loadBookingPaxGroups } from "@/lib/pax-groups/booking-pax-groups"
 import { loadCountryAliasMap, loadCountryCodeMap, resolveCountryCode } from "@/lib/countries"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getInvoiceStatusOptions } from "@/lib/settings-access"
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, customer_invoice_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, no_of_adults, no_of_children, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, customer_invoice_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, no_of_adults, no_of_children, child_ages, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", parsed.data.jobId)
     .single()
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
 
   const { data: travellers } = await supabase
     .from("travellers")
-    .select("prefix, first_name, last_name, id_passport, date_of_birth, residence")
+    .select("prefix, first_name, last_name, id_passport, date_of_birth, residence, is_child, pax_group_id")
     .eq("booking_id", parsed.data.jobId)
     .order("sort_order")
 
@@ -280,14 +281,24 @@ export async function POST(req: Request) {
     loadCountryAliasMap(supabase).catch(() => new Map<string, string>()),
     loadCountryCodeMap(supabase).catch(() => new Map<string, string>()),
   ])
+  const childAges = childAgesForTravellers(travellers ?? [], booking.child_ages ?? null, booking.departure_date ?? null)
   const guests = (travellers ?? [])
-    .map((traveller) => ({
+    .map((traveller, index) => ({
       name: [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim(),
       dateOfBirth: traveller.date_of_birth,
       countryCode: resolveCountryCode(traveller.residence, countryAliasMap, countryCodeMap),
       idNumber: traveller.id_passport,
+      paxGroupId: traveller.pax_group_id ?? null,
+      isChild: traveller.is_child ?? false,
+      childAge: childAges[index],
     }))
     .filter((guest) => guest.name)
+  // On a booking split into pax groups the block heads and numbers the guests by suite; null keeps
+  // the flat list.
+  const bookingPaxGroups = await loadBookingPaxGroups(supabase, booking.id)
+  const paxGroups = bookingPaxGroups
+    ? { groups: bookingPaxGroups.groups, headings: buildGuestHeadings(bookingPaxGroups) }
+    : null
   const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = isFullPayment
     ? await composeEmail(supabase, "full_payment_request", {
@@ -308,6 +319,7 @@ export async function POST(req: Request) {
             guests,
             adults: booking.no_of_adults ?? 0,
             children: booking.no_of_children ?? 0,
+            paxGroups,
           }),
         },
         senderProfileId: booking.assigned_salesperson_id ?? user.id,
@@ -335,6 +347,7 @@ export async function POST(req: Request) {
             guests,
             adults: booking.no_of_adults ?? 0,
             children: booking.no_of_children ?? 0,
+            paxGroups,
           }),
         },
         senderProfileId: booking.assigned_salesperson_id ?? user.id,

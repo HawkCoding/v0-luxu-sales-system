@@ -4,6 +4,7 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
 import { normalizeDateOfBirth } from "@/lib/date-format"
 import { compareRosterToBooking, type RosterComparison } from "@/lib/packages/roster-pax"
+import { loadPaxGroupSummaries } from "@/lib/packages/booking-pax-groups"
 import { fetchDefaultAgeBuckets } from "@/lib/pricing/age-buckets"
 import { TRAVELLER_COLUMNS } from "@/lib/supabase/columns"
 import type { createSessionClient } from "@/lib/supabase/server"
@@ -39,6 +40,9 @@ const travellerInputSchema = z.object({
   isChild: z.boolean().default(false),
   isPrimary: z.boolean().default(false),
   clubMemberships: clubMembershipsSchema.default([]),
+  /** The traveller's suite (booking_pax_groups.id) on a booking split into pax groups. Null =
+   *  not placed yet. Must be one of this booking's groups -- see PUT. */
+  paxGroupId: z.string().uuid().nullable().optional(),
 })
 
 const putTravellersSchema = z.object({
@@ -60,6 +64,7 @@ type TravellerRow = {
   is_primary: boolean
   sort_order: number
   club_memberships: Json
+  pax_group_id?: string | null
 }
 
 /**
@@ -124,6 +129,7 @@ function mapTraveller(row: TravellerRow) {
     isPrimary: row.is_primary,
     sortOrder: row.sort_order,
     clubMemberships: parseClubMemberships(row.club_memberships),
+    paxGroupId: row.pax_group_id ?? null,
   }
 }
 
@@ -179,9 +185,15 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   const travellers = (data ?? []).map((row) => mapTraveller(row as TravellerRow))
 
+  // The suites a guest can be placed in, so the Reservation tab needs no second fetch. Empty on a
+  // booking that isn't split into pax groups.
+  const paxGroups = await loadPaxGroupSummaries(supabase, id)
+  if (paxGroups.error) return safeSupabaseError("travellers:pax-groups", paxGroups.error)
+
   return Response.json({
     travellers,
     paxComparison: await loadPaxComparison(supabase, id, travellers),
+    paxGroups: paxGroups.groups,
   })
 }
 
@@ -212,6 +224,51 @@ export async function PUT(req: Request, { params }: RouteParams) {
   if (bookingError) return safeSupabaseError("travellers:load-booking", bookingError)
   if (!booking) return jsonError("Booking not found", 404)
 
+  // A traveller can only be placed in one of this booking's own suites. Checked before the
+  // replace-set's delete, so a stale or foreign group id fails the save with the roster intact.
+  const requestedGroupIds = [
+    ...new Set(
+      parsed.data.travellers
+        .map((traveller) => traveller.paxGroupId)
+        .filter((groupId): groupId is string => Boolean(groupId)),
+    ),
+  ]
+  if (requestedGroupIds.length > 0) {
+    const { data: groupRows, error: groupsError } = await supabase
+      .from("booking_pax_groups")
+      .select("id")
+      .eq("booking_id", id)
+      .in("id", requestedGroupIds)
+    if (groupsError) return safeSupabaseError("travellers:load-pax-groups", groupsError)
+    const knownGroupIds = new Set((groupRows ?? []).map((row) => row.id))
+    const unknownIndex = parsed.data.travellers.findIndex(
+      (traveller) => traveller.paxGroupId && !knownGroupIds.has(traveller.paxGroupId),
+    )
+    if (unknownIndex !== -1) {
+      return jsonError(
+        `Guest ${unknownIndex + 1} is placed in a suite this booking no longer has. Reload the page and pick their suite again.`,
+        400,
+        { travellerIndex: unknownIndex },
+      )
+    }
+  }
+
+  // A guest re-sent without paxGroupId at all (a client that predates pax groups) keeps the suite
+  // it was placed in: rows are deleted and re-inserted below, so an omitted field would otherwise
+  // silently unplace every guest. An explicit null still unplaces.
+  const keptGroupByTravellerId = new Map<string, string | null>()
+  if (parsed.data.travellers.some((traveller) => traveller.id && traveller.paxGroupId === undefined)) {
+    const { data: storedRows, error: storedError } = await supabase
+      .from("travellers")
+      .select("id, pax_group_id")
+      .eq("booking_id", id)
+      .order("sort_order")
+    if (storedError) return safeSupabaseError("travellers:load-placements", storedError)
+    for (const row of (storedRows ?? []) as { id: string; pax_group_id?: string | null }[]) {
+      keptGroupByTravellerId.set(row.id, row.pax_group_id ?? null)
+    }
+  }
+
   type TravellerInsert = Database["public"]["Tables"]["travellers"]["Insert"]
   const rows: TravellerInsert[] = parsed.data.travellers.map((traveller, index) => ({
     booking_id: id,
@@ -229,6 +286,12 @@ export async function PUT(req: Request, { params }: RouteParams) {
     is_primary: traveller.isPrimary,
     sort_order: index,
     club_memberships: clubMembershipsToJson(cleanClubMemberships(traveller.clubMemberships)),
+    pax_group_id:
+      traveller.paxGroupId !== undefined
+        ? traveller.paxGroupId
+        : traveller.id
+          ? keptGroupByTravellerId.get(traveller.id) ?? null
+          : null,
   }))
 
   // Replace-set semantics: the delete is unconditional. Count what goes so an empty payload can

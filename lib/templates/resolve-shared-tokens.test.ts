@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { isPlaceholderToken, resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { SYSTEM_TEMPLATE_KEYS, getTokenSpecs } from "@/lib/templates/registry"
+import { carmenPaxGroupRows, carmenTravellers } from "@/lib/pax-groups/carmen-sample.fixtures"
 
 /**
  * The quote, voucher and thank-you emails each override `direction`/`routeName` with their own
@@ -143,6 +144,54 @@ describe("tripTitle and departureDateShort", () => {
     )
 
     expect(tokens.tripTitle).toBe("Pretoria → Cape Town — Smith Family")
+  })
+
+  it("lists the children in {{guestInfo}} too", async () => {
+    const { blocks } = await resolveSharedEmailTokens(
+      makeSupabase({
+        bookings: [booking],
+        travellers: [
+          { prefix: "Mr", first_name: "John", last_name: "Smith", id_passport: "A1", date_of_birth: null, residence: null, is_child: false, sort_order: 0 },
+          { prefix: "Miss", first_name: "Amy", last_name: "Smith", id_passport: "A2", date_of_birth: null, residence: null, is_child: true, sort_order: 1 },
+        ],
+      }) as never,
+      "booking-1",
+    )
+
+    expect(blocks.guestInfo).toContain("Mr John Smith")
+    expect(blocks.guestInfo).toContain("Miss Amy Smith")
+  })
+
+  it("resolves {{availability}} and {{paxGroupPricing}} empty on a booking without pax groups", async () => {
+    const { tokens, blocks } = await resolveSharedEmailTokens(makeSupabase({ bookings: [booking] }) as never, "booking-1")
+
+    expect(tokens.availability).toBe("")
+    expect(blocks.paxGroupPricing).toBe("")
+  })
+
+  it("groups {{guestInfo}} by suite and words {{availability}} on a booking split into pax groups", async () => {
+    const { groupRows, services } = carmenPaxGroupRows()
+    const { tokens, blocks } = await resolveSharedEmailTokens(
+      makeSupabase({
+        bookings: [{ ...booking, primary_supplier_id: "s-blue-train", child_ages: [8, 10, 7, 7] }],
+        booking_pax_groups: groupRows,
+        booking_services: services,
+        travellers: carmenTravellers(),
+      }) as never,
+      "booking-1",
+    )
+
+    expect(tokens.availability).toBe(
+      "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite with a ¾ bath.",
+    )
+    // The body's copy carries Carmen's bold; a block outranks the plain token there.
+    expect(blocks.availability).toBe(
+      "On the <strong>Pretoria to Cape Town</strong> departure, <strong>11 August 2026</strong> we can still assist you with <strong>5 x Twin bedded Deluxe Suites with a shower &amp; 1 x Double bedded Deluxe Suite with a ¾ bath</strong>.",
+    )
+    expect(blocks.guestInfo).toContain(
+      '<strong style="font-size:12px;">Deluxe Suite 2</strong><br/>2.1 Mr Jun Chen',
+    )
+    expect(blocks.guestInfo).toContain("3.1 Mr Hao Chen DOB: 01/07/2018 TW 300000003 – CHD 8")
   })
 
   // The nights fallback stands in for a route on a stay; it must not become a trip title.

@@ -19,8 +19,53 @@ import {
   formatQuoteGrandTotalLabel,
   formatTimeOfDay,
   formatTotalLabel,
+  pluralUnitLabel,
   TRAVEL_DATES_LABEL,
 } from "./quote-presentation"
+import { blockScopeTagger } from "@/lib/quotes/resolve-pax-group-pricing"
+import { carmenQuoteLines, carmenServiceBlocks } from "@/lib/pax-groups/carmen-sample.fixtures"
+
+describe("pax-group scope tags on the itinerary", () => {
+  const blocks = carmenServiceBlocks()
+  const tag = blockScopeTagger(carmenQuoteLines())
+
+  it("tags a service only some suites take at the end of a sentence its time carries on, in the PDF summary", () => {
+    const items = buildQuoteSummaryDays(blocks, null, tag).flatMap((day) => day.items.map((item) => item.text))
+
+    // Never "(Sedan) (Suite 6 only) at 11h30": two parentheses running together.
+    expect(items).toContain(
+      "Transfer from the One&Only Cape Town to the Cape Town International Airport (Sedan) at 11h30 (Suite 6 only)",
+    )
+    // Every suite rides the train, the minibus and stays at the hotel: no tag.
+    expect(items.filter((text) => text.includes("only)"))).toHaveLength(1)
+  })
+
+  it("tags the email itinerary's sentence ahead of its trailing facts", () => {
+    const lines = buildQuoteItineraryLines(blocks, null, (block) =>
+      block.legId === "leg-hotel" ? "(Suites 2 & 3 only)" : tag?.(block) ?? null,
+    ).map((line) => line.text)
+
+    expect(lines.some((text) => /Bed & Breakfast \(Suites 2 & 3 only\) \| Check in from 15h00$/.test(text))).toBe(true)
+    expect(lines).toContain(
+      "Transfer from the One&Only Cape Town to the Cape Town International Airport (Sedan) at 11h30 (Suite 6 only)",
+    )
+  })
+
+  it("leaves every line as it was without a tagger", () => {
+    expect(buildQuoteSummaryDays(blocks, null, undefined)).toEqual(buildQuoteSummaryDays(blocks, null))
+    expect(buildQuoteItineraryLines(blocks, null, () => null)).toEqual(buildQuoteItineraryLines(blocks, null))
+  })
+})
+
+describe("pluralUnitLabel", () => {
+  it("pluralises the type's own noun, ahead of its configuration", () => {
+    expect(pluralUnitLabel("Twin Deluxe Suite with Shower")).toBe("Twin Deluxe Suites with Shower")
+    expect(pluralUnitLabel("Signature Family Ocean View 2 Bedroom Apartment")).toBe(
+      "Signature Family Ocean View 2 Bedroom Apartments",
+    )
+    expect(pluralUnitLabel("Presidential")).toBe("Presidential")
+  })
+})
 
 describe("TRAVEL_DATES_LABEL", () => {
   it("is the product-neutral date label", () => {

@@ -8,10 +8,14 @@ import { displayRouteName, resolveDirectedRouteName } from "@/lib/routes/route-n
 import type {
   CommissionKind,
   PackageDetail,
+  PackageLeg,
+  PaxGroupMeta,
   PricingSnapshot,
+  PricingUnitRef,
   QuoteLineItem,
   SupplierKind,
   SupplierRateCard,
+  UnitRateSplit,
 } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
@@ -51,6 +55,10 @@ import {
 import { resolveTransferPax, resolveTransferPricingBasis } from "@/lib/pricing/transfer-basis"
 import { effectiveUnitRateTypeId } from "@/lib/packages/unit-rate-type"
 import { describeEmptyUnit, findEmptyUnitIndexes } from "@/lib/packages/unit-headcount"
+// Supplier kinds whose units can split their guests across rate types (UnitRateSplit) -- trains,
+// tours and cruises; never hotels, airlines or manual-pricing legs. Shared with the dialog and the
+// services PATCH so all three agree.
+import { primaryLegIdOf, RATE_SPLIT_SUPPLIER_KINDS } from "@/lib/packages/pax-groups"
 
 /** An airline seat, hotel room or cruise cabin may hold more or fewer people than the booking, but
  *  never nobody -- it would price at R0 per person or bill an empty room (lib/packages/unit-headcount.ts). */
@@ -65,9 +73,37 @@ function assertNoEmptyUnits(
   }
 }
 
+/**
+ * The booking's primary service: the core leg (isCoreBookingLeg -- the primary supplier's leg, else
+ * the train) that sorts first. Its units are the booking's pax groups, one group each, so its lines
+ * are the ones that carry PricingSnapshot.paxGroups. Normally there is exactly one core leg; the
+ * sort order only breaks the tie when the primary supplier also sits on a second leg (a group's own
+ * nights at the same property), matching the order Build Booking lists the legs in.
+ */
+export function findPrimaryLegId(
+  legs: readonly Pick<PackageLeg, "id" | "supplierId" | "supplierKind" | "sortOrder">[],
+  primarySupplierId: string | null,
+): string | null {
+  // One rule shared with Build Booking and the services PATCH (lib/packages/pax-groups.ts), so the
+  // pricer and the dialog always agree on which leg's units are the groups.
+  return primaryLegIdOf(legs, primarySupplierId)
+}
+
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
 export interface PackageUnitSelection {
+  /** The booking_service_units row this selection came from, when it came from one. Stamped into
+   *  the line's unitRefs; never read for pricing. */
+  unitId?: string
+  /** The pax groups this unit serves (booking_service_units.pax_group_ids). Empty/absent = every
+   *  group; a primary-service unit serves exactly its own group. Stamped into the line's unitRefs;
+   *  never read for pricing. */
+  paxGroupIds?: string[]
+  /** Train, tour and cruise rate-card legs only: guests of this unit who price at another rate type
+   *  than the unit's own (one SA resident and one international guest sharing a suite). Each split
+   *  becomes its own rate slice; the unit's remaining guests price at its own rate. Ignored on every
+   *  other kind, on manual-pricing legs and on a tour unit with a typed flat price. */
+  rateSplits?: UnitRateSplit[]
   suiteTypeId: string
   bedroomTypeId?: string | null
   bedroomLayoutId?: string | null
@@ -175,6 +211,8 @@ interface TransportRequestRow {
   infant_count: number | null
   price_override_child: number | null
   price_override_infant: number | null
+  /** The pax groups this trip serves. Empty = every group. */
+  pax_group_ids?: string[] | null
 }
 
 interface RateTypeMeta {
@@ -209,6 +247,11 @@ interface BuildPackageQuoteLineItemsInput {
   fxRates?: FxRateMap
   /** The FX publication date stamped onto converted lines, for the internal provenance note. */
   fxRateAsOf?: string | null
+  /** The booking's pax groups with their labels already resolved (lib/pax-groups/labels.ts). With
+   *  2 or more, every line of the primary service (findPrimaryLegId) carries the full list as
+   *  PricingSnapshot.paxGroups. Never read for pricing: a booking with groups prices exactly as the
+   *  same units would without them. */
+  paxGroups?: PaxGroupMeta[]
 }
 
 /** A leg that could not be priced because it has not been configured yet (no route/meal plan
@@ -246,6 +289,7 @@ export async function buildPackageQuoteLineItems({
   quoteCurrency = BASE_CURRENCY,
   fxRates = { [BASE_CURRENCY]: 1 },
   fxRateAsOf = null,
+  paxGroups = [],
 }: BuildPackageQuoteLineItemsInput): Promise<BuildPackageQuoteLineItemsResult> {
   const targetCurrency = normaliseCurrency(quoteCurrency)
 
@@ -288,7 +332,7 @@ export async function buildPackageQuoteLineItems({
     supabase
       .from("booking_transport_requests")
       .select(
-        "id, service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, complimentary, rental_details:booking_vehicle_rental_details(return_at), pricing_basis, adult_count, child_count, infant_count, price_override_child, price_override_infant",
+        "id, service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, complimentary, rental_details:booking_vehicle_rental_details(return_at), pricing_basis, adult_count, child_count, infant_count, price_override_child, price_override_infant, pax_group_ids",
       )
       .eq("booking_id", jobId)
       .order("sort_order", { ascending: true }),
@@ -332,6 +376,14 @@ export async function buildPackageQuoteLineItems({
   // Narrowed once here: the hoisted helpers below close over it, and a function declaration loses
   // the narrowing applied to the binding it captures.
   const bookingPrimarySupplierId = job.primary_supplier_id ?? null
+
+  // Group mode: the primary service's lines carry every group, so the pax-group lines can tell whose
+  // guests each of its units holds. One group (or none) is a booking that prices and reads as today.
+  const stampedPaxGroups =
+    paxGroups.length >= 2 ? paxGroups.slice().sort((a, b) => a.position - b.position) : null
+  const primaryLegId = stampedPaxGroups
+    ? findPrimaryLegId(packageDetail.legs, bookingPrimarySupplierId)
+    : null
 
   // Batch-resolve display names for whoever set a transport price override, same source as the
   // hotel room override's "set by" note — read once here rather than per request below. Depends
@@ -602,6 +654,30 @@ export async function buildPackageQuoteLineItems({
      * internal quote view can render "1 guest × 2 nights" rather than a bare 2 that reads as a
      * headcount beside a "per person per night" basis. */
     qtyBasis?: { occupants: number; nights: number } | null
+    /** Hotel, train, tour, cruise and airline lines only: the units (or rate slices of them) this
+     *  line was priced for (see PricingSnapshot.unitRefs). Left off shared costs. */
+    unitRefs?: PricingUnitRef[] | null
+    /** Transfers/rentals only: the pax groups the trip serves. Empty = every group. */
+    paxGroupIds?: readonly string[] | null
+  }
+
+  /** A unit's (or one of its rate slices') identity and occupants for PricingSnapshot.unitRefs.
+   *  `index` is the unit's position on its leg; `rateTypeId` is the rate the slice priced at. */
+  function unitRefOf(
+    unitSelection: PackageUnitSelection,
+    index: number,
+    rateTypeId: string | null,
+  ): PricingUnitRef {
+    const groupIds = unitSelection.paxGroupIds ?? []
+    return {
+      index,
+      ...(unitSelection.unitId ? { unitId: unitSelection.unitId } : {}),
+      adults: unitSelection.adultCount ?? 0,
+      children: unitSelection.childCount ?? 0,
+      infants: unitSelection.infantCount ?? 0,
+      ...(groupIds.length > 0 ? { paxGroupIds: [...groupIds] } : {}),
+      ...(rateTypeId ? { rateTypeId } : {}),
+    }
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -636,6 +712,8 @@ export async function buildPackageQuoteLineItems({
     transferPricingBasis,
     accommodationPricingBasis,
     qtyBasis,
+    unitRefs,
+    paxGroupIds,
   }: AddLineItemOptions) {
     // A stay whose every night was gifted still has to reach the quote: the client documents read
     // their itinerary off the priced legs, so dropping the line would drop the hotel entirely.
@@ -768,6 +846,11 @@ export async function buildPackageQuoteLineItems({
         ...(transferPricingBasis ? { transferPricingBasis } : {}),
         ...(accommodationPricingBasis ? { accommodationPricingBasis } : {}),
         ...(qtyBasis ? { occupantCount: qtyBasis.occupants, chargedNights: qtyBasis.nights } : {}),
+        ...(unitRefs && unitRefs.length > 0 ? { unitRefs } : {}),
+        ...(paxGroupIds && paxGroupIds.length > 0 ? { paxGroupIds: [...paxGroupIds] } : {}),
+        ...(stampedPaxGroups && primaryLegId !== null && activeLeg?.id === primaryLegId
+          ? { paxGroups: stampedPaxGroups.map((group) => ({ ...group })) }
+          : {}),
       }
     }
 
@@ -1144,8 +1227,13 @@ export async function buildPackageQuoteLineItems({
         // (PASSENGER_WARN_SUPPLIER_KINDS in lib/packages/apply-dialog-state.ts); only a train must
         // still match exactly (PASSENGER_SUM_SUPPLIER_KINDS, enforced below and in PATCH /services).
 
-        for (const unitSelection of units) {
+        for (const [unitIndex, unitSelection] of units.entries()) {
           const unitRateTypeId = effectiveRateTypeIdOf(unitSelection)
+          // Every line this room emits belongs to this room's occupants (pax-group lines). Read
+          // after each path below has resolved its card, so an inherited rate names the card's own.
+          const roomUnitRefs = () => [
+            unitRefOf(unitSelection, unitIndex, unitRateTypeId ?? activeRateCard?.rateTypeId ?? null),
+          ]
           // 0 is a real override (a comped room), so this is a null check, not a truthiness one.
           const overridePrice =
             unitSelection.manualRoomPrice === null || unitSelection.manualRoomPrice === undefined
@@ -1192,6 +1280,7 @@ export async function buildPackageQuoteLineItems({
               pricingMode: isManualPricing ? "manual" : "rate_card",
               sourceCurrency: overrideCurrency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs(),
               roomOverride: {
                 price: overridePrice,
                 // What the card would have charged this room a night -- the figure Build Booking
@@ -1240,6 +1329,7 @@ export async function buildPackageQuoteLineItems({
                 pricingMode: isManualPricing ? "manual" : "rate_card",
                 sourceCurrency: selection.priceCurrency ?? targetCurrency,
                 accommodationPricingBasis: accommodationBasis,
+                unitRefs: roomUnitRefs(),
                 complimentary,
               })
               continue
@@ -1275,6 +1365,7 @@ export async function buildPackageQuoteLineItems({
               hideRoomConfig: true,
               sourceCurrency: validRateCard.currency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs(),
               complimentary,
             })
             // No zero-qty fallback needed below: this path always emits exactly one line per room,
@@ -1318,6 +1409,7 @@ export async function buildPackageQuoteLineItems({
               passengerKind: fare.kind,
               sourceCurrency: validRateCard.currency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs(),
               complimentary,
             })
           }
@@ -1339,6 +1431,7 @@ export async function buildPackageQuoteLineItems({
               hideRoomConfig: true,
               sourceCurrency: validRateCard.currency,
               accommodationPricingBasis: accommodationBasis,
+              unitRefs: roomUnitRefs(),
               complimentary,
             })
           }
@@ -1360,6 +1453,8 @@ export async function buildPackageQuoteLineItems({
           }
           const requestPricingDate = dateOnly(transportRequest?.pickup_at) ?? legPricingDate
           activePricingDate = requestPricingDate
+          // The pax groups this trip serves, stamped on each of its lines (empty = every group).
+          const requestPaxGroupIds = transportRequest?.pax_group_ids ?? null
           const returnDate = isVehicleRental
             ? dateOnly(
                 (Array.isArray(transportRequest?.rental_details)
@@ -1490,6 +1585,7 @@ export async function buildPackageQuoteLineItems({
                 isComplimentaryTransport: isComplimentary,
                 transportRequestId: transportRequest?.id ?? null,
                 transferPricingBasis: transferBasis,
+                paxGroupIds: requestPaxGroupIds,
               })
             }
             continue
@@ -1536,6 +1632,7 @@ export async function buildPackageQuoteLineItems({
                 : {}),
               isComplimentaryTransport: isComplimentary,
               transportRequestId: transportRequest?.id ?? null,
+              paxGroupIds: requestPaxGroupIds,
             })
             continue
           }
@@ -1560,6 +1657,7 @@ export async function buildPackageQuoteLineItems({
             hideVariantSuffix: isTransfer,
             sourceCurrency: validRateCard.currency,
             transportRequestId: transportRequest?.id ?? null,
+            paxGroupIds: requestPaxGroupIds,
           })
         }
       } else {
@@ -1616,6 +1714,109 @@ export async function buildPackageQuoteLineItems({
           return { adult, child, infant }
         }
 
+        const hasTourPriceOverride = (unitSelection: PackageUnitSelection): boolean =>
+          isTour && unitSelection.manualTourPrice !== null && unitSelection.manualTourPrice !== undefined
+        // A typed flat tour price is the whole unit's price whoever is in it, so it has no guests'
+        // rates to split; neither has a manual-pricing leg, whose fares are typed per cabin.
+        const rateSplitsApply = RATE_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind) && !isManualPricing
+        const wholeCount = (value: number | null | undefined): number =>
+          typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+
+        /**
+         * A unit as the rate slices it prices in (UnitRateSplit): the base slice holds the unit's
+         * guests less every split, at the unit's own rate; each split rate gets a slice of its own.
+         * Splits on one rate are summed, a split at the unit's own rate moves nobody, and a slice
+         * holding nobody is dropped. A unit with no effective split is a single slice -- a copy of
+         * itself -- so a booking without splits groups and prices exactly as before.
+         *
+         * A slice's own rate type goes through the same card resolution (resolveUnit) as a unit
+         * rate type, so a split rate with no card fails with the same message.
+         */
+        function rateSlicesOf(unitSelection: PackageUnitSelection, unitIndex: number): PackageUnitSelection[] {
+          const splits = rateSplitsApply && !hasTourPriceOverride(unitSelection) ? unitSelection.rateSplits ?? [] : []
+          if (splits.length === 0) return [{ ...unitSelection }]
+          // The rate the unit's own guests price at. With none chosen on the unit or the leg, that is
+          // whichever rate the card resolution falls back to (resolveUnit, below), so a split onto
+          // that same rate still moves nobody.
+          const unitRate =
+            effectiveRateTypeIdOf(unitSelection) ??
+            (() => {
+              const inherited = getValidRateCard(leg, routeId, unitSelection.suiteTypeId, legPricingDate, null)
+              return inherited?.ok ? inherited.card.rateTypeId : null
+            })()
+          const movedByRate = new Map<string, { adultCount: number; childCount: number; infantCount: number }>()
+          for (const split of splits) {
+            if (!split.rateTypeId || split.rateTypeId === unitRate) continue
+            const moved = movedByRate.get(split.rateTypeId) ?? { adultCount: 0, childCount: 0, infantCount: 0 }
+            moved.adultCount += wholeCount(split.adultCount)
+            moved.childCount += wholeCount(split.childCount)
+            moved.infantCount += wholeCount(split.infantCount)
+            movedByRate.set(split.rateTypeId, moved)
+          }
+          if (movedByRate.size === 0) return [{ ...unitSelection }]
+
+          const base = {
+            adultCount: unitSelection.adultCount ?? 0,
+            childCount: unitSelection.childCount ?? 0,
+            infantCount: unitSelection.infantCount ?? 0,
+          }
+          for (const moved of movedByRate.values()) {
+            base.adultCount -= moved.adultCount
+            base.childCount -= moved.childCount
+            base.infantCount -= moved.infantCount
+          }
+          // Build Booking and PATCH /services refuse this; a stale or hand-built payload still must
+          // not price a guest twice, or a negative one.
+          for (const [key, noun] of [
+            ["adultCount", "adults"],
+            ["childCount", "children"],
+            ["infantCount", "infants"],
+          ] as const) {
+            if (base[key] >= 0) continue
+            const held = unitSelection[key] ?? 0
+            throw new Error(
+              `${legLabel}: ${SUPPLIER_VOCABULARY[leg.supplierKind].unitNoun} ${unitIndex + 1} puts ` +
+                `${held - base[key]} ${noun} on another rate but holds ${held} — adjust its guest rates`,
+            )
+          }
+
+          const unitSlices: PackageUnitSelection[] = []
+          if (base.adultCount + base.childCount + base.infantCount > 0) {
+            unitSlices.push({ ...unitSelection, ...base })
+          }
+          for (const [rateTypeId, moved] of movedByRate) {
+            if (moved.adultCount + moved.childCount + moved.infantCount === 0) continue
+            unitSlices.push({ ...unitSelection, ...moved, rateTypeId })
+          }
+          return unitSlices
+        }
+
+        // Every slice remembers its unit: its position on the leg (unitRefs.index) and its total
+        // occupancy, which is what the single-supplement "solo room" test reads -- one SA guest
+        // sharing a suite with one TW guest is not alone in it. Keyed by the slice object, which
+        // rateSlicesOf always creates fresh.
+        const sliceOrigin = new Map<PackageUnitSelection, { index: number; occupancy: number }>()
+        const slices: PackageUnitSelection[] = []
+        for (const [unitIndex, unitSelection] of units.entries()) {
+          const occupancy =
+            (unitSelection.adultCount ?? 0) + (unitSelection.childCount ?? 0) + (unitSelection.infantCount ?? 0)
+          for (const slice of rateSlicesOf(unitSelection, unitIndex)) {
+            sliceOrigin.set(slice, { index: unitIndex, occupancy })
+            slices.push(slice)
+          }
+        }
+        const occupancyOf = (slice: PackageUnitSelection): number =>
+          sliceOrigin.get(slice)?.occupancy ??
+          (slice.adultCount ?? 0) + (slice.childCount ?? 0) + (slice.infantCount ?? 0)
+        /** The slice's unitRefs entry. Read after its line's card was resolved, so a slice inheriting
+         *  the leg's rate names the card's own rate type. */
+        const sliceRefOf = (slice: PackageUnitSelection): PricingUnitRef =>
+          unitRefOf(
+            slice,
+            sliceOrigin.get(slice)?.index ?? 0,
+            effectiveRateTypeIdOf(slice) ?? activeRateCard?.rateTypeId ?? null,
+          )
+
         // Price against the suite type, not each room's own configuration: multiple units booked
         // under the same suite type (e.g. 3 rooms of "Deluxe Double") combine into one line per
         // passenger type instead of splitting per room, even if their bed/bathroom setup differs.
@@ -1628,11 +1829,14 @@ export async function buildPackageQuoteLineItems({
         // A train suite carrying a per-person fare override groups by its typed fare triple as
         // well, so two suites of the same type at different overridden fares (or one overridden and
         // one on the card) never merge into one line; two suites typed identically still share one.
+        //
+        // Grouped by rate slice rather than by unit: the key already carries the effective rate, so
+        // a suite split across two rates lands on two lines, and a slice shares a line with any
+        // other unit or slice at the same rate.
         const unitsBySuiteType = new Map<string, PackageUnitSelection[]>()
         let tourOverrideGroupCounter = 0
-        for (const unitSelection of units) {
-          const hasTourOverride =
-            isTour && unitSelection.manualTourPrice !== null && unitSelection.manualTourPrice !== undefined
+        for (const unitSelection of slices) {
+          const hasTourOverride = hasTourPriceOverride(unitSelection)
           const trainOverride = trainFareOverridesOf(unitSelection)
           const groupKey = hasTourOverride
             ? `tour-override::${tourOverrideGroupCounter++}`
@@ -1698,6 +1902,7 @@ export async function buildPackageQuoteLineItems({
                 setAt: unitSelection.manualTourPriceSetAt ?? null,
                 setByName: unitSelection.manualTourPriceSetByName ?? null,
               },
+              unitRefs: [sliceRefOf(unitSelection)],
             })
             continue
           }
@@ -1795,21 +2000,21 @@ export async function buildPackageQuoteLineItems({
             for (const unitSelection of groupUnits) {
               const count = unitSelection[key] ?? 0
               if (count === 0) continue
-              const adultCount = unitSelection.adultCount ?? 0
-              const childCount = unitSelection.childCount ?? 0
-              const infantCount = unitSelection.infantCount ?? 0
               // Manual-pricing legs never carry a single supplement -- the typed fare is already
               // the per-seat price a passenger pays, with no notion of a solo room to bump. A tour
               // unit isn't a shared room either -- it's one traveller party's own booking of the
               // activity -- so a lone adult on a tour is a genuine 1-pax price, not a solo-room
               // surcharge case.
+              //
+              // "Alone" is the whole unit's occupancy, never a rate slice's: a guest on another rate
+              // still shares the suite with the rest of it.
               const isSoloRoom =
                 !isManualPricing &&
                 !isTour &&
                 kindOverride === null &&
                 SUPPLIER_VOCABULARY[leg.supplierKind].showSingleSupplement &&
                 packageDetail.singleSupplementPct > 0 &&
-                adultCount + childCount + infantCount === 1
+                occupancyOf(unitSelection) === 1
               if (isSoloRoom && count === 1) {
                 soloContributingUnits.push(unitSelection)
               } else {
@@ -1853,6 +2058,9 @@ export async function buildPackageQuoteLineItems({
                   pricingMode: isManualPricing ? "manual" : "rate_card",
                   singleSupplementPct: isSolo ? packageDetail.singleSupplementPct : null,
                   sourceCurrency: lineSourceCurrency,
+                  // Every unit (or rate slice) merged into this line, so the pax-group lines can
+                  // seat its fare. Merged units share the same fare by construction.
+                  unitRefs: variantUnits.map(sliceRefOf),
                   ...(kindOverride !== null
                     ? {
                         trainFareOverride: {

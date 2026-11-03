@@ -29,7 +29,9 @@ import {
   TRAVEL_DATES_LABEL,
   VAT_INCLUSIVE_SUFFIX,
   WARNING_TEXT_COLOR,
+  type ItineraryScopeTag,
 } from "@/lib/quotes/quote-presentation"
+import { formatPaxGroupLine, type PaxGroupPricing } from "@/lib/quotes/pax-group-pricing"
 
 export interface QuoteSummaryInput {
   quoteNumber: string
@@ -64,6 +66,11 @@ export interface QuoteSummaryInput {
   packageExcludesDefault?: string
   /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
   flightCapPerPerson?: number | null
+  /** One line per pax group on the gross subtotal (resolvePaxGroupPricing), as the quote PDF prints
+   *  them. When it has lines they replace the "N Adults x R… per person" line. */
+  paxGroupPricing?: PaxGroupPricing | null
+  /** Tags an itinerary service only some pax groups take ("(Suite 2 only)"); absent tags nothing. */
+  itineraryScopeTag?: ItineraryScopeTag
 }
 
 export function formatQuoteDate(value: string | null): string {
@@ -131,9 +138,62 @@ const excludesItem = "margin:0 0 4px;color:#554c42;font-size:12px;line-height:18
 const DEFAULT_INCLUDES_HEADING = "Your Package Includes"
 const DEFAULT_EXCLUDES_HEADING = "Your Package Excludes"
 
+// A pax group's line: the panel's per-person type, as two cells so the subtotals stand in one
+// right-aligned column. The padding sits on the <td>s, which Outlook keeps.
+const groupSentenceCell = "padding:0 16px 6px 0;color:#554c42;font-size:13px;line-height:19px;text-align:left;vertical-align:top;"
+const groupAmountCell =
+  "padding:0 0 6px 0;color:#554c42;font-size:13px;line-height:19px;text-align:right;vertical-align:top;white-space:nowrap;"
+
+// {{paxGroupPricing}} on its own sits among Carmen's paragraphs, so its cells take the email's own
+// type (the body font and colour) rather than the panel's grey 13px.
+const inheritType = "color:inherit;font-family:inherit;font-size:inherit;line-height:inherit;"
+const standaloneSentenceCell = `padding:0 16px 6px 0;${inheritType}text-align:left;vertical-align:top;`
+const standaloneAmountCell = `padding:0 0 6px 0;${inheritType}text-align:right;vertical-align:top;white-space:nowrap;`
+const standaloneTotalLine = "margin:0;font-weight:700;"
+
+export interface PaxGroupPricingRowsOptions {
+  /** The {{paxGroupPricing}} token: cells inherit the email's type, and the rows close with a rule
+   *  and "TOTAL for 8 Adults & 4 Children: R… (incl.VAT)". The "Total price" panel leaves it off. */
+  standalone?: boolean
+}
+
+/**
+ * One row per pax group — Carmen's sentence on the left, the suite's subtotal on the right — as an
+ * Outlook-safe layout table. The quote email's "Total price" panel prints it in place of the
+ * per-person line, and {{paxGroupPricing}} on its own (`standalone`, closing with its TOTAL line).
+ * Plain text reads "sentence amount" per line. Empty when the pricing has no lines.
+ */
+export function buildPaxGroupPricingRows(
+  pricing: PaxGroupPricing | null | undefined,
+  currency?: string,
+  { standalone = false }: PaxGroupPricingRowsOptions = {},
+): string {
+  const lines = pricing?.lines ?? []
+  if (!pricing || lines.length === 0) return ""
+  const money = (amount: number) => formatMoney(amount, currency)
+  const sentenceCell = standalone ? standaloneSentenceCell : groupSentenceCell
+  const amountCell = standalone ? standaloneAmountCell : groupAmountCell
+  const rows = lines
+    .map(
+      (line) =>
+        `<tr><td valign="top" style="${sentenceCell}">${escapeHtml(formatPaxGroupLine(line, money))}</td>` +
+        `<td align="right" valign="top" style="${amountCell}">${escapeHtml(money(line.subtotal))}</td></tr>`,
+    )
+    .join("")
+  const table = `<table ${LAYOUT_TABLE_ATTRS} data-label="Price per suite"><tbody>${rows}</tbody></table>`
+  if (!standalone) return table
+  const label = formatTotalLabel({ adults: pricing.adults, children: pricing.children }, { joiner: " & " })
+  return (
+    table +
+    `<p style="${pricingDivider}">&nbsp;</p>` +
+    `<p style="${standaloneTotalLine}">${escapeHtml(label)}: ${money(pricing.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>`
+  )
+}
+
 export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const pax = { adults: input.adults, children: input.children }
-  const paxLabel = formatPaxLabel(pax)
+  // A booking split into suites reads "&" throughout, like its total; others keep the approved "+".
+  const paxLabel = formatPaxLabel(pax, input.paxGroupPricing?.lines.length ? { joiner: " & " } : {})
   const journeyRange = formatJourneyRange(input.journeyStart, input.journeyEnd)
   const agentCommission = input.agentCommission ?? 0
   const hasAgentCommission = agentCommission > 0
@@ -165,15 +225,22 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   // (20260723130000_fix_double_rand_templates.sql and its all-rows follow-up).
   const money = (amount: number) => formatMoney(amount, input.currency)
 
+  // On a booking split into pax groups, one row per suite replaces the per-person line; the rows add
+  // up to the subtotal (or, with nothing deducted, the total), so a rule always closes them.
+  const groupRows = buildPaxGroupPricingRows(input.paxGroupPricing, input.currency)
+
   // 16px above: the itinerary/exclusion lines over it end in a 2-4px margin of their own.
   const pricing = outlinedPanel(
     "Total price",
     16,
-    (perPersonRate !== null
-      ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${money(perPersonRate)} per person</p>`
-      : "") +
+    (groupRows
+      ? groupRows
+      : perPersonRate !== null
+        ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${money(perPersonRate)} per person</p>`
+        : "") +
       (showSubtotal
-        ? `<p style="${subtotalLine}">Subtotal: ${money(input.subtotal ?? input.total)}</p>` +
+        ? (groupRows ? `<p style="${pricingDivider}">&nbsp;</p>` : "") +
+          `<p style="${subtotalLine}">Subtotal: ${money(input.subtotal ?? input.total)}</p>` +
           (hasAgentCommission
             ? `<p style="${agentCommissionLine}">${escapeHtml(AGENT_COMMISSION_LABEL)}: ${escapeHtml(formatAgentCommission(agentCommission, money))}</p>`
             : "") +
@@ -181,8 +248,12 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
             ? `<p style="${discountLine}">${escapeHtml(DISCOUNT_LABEL)}: ${escapeHtml(formatDiscount(discount, money))}</p>`
             : "") +
           `<p style="${pricingDivider}">&nbsp;</p>`
-        : "") +
-      `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${money(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>`,
+        : groupRows
+          ? `<p style="${pricingDivider}">&nbsp;</p>`
+          : "") +
+      // Carmen's group wording joins the party with "&"; a booking without groups keeps the "+"
+      // the client approved.
+      `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax, groupRows ? { joiner: " & " } : {}))}: ${money(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>`,
   )
 
   const sortedBlocks = sortItineraryBlocksByLegOrder(input.itineraryBlocks)
@@ -191,7 +262,7 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const moneyNoDecimals = (amount: number) => formatMoney(amount, input.currency, { decimals: false })
   const flightCapBullet =
     input.flightCapPerPerson != null ? formatFlightCapLine(moneyNoDecimals, input.flightCapPerPerson) : null
-  const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet)
+  const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet, input.itineraryScopeTag)
   if (itineraryLines.length > 0) {
     const heading = input.packageIncludesHeading || DEFAULT_INCLUDES_HEADING
     const items = itineraryLines

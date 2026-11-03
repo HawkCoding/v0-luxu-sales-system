@@ -398,3 +398,43 @@ describe("indefinite article on the bathroom clause", () => {
     )
   })
 })
+
+describe("{{suiteDescription}} counting suites", () => {
+  const twin = { suiteTypeName: "Deluxe Suite", bedroomType: "Twin", bathroomType: "Shower", supplierKind: "train_operator" } as const
+  const double = { ...twin, bedroomType: "Double" }
+
+  it("counts identical suites by their units instead of collapsing them", () => {
+    const selections: SuiteSelection[] = [
+      ...[1, 2, 3, 4, 5].map((n) => ({ ...twin, unitKeys: [`u${n}`] })),
+      { ...double, unitKeys: ["u6"] },
+    ]
+    expect(buildSuiteTokens(selections).suiteDescription).toBe(
+      "5 Twin bedded Deluxe Suites with a shower and a Double bedded Deluxe Suite with a shower",
+    )
+  })
+
+  it("counts a suite priced on several lines once", () => {
+    const variants = (bedroom: string) => [
+      { label: "Bedroom Type", values: [bedroom] },
+      { label: "Bathroom Type", values: ["Shower"] },
+    ]
+    const ref = (index: number, unitId: string) => ({ index, unitId, adults: 1, children: 0, infants: 0 })
+    const selections = suiteSelectionsFromSnapshots([
+      // SA adults of suites 1, 2 and 4; TW adults of suites 2 and 4; suite 3's children.
+      snapshot({ supplierKind: "train_operator", selectedVariants: variants("Twin"), unitRefs: [ref(0, "u1"), ref(1, "u2"), ref(3, "u4")] }),
+      snapshot({ supplierKind: "train_operator", selectedVariants: variants("Twin"), unitRefs: [ref(1, "u2"), ref(3, "u4")] }),
+      snapshot({ supplierKind: "train_operator", selectedVariants: variants("Twin"), passengerKind: "child", unitRefs: [ref(2, "u3")] }),
+      snapshot({ supplierKind: "train_operator", selectedVariants: variants("Double"), unitRefs: [ref(4, "u5")] }),
+    ])
+    expect(buildSuiteTokens(selections).suiteDescription).toBe(
+      "4 Twin bedded Deluxe Suites with a shower and a Double bedded Deluxe Suite with a shower",
+    )
+  })
+
+  it("leaves a single suite, and lines with no unit refs, as they were", () => {
+    expect(buildSuiteTokens([{ ...twin, unitKeys: ["u1"] }, { ...twin, unitKeys: ["u1"] }]).suiteDescription).toBe(
+      "a Twin bedded Deluxe Suite with a shower",
+    )
+    expect(buildSuiteTokens([twin, { ...twin }]).suiteDescription).toBe("a Twin bedded Deluxe Suite with a shower")
+  })
+})

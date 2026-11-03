@@ -44,11 +44,13 @@ function substitute(
   escape: boolean,
 ): string {
   return text.replace(TOKEN_RE, (match, name: string) => {
-    if (Object.prototype.hasOwnProperty.call(tokens, name)) {
-      return escape ? escapeHtml(tokens[name]) : tokens[name]
-    }
+    // In the body a block wins over a scalar of the same name: {{availability}} is plain text in a
+    // subject but carries its bold in the body.
     if (allowBlocks && Object.prototype.hasOwnProperty.call(blocks, name)) {
       return blocks[name]
+    }
+    if (Object.prototype.hasOwnProperty.call(tokens, name)) {
+      return escape ? escapeHtml(tokens[name]) : tokens[name]
     }
     unknown.add(name)
     return match

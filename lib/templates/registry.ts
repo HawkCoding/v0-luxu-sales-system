@@ -199,7 +199,7 @@ const bankingDetails: TemplateTokenSpec = {
 }
 const guestInfo: TemplateTokenSpec = {
   name: "guestInfo",
-  description: "Each named guest with their DOB, country of residence and passport/ID number, for the customer to confirm (falls back to guest counts if names aren't captured yet)",
+  description: "Each named guest with their DOB, country of residence and passport/ID number, for the customer to confirm — headed and numbered by suite (\"2.1\") when the booking is split into suites (falls back to guest counts if names aren't captured yet)",
   kind: "block",
   sample:
     "<p>Mr John Adams DOB: 27/09/1959 UK 155510783</p><p>Mrs Caron Adams DOB: 30/01/1963 UK 128860381</p>",
@@ -220,6 +220,29 @@ const trainOnlyNote: TemplateTokenSpec = {
   sample:
     "<p>We have quoted you for the train only. If you would like to request any other services, we offer those as well.</p>",
   kinds: ["train_operator"],
+}
+// Pax groups: a booking split into suites (or rooms, or cabins) of their own. Universal because any
+// main product with two or more units can be split. Both resolve empty on a booking that isn't.
+const availability: TemplateTokenSpec = {
+  name: "availability",
+  description:
+    "What the main product can still offer, counted from the booking's suites: \"On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite with a shower\" — the route, date and suites in bold in the email (empty unless the booking is split into suites)",
+  // Scalar so the editor keeps it inline inside a paragraph; the send path also supplies a block of
+  // the same name carrying the bold, which the body prefers (renderTemplate).
+  kind: "scalar",
+  sample:
+    "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite with a ¾ bath.",
+}
+const paxGroupPricing: TemplateTokenSpec = {
+  name: "paxGroupPricing",
+  description:
+    "One price line per suite, as the quote prints them (\"Twin Deluxe Suite 2 - 1 Adult x R24 100,00 (SA) & 1 Adult x R29 400,00 (TW)\" and its subtotal; empty unless the booking is split into suites)",
+  kind: "block",
+  sample:
+    '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;" data-label="Price per suite"><tbody>' +
+    '<tr><td valign="top" style="padding:0 16px 6px 0;color:#554c42;font-size:13px;line-height:19px;">Twin Deluxe Suite 1 - 2 Adults x R23 800,00 per person (SA)</td><td align="right" valign="top" style="padding:0 0 6px 0;color:#554c42;font-size:13px;line-height:19px;text-align:right;white-space:nowrap;">R47 600,00</td></tr>' +
+    '<tr><td valign="top" style="padding:0 16px 6px 0;color:#554c42;font-size:13px;line-height:19px;">Twin Deluxe Suite 2 - 1 Adult x R24 100,00 (SA) &amp; 1 Adult x R29 400,00 (TW)</td><td align="right" valign="top" style="padding:0 0 6px 0;color:#554c42;font-size:13px;line-height:19px;text-align:right;white-space:nowrap;">R53 500,00</td></tr>' +
+    "</tbody></table>",
 }
 
 // Every token below is resolvable in every template type (lib/templates/resolve-shared-tokens.ts
@@ -354,6 +377,8 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   bankingDetails,
   rateLabel,
   trainOnlyNote,
+  availability,
+  paxGroupPricing,
 ]
 
 export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = Object.fromEntries(

@@ -64,6 +64,11 @@ function toIsoDateString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
+export interface PaxLabelOptions {
+  /** Between the guest counts: " + " (the default) or " & " (a booking split into pax groups). */
+  joiner?: string
+}
+
 function paxParts({ adults, children, infants = 0 }: QuotePax): string[] {
   const parts: string[] = []
   if (adults > 0) parts.push(`${adults} ${adults === 1 ? "Adult" : "Adults"}`)
@@ -73,8 +78,8 @@ function paxParts({ adults, children, infants = 0 }: QuotePax): string[] {
 }
 
 /** "2 Adults" | "1 Adult + 2 Children" | "2 Adults + 1 Child + 1 Infant" | "" when all counts are 0. */
-export function formatPaxLabel(pax: QuotePax): string {
-  return paxParts(pax).join(" + ")
+export function formatPaxLabel(pax: QuotePax, { joiner = " + " }: PaxLabelOptions = {}): string {
+  return paxParts(pax).join(joiner)
 }
 
 /**
@@ -86,9 +91,10 @@ export function derivePerPersonRate(total: number, pax: QuotePax): number | null
   return Math.round((total / pax.adults) * 100) / 100
 }
 
-/** "TOTAL for 2 Adults" | "TOTAL" when pax is unknown. */
-export function formatTotalLabel(pax: QuotePax): string {
-  const label = formatPaxLabel(pax)
+/** "TOTAL for 2 Adults" | "TOTAL for 8 Adults & 4 Children" with `joiner: " & "` | "TOTAL" when pax
+ *  is unknown. */
+export function formatTotalLabel(pax: QuotePax, options: PaxLabelOptions = {}): string {
+  const label = formatPaxLabel(pax, options)
   return label ? `TOTAL for ${label}` : "TOTAL"
 }
 
@@ -415,6 +421,18 @@ function pluralSuiteLabel(label: string): string | null {
   return `${label.slice(0, end)}s${label.slice(end)}`
 }
 
+/** "Deluxe Suite" → "Deluxe Suites", "Twin Deluxe Suite with Shower" → "Twin Deluxe Suites with
+ *  Shower"; a label with no noun to pluralise comes back unchanged. */
+export function pluralUnitLabel(label: string): string {
+  return pluralSuiteLabel(label) ?? label
+}
+
+/**
+ * Says which pax groups a block's service is for — "(Suite 2 only)" — or null when it serves every
+ * group (or the booking has none). See blockScopeTagger in lib/quotes/resolve-pax-group-pricing.ts.
+ */
+export type ItineraryScopeTag = (block: VoucherServiceBlock) => string | null
+
 /** True when a number is said starting with a vowel sound: 8, 11, 18, 80–89, 800–899, 1100–1199
  *  ("eleven hundred"), 1800–1899, 8 000–8 999, … — read off its leading spoken group. */
 function numberTakesAn(value: number): boolean {
@@ -506,8 +524,23 @@ function joinSentence(
   return renderSentence(sentence(parts, suffixes, separator))
 }
 
-function describeBlock(block: VoucherServiceBlock): string {
-  return renderSentence(describeBlockSentence(block))
+function describeBlock(block: VoucherServiceBlock, scopeTag?: ItineraryScopeTag): string {
+  return renderSentence(taggedSentence(describeBlockSentence(block), block, scopeTag))
+}
+
+/** The block's sentence with its pax-group tag after the main clause, ahead of any trailing facts:
+ *  "Two nights at the One&Only, Cape Town in a Signature Apartment (Suites 2 & 3 only) | Check in…". */
+function taggedSentence(sentence: Sentence, block: VoucherServiceBlock, scopeTag?: ItineraryScopeTag): Sentence {
+  const tag = scopeTag?.(block)?.trim()
+  if (!tag) return sentence
+  // A tail that carries the sentence on ("… (Luxury - Fortuner/Mercedez) at 10h00") takes the tag at
+  // its end, so two parentheses never run together; a " | " tail is separate facts, after the tag.
+  if (sentence.separator !== " | " && sentence.tail.length > 0) {
+    const tail = [...sentence.tail]
+    tail[tail.length - 1] = `${tail[tail.length - 1]} ${tag}`
+    return { ...sentence, tail }
+  }
+  return { ...sentence, main: `${sentence.main} ${tag}` }
 }
 
 function describeBlockSentence(block: VoucherServiceBlock): Sentence {
@@ -708,10 +741,13 @@ function placeEndLines<T extends { dateISO: string | null }>(
  * `flightCapBullet` (already formatted, e.g. "Flights are capped at R2 000pp — incl. baggage &
  * fees" via {@link formatFlightCapLine}) is attached under the *first* flight block only, one
  * combined line for the whole quote rather than repeated per flight.
+ *
+ * `scopeTag` appends "(Suite 2 only)" to a service only some pax groups take; absent, no line changes.
  */
 export function buildQuoteItineraryLines(
   blocks: VoucherServiceBlock[],
   flightCapBullet?: string | null,
+  scopeTag?: ItineraryScopeTag,
 ): QuoteItineraryLine[] {
   const mainLines: QuoteItineraryLine[] = []
   const endLines: Array<PendingEndLine<QuoteItineraryLine>> = []
@@ -744,7 +780,7 @@ export function buildQuoteItineraryLines(
 
     mainLines.push({
       dateISO: d.departureDate ?? null,
-      text: describeBlock(block),
+      text: describeBlock(block, scopeTag),
       bullets,
       ...(hotelDescription ? { description: hotelDescription } : {}),
     })
@@ -817,10 +853,13 @@ export interface QuoteSummaryDay {
  * 14h00", "Check in at 10h00 - Train departs at 12h00") sits on its own line under the service, a
  * flight's or tour's time runs on in its sentence without the " | " break, and a train's arrival caveat joins
  * its arrival line, as the approved template sets them.
+ *
+ * `scopeTag` appends "(Suite 2 only)" to a service only some pax groups take; absent, no line changes.
  */
 export function buildQuoteSummaryDays(
   blocks: VoucherServiceBlock[],
   flightCapBullet?: string | null,
+  scopeTag?: ItineraryScopeTag,
 ): QuoteSummaryDay[] {
   type SummaryLine = { dateISO: string | null; items: QuoteSummaryItem[] }
   const mainLines: SummaryLine[] = []
@@ -829,7 +868,7 @@ export function buildQuoteSummaryDays(
 
   blocks.forEach((block) => {
     const d = block.serviceData
-    const described = describeBlockSentence(block)
+    const described = taggedSentence(describeBlockSentence(block), block, scopeTag)
     const splitsTail = block.serviceType === "hotel" || block.serviceType === "train"
     // Every other service runs its trailing fact on in the sentence ("… in Economy departing at
     // 10h00", "… Sundowner Cruise at 17h00") — the PDF never prints the email's " | " break.

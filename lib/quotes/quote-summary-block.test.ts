@@ -3,7 +3,16 @@ import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
 import type { BulletLine } from "@/lib/inclusions/bullet-lines"
 import { formatMoney } from "@/lib/money"
-import { buildQuoteSummaryBlock, type QuoteSummaryInput } from "./quote-summary-block"
+import { buildPaxGroupPricingRows, buildQuoteSummaryBlock, type QuoteSummaryInput } from "./quote-summary-block"
+import { brandedEmailToPlainText } from "@/lib/email/plain-text"
+import { allocatePaxGroups } from "@/lib/quotes/pax-group-pricing"
+import { blockScopeTagger } from "@/lib/quotes/resolve-pax-group-pricing"
+import {
+  CARMEN_RATE_LABELS,
+  CARMEN_SUBTOTAL,
+  carmenQuoteLines,
+  carmenServiceBlocks,
+} from "@/lib/pax-groups/carmen-sample.fixtures"
 
 const itineraryBlocks: VoucherServiceBlock[] = [
   {
@@ -418,5 +427,109 @@ describe("buildQuoteSummaryBlock — Rovos-style journey/rate tagged inclusions"
 
     expect(html).toContain("Short Journeys")
     expect(html).toContain("Complimentary night pre/post departure")
+  })
+})
+
+describe("buildQuoteSummaryBlock pax groups", () => {
+  const quoteLines = carmenQuoteLines()
+  const pricing = allocatePaxGroups({ lines: quoteLines, target: CARMEN_SUBTOTAL, rateLabels: CARMEN_RATE_LABELS })
+  const grouped: QuoteSummaryInput = {
+    ...base,
+    adults: 8,
+    children: 4,
+    subtotal: CARMEN_SUBTOTAL,
+    discount: 27_240,
+    total: 245_160,
+    paxGroupPricing: pricing,
+    itineraryScopeTag: blockScopeTagger(quoteLines),
+    itineraryBlocks: carmenServiceBlocks(),
+  }
+  /** The "Total price" panel alone. */
+  const panel = (html: string) => html.slice(html.indexOf('data-label="Total price"'))
+  const text = (html: string) => brandedEmailToPlainText(html).replace(/[  ]/g, " ")
+
+  it("replaces the per-person line with one two-cell row per suite, sentence left and subtotal right", () => {
+    const html = panel(buildQuoteSummaryBlock(grouped))
+
+    expect(html).toContain('data-label="Price per suite"')
+    expect((html.match(/<tr><td valign="top"/g) ?? []).length).toBe(6)
+    expect(html).toMatch(
+      /<td valign="top" style="[^"]*text-align:left;[^"]*">Twin Deluxe Suite 2 - 1 Adult x R24.100,00 \(SA\) &amp; 1 Adult x R29.400,00 \(TW\)<\/td><td align="right" valign="top" style="[^"]*text-align:right;[^"]*white-space:nowrap;">R53.500,00<\/td>/,
+    )
+    expect(html).not.toContain("per person</p>")
+  })
+
+  it("keeps the subtotal, discount and total below the suites and reads sentence-then-amount in plain text", () => {
+    const plain = text(buildQuoteSummaryBlock(grouped))
+
+    expect(plain).toContain("Twin Deluxe Suite 1 - 2 Adults x R23 800,00 per person (SA) R47 600,00\n")
+    expect(plain).toContain("Double Deluxe Suite 6 - 2 Adults x R23 800,00 per person (SA) R47 600,00")
+    expect(plain.indexOf("Double Deluxe Suite 6")).toBeLessThan(plain.indexOf("Subtotal: R272 400,00"))
+    expect(plain.indexOf("Subtotal: R272 400,00")).toBeLessThan(plain.indexOf("Discount: -R27 240,00"))
+    // Carmen's "&" in group mode; a booking without groups keeps "+".
+    expect(plain).toContain("TOTAL for 8 Adults & 4 Children: R245 160,00 (incl.VAT)")
+    expect(plain).toContain("Guests: 8 Adults & 4 Children")
+    const noGroups = text(buildQuoteSummaryBlock({ ...base, adults: 8, children: 4, itineraryBlocks: [] }))
+    expect(noGroups).toContain("TOTAL for 8 Adults + 4 Children")
+    expect(noGroups).toContain("Guests: 8 Adults + 4 Children")
+  })
+
+  it("closes the suites with a rule above the total when nothing is deducted", () => {
+    const html = panel(buildQuoteSummaryBlock({ ...grouped, discount: 0, total: CARMEN_SUBTOTAL }))
+
+    expect(html).not.toContain("Subtotal:")
+    expect(html.indexOf("Price per suite")).toBeLessThan(html.indexOf("border-bottom:1px solid"))
+    expect(html.indexOf("border-bottom:1px solid")).toBeLessThan(html.indexOf("TOTAL for 8 Adults"))
+  })
+
+  it("tags a service only some suites take in the itinerary", () => {
+    const html = buildQuoteSummaryBlock(grouped)
+
+    expect(html).toContain("Cape Town International Airport (Sedan) at 11h30 (Suite 6 only)")
+    expect(html).not.toContain(") (Suite")
+  })
+
+  describe("{{paxGroupPricing}} on its own", () => {
+    const standalone = buildPaxGroupPricingRows(pricing, "ZAR", { standalone: true })
+
+    it("takes the email's own type instead of the panel's grey 13px", () => {
+      expect(standalone).toContain("color:inherit;font-family:inherit;font-size:inherit;line-height:inherit;")
+      expect(standalone).not.toContain("color:#554c42")
+      expect(standalone).not.toContain("font-size:13px")
+    })
+
+    it("closes the rows with a rule and Carmen's TOTAL line, in plain text too", () => {
+      expect(standalone.indexOf("Double Deluxe Suite 6")).toBeLessThan(standalone.indexOf("border-bottom:1px solid"))
+      expect(standalone).toMatch(/<p style="margin:0;font-weight:700;">TOTAL for 8 Adults &amp; 4 Children: R272.400,00 \(incl\.VAT\)<\/p>$/)
+      expect(text(standalone)).toContain("TOTAL for 8 Adults & 4 Children: R272 400,00 (incl.VAT)")
+    })
+
+    it("drops the children from the TOTAL line when there are none", () => {
+      const adultsOnly = pricing ? { ...pricing, children: 0 } : null
+      expect(buildPaxGroupPricingRows(adultsOnly, "ZAR", { standalone: true })).toContain("TOTAL for 8 Adults: ")
+    })
+
+    it("leaves the panel's rows without a TOTAL line", () => {
+      expect(buildPaxGroupPricingRows(pricing, "ZAR")).not.toContain("TOTAL")
+    })
+  })
+
+  it("escapes a typed suite name", () => {
+    const evil = pricing
+      ? { ...pricing, lines: pricing.lines.map((line, index) => (index === 0 ? { ...line, label: "<b>Suite</b>" } : line)) }
+      : null
+    const html = buildPaxGroupPricingRows(evil, "ZAR")
+
+    expect(html).not.toContain("<b>Suite</b>")
+    expect(html).toContain("&lt;b&gt;Suite&lt;/b&gt;")
+  })
+
+  it("prints the panel exactly as before without pax-group lines", () => {
+    const plainInput: QuoteSummaryInput = { ...base, itineraryBlocks }
+    expect(buildQuoteSummaryBlock({ ...plainInput, paxGroupPricing: null, itineraryScopeTag: undefined })).toBe(
+      buildQuoteSummaryBlock(plainInput),
+    )
+    expect(buildPaxGroupPricingRows(null)).toBe("")
+    expect(buildPaxGroupPricingRows({ lines: [], adults: 0, children: 0, total: 0 })).toBe("")
   })
 })

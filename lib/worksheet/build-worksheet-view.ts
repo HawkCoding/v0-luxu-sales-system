@@ -3,6 +3,7 @@ import type { Database } from "@/lib/supabase/types"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { resolveAcceptedQuoteScope, scopeLegIdsFilter } from "@/lib/quotes/accepted-quote-scope"
 import { firstRecord } from "@/lib/utils"
+import { loadBookingPaxGroups } from "@/lib/pax-groups/booking-pax-groups"
 import { resolveProductCopy } from "@/lib/settings-access"
 import type { SupplierKind } from "@/lib/types"
 import {
@@ -83,7 +84,7 @@ export async function buildWorksheetView(
       .maybeSingle(),
     supabase
       .from("travellers")
-      .select("prefix, first_name, last_name, residence, date_of_birth, room_with, room_type, is_primary, sort_order")
+      .select("prefix, first_name, last_name, residence, date_of_birth, room_with, room_type, is_primary, sort_order, pax_group_id")
       .eq("booking_id", bookingId)
       .order("sort_order"),
     supabase
@@ -155,6 +156,14 @@ export async function buildWorksheetView(
 
   const remark = meanFormattedRemark(reservationDetails ?? null)
 
+  // A traveller placed in a pax group shows that suite's name in the Room Type column ("Twin Deluxe
+  // Suite 2"); everyone else keeps the free-text room type. Read only when someone is placed.
+  const groupLabels = new Map<string, string>()
+  if ((travellers ?? []).some((t) => t.pax_group_id)) {
+    const paxGroups = await loadBookingPaxGroups(supabase, bookingId)
+    for (const group of paxGroups?.groups ?? []) groupLabels.set(group.id, group.label)
+  }
+
   const pax: WorksheetPaxRow[] = (travellers ?? []).map((t, i) => ({
     title: t.prefix,
     firstName: t.first_name,
@@ -162,7 +171,7 @@ export async function buildWorksheetView(
     nationality: t.residence,
     age: computeAge(t.date_of_birth, arriveDate),
     roomWith: t.room_with,
-    roomType: t.room_type,
+    roomType: (t.pax_group_id ? groupLabels.get(t.pax_group_id) : undefined) ?? t.room_type,
     // The reservation-form remark (seating/smoking/dietary/medical/occasion) is
     // recorded once per booking, not per traveller — attach it to the primary
     // guest's row rather than fabricating a per-pax value.

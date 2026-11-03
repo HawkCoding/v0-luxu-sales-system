@@ -70,15 +70,32 @@ interface MockState {
   getServiceRows?: Array<Record<string, unknown>>
   /** Makes the booking_service_units insert fail, as a rejected row would. */
   insertUnitsError?: { message: string; code?: string }
+  /** suppliers.pricing_mode per service; rate_card unless named. */
+  servicePricingModes?: Record<string, "rate_card" | "manual">
+  /** booking_services.rate_type_id as stored, per service. */
+  serviceRateTypeIds?: Record<string, string | null>
+  /** The booking's stored pax groups (booking_pax_groups), in position order. */
+  storedPaxGroups?: Array<{ id: string; position: number; label: string | null }>
 }
 
 function buildSupabase(state: MockState = {}) {
   const updateCalls: Array<{ serviceId: string; payload: Record<string, unknown> }> = []
   const unitDeletes: string[] = []
   const unitInserts: Record<string, unknown>[] = []
+  /** Every replace_booking_pax_groups call, in order, and where it landed relative to the units. */
+  const paxGroupReplaces: Array<{ groups: unknown; beforeUnits: boolean }> = []
 
   const supabase = {
     from: vi.fn((table: string) => {
+      if (table === "booking_pax_groups") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: state.storedPaxGroups ?? [], error: null })),
+            })),
+          })),
+        }
+      }
       if (table === "bookings") {
         return {
           select: vi.fn(() => ({
@@ -109,7 +126,7 @@ function buildSupabase(state: MockState = {}) {
       if (table === "booking_services") {
         return {
           select: vi.fn((columns: string) => {
-            if (columns.includes("suppliers(kind, name)")) {
+            if (columns.includes("suppliers(kind, name")) {
               return {
                 eq: vi.fn(() => ({
                   in: vi.fn(async () => ({
@@ -118,10 +135,28 @@ function buildSupabase(state: MockState = {}) {
                       supplier_id: `${serviceId}-supplier`,
                       updated_at: state.serviceUpdatedAt ?? "2026-08-14T10:00:00.000Z",
                       service_date: state.serviceDates?.[serviceId] ?? null,
+                      rate_type_id: state.serviceRateTypeIds?.[serviceId] ?? null,
                       suppliers: {
                         kind: state.serviceKinds?.[serviceId] ?? "train_operator",
                         name: state.serviceNames?.[serviceId] ?? "The Blue Train",
+                        pricing_mode: state.servicePricingModes?.[serviceId] ?? "rate_card",
                       },
+                    })),
+                    error: null,
+                  })),
+                })),
+              }
+            }
+            // The PATCH's primary-leg lookup for pax groups: every service on the booking, in order.
+            if (columns.includes("suppliers(kind)")) {
+              return {
+                eq: vi.fn(() => ({
+                  order: vi.fn(async () => ({
+                    data: (state.validServiceIds ?? [SERVICE_A, SERVICE_B]).map((serviceId, index) => ({
+                      id: serviceId,
+                      supplier_id: `${serviceId}-supplier`,
+                      sort_order: index,
+                      suppliers: { kind: state.serviceKinds?.[serviceId] ?? "train_operator" },
                     })),
                     error: null,
                   })),
@@ -204,16 +239,25 @@ function buildSupabase(state: MockState = {}) {
     }),
     // The units replace-set: delete + insert in one transaction, so a rejected row rolls the
     // delete back -- modelled here by recording nothing when it fails.
-    rpc: vi.fn(async (fn: string, args: { p_service_ids: string[]; p_units: Record<string, unknown>[] }) => {
-      if (fn !== "replace_booking_service_units") throw new Error(`Unexpected rpc ${fn}`)
-      if (state.insertUnitsError) return { error: state.insertUnitsError }
-      unitDeletes.push(...args.p_service_ids)
-      unitInserts.push(...args.p_units)
-      return { error: null }
-    }),
+    rpc: vi.fn(
+      async (
+        fn: string,
+        args: { p_service_ids: string[]; p_units: Record<string, unknown>[]; p_groups?: unknown },
+      ) => {
+        if (fn === "replace_booking_pax_groups") {
+          paxGroupReplaces.push({ groups: args.p_groups, beforeUnits: unitDeletes.length === 0 })
+          return { error: null }
+        }
+        if (fn !== "replace_booking_service_units") throw new Error(`Unexpected rpc ${fn}`)
+        if (state.insertUnitsError) return { error: state.insertUnitsError }
+        unitDeletes.push(...args.p_service_ids)
+        unitInserts.push(...args.p_units)
+        return { error: null }
+      },
+    ),
   }
 
-  return { supabase, updateCalls, unitDeletes, unitInserts }
+  return { supabase, updateCalls, unitDeletes, unitInserts, paxGroupReplaces }
 }
 
 function mockAuth(state: MockState = {}) {
@@ -1272,5 +1316,283 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect(empty.status).toBe(400)
     const body = await empty.json()
     expect(body.error).toBe("Room 2 has nobody in it — add guests or remove the room.")
+  })
+})
+
+describe("pax groups on /api/jobs/[id]/services", () => {
+  const GROUP_1 = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1"
+  const GROUP_2 = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2"
+  const STRANGER_GROUP = "cccccccc-cccc-4ccc-8ccc-cccccccccccf"
+  const RATE_SA = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1"
+  const RATE_TW = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2"
+
+  // SERVICE_A is the train (the core leg by the train rule: no primary supplier), SERVICE_B a hotel.
+  // The booking is 2 adults and 1 child, so the train's suites must hold exactly that.
+  const groupedState: MockState = {
+    validServiceIds: [SERVICE_A, SERVICE_B],
+    serviceKinds: { [SERVICE_A]: "train_operator", [SERVICE_B]: "hotel_property" },
+  }
+
+  function trainUnits(overrides: Array<Record<string, unknown>> = [{}, {}]) {
+    return [
+      { suiteTypeId: SUITE_A, adultCount: 2, childCount: 0, infantCount: 0, paxGroupIds: [GROUP_1], ...overrides[0] },
+      { suiteTypeId: SUITE_A, adultCount: 0, childCount: 1, infantCount: 0, paxGroupIds: [GROUP_2], ...overrides[1] },
+    ]
+  }
+
+  function patchBody(body: Record<string, unknown>) {
+    return PATCH(new Request("http://localhost", { method: "PATCH", body: JSON.stringify(body) }), makeParams())
+  }
+
+  beforeEach(() => {
+    authMocks.requireRole.mockReset()
+    authMocks.requireUser.mockReset()
+    auditMocks.writeAuditLog.mockClear()
+  })
+
+  it("GET returns the booking's groups in position order", async () => {
+    const stored = [
+      { id: GROUP_1, position: 1, label: null },
+      { id: GROUP_2, position: 2, label: "Honeymoon suite" },
+    ]
+    mockAuth({ storedPaxGroups: stored })
+    const res = await GET(new Request("http://localhost"), makeParams())
+    expect((await res.json()).paxGroups).toEqual(stored)
+  })
+
+  it("replaces the groups before the units, with positions in send order, and stores each unit's groups and rate splits", async () => {
+    const built = mockAuth({ ...groupedState, storedPaxGroups: [{ id: GROUP_1, position: 1, label: null }] })
+    const res = await patchBody({
+      paxGroups: [
+        { id: GROUP_1, label: "  Parents  " },
+        { id: GROUP_2, label: null },
+      ],
+      selections: [
+        {
+          packageLegId: SERVICE_A,
+          rateTypeId: RATE_SA,
+          units: trainUnits([{ rateSplits: [{ rateTypeId: RATE_TW, adultCount: 1 }] }, {}]),
+        },
+        {
+          packageLegId: SERVICE_B,
+          units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 1, paxGroupIds: [GROUP_1, GROUP_2, GROUP_1] }],
+        },
+      ],
+    })
+
+    expect(res.status).toBe(200)
+    expect(built.paxGroupReplaces).toEqual([
+      {
+        groups: [
+          { id: GROUP_1, position: 1, label: "Parents" },
+          { id: GROUP_2, position: 2, label: null },
+        ],
+        beforeUnits: true,
+      },
+    ])
+    const [suite1, suite2, apartment] = built.unitInserts
+    expect(suite1).toMatchObject({
+      pax_group_ids: [GROUP_1],
+      rate_splits: [{ rateTypeId: RATE_TW, adultCount: 1, childCount: 0, infantCount: 0 }],
+    })
+    expect(suite2).toMatchObject({ pax_group_ids: [GROUP_2], rate_splits: [] })
+    // Duplicates collapse; one apartment serving both groups.
+    expect(apartment).toMatchObject({ pax_group_ids: [GROUP_1, GROUP_2], rate_splits: [] })
+    // The reload carries the stored groups back.
+    expect((await res.json()).paxGroups).toEqual([{ id: GROUP_1, position: 1, label: null }])
+  })
+
+  it("clears every group when sent an empty list", async () => {
+    const built = mockAuth(groupedState)
+    const res = await patchBody({
+      paxGroups: [],
+      selections: [{ packageLegId: SERVICE_A, units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 1 }] }],
+    })
+    expect(res.status).toBe(200)
+    expect(built.paxGroupReplaces).toEqual([{ groups: [], beforeUnits: true }])
+    expect(built.unitInserts[0]).toMatchObject({ pax_group_ids: [], rate_splits: [] })
+  })
+
+  it("leaves the stored groups alone when the body sends none", async () => {
+    const built = mockAuth({ ...groupedState, storedPaxGroups: [{ id: GROUP_1, position: 1, label: null }] })
+    const res = await patchBody({
+      selections: [
+        {
+          packageLegId: SERVICE_B,
+          units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 0, paxGroupIds: [GROUP_1] }],
+        },
+      ],
+    })
+    expect(res.status).toBe(200)
+    expect(built.paxGroupReplaces).toHaveLength(0)
+    expect(built.unitInserts[0]).toMatchObject({ pax_group_ids: [GROUP_1] })
+  })
+
+  it("refuses a unit naming a group the booking doesn't have when the body sends none", async () => {
+    const built = mockAuth({ ...groupedState, storedPaxGroups: [{ id: GROUP_1, position: 1, label: null }] })
+    const res = await patchBody({
+      selections: [
+        {
+          packageLegId: SERVICE_B,
+          units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 0, paxGroupIds: [STRANGER_GROUP] }],
+        },
+      ],
+    })
+    expect(res.status).toBe(400)
+    expect(built.unitInserts).toHaveLength(0)
+  })
+
+  it("refuses a unit naming a group missing from the body's groups", async () => {
+    const built = mockAuth(groupedState)
+    const res = await patchBody({
+      paxGroups: [
+        { id: GROUP_1, label: null },
+        { id: GROUP_2, label: null },
+      ],
+      selections: [
+        { packageLegId: SERVICE_A, units: trainUnits() },
+        {
+          packageLegId: SERVICE_B,
+          units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 0, paxGroupIds: [STRANGER_GROUP] }],
+        },
+      ],
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/paxGroupIds/)
+    expect(built.paxGroupReplaces).toHaveLength(0)
+  })
+
+  it("refuses a single group -- groups exist only with 2 or more main-service units", async () => {
+    mockAuth(groupedState)
+    const res = await patchBody({
+      paxGroups: [{ id: GROUP_1, label: null }],
+      selections: [{ packageLegId: SERVICE_A, units: trainUnits([{}, { paxGroupIds: [GROUP_1] }]) }],
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it("refuses groups sent without the main service's units", async () => {
+    const built = mockAuth(groupedState)
+    const res = await patchBody({
+      paxGroups: [
+        { id: GROUP_1, label: null },
+        { id: GROUP_2, label: null },
+      ],
+      selections: [{ packageLegId: SERVICE_B, units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 0 }] }],
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/main service/)
+    expect(built.paxGroupReplaces).toHaveLength(0)
+  })
+
+  it.each([
+    ["shares a group with another suite", [{}, { paxGroupIds: [GROUP_1] }]],
+    ["serves two groups", [{ paxGroupIds: [GROUP_1, GROUP_2] }, {}]],
+    ["serves no group", [{ paxGroupIds: [] }, {}]],
+    ["is out of position order", [{ paxGroupIds: [GROUP_2] }, { paxGroupIds: [GROUP_1] }]],
+  ])("refuses a main-service unit that %s", async (_label, overrides) => {
+    const built = mockAuth(groupedState)
+    const res = await patchBody({
+      paxGroups: [
+        { id: GROUP_1, label: null },
+        { id: GROUP_2, label: null },
+      ],
+      selections: [{ packageLegId: SERVICE_A, units: trainUnits(overrides) }],
+    })
+    expect(res.status).toBe(400)
+    expect(built.paxGroupReplaces).toHaveLength(0)
+    expect(built.unitInserts).toHaveLength(0)
+  })
+
+  it("refuses more groups than the main service has units", async () => {
+    mockAuth(groupedState)
+    const res = await patchBody({
+      paxGroups: [
+        { id: GROUP_1, label: null },
+        { id: GROUP_2, label: null },
+        { id: STRANGER_GROUP, label: null },
+      ],
+      selections: [{ packageLegId: SERVICE_A, units: trainUnits() }],
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/every unit is one group/)
+  })
+
+  it.each([
+    ["a hotel", { [SERVICE_A]: "hotel_property" }, {}],
+    ["an airline", { [SERVICE_A]: "airline" }, {}],
+    ["a manual-pricing train", { [SERVICE_A]: "train_operator" }, { [SERVICE_A]: "manual" as const }],
+  ])("refuses per-guest rates on %s", async (_label, serviceKinds, servicePricingModes) => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds, servicePricingModes })
+    const res = await patchBody({
+      selections: [
+        {
+          packageLegId: SERVICE_A,
+          units: [
+            {
+              suiteTypeId: SUITE_A,
+              adultCount: 2,
+              childCount: 1,
+              rateSplits: [{ rateTypeId: RATE_TW, adultCount: 1 }],
+            },
+          ],
+        },
+      ],
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/Per-guest rates/)
+    expect(built.unitInserts).toHaveLength(0)
+  })
+
+  it("refuses more split guests of a kind than the unit holds", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A] })
+    const res = await patchBody({
+      selections: [
+        {
+          packageLegId: SERVICE_A,
+          units: [
+            {
+              suiteTypeId: SUITE_A,
+              adultCount: 2,
+              childCount: 1,
+              rateSplits: [
+                { rateTypeId: RATE_TW, adultCount: 1 },
+                { rateTypeId: RATE_SA, adultCount: 2 },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/More adults on other rates/)
+  })
+
+  it("drops a split on the unit's own rate and merges splits on the same rate", async () => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceRateTypeIds: { [SERVICE_A]: RATE_SA } })
+    const res = await patchBody({
+      selections: [
+        {
+          packageLegId: SERVICE_A,
+          units: [
+            {
+              suiteTypeId: SUITE_A,
+              adultCount: 2,
+              childCount: 1,
+              rateSplits: [
+                { rateTypeId: RATE_SA, adultCount: 1 },
+                { rateTypeId: RATE_TW, adultCount: 1 },
+                { rateTypeId: RATE_TW, childCount: 1 },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    expect(res.status).toBe(200)
+    // The leg's stored rate is RATE_SA (the payload left it alone), so the RATE_SA split goes.
+    expect(built.unitInserts[0].rate_splits).toEqual([
+      { rateTypeId: RATE_TW, adultCount: 1, childCount: 1, infantCount: 0 },
+    ])
   })
 })

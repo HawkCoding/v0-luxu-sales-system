@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import type { PackageDetail, PackageLeg, SupplierKind, SupplierRateCard } from "@/lib/types"
-import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
+import { buildPackageQuoteLineItems, findPrimaryLegId } from "@/lib/quotes/build-from-package"
 import { describeQtyBasis, isMissingPricing } from "@/lib/quotes/pricing-engine"
 
 const JOB_ID = "00000000-0000-4000-8000-00000000aaaa"
@@ -4064,5 +4064,470 @@ describe("buildPackageQuoteLineItems", () => {
         expect(lineItems.find((li) => li.description === "Commission")).toBeUndefined()
       })
     })
+  })
+})
+
+describe("buildPackageQuoteLineItems: pax groups", () => {
+  const G1 = "group-1"
+  const G2 = "group-2"
+  const G3 = "group-3"
+
+  function adultsBooking(adults: number, extra: Record<string, unknown> = {}) {
+    return {
+      id: JOB_ID,
+      no_of_adults: adults,
+      no_of_children: 0,
+      no_of_suites: 2,
+      child_ages: [],
+      departure_date: "2026-09-01",
+      ...extra,
+    }
+  }
+
+  /** A train with an SA resident rate and an international (TW) rate on the same suite type. */
+  function twoRateTrainLeg(partial: Partial<PackageLeg> = {}): PackageLeg {
+    return leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe Suite")],
+      rateCards: [
+        rateCard({ id: "rc-sa", routeId: "route-cpt", suiteTypeId: "suite-dlx", rateTypeId: "rate-sa", pricePerPerson: 20000 }),
+        rateCard({ id: "rc-tw", routeId: "route-cpt", suiteTypeId: "suite-dlx", rateTypeId: "rate-tw", pricePerPerson: 25000 }),
+      ],
+      ...partial,
+    })
+  }
+
+  function hotelLeg(): PackageLeg {
+    return leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      sortOrder: 1,
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-apartment", "supplier-leg-hotel", "Family Apartment")],
+      rateCards: [rateCard({ id: "rc-apartment", routeId: "route-bb", suiteTypeId: "room-apartment", pricePerPerson: 3000 })],
+    })
+  }
+
+  const adultLines = <T extends { description: string }>(lineItems: T[]): T[] =>
+    lineItems.filter((li) => li.description.includes("Adult"))
+
+  it("stamps every merged unit on a train line, with its groups and the rate it priced at", async () => {
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      packageDetail: detail([twoRateTrainLeg()]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          rateTypeId: "rate-sa",
+          units: [
+            { unitId: "unit-1", paxGroupIds: [G1], suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0 },
+            { unitId: "unit-2", paxGroupIds: [G2], suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0 },
+          ],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0]).toMatchObject({ qty: 4, unitPrice: 20000, total: 80000 })
+    expect(lineItems[0].pricingSnapshot?.unitRefs).toEqual([
+      { index: 0, unitId: "unit-1", adults: 2, children: 0, infants: 0, paxGroupIds: [G1], rateTypeId: "rate-sa" },
+      { index: 1, unitId: "unit-2", adults: 2, children: 0, infants: 0, paxGroupIds: [G2], rateTypeId: "rate-sa" },
+    ])
+  })
+
+  it("stamps each hotel room as its own unit, shared rooms with every group they serve", async () => {
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      packageDetail: detail([hotelLeg()]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          units: [{ unitId: "room-1", paxGroupIds: [G1, G2], suiteTypeId: "room-apartment", adultCount: 4 }],
+        },
+      ],
+    })
+
+    expect(lineItems.map((li) => [li.total, li.pricingSnapshot?.unitRefs])).toEqual([
+      [24000, [{ index: 0, unitId: "room-1", adults: 4, children: 0, infants: 0, paxGroupIds: [G1, G2], rateTypeId: "rate-standard" }]],
+    ])
+  })
+
+  it("prices a suite split across two rates as two adult lines at two rate cards", async () => {
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      packageDetail: detail([twoRateTrainLeg()]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            {
+              unitId: "unit-1",
+              paxGroupIds: [G1],
+              suiteTypeId: "suite-dlx",
+              rateTypeId: "rate-sa",
+              adultCount: 2,
+              childCount: 0,
+              infantCount: 0,
+              rateSplits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+            },
+            { unitId: "unit-2", paxGroupIds: [G2], suiteTypeId: "suite-dlx", rateTypeId: "rate-sa", adultCount: 2 },
+          ],
+        },
+      ],
+    })
+
+    const lines = adultLines(lineItems)
+    expect(lines.map((li) => [li.qty, li.unitPrice, li.total, li.pricingSnapshot?.rateTypeId])).toEqual([
+      [3, 20000, 60000, "rate-sa"],
+      [1, 25000, 25000, "rate-tw"],
+    ])
+    expect(lines[0].pricingSnapshot?.unitRefs).toEqual([
+      { index: 0, unitId: "unit-1", adults: 1, children: 0, infants: 0, paxGroupIds: [G1], rateTypeId: "rate-sa" },
+      { index: 1, unitId: "unit-2", adults: 2, children: 0, infants: 0, paxGroupIds: [G2], rateTypeId: "rate-sa" },
+    ])
+    expect(lines[1].pricingSnapshot?.unitRefs).toEqual([
+      { index: 0, unitId: "unit-1", adults: 1, children: 0, infants: 0, paxGroupIds: [G1], rateTypeId: "rate-tw" },
+    ])
+  })
+
+  it("charges the single supplement off the whole suite's occupancy, never a rate slice's", async () => {
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      packageDetail: { ...detail([twoRateTrainLeg()]), singleSupplementPct: 50 },
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          rateTypeId: "rate-sa",
+          units: [
+            // Alone in the suite: supplement.
+            { unitId: "unit-solo", suiteTypeId: "suite-dlx", adultCount: 1 },
+            // One SA and one TW guest sharing: neither is alone, so neither pays the supplement.
+            {
+              unitId: "unit-shared",
+              suiteTypeId: "suite-dlx",
+              adultCount: 2,
+              rateSplits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+            },
+            // Alone, on the other rate: still a supplement, at that rate.
+            {
+              unitId: "unit-solo-tw",
+              suiteTypeId: "suite-dlx",
+              adultCount: 1,
+              rateSplits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+            },
+          ],
+        },
+      ],
+    })
+
+    const lines = adultLines(lineItems).map((li) => ({
+      qty: li.qty,
+      unitPrice: li.unitPrice,
+      supplement: li.description.includes("single supplement"),
+      units: li.pricingSnapshot?.unitRefs?.map((ref) => ref.unitId),
+    }))
+    expect(lines).toEqual([
+      { qty: 1, unitPrice: 20000, supplement: false, units: ["unit-shared"] },
+      { qty: 1, unitPrice: 30000, supplement: true, units: ["unit-solo"] },
+      { qty: 1, unitPrice: 25000, supplement: false, units: ["unit-shared"] },
+      { qty: 1, unitPrice: 37500, supplement: true, units: ["unit-solo-tw"] },
+    ])
+  })
+
+  it("merges a split at the unit's own rate back into it and drops a split holding nobody", async () => {
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(2) }),
+      packageDetail: detail([twoRateTrainLeg()]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            {
+              unitId: "unit-1",
+              suiteTypeId: "suite-dlx",
+              rateTypeId: "rate-sa",
+              adultCount: 2,
+              rateSplits: [
+                { rateTypeId: "rate-sa", adultCount: 1, childCount: 0, infantCount: 0 },
+                { rateTypeId: "rate-tw", adultCount: 0, childCount: 0, infantCount: 0 },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(lineItems.map((li) => [li.qty, li.total, li.pricingSnapshot?.unitRefs])).toEqual([
+      [2, 40000, [{ index: 0, unitId: "unit-1", adults: 2, children: 0, infants: 0, rateTypeId: "rate-sa" }]],
+    ])
+  })
+
+  it("refuses a split rate with no card, exactly as it refuses a unit rate with none", async () => {
+    await expect(
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: adultsBooking(2) }),
+        packageDetail: detail([twoRateTrainLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        rateTypes: [{ id: "rate-zz", code: "ZZ", name: "Zanzibar Resident" }],
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                rateTypeId: "rate-sa",
+                adultCount: 2,
+                rateSplits: [{ rateTypeId: "rate-zz", adultCount: 1, childCount: 0, infantCount: 0 }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/"Zanzibar Resident" has no rate card for "Deluxe Suite"/)
+  })
+
+  it("refuses a split that moves more guests of a kind than the suite holds", async () => {
+    await expect(
+      buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: adultsBooking(2) }),
+        packageDetail: detail([twoRateTrainLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-train",
+            selected: true,
+            units: [
+              {
+                suiteTypeId: "suite-dlx",
+                rateTypeId: "rate-sa",
+                adultCount: 2,
+                rateSplits: [{ rateTypeId: "rate-tw", adultCount: 3, childCount: 0, infantCount: 0 }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toThrow("suite 1 puts 3 adults on another rate but holds 2")
+  })
+
+  it("ignores rate splits on a manual-pricing leg and on a hotel", async () => {
+    const manualTrain = twoRateTrainLeg({ pricingMode: "manual", rateCards: [] })
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(2) }),
+      packageDetail: detail([manualTrain, hotelLeg()]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          priceCurrency: "ZAR",
+          units: [
+            {
+              suiteTypeId: "suite-dlx",
+              adultCount: 2,
+              manualAdultPrice: 10000,
+              rateSplits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+            },
+          ],
+        },
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 1,
+          units: [
+            {
+              suiteTypeId: "room-apartment",
+              adultCount: 2,
+              rateSplits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(lineItems.map((li) => [li.pricingSnapshot?.legId, li.qty, li.total])).toEqual([
+      ["leg-train", 2, 20000],
+      ["leg-hotel", 2, 6000],
+    ])
+  })
+
+  it("stamps a transfer's pax groups on its line, and leaves a shared transfer's line unscoped", async () => {
+    const transferLeg = leg({
+      id: "leg-transfer",
+      supplierKind: "transfers",
+      routes: [route("route-t", "supplier-leg-transfer", "Airport transfers")],
+      suiteTypes: [suiteType("vehicle-sedan", "supplier-leg-transfer", "Sedan")],
+      rateCards: [rateCard({ id: "rc-sedan", routeId: "route-t", suiteTypeId: "vehicle-sedan", pricePerPerson: 500 })],
+    })
+    const request = (id: string, paxGroupIds: string[]) => ({
+      id,
+      service_type: "transfer",
+      route_id: null,
+      suite_type_id: "vehicle-sedan",
+      service_id: "leg-transfer",
+      pickup_point: "Airport",
+      dropoff_point: "Hotel",
+      pickup_at: null,
+      rental_details: null,
+      pax_group_ids: paxGroupIds,
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ transportRequests: [request("req-suite-2", [G2]), request("req-shared", [])] }),
+      packageDetail: detail([transferLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "leg-transfer", selected: true }],
+    })
+
+    expect(lineItems.map((li) => [li.pricingSnapshot?.transportRequestId, li.pricingSnapshot?.paxGroupIds])).toEqual([
+      ["req-suite-2", [G2]],
+      ["req-shared", undefined],
+    ])
+    expect(lineItems.every((li) => li.pricingSnapshot?.unitRefs === undefined)).toBe(true)
+  })
+
+  function groupedTrainAndHotel() {
+    return {
+      packageDetail: detail([twoRateTrainLeg(), hotelLeg()]),
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          rateTypeId: "rate-sa",
+          units: [
+            { unitId: "unit-1", paxGroupIds: [G1], suiteTypeId: "suite-dlx", adultCount: 2 },
+            { unitId: "unit-2", paxGroupIds: [G2], suiteTypeId: "suite-dlx", adultCount: 1 },
+            { unitId: "unit-3", paxGroupIds: [G3], suiteTypeId: "suite-dlx", adultCount: 1 },
+          ],
+        },
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 1,
+          units: [{ unitId: "room-1", suiteTypeId: "room-apartment", adultCount: 4 }],
+        },
+      ],
+    }
+  }
+  const metas = [
+    { id: G3, position: 3, label: "Deluxe Suite 3" },
+    { id: G1, position: 1, label: "Twin Deluxe Suite 1" },
+    { id: G2, position: 2, label: "Deluxe Suite 2" },
+  ]
+  const sortedMetas = [metas[1], metas[2], metas[0]]
+
+  it("stamps every group, in position order, on each line of the primary service only", async () => {
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      paxGroups: metas,
+      ...groupedTrainAndHotel(),
+    })
+
+    const trainLines = lineItems.filter((li) => li.pricingSnapshot?.legId === "leg-train")
+    const hotelLines = lineItems.filter((li) => li.pricingSnapshot?.legId === "leg-hotel")
+    expect(trainLines.length).toBeGreaterThan(0)
+    expect(hotelLines.length).toBeGreaterThan(0)
+    for (const line of trainLines) expect(line.pricingSnapshot?.paxGroups).toEqual(sortedMetas)
+    for (const line of hotelLines) expect(line.pricingSnapshot?.paxGroups).toBeUndefined()
+  })
+
+  it("finds the primary service through the booking's primary supplier", async () => {
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4, { primary_supplier_id: "supplier-leg-hotel" }) }),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      paxGroups: metas,
+      ...groupedTrainAndHotel(),
+    })
+
+    for (const line of lineItems) {
+      expect(line.pricingSnapshot?.paxGroups).toEqual(
+        line.pricingSnapshot?.legId === "leg-hotel" ? sortedMetas : undefined,
+      )
+    }
+  })
+
+  it("stamps no groups on a booking with fewer than two, and prices it exactly the same", async () => {
+    const withoutGroups = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      ...groupedTrainAndHotel(),
+    })
+    const withOneGroup = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      paxGroups: [metas[1]],
+      ...groupedTrainAndHotel(),
+    })
+    const withGroups = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: adultsBooking(4) }),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      paxGroups: metas,
+      ...groupedTrainAndHotel(),
+    })
+
+    expect(withoutGroups.lineItems.some((li) => li.pricingSnapshot?.paxGroups)).toBe(false)
+    expect(withOneGroup.lineItems.some((li) => li.pricingSnapshot?.paxGroups)).toBe(false)
+    const priced = (result: typeof withGroups) =>
+      result.lineItems.map((li) => [li.description, li.qty, li.unitPrice, li.total])
+    expect(priced(withGroups)).toEqual(priced(withoutGroups))
+  })
+})
+
+describe("findPrimaryLegId", () => {
+  const core = (id: string, sortOrder: number, supplierKind: SupplierKind = "train_operator") => ({
+    id,
+    supplierId: "supplier-primary",
+    supplierKind,
+    sortOrder,
+  })
+
+  it("picks the primary supplier's leg", () => {
+    expect(
+      findPrimaryLegId(
+        [{ id: "leg-train", supplierId: "supplier-train", supplierKind: "train_operator", sortOrder: 0 }, core("leg-hotel", 1, "hotel_property")],
+        "supplier-primary",
+      ),
+    ).toBe("leg-hotel")
+  })
+
+  it("picks the first by sort order when the primary supplier sits on two legs", () => {
+    expect(findPrimaryLegId([core("leg-second", 2), core("leg-first", 1)], "supplier-primary")).toBe("leg-first")
+  })
+
+  it("falls back to the train with no primary supplier recorded, and to nothing without one", () => {
+    expect(findPrimaryLegId([core("leg-hotel", 0, "hotel_property"), core("leg-train", 1)], null)).toBe("leg-train")
+    expect(findPrimaryLegId([core("leg-hotel", 0, "hotel_property")], null)).toBeNull()
   })
 })

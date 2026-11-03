@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Boxes, Check, ChevronDown, ChevronUp, Pencil, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,17 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { Tabs } from "@/components/ui/tabs"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { isCoreBookingLeg, isTypePricedSupplier, SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
@@ -88,8 +99,51 @@ import {
   type SavedSelectionRow,
   type SavedServiceRowVersion,
   type TransferAnchorContext,
+  createDraftUnit,
+  type SuiteLegState,
 } from "@/lib/packages/apply-dialog-state"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  fromSavedPaxGroups,
+  isPaxGroupMode,
+  primaryLegIdOf,
+  primaryStateOf,
+  syncGroupPax,
+  syncPaxGroups,
+  toPaxGroupMetas,
+  type PaxGroupDraft,
+} from "@/lib/packages/pax-groups"
+import {
+  buildPaxGroupViews,
+  collectGroupHeadcountWarnings,
+  describeGroupList,
+  duplicateGroup,
+  excludeGroupFromLeg,
+  expectedTotalsForLeg,
+  groupProblems,
+  includeGroupOnLeg,
+  joinAnd,
+  legName,
+  legServesGroup,
+  previewGroupRemoval,
+  trimAllRateSplits,
+  withGroupScope,
+  type PaxGroupProblem,
+} from "@/lib/packages/pax-group-toggles"
+import { describeEmptyUnit } from "@/lib/packages/unit-headcount"
+import { paxGroupNamesFromSuiteTypes } from "@/lib/pax-groups/labels"
+import { paxGroupNoun, paxGroupScopeTag } from "@/lib/quotes/pax-group-pricing"
+import { PaxGroupBar } from "@/components/packages/pax-group-bar"
+import { PaxGroupOverview } from "@/components/packages/pax-group-overview"
+import { PaxGroupPriceTable } from "@/components/packages/pax-group-price-table"
+import { LegNotInGroupRow } from "@/components/packages/leg-not-in-group-row"
+import {
+  addBackButtonId,
+  groupTabId,
+  PAX_GROUP_PANEL_ID,
+  removeFromGroupButtonId,
+  type PaxGroupEditorContext,
+} from "@/components/packages/pax-group-editor-context"
 
 interface BuildBookingDialogProps {
   jobId: string
@@ -344,13 +398,17 @@ interface QuoteBuilderDraft {
   services: ServiceRow[]
   legStates: ApplyLegState[]
   travellerDraft: TravellerCounts | null
+  /** The pax groups (suite names) the leg states' paxGroupIds point at. */
+  paxGroups: PaxGroupDraft[]
 }
 
 // Bumped from 1: the draft no longer carries a commission field — Commission is now edited
 // post-hoc on the Job Quotes tab instead of decided once in Build Booking (see PATCH
 // /api/quotes/[id]/commission). An old draft under the previous shape is dropped rather than
 // restored with a stale commission field.
-const QUOTE_DRAFT_SCHEMA_VERSION = 2
+// Bumped from 2: units carry paxGroupIds/rateSplits and the draft carries the pax groups -- a v2
+// draft's units have neither, and the group sync reads both.
+const QUOTE_DRAFT_SCHEMA_VERSION = 3
 
 // Stable module-level reference -- an inline object literal here would get a new identity every
 // render and restart the autosave hook's debounce on every unrelated re-render.
@@ -359,6 +417,14 @@ const EMPTY_QUOTE_DRAFT: QuoteBuilderDraft = {
   services: [],
   legStates: [],
   travellerDraft: null,
+  paxGroups: [],
+}
+
+/** The amber pax-group warning list's step-3 row. */
+interface HeadcountWarningRow {
+  key: string
+  legLabel: string
+  message: string
 }
 
 export function BuildBookingDialog({
@@ -419,6 +485,22 @@ export function BuildBookingDialog({
   useEffect(() => {
     legStatesRef.current = legStates
   }, [legStates])
+  /** The booking's pax groups, in position order (lib/packages/pax-groups.ts). Each is one unit of
+   *  the primary leg; empty on a booking with fewer than 2. */
+  const [paxGroups, setPaxGroups] = useState<PaxGroupDraft[]>([])
+  /** The suite tab in view; null = "All suites". */
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
+  /** The polite live region's text (the group bar's). */
+  const [groupAnnouncement, setGroupAnnouncement] = useState("")
+  /** The group waiting on the Remove confirmation. */
+  const [removeGroupId, setRemoveGroupId] = useState<string | null>(null)
+  /** Group-mode "suite has nobody in it" errors, each with a "Go to" link. */
+  const [groupValidationErrors, setGroupValidationErrors] = useState<Array<{ groupId: string; message: string }>>([])
+  /** The leg states the pax sync last saw; null = take the current ones as the baseline (after a
+   *  hydrate, a restore or a save, nothing was hand-edited since). */
+  const paxSyncBaselineRef = useRef<ApplyLegState[] | null>(null)
+  /** An element id to focus once it renders (focus moves after group actions). */
+  const pendingFocusRef = useRef<{ id: string; tries: number } | null>(null)
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
   const [bucketsBySupplierId, setBucketsBySupplierId] = useState<Record<string, AgeBuckets>>({})
   const [bookingCounts, setBookingCounts] = useState<TravellerCounts | null>(null)
@@ -475,7 +557,7 @@ export function BuildBookingDialog({
   // Draft autosave: mirrors the persistable slice of this dialog's state to localStorage so a
   // refresh, crash, or accidental dismissal doesn't throw away typing that hasn't reached the
   // configure step's "Next" (the first point any of this is saved server-side).
-  const currentQuoteDraftData: QuoteBuilderDraft = { step, services, legStates, travellerDraft }
+  const currentQuoteDraftData: QuoteBuilderDraft = { step, services, legStates, travellerDraft, paxGroups }
   const {
     pendingDraft: pendingQuoteDraft,
     pendingDraftRecordUpdatedAt: pendingQuoteDraftRecordUpdatedAt,
@@ -524,7 +606,9 @@ export function BuildBookingDialog({
     if (draft.travellerDraft) setTravellerDraft(draft.travellerDraft)
 
     if (legStatesRestorable && draft.legStates.length > 0) {
+      paxSyncBaselineRef.current = null
       setLegStates(draft.legStates)
+      setPaxGroups(draft.paxGroups ?? [])
       // The draft carries the row versions it was typed against. Services belong to the booking, not
       // the quote, so they may have been saved since (another quote's dialog, a movement-time edit,
       // another window): keeping those stamps guarantees a 409 on Next. Refresh any leg that moved
@@ -710,6 +794,249 @@ export function BuildBookingDialog({
     [sortedLegs, legStates, quoteCurrency, rateTypes],
   )
 
+  // ---- Pax groups -------------------------------------------------------------------------------
+  // The primary leg's units ARE the groups once it has 2 or more (lib/packages/pax-groups.ts). The
+  // groups are derived from leg state synchronously, so nothing here has a loading state of its own.
+  const primarySupplierId = savedState?.primarySupplierId ?? null
+  const primaryLegId = useMemo(
+    () => (packageDetail ? primaryLegIdOf(packageDetail.legs, primarySupplierId) : null),
+    [packageDetail, primarySupplierId],
+  )
+  const primaryLeg = sortedLegs.find((leg) => leg.id === primaryLegId) ?? null
+  const primaryState: SuiteLegState | null = primaryStateOf(legStates, primaryLegId)
+  const groupNoun = paxGroupNoun(primaryLeg?.supplierKind)
+  const groupNames = useMemo(() => paxGroupNamesFromSuiteTypes(primaryLeg?.suiteTypes ?? []), [primaryLeg])
+  const groupMode = paxGroups.length >= 2 && isPaxGroupMode(legStates, primaryLegId)
+  const groupViews = useMemo(
+    () => (groupMode ? buildPaxGroupViews(paxGroups, primaryState, groupNames) : []),
+    [groupMode, paxGroups, primaryState, groupNames],
+  )
+  const groupProblemMap = useMemo(() => {
+    const map = new Map<string, PaxGroupProblem | null>()
+    if (!primaryLeg || !primaryState) return map
+    for (const view of groupViews) map.set(view.id, groupProblems(view, primaryLeg, primaryState, groupNoun))
+    return map
+  }, [groupViews, primaryLeg, primaryState, groupNoun])
+  const activeGroup = groupViews.find((view) => view.id === activeGroupId) ?? null
+
+  const announce = useCallback((message: string) => {
+    // Cleared first so an identical message is announced again.
+    setGroupAnnouncement("")
+    requestAnimationFrame(() => setGroupAnnouncement(message))
+  }, [])
+
+  function focusWhenRendered(id: string) {
+    pendingFocusRef.current = { id, tries: 0 }
+  }
+  // Focus moves after group actions land once the element they point at has rendered -- a new
+  // suite's tab only exists after the pax sync below has registered its group.
+  useEffect(() => {
+    const pending = pendingFocusRef.current
+    if (!pending) return
+    const element = document.getElementById(pending.id)
+    if (element) {
+      element.focus()
+      pendingFocusRef.current = null
+    } else if (pending.tries >= 5) {
+      pendingFocusRef.current = null
+    } else {
+      pending.tries += 1
+    }
+  })
+
+  // The pax sync: after any change to the leg states, bring the groups in line with the primary
+  // leg's units (minting, dropping, first-activation seeding) and re-sync grouped headcounts. Runs
+  // as an effect so every way the states change -- an editor, a draft restore, a reload -- is
+  // covered; syncPaxGroups returns the same objects when nothing changed, so it settles at once.
+  useEffect(() => {
+    if (!primaryLegId || legStates.length === 0) return
+    const previous = paxSyncBaselineRef.current ?? legStates
+    const synced = syncPaxGroups(legStates, paxGroups, primaryLegId)
+    const next = trimAllRateSplits(syncGroupPax(synced.states, synced.groups, primaryLegId, previous))
+    paxSyncBaselineRef.current = next
+    if (next.length !== legStates.length || next.some((state, index) => state !== legStates[index])) {
+      setLegStates(next)
+    }
+    if (synced.groups === paxGroups) return
+    setPaxGroups(synced.groups)
+    if (paxGroups.length < 2 && synced.groups.length >= 2) {
+      const paired = next.filter((state, index) => {
+        const before = legStates[index]
+        return (
+          state.kind === "suite" &&
+          before?.kind === "suite" &&
+          state.legId !== primaryLegId &&
+          before.units.every((unit) => unit.paxGroupIds.length === 0) &&
+          state.units.length > 0 &&
+          state.units.every((unit) => unit.paxGroupIds.length === 1)
+        )
+      })
+      const legNameById = new Map(sortedLegs.map((leg) => [leg.id, legName(leg)]))
+      const noun = groupNoun.toLowerCase()
+      announce(
+        `Booking split into ${synced.groups.length} ${noun}s. Pick a ${noun} to set what it's on.` +
+          paired
+            .map((state) => {
+              const kind = sortedLegs.find((leg) => leg.id === state.legId)?.supplierKind
+              const units = kind === "cruise_line" ? "Cabins" : "Rooms"
+              return ` ${units} at ${legNameById.get(state.legId) ?? "a service"} were paired with ${noun}s in order.`
+            })
+            .join(""),
+      )
+    } else if (paxGroups.length >= 2 && synced.groups.length < 2) {
+      announce(`Only one ${groupNoun.toLowerCase()} left — the booking is no longer split by ${groupNoun.toLowerCase()}.`)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legStates, paxGroups, primaryLegId])
+
+  /** Applies a group action's leg edits the way an editor's onChange would: edited legs leave
+   *  "auto", and anchored dates follow. The pax sync effect then tidies the groups. */
+  function applyLegEdits(edit: (states: ApplyLegState[]) => ApplyLegState[]) {
+    setLegStates((prev) => {
+      const edited = edit(prev).map((state, index) =>
+        state !== prev[index] && state.origin === "auto" ? { ...state, origin: "consultant" as const } : state,
+      )
+      return packageDetail ? applyAnchoredDates(packageDetail, edited, primarySupplierId) : edited
+    })
+  }
+
+  function selectGroup(groupId: string | null) {
+    setActiveGroupId(groupId)
+  }
+
+  function addGroup() {
+    if (!primaryLegId) return
+    const groupId = crypto.randomUUID()
+    applyLegEdits((states) =>
+      states.map((state) =>
+        state.legId === primaryLegId && state.kind === "suite"
+          ? { ...state, units: [...state.units, { ...createDraftUnit(), paxGroupIds: [groupId] }] }
+          : state,
+      ),
+    )
+    announce(`${groupNoun} ${paxGroups.length + 1} added.`)
+    setActiveGroupId(groupId)
+    focusWhenRendered(groupTabId(groupId))
+  }
+
+  function duplicateSuite(sourceGroupId: string) {
+    const source = groupViews.find((view) => view.id === sourceGroupId)
+    if (!source || !primaryLegId) return
+    const newGroupId = crypto.randomUUID()
+    const result = duplicateGroup(legStates, paxGroups, primaryLegId, sourceGroupId, newGroupId)
+    if (!result) return
+    applyLegEdits(() => result.states)
+    setPaxGroups(result.groups)
+    const legNameById = new Map(sortedLegs.map((leg) => [leg.id, legName(leg)]))
+    const skipped = result.skipped.map(
+      (entry) =>
+        `${legNameById.get(entry.legId) ?? "a service"}${
+          entry.sharedWithIds.length > 0 ? ` (shared with ${describeGroupList(entry.sharedWithIds, paxGroups, groupNoun)})` : ""
+        }`,
+    )
+    announce(
+      `${groupNoun} ${result.groups.length} added as a copy of ${groupNoun} ${source.position}.` +
+        (skipped.length > 0 ? ` Not copied: ${skipped.join(", ")}.` : ""),
+    )
+    setActiveGroupId(newGroupId)
+    focusWhenRendered(groupTabId(newGroupId))
+  }
+
+  function confirmRemoveSuite() {
+    const groupId = removeGroupId
+    setRemoveGroupId(null)
+    const index = paxGroups.findIndex((group) => group.id === groupId)
+    if (!groupId || index === -1 || !primaryLegId) return
+    applyLegEdits((states) =>
+      states.map((state) =>
+        state.legId === primaryLegId && state.kind === "suite"
+          ? { ...state, units: state.units.filter((unit) => unit.paxGroupIds[0] !== groupId) }
+          : state,
+      ),
+    )
+    const position = index + 1
+    const count = paxGroups.length
+    if (count - 1 < 2) {
+      // The pax sync announces the booking leaving group mode.
+      setActiveGroupId(null)
+      return
+    }
+    announce(
+      `${groupNoun} ${position} removed.` +
+        (position < count
+          ? position + 1 === count
+            ? ` ${groupNoun} ${count} is now ${groupNoun} ${count - 1}.`
+            : ` ${groupNoun}s ${position + 1} to ${count} are now ${groupNoun}s ${position} to ${count - 1}.`
+          : ""),
+    )
+    const previousGroupId = index > 0 ? paxGroups[index - 1].id : null
+    if (activeGroupId === groupId || activeGroupId === null) setActiveGroupId(previousGroupId)
+    focusWhenRendered(groupTabId(previousGroupId))
+  }
+
+  function removeGroupFromLeg(legId: string, groupId: string) {
+    const leg = sortedLegs.find((candidate) => candidate.id === legId)
+    const position = paxGroups.findIndex((group) => group.id === groupId) + 1
+    const allIds = paxGroups.map((group) => group.id)
+    applyLegEdits((states) =>
+      states.map((state) => (state.legId === legId ? excludeGroupFromLeg(state, groupId, allIds) : state)),
+    )
+    if (leg) announce(`${legName(leg)} removed from ${groupNoun} ${position}.`)
+    if (activeGroupId === groupId) focusWhenRendered(addBackButtonId(legId))
+  }
+
+  function addGroupToLeg(legId: string, groupId: string) {
+    const leg = sortedLegs.find((candidate) => candidate.id === legId)
+    const state = legStates.find((candidate) => candidate.legId === legId)
+    const view = groupViews.find((candidate) => candidate.id === groupId)
+    if (!leg || !state || !view) return
+    const result = includeGroupOnLeg(state, groupId, paxGroups.map((group) => group.id), view.pax)
+    if (result.mode === "unchanged") return
+    applyLegEdits((states) => states.map((candidate) => (candidate.legId === legId ? result.state : candidate)))
+    const itemNoun =
+      state.kind === "suite"
+        ? SUPPLIER_VOCABULARY[leg.supplierKind].unitNoun
+        : leg.supplierKind === "vehicle_rental"
+          ? "vehicle"
+          : "transfer"
+    announce(
+      result.mode === "own"
+        ? `${groupNoun} ${view.position} added to ${legName(leg)} with its own ${itemNoun} (${itemNoun} ${result.itemNumber}).`
+        : `${groupNoun} ${view.position} added to ${legName(leg)}, shared with ${describeGroupList(result.sharedWithIds, paxGroups, groupNoun)}.`,
+    )
+    if (activeGroupId === groupId) focusWhenRendered(removeFromGroupButtonId(legId))
+  }
+
+  function toggleGroupOnLeg(legId: string, groupId: string, include: boolean) {
+    if (include) addGroupToLeg(legId, groupId)
+    else removeGroupFromLeg(legId, groupId)
+  }
+
+  const paxGroupContext: PaxGroupEditorContext | undefined = groupMode
+    ? {
+        groups: groupViews,
+        activeGroupId: activeGroup?.id ?? null,
+        primaryLegId,
+        noun: groupNoun,
+        problems: groupProblemMap,
+        onLabelChange: (groupId, label) =>
+          setPaxGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, label } : group))),
+        onDuplicateGroup: duplicateSuite,
+        onRemoveGroup: setRemoveGroupId,
+        onRemoveFromLeg: removeGroupFromLeg,
+      }
+    : undefined
+
+  /** The headcount a leg's editor checks against: in group mode a leg some suites dropped counts
+   *  only the suites still on it (expectedTotalsForLeg). */
+  function expectedTotalsFor(leg: { id: string; supplierId: string }, state: ApplyLegState): PassengerTotals | null {
+    const bookingTotals = totalsBySupplierId[leg.supplierId] ?? null
+    return groupMode ? expectedTotalsForLeg(state, paxGroups, primaryState, bookingTotals) : bookingTotals
+  }
+
+  const removeGroupView = groupViews.find((view) => view.id === removeGroupId) ?? null
+  const removePreview = removeGroupView ? previewGroupRemoval(legStates, primaryLegId, removeGroupView.id) : null
+
   // Surfaced next to the blocking validation error too — hitting Next with a stale booking total
   // shouldn't be a dead end; the fix is one click away right where the error is shown.
   const mismatchedSplitLegs = useMemo(() => {
@@ -746,10 +1073,19 @@ export function BuildBookingDialog({
   // Airline, hotel and cruise legs whose units hold more or fewer people than the booking. Never
   // blocks Next -- an extra ticket is a legitimate sale -- but the confirm step lists them so the
   // difference is signed off rather than missed.
-  const headcountWarnings = useMemo(
-    () => (packageDetail ? collectHeadcountWarnings(packageDetail, legStates, totalsBySupplierId) : []),
-    [packageDetail, legStates, totalsBySupplierId],
-  )
+  // In group mode each leg is checked against the suites on it, grouped units against their suites,
+  // and every entry names the suites it concerns.
+  const headcountWarnings = useMemo((): HeadcountWarningRow[] => {
+    if (!packageDetail) return []
+    if (groupMode) {
+      return collectGroupHeadcountWarnings(packageDetail, legStates, totalsBySupplierId, paxGroups, primaryLegId, groupNoun)
+    }
+    return collectHeadcountWarnings(packageDetail, legStates, totalsBySupplierId).map((warning) => ({
+      key: warning.legId,
+      legLabel: warning.legLabel,
+      message: warning.message,
+    }))
+  }, [packageDetail, legStates, totalsBySupplierId, groupMode, paxGroups, primaryLegId, groupNoun])
 
   function reset() {
     setStep("services")
@@ -768,6 +1104,13 @@ export function BuildBookingDialog({
     setValidationErrors([])
     setEditingTravellers(false)
     setTravellerDraft(null)
+    setPaxGroups([])
+    setActiveGroupId(null)
+    setGroupAnnouncement("")
+    setRemoveGroupId(null)
+    setGroupValidationErrors([])
+    paxSyncBaselineRef.current = null
+    pendingFocusRef.current = null
     clearQuoteConflict()
     setAmendConfirmOpen(false)
     amendServicesRef.current.reset()
@@ -788,6 +1131,34 @@ export function BuildBookingDialog({
   // Manual/extra lines added previously survive a rebuild.
   const preservedExtras = existingLineItems.filter((li) => li.pricingSnapshot?.isExtra === true)
   const lineItemsToSave = [...previewLineItems, ...preservedExtras]
+
+  // Step 3 in group mode: the "(SA)" tags by rate type (archived rates included -- a split may still
+  // point at one), the services each suite is not on, and the "Suite 2 only" tag per line.
+  const rateShortLabels = useMemo(
+    () => new Map((rateTypesData?.rateTypes ?? []).map((rt) => [rt.id, rt.shortLabel ?? null] as const)),
+    [rateTypesData],
+  )
+  const notOnByGroup = new Map(
+    groupViews.map((view) => [
+      view.id,
+      sortedLegs.flatMap((leg) => {
+        if (leg.id === primaryLegId) return []
+        const state = legStates.find((candidate) => candidate.legId === leg.id)
+        return state?.selected && !legServesGroup(state, view.id) ? [legName(leg)] : []
+      }),
+    ]),
+  )
+  const lineScopeTags: (string | null)[] = (() => {
+    if (!groupMode || step !== "confirm") return []
+    const snakeLines = lineItemsToSave.map((li) => ({ pricing_snapshot: li.pricingSnapshot ?? null }))
+    const primaryLines = snakeLines.filter((line) => (line.pricing_snapshot?.paxGroups?.length ?? 0) >= 2)
+    return lineItemsToSave.map((li, index) => {
+      const scopeId = li.pricingSnapshot?.transportRequestId ?? li.pricingSnapshot?.legId ?? null
+      // This line alone (plus the lines naming the groups), so each room or trip gets its own tag.
+      const tag = paxGroupScopeTag([snakeLines[index], ...primaryLines], scopeId, groupNoun)
+      return tag ? tag.replace(/^\(/, "").replace(/\)$/, "") : null
+    })
+  })()
 
   function addService() {
     const supplier = suppliers.find((s) => s.id === pickerSupplierId)
@@ -877,6 +1248,9 @@ export function BuildBookingDialog({
       // dates against the new packageDetail (removing/adding a leg can change what a surviving
       // leg anchors to).
       const merged = mergeLegStatesAfterRebuild(legStates, seeded)
+      // The saved groups come with the saved states; edits carried across a rebuild keep theirs.
+      if (legStates.length === 0) setPaxGroups(fromSavedPaxGroups(savedState?.paxGroups))
+      paxSyncBaselineRef.current = null
       setLegStates(applyAnchoredDates(built.packageDetail, merged, stateOptions.primarySupplierId))
       setStep("configure")
       // The reorder pass in build-booking bumps updated_at on every kept leg, not just moved ones;
@@ -1009,6 +1383,7 @@ export function BuildBookingDialog({
     })
     setSavedState(saved)
     setExistingTransportRequests(transportRows)
+    paxSyncBaselineRef.current = null
     setLegStates((prev) =>
       applyAnchoredDates(detail, takeServerLegs(prev, fresh, staleIds), saved.primarySupplierId ?? null),
     )
@@ -1128,14 +1503,40 @@ export function BuildBookingDialog({
   async function validateAndPreview() {
     if (!packageDetail) return
 
-    const problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId, rateTypes })
+    let problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId, rateTypes })
+    // Group mode: a suite holding nobody blocks Next whatever the main product is, said in the
+    // suite's own words with a way to get to it. The generic "room 2 has nobody in it" line for the
+    // same unit is dropped so it isn't said twice.
+    const groupErrors =
+      groupMode && primaryLeg
+        ? groupViews.flatMap((view) =>
+            view.pax.adultCount + view.pax.childCount + view.pax.infantCount === 0
+              ? [
+                  {
+                    groupId: view.id,
+                    message: `${groupNoun} ${view.position} has nobody in it — add guests or remove the ${SUPPLIER_VOCABULARY[primaryLeg.supplierKind].unitNoun}.`,
+                  },
+                ]
+              : [],
+          )
+        : []
+    if (groupMode && primaryLeg && primaryState) {
+      const duplicateLines = new Set(
+        primaryState.units.map((_unit, index) => `${legName(primaryLeg)}: ${describeEmptyUnit(primaryLeg.supplierKind, index)}`),
+      )
+      problems = problems.filter((problem) => !duplicateLines.has(problem))
+    }
     // Pricing needs at least one dated service (rate cards match on the derived trip start).
     const derivedRange = deriveTripDateRangeFromStates(packageDetail, legStates)
-    if (problems.length === 0 && !derivedRange.start) {
+    if (problems.length === 0 && groupErrors.length === 0 && !derivedRange.start) {
       problems.push("Add a date to at least one service — trip dates are worked out from them")
     }
     setValidationErrors(problems)
-    if (problems.length > 0) return
+    setGroupValidationErrors(groupErrors)
+    if (problems.length > 0 || groupErrors.length > 0) {
+      if (groupMode) focusWhenRendered("configure-validation-errors")
+      return
+    }
 
     setValidating(true)
     setBuildError(null)
@@ -1148,7 +1549,9 @@ export function BuildBookingDialog({
       const patchRes = await fetch(`/api/jobs/${jobId}/services`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...toPackageSelectionsPatch(legStates), deferTripDateRecompute: true }),
+        // The groups travel on every save ([] clears them), so the ones minted in this session are
+        // known to the server before the units that name them.
+        body: JSON.stringify({ ...toPackageSelectionsPatch(legStates, groupMode ? paxGroups : []), deferTripDateRecompute: true }),
       })
       if (!patchRes.ok) {
         const body = await patchRes.json().catch(() => ({}))
@@ -1174,6 +1577,8 @@ export function BuildBookingDialog({
         : legStates
       if (patchBody?.selections) {
         const savedSelections = patchBody.selections
+        // Adopted unit ids are not edits: the pax sync takes the saved states as its baseline.
+        paxSyncBaselineRef.current = null
         setLegStates((prev) => adoptSavedServiceRows(prev, savedSelections))
       }
 
@@ -1206,6 +1611,8 @@ export function BuildBookingDialog({
           quoteId,
           travelDate: derivedRange.start,
           selections: toApplySelections(savedLegStates),
+          // Resolved suite names, so the primary-service lines carry them for the documents.
+          ...(groupMode ? { paxGroups: toPaxGroupMetas(paxGroups, primaryState, groupNames) } : {}),
           // Send the rates that were on screen so a hand-nudged rate prices the quote, rather
           // than the server silently re-deriving a different one from its cache. On an amend these
           // are the on-screen values — the accepted quote's prefilled rates plus anything typed.
@@ -1353,7 +1760,7 @@ export function BuildBookingDialog({
         {isAmend && (
           <div
             role="note"
-            className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+            className="mr-8 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
           >
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
             <span>
@@ -1364,7 +1771,7 @@ export function BuildBookingDialog({
         )}
         {step === "services" && (
           <>
-            <DialogHeader>
+            <DialogHeader className="text-left">
               <DialogTitle className="flex items-center gap-2">
                 {isAmend ? "Amend this booking's services" : <>Build this booking&apos;s services</>}
                 <PresenceAvatars users={others} />
@@ -1473,7 +1880,7 @@ export function BuildBookingDialog({
 
         {step === "configure" && packageDetail && (
           <>
-            <DialogHeader>
+            <DialogHeader className="text-left">
               <DialogTitle className="flex items-center gap-2">
                 Configure services
                 <PresenceAvatars users={others} />
@@ -1505,43 +1912,178 @@ export function BuildBookingDialog({
               </p>
             )}
 
-            <div className="space-y-4">
-              {sortedLegs.map((leg) => {
-                const state = legStates.find((candidate) => candidate.legId === leg.id)
-                if (!state) return null
-                return (
-                  <div key={leg.id} className="space-y-2">
-                    {state.kind === "transport" ? (
-                      <TransportLegEditor
-                        leg={leg}
-                        value={state}
-                        onChange={updateLegState}
-                        anchorContext={transferAnchorContext(leg.id)}
-                        rateTypes={rateTypes}
-                        quoteCurrency={quoteCurrency}
-                        fxRates={pricingFxRates}
-                        travelDate={travelDate}
-                        expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
-                      />
-                    ) : (
-                      <SuiteLegEditor
-                        leg={leg}
-                        value={state}
-                        onChange={updateLegState}
-                        expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
-                        anchorContext={hotelAnchorContext(leg.id)}
-                        flightAnchorContext={airlineAnchorContext(leg.id)}
-                        tourAnchorContext={tourAnchorContext(leg.id)}
-                        primarySupplierId={savedState?.primarySupplierId ?? null}
-                        rateTypes={rateTypes}
-                        quoteCurrency={quoteCurrency}
-                        fxRates={pricingFxRates}
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            {/* The Tabs root wraps the group bar and the leg list alike, so the sticky tab row
+                has the whole list as its scroll range and the leg editors stay mounted as the
+                suite filter changes. Without groups it is a plain block holding today's list. */}
+            <Tabs
+              className="block"
+              value={activeGroup?.id ?? "all"}
+              onValueChange={(value) => selectGroup(value === "all" ? null : value)}
+            >
+              {groupMode ? (
+                <PaxGroupBar
+                  groups={groupViews}
+                  problems={groupProblemMap}
+                  activeGroupId={activeGroup?.id ?? null}
+                  onActiveGroupChange={selectGroup}
+                  onAddGroup={addGroup}
+                  noun={groupNoun}
+                  placed={groupViews.reduce(
+                    (sum, view) => sum + view.pax.adultCount + view.pax.childCount + view.pax.infantCount,
+                    0,
+                  )}
+                  total={(() => {
+                    const totals = primaryLeg ? totalsBySupplierId[primaryLeg.supplierId] : undefined
+                    return totals ? totals.adultCount + totals.childCount + totals.infantCount : null
+                  })()}
+                  announcement={groupAnnouncement}
+                />
+              ) : null}
+              <div
+                className="space-y-8"
+                {...(groupMode
+                  ? { id: PAX_GROUP_PANEL_ID, role: "tabpanel", "aria-labelledby": groupTabId(activeGroup?.id ?? null) }
+                  : {})}
+              >
+                {groupMode && !activeGroup ? (
+                  <PaxGroupOverview
+                    legs={sortedLegs}
+                    legStates={legStates}
+                    groups={groupViews}
+                    problems={groupProblemMap}
+                    primaryLegId={primaryLegId}
+                    noun={groupNoun}
+                    onSelectGroup={(groupId) => {
+                      selectGroup(groupId)
+                      focusWhenRendered(groupTabId(groupId))
+                    }}
+                    onToggle={toggleGroupOnLeg}
+                  />
+                ) : null}
+                {groupMode && activeGroup ? (
+                  <p className="text-xs text-muted-foreground">
+                    Showing what {groupNoun} {activeGroup.position} is on. Services it isn&apos;t on are folded away.
+                  </p>
+                ) : null}
+                {sortedLegs.map((leg) => {
+                  const state = legStates.find((candidate) => candidate.legId === leg.id)
+                  if (!state) return null
+                  // A selected service the suite in view isn't on folds to one dashed row.
+                  const folded =
+                    activeGroup !== null &&
+                    leg.id !== primaryLegId &&
+                    state.selected &&
+                    !legServesGroup(state, activeGroup.id)
+                  return (
+                    <div key={leg.id} className="space-y-2">
+                      {folded && activeGroup ? (
+                        <LegNotInGroupRow
+                          legId={leg.id}
+                          legName={legName(leg)}
+                          noun={groupNoun}
+                          position={activeGroup.position}
+                          onAddBack={() => addGroupToLeg(leg.id, activeGroup.id)}
+                        />
+                      ) : state.kind === "transport" ? (
+                        <TransportLegEditor
+                          leg={leg}
+                          value={state}
+                          onChange={updateLegState}
+                          anchorContext={transferAnchorContext(leg.id)}
+                          rateTypes={rateTypes}
+                          quoteCurrency={quoteCurrency}
+                          fxRates={pricingFxRates}
+                          travelDate={travelDate}
+                          expectedTotals={expectedTotalsFor(leg, state)}
+                          paxGroups={paxGroupContext}
+                        />
+                      ) : (
+                        <SuiteLegEditor
+                          leg={leg}
+                          value={state}
+                          onChange={updateLegState}
+                          expectedTotals={expectedTotalsFor(leg, state)}
+                          anchorContext={hotelAnchorContext(leg.id)}
+                          flightAnchorContext={airlineAnchorContext(leg.id)}
+                          tourAnchorContext={tourAnchorContext(leg.id)}
+                          primarySupplierId={savedState?.primarySupplierId ?? null}
+                          rateTypes={rateTypes}
+                          quoteCurrency={quoteCurrency}
+                          fxRates={pricingFxRates}
+                          paxGroups={paxGroupContext}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </Tabs>
+
+            <AlertDialog open={removeGroupView !== null} onOpenChange={(next) => (next ? null : setRemoveGroupId(null))}>
+              <AlertDialogContent>
+                {removeGroupView ? (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Remove {groupNoun} {removeGroupView.position}?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription asChild>
+                        <div className="space-y-2">
+                          {removePreview && removePreview.ownItems.length > 0 ? (
+                            <p>
+                              Also removed, as only {groupNoun} {removeGroupView.position} uses{" "}
+                              {removePreview.ownItems.length === 1 ? "it" : "them"}:{" "}
+                              {joinAnd(
+                                removePreview.ownItems.map((item) => {
+                                  const leg = sortedLegs.find((candidate) => candidate.id === item.legId)
+                                  return `${item.noun} ${item.number}${leg ? ` (${legName(leg)})` : ""}`
+                                }),
+                                " and ",
+                              )}
+                              .
+                            </p>
+                          ) : null}
+                          {removePreview?.keptSharedLegIds.map((legId) => {
+                            const leg = sortedLegs.find((candidate) => candidate.id === legId)
+                            const unitNoun = leg ? SUPPLIER_VOCABULARY[leg.supplierKind].unitNoun : "unit"
+                            return (
+                              <p key={legId}>
+                                {leg ? legName(leg) : "A service"} has nothing else, so its first {unitNoun} stays — shared
+                                by every remaining {groupNoun.toLowerCase()}.
+                              </p>
+                            )
+                          })}
+                          <p>
+                            Guests placed in {groupNoun} {removeGroupView.position} become unplaced.
+                          </p>
+                          {groupViews.length - 1 < 2 ? (
+                            <p>
+                              With one {groupNoun.toLowerCase()} left, the booking is no longer split by{" "}
+                              {groupNoun.toLowerCase()} and {groupNoun.toLowerCase()} names are cleared.
+                            </p>
+                          ) : removeGroupView.position < groupViews.length ? (
+                            <p>
+                              {removeGroupView.position + 1 === groupViews.length
+                                ? `${groupNoun} ${groupViews.length} becomes ${groupNoun} ${groupViews.length - 1}.`
+                                : `${groupNoun}s ${removeGroupView.position + 1}–${groupViews.length} become ${groupNoun}s ${removeGroupView.position}–${groupViews.length - 1}.`}
+                            </p>
+                          ) : null}
+                        </div>
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep {groupNoun.toLowerCase()}</AlertDialogCancel>
+                      <AlertDialogAction
+                        className={buttonVariants({ variant: "destructive" })}
+                        onClick={confirmRemoveSuite}
+                      >
+                        Remove {groupNoun.toLowerCase()}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </>
+                ) : null}
+              </AlertDialogContent>
+            </AlertDialog>
 
             <FxRateBanner
               foreignCurrencies={foreignCurrencies}
@@ -1553,8 +2095,37 @@ export function BuildBookingDialog({
               onRateChange={handleFxRateChange}
             />
 
-            {validationErrors.length > 0 && (
-              <ul className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {(validationErrors.length > 0 || groupValidationErrors.length > 0) && (
+              <ul
+                className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                {...(groupMode ? { id: "configure-validation-errors", role: "alert", tabIndex: -1 } : {})}
+              >
+                {groupValidationErrors.map((error) => {
+                  const view = groupViews.find((candidate) => candidate.id === error.groupId)
+                  const unit = view?.primaryUnit
+                  return (
+                    <li key={error.groupId}>
+                      {error.message}
+                      {view && unit && primaryLegId ? (
+                        <>
+                          {" "}
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
+                            className="h-auto p-0"
+                            onClick={() => {
+                              selectGroup(view.id)
+                              focusWhenRendered(`adults-${primaryLegId}-${unit.id}`)
+                            }}
+                          >
+                            Go to {groupNoun} {view.position}
+                          </Button>
+                        </>
+                      ) : null}
+                    </li>
+                  )
+                })}
                 {validationErrors.map((error) => (
                   <li key={error}>{error}</li>
                 ))}
@@ -1649,7 +2220,15 @@ export function BuildBookingDialog({
             )}
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setStep("services"); setBuildError(null); setValidationErrors([]) }}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setStep("services")
+                  setBuildError(null)
+                  setValidationErrors([])
+                  setGroupValidationErrors([])
+                }}
+              >
                 Back
               </Button>
               <Button onClick={validateAndPreview} disabled={validating}>
@@ -1661,7 +2240,7 @@ export function BuildBookingDialog({
 
         {step === "confirm" && (
           <>
-            <DialogHeader>
+            <DialogHeader className="text-left">
               <DialogTitle className="flex items-center gap-2">
                 {/* Nothing is being replaced on a first build — the old title
                     contradicted the body copy right below it. */}
@@ -1688,7 +2267,17 @@ export function BuildBookingDialog({
                 </p>
                 <ul className="mt-1 list-disc pl-6 text-xs text-muted-foreground">
                   {incompleteLegs.map((leg) => (
-                    <li key={leg.legId}>{leg.message}</li>
+                    <li key={leg.legId}>
+                      {groupMode
+                        ? withGroupScope(
+                            leg.message,
+                            leg.legLabel,
+                            legStates.find((state) => state.legId === leg.legId),
+                            paxGroups,
+                            groupNoun,
+                          )
+                        : leg.message}
+                    </li>
                   ))}
                 </ul>
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -1709,7 +2298,7 @@ export function BuildBookingDialog({
                 </p>
                 <ul className="mt-1 list-disc pl-6 text-xs text-muted-foreground">
                   {headcountWarnings.map((warning) => (
-                    <li key={warning.legId}>
+                    <li key={warning.key}>
                       <span className="font-medium text-foreground">{warning.legLabel}:</span> {warning.message}
                     </li>
                   ))}
@@ -1720,28 +2309,51 @@ export function BuildBookingDialog({
               </div>
             )}
 
+            {groupMode ? (
+              <PaxGroupPriceTable
+                lines={lineItemsToSave}
+                groups={groupViews}
+                noun={groupNoun}
+                currency={quoteCurrency}
+                rateLabels={rateShortLabels}
+                unpriced={incompleteLegs.length > 0 || lineItemsToSave.some((li) => isMissingPricing(li))}
+                notOnByGroup={notOnByGroup}
+              />
+            ) : null}
+
+            {groupMode ? <h3 className="text-sm font-medium">Quote lines</h3> : null}
+
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
-                    <th className="px-3 py-2 whitespace-nowrap">Date</th>
+                    <th className="hidden px-3 py-2 whitespace-nowrap sm:table-cell">Date</th>
                     <th className="px-3 py-2">Description</th>
                     <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Unit price</th>
+                    <th className="hidden px-3 py-2 text-right whitespace-nowrap min-w-[100px] sm:table-cell">Unit price</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lineItemsToSave.map((li, i) => (
                     <tr key={i} className="border-b last:border-0">
-                      <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                      <td className="hidden px-3 py-2 text-xs text-muted-foreground whitespace-nowrap sm:table-cell">
                         {describeLineDate(li) ?? "—"}
                       </td>
                       <td className="px-3 py-2 text-xs">
+                        {/* Phones drop the Date column; the date rides above the description. */}
+                        {describeLineDate(li) ? (
+                          <span className="block text-[11px] text-muted-foreground sm:hidden">{describeLineDate(li)}</span>
+                        ) : null}
                         <div>
                           {li.description}
                           {li.pricingSnapshot?.isExtra ? (
                             <Badge variant="outline" className="ml-1.5 align-middle text-[9px]">Extra</Badge>
+                          ) : null}
+                          {groupMode && lineScopeTags[i] ? (
+                            <Badge variant="outline" className="ml-1.5 align-middle text-[9px]">
+                              {lineScopeTags[i]}
+                            </Badge>
                           ) : null}
                           {li.pricingSnapshot?.pricingMode === "manual" && isMissingPricing(li) ? (
                             <Badge variant="destructive" className="ml-1.5 align-middle text-[9px]">
@@ -1784,7 +2396,7 @@ export function BuildBookingDialog({
                           </div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">{formatMoney(li.unitPrice, quoteCurrency)}</td>
+                      <td className="hidden px-3 py-2 text-right text-xs whitespace-nowrap sm:table-cell">{formatMoney(li.unitPrice, quoteCurrency)}</td>
                       <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">{formatMoney(li.total, quoteCurrency)}</td>
                     </tr>
                   ))}
