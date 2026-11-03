@@ -338,7 +338,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
           {
             kind: "adult",
             ordinal: 3,
-            label: "Adult 3 (single, supplement incl.)",
+            label: "Adult 3 (single supplement incl.)",
             amount: 35_349,
             single: true,
             supplement: true,
@@ -348,7 +348,7 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       })
 
       expect(first).toMatch(/Adult 1 \(sharing\)\s+R\s?24\s?728,00/)
-      expect(first).toMatch(/Adult 3 \(single, supplement incl\.\)\s+R\s?35\s?349,00/)
+      expect(first).toMatch(/Adult 3 \(single supplement incl\.\)\s+R\s?35\s?349,00/)
       expect(first).not.toContain("Total per Adult")
       expect(first).toContain("Total for 3 Adults incl. VAT")
     })

@@ -109,14 +109,14 @@ function splitEvenly(amount: number, guests: readonly Guest[]): void {
 function labelFor(guest: Guest, age: number | null): string {
   if (guest.kind === "child") return `Child ${guest.ordinal}${age != null ? ` (age ${age})` : ""}`
   const base = `Adult ${guest.ordinal}`
-  if (guest.supplement) return `${base} (single, supplement incl.)`
+  if (guest.supplement) return `${base} (single supplement incl.)`
   if (guest.soloUnits > 0 && guest.sharedUnits === 0) return `${base} (single)`
   if (guest.sharedUnits > 0) return `${base} (sharing)`
   return base
 }
 
 /**
- * One row per paying guest — "Adult 1 (sharing)", "Adult 3 (single, supplement incl.)", "Child 1
+ * One row per paying guest — "Adult 1 (sharing)", "Adult 3 (single supplement incl.)", "Child 1
  * (age 6)" — saying what that person pays. Replaces the flat "Total per Adult / Total per Child"
  * split wherever it can be worked out; null tells the caller to keep those rows.
  *

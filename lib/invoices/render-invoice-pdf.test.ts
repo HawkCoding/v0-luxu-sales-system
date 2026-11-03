@@ -261,7 +261,7 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
         perGuestRows: [
           { kind: "adult", ordinal: 1, label: "Adult 1 (sharing)", amount: 24_728, single: false, supplement: false, age: null },
           { kind: "adult", ordinal: 2, label: "Adult 2 (sharing)", amount: 24_728, single: false, supplement: false, age: null },
-          { kind: "adult", ordinal: 3, label: "Adult 3 (single, supplement incl.)", amount: 35_349, single: true, supplement: true, age: null },
+          { kind: "adult", ordinal: 3, label: "Adult 3 (single supplement incl.)", amount: 35_349, single: true, supplement: true, age: null },
           { kind: "child", ordinal: 1, label: "Child 1 (age 6)", amount: 12_000, single: false, supplement: false, age: 6 },
         ],
       },
@@ -269,7 +269,7 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
 
     const text = await extractPdfText(buffer)
     expect(text).toContain("Adult 1 (sharing):")
-    expect(text).toContain("Adult 3 (single, supplement incl.):")
+    expect(text).toContain("Adult 3 (single supplement incl.):")
     expect(text).toContain("Child 1 (age 6):")
     expect(text).not.toContain("Total per Adult:")
     expect(text).not.toContain("Total per Child:")

@@ -58,7 +58,7 @@ describe("allocatePerGuest", () => {
     expect(amounts(allocatePerGuest({ lines, adults: 3, children: 0, target: 84_805 }))).toEqual([
       ["Adult 1 (sharing)", 24_728],
       ["Adult 2 (sharing)", 24_728],
-      ["Adult 3 (single, supplement incl.)", 35_349],
+      ["Adult 3 (single supplement incl.)", 35_349],
     ])
   })
 

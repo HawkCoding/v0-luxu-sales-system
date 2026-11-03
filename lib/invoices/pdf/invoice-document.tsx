@@ -523,7 +523,7 @@ function TotalsRow({ label, value, bold = false }: { label: string; value: strin
   )
 }
 
-/** A per-guest row: the label takes whatever the amount leaves, so "Adult 3 (single, supplement
+/** A per-guest row: the label takes whatever the amount leaves, so "Adult 3 (single supplement
  *  incl.):" stays on one line where the ladder's fixed 152pt label column would wrap it. */
 function GuestTotalsRow({ label, value }: { label: string; value: string }) {
   return (

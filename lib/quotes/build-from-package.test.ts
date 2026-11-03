@@ -2594,7 +2594,7 @@ describe("buildPackageQuoteLineItems", () => {
     expect(rows?.map((row) => [row.label, row.amount])).toEqual([
       ["Adult 1 (sharing)", 24728],
       ["Adult 2 (sharing)", 24728],
-      ["Adult 3 (single, supplement incl.)", 35349],
+      ["Adult 3 (single supplement incl.)", 35349],
     ])
   })
 
