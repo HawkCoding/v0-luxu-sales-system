@@ -67,13 +67,13 @@ export interface QuotePdfData {
   journeyStart: string | null
   journeyEnd: string | null
   /** The booking's own counts (bookings.no_of_adults / no_of_children, infants included) — the
-   *  "Guests:" row, as the quote e-mail, invoice and voucher print them. */
+   *  "Guests:" row, which names the payingPax infants out of the children. */
   adults: number
   children: number
   /** Adults and paying children as the supplier's age buckets price them (resolvePayingPax: infants
    *  out, over-age children as adults) — the grand-total label and the per-person rows, so the label
    *  counts the people the per-person figures divide by. Absent falls back to adults/children. */
-  payingPax?: { adults: number; children: number } | null
+  payingPax?: { adults: number; children: number; infants?: number } | null
   /** The booking's main product for the "Train Journey details" box; null omits its product rows. */
   journeyDetails?: QuoteJourneyDetails | null
   /** VAT-inclusive grand total (quotes.total) — already net of agentCommission. */
@@ -149,7 +149,9 @@ const SECTION_RIGHT = 14.8
 /** Box columns: labels at 54.7 / 329.1, values at 155.1 / 408.8. */
 const BOX_RIGHT_COLUMN = 274.4
 const LEFT_LABEL = 100.4
-const RIGHT_LABEL = 79.7
+// Narrowed from 79.7 so long date ranges keep the freed width on one line, but wide enough that the
+// longest label ("Travel dates", 8pt bold + 6pt gap) never wraps onto a second line.
+const RIGHT_LABEL = 62
 /** "Phone" / "E-mail" — the client column's values sit right after the widest label. */
 const CLIENT_LABEL = 40
 /** Date / title column of both package tables (51.7 → 187.5). */
@@ -391,8 +393,13 @@ export function QuoteDocument({
   const money = (value: number) =>
     formatMoney(value, currency, groupLines.length > 0 ? { decimals: false } : undefined)
 
+  const infants = payingPax?.infants ?? 0
+  // The booking's no_of_children counts its infants; name them on their own in the Guests row.
   // A booking split into suites reads "&" throughout, like its total; others keep the approved "+".
-  const paxLabel = formatPaxLabel({ adults, children }, paxGroupPricing?.lines.length ? { joiner: " & " } : {})
+  const paxLabel = formatPaxLabel(
+    { adults, children: Math.max(0, children - infants), infants },
+    groupLines.length > 0 ? { joiner: " & " } : {},
+  )
   const paying = payingPax ?? { adults, children }
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
   const [phone, email] = [customerPhone?.trim() || null, customerEmail?.trim() || null]
@@ -576,7 +583,7 @@ export function QuoteDocument({
           {hasVisibleDiscount ? (
             <TotalsRow label={withoutTrailingColon(DISCOUNT_LABEL)} value={formatDiscount(discount, money)} />
           ) : null}
-          <TotalsRow label={withoutTrailingColon(formatQuoteGrandTotalLabel(paying))} value={money(total)} bold />
+          <TotalsRow label={withoutTrailingColon(formatQuoteGrandTotalLabel({ ...paying, infants }))} value={money(total)} bold />
         </View>
 
         {closing}

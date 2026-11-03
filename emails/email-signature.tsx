@@ -42,8 +42,10 @@ const mutedLinks = (html: string) => styleSignatureLinks(inlineHtml(html), EMAIL
 export function EmailSignature({ signature }: EmailSignatureProps) {
   const { fullName, jobTitle, tel, cell, fax, email, website, brand } = signature
 
-  // renderSenderLayout already styles its links in SIGNATURE_TEXT_COLOR.
-  const senderHtml = renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website })
+  // renderSenderLayout already styles its links in SIGNATURE_TEXT_COLOR. A layout saved from the
+  // editor comes wrapped in <p>: left nested in <Text>, its default 13px top margin nearly doubled
+  // the gap under the message (client, 2026-11-02).
+  const senderHtml = inlineHtml(renderSenderLayout(brand.senderLayout, { fullName, jobTitle, tel, cell, fax, email, website }))
   const bannerSize = signatureBannerSize(brand.bannerWidth, brand.bannerHeight)
 
   // A one-cell table, not react-email's <Section> (which stamps align="center"

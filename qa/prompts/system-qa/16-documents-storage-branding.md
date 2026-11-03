@@ -17,7 +17,7 @@ QA booking). QA 04 (branding and banking settings known).
 ## Surfaces under test
 
 - [app/app/documents/page.tsx](../../../app/app/documents/page.tsx) — the library with type/supplier/consultant/date filters
-- [components/job-documents-tab.tsx](../../../components/job-documents-tab.tsx), [components/job-attachments-tab.tsx](../../../components/job-attachments-tab.tsx)
+- [components/job-documents-tab.tsx](../../../components/job-documents-tab.tsx)
 - [app/api/documents/upload/route.ts](../../../app/api/documents/upload/route.ts), [app/api/documents/[id]/route.ts](../../../app/api/documents/[id]/route.ts) — signed-URL GET, DELETE `[A/M]`
 - [app/api/pdf-preview/[type]/route.ts](../../../app/api/pdf-preview/[type]/route.ts) — `voucher|itinerary|quote|invoice|worksheet` from sample data
 - [components/voucher-template-editor.tsx](../../../components/voucher-template-editor.tsx), [app/api/voucher-template/route.ts](../../../app/api/voucher-template/route.ts), [app/api/voucher-template/upload/route.ts](../../../app/api/voucher-template/upload/route.ts)
@@ -42,9 +42,9 @@ QA booking). QA 04 (branding and banking settings known).
 
 ### Booking tabs
 
-5. Documents tab on the QA booking lists the same documents with the right
-   kinds and statuses (note `voucher_pdf` should be `sent` after QA 14).
-6. Attachments tab: upload a PDF, an image, and a non-document file type.
+5. Documents tab on the QA booking lists the same documents under Generated with
+   the right kinds and statuses (note `voucher_pdf` should be `sent` after QA 14).
+6. Documents tab, Uploaded list: upload a PDF, an image, and a non-document file type.
    Confirm the accepted types and that a rejected type fails cleanly.
 7. Upload a very large file → size limit enforced with a readable message, not a
    timeout or a 413 with no explanation.
@@ -52,12 +52,12 @@ QA booking). QA 04 (branding and banking settings known).
    unicode) → stored safely, `storage_path` correctly bucket-prefixed, no path
    traversal. This one is a Sev-1 if it escapes the bucket prefix.
 9. Download an uploaded attachment.
-10. Delete a document as admin → gone from the list and from storage. Verify the
+10. Delete an uploaded file → gone from the list and from storage. Verify the
     storage object is actually removed, not just the DB row — orphaned objects
     are Sev-3, but a DB row deleted while the file remains downloadable via a
     still-valid signed URL is Sev-2.
-11. `DELETE /api/documents/{id}` as consultant → 403 (`delete:documents` is
-    admin+manager).
+11. `DELETE /api/documents/{id}` on a generated PDF, as any role → 403, with the
+    row and the file left in place.
 
 ### Storage access control
 

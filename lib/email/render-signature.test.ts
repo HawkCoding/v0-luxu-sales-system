@@ -207,6 +207,20 @@ describe("renderSignatureFragment", () => {
     expect(senderBlock.match(/<br/g)?.length).toBe(2)
   })
 
+  it("keeps a layout saved from the editor out of a nested <p>, which would add its own margin", async () => {
+    const html = await renderSignatureFragment({
+      ...BASE,
+      brand: {
+        ...BASE.brand,
+        senderLayout: '<p><span style="font-size:14px"><strong>{{fullName}}</strong></span><br />Email: {{email}}</p>',
+      },
+    })
+    const senderBlock = html.slice(0, html.indexOf("<img"))
+    expect(senderBlock.match(/<p/g)?.length).toBe(1)
+    expect(senderBlock.match(/<\/p>/g)?.length).toBe(1)
+    expect(senderBlock).toMatch(/<p style="[^"]*"><span style="font-size:14px"><strong>Leonie Burke<\/strong>/)
+  })
+
   it("renders no leading <br> when there are no phone numbers", async () => {
     const html = await renderSignatureFragment({ ...BASE, tel: null, cell: null, fax: null })
     const senderBlock = html.slice(0, html.indexOf("<img"))

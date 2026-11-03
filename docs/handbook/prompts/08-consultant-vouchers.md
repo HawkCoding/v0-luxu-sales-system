@@ -43,8 +43,8 @@ internal worksheet, and closing the booking.
    client. STOP callout.
 7. **The Documents tab and the Documents library** — finding and downloading any generated
    PDF, and the type filter on the library page.
-8. **Attachments** — uploading, downloading and deleting files on a booking, and how they
-   differ from generated documents.
+8. **Uploading files** — uploading, downloading and deleting files in the Uploaded list of
+   the Documents tab, and how they differ from generated documents.
 9. **Closing the booking** — what Closed means and what stops changing after it.
 
 ## Screenshots to capture
