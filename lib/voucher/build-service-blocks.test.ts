@@ -1331,7 +1331,59 @@ describe("buildVoucherServiceBlocks", () => {
 
     expect(blocks).toHaveLength(1)
     expect(blocks[0].serviceData.route).toBe("Cape Town → Pretoria")
+    expect(blocks[0].serviceData.routeEndpoints).toBe("Cape Town → Pretoria")
     expect(blocks[0].serviceData.arrivalStation).toBe("Pretoria")
+  })
+
+  it("keeps a one-way train route's name as its route and states its endpoints alongside", async () => {
+    const leg = {
+      id: "svc-train",
+      label: "Train",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "sup-rovos",
+      route_id: "route-1",
+      route_reversed: false,
+      suite_type_id: "suite-1",
+      service_date: "2027-05-14",
+      suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
+      routes: {
+        name: "Durban Safari",
+        duration_days: 3,
+        direction_mode: "one_way",
+        origin: { name: "Pretoria" },
+        destination: { name: "Durban" },
+      },
+      suite_types: { name: "Royal Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(buildSupabase({ services: [leg] }), { bookingId: BOOKING_ID })
+
+    expect(blocks[0].serviceData.route).toBe("Durban Safari")
+    expect(blocks[0].serviceData.routeEndpoints).toBe("Pretoria → Durban")
+  })
+
+  it("has no endpoints to state when a train route's locations are missing", async () => {
+    const leg = {
+      id: "svc-train",
+      label: "Train",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "sup-rovos",
+      route_id: "route-1",
+      route_reversed: false,
+      suite_type_id: "suite-1",
+      service_date: "2027-05-14",
+      suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
+      routes: { name: "Durban Safari", duration_days: 3, direction_mode: "one_way", origin: null, destination: null },
+      suite_types: { name: "Royal Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(buildSupabase({ services: [leg] }), { bookingId: BOOKING_ID })
+
+    expect(blocks[0].serviceData.routeEndpoints).toBeNull()
   })
 
   it("matches a transport request keyed by service_id to its booking_services leg, and never double-counts it as a manual request", async () => {

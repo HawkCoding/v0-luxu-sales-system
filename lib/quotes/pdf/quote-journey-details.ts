@@ -47,8 +47,10 @@ export function buildQuoteJourneyDetails(
 
   switch (primaryBlock.serviceType) {
     case "train": {
-      const route = displayRouteName(d.route)
-      const tourName = displayRouteName(packageName)
+      // Route states where the leg goes; the route's own name is the tour, which it moves up to when
+      // the booking carries no package name.
+      const route = displayRouteName(d.routeEndpoints ?? d.route)
+      const tourName = displayRouteName(packageName) ?? (d.routeEndpoints ? displayRouteName(d.route) : null)
       return { ...base, tourName: sameRouteEndpoints(tourName, route) ? null : tourName, route }
     }
     case "airline":

@@ -35,6 +35,11 @@ export interface VoucherServiceBlockGuestBreakdown {
 
 export interface VoucherServiceBlockData {
   route?: string | null
+  /** Train-only: where the leg travels from and to in the booked direction ("Pretoria → Durban"),
+   * whatever the route is named ("Durban Safari"). The invoice and quote print this as the route;
+   * null when the route has no endpoints, and absent on blocks built before it existed — both
+   * fall back to `route`. */
+  routeEndpoints?: string | null
   /** The station a train leg actually arrives at — the route's destination, or its origin when
    * `route_reversed` swaps the booked direction. Never derive this from the supplier's own
    * static `location` field, which has no notion of leg direction. */

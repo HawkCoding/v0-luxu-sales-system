@@ -555,6 +555,17 @@ export function resolveVoucherRouteName(
   return resolveDirectedRouteName(origin, destination, reversed)
 }
 
+/** "Pretoria → Durban" in the booked direction, for any train route — a one-way route's own name is
+ * its tour name ("Durban Safari"), which says nothing about where it goes. Null when either endpoint
+ * isn't resolvable. */
+function resolveRouteEndpoints(route: RouteJoin | null | undefined, reversed: boolean): string | null {
+  if (!route) return null
+  const origin = firstRecord(route.origin)?.name
+  const destination = firstRecord(route.destination)?.name
+  if (!origin || !destination) return null
+  return resolveDirectedRouteName(origin, destination, reversed)
+}
+
 /** The station a train leg arrives at, honoring `route_reversed` — null when the route's
  * endpoints aren't resolvable (falls back to no station shown, never the supplier's static
  * location). */
@@ -1020,6 +1031,7 @@ export async function buildVoucherServiceBlocks(
         : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,
+      routeEndpoints: isTrain ? resolveRouteEndpoints(route, row.route_reversed ?? false) : null,
       arrivalStation,
       boardingPoint: stationPoints.boarding,
       arrivalPoint: stationPoints.arrival,

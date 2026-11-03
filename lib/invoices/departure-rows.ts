@@ -94,6 +94,14 @@ function compactSuiteRow(row: VoucherRow, block: VoucherServiceBlock): InvoiceDe
   return { left: { label: row.label, value }, right }
 }
 
+/** The train's "Route" row says where the leg goes ("Pretoria → Durban"), not the route's own name —
+ *  that already prints as the "Tour" row above it. The voucher keeps the name. */
+function trainRouteRow(row: VoucherRow, block: VoucherServiceBlock): InvoiceDepartureRow | null {
+  const endpoints = block.serviceData.routeEndpoints
+  if (row.label !== "Route" || !endpoints) return null
+  return { left: { label: row.label, value: endpoints }, right: null }
+}
+
 function toInvoiceRow(row: VoucherRow): InvoiceDepartureRow {
   if (row.cells && row.cells.length > 0) {
     const [first, second] = row.cells
@@ -114,5 +122,5 @@ function toInvoiceRow(row: VoucherRow): InvoiceDepartureRow {
 export function invoiceRowsForBlock(block: VoucherServiceBlock): InvoiceDepartureRow[] {
   return voucherRowsForBlock(block, { showInclusions: false })
     .filter((row) => !INVOICE_OMITTED_VOUCHER_ROWS.has(row.label))
-    .map((row) => splitDateRow(row, block) ?? compactSuiteRow(row, block) ?? toInvoiceRow(row))
+    .map((row) => splitDateRow(row, block) ?? compactSuiteRow(row, block) ?? trainRouteRow(row, block) ?? toInvoiceRow(row))
 }

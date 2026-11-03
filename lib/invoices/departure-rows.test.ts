@@ -71,6 +71,18 @@ describe("invoiceRowsForBlock", () => {
     expect(rows.every((row) => row.left?.label !== "Guests")).toBe(true)
   })
 
+  it("train block: the Route row states the endpoints, not the route's own name", () => {
+    const rows = invoiceRowsForBlock(
+      block({ serviceData: { route: "Durban Safari", routeEndpoints: "Pretoria → Durban" } }),
+    )
+    expect(rows.find((r) => r.left?.label === "Route")?.left?.value).toBe("Pretoria → Durban")
+  })
+
+  it("train block: keeps the route's name when it has no endpoints", () => {
+    const rows = invoiceRowsForBlock(block({ serviceData: { route: "Durban Safari", routeEndpoints: null } }))
+    expect(rows.find((r) => r.left?.label === "Route")?.left?.value).toBe("Durban Safari")
+  })
+
   it("train block: route, split date/time columns, suite -- no duration, boarding point or reference", () => {
     const rows = invoiceRowsForBlock(
       block({

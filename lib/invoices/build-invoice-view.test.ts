@@ -403,6 +403,33 @@ describe("buildDeparture", () => {
     expect(departure?.legs.map((leg) => leg.heading)).toEqual(["Your Journey", "Return Journey"])
   })
 
+  describe("a train route named something other than its endpoints", () => {
+    const namedRoute: VoucherServiceBlock = {
+      serviceType: "train",
+      title: "Rovos Rail",
+      contactDetails: {},
+      displayOrder: 0,
+      serviceData: { route: "Durban Safari", routeEndpoints: "Pretoria → Durban" },
+    }
+    const context = { durationNights: 2, durationUnit: null, suites: 1, adults: 2, children: 0 }
+
+    it("prints the name as the Tour and the endpoints as the Route", () => {
+      const departure = buildDeparture([namedRoute], "Your Journey", { ...context, tourName: "Durban Safari" })
+      expect(departure?.tourName).toBe("Durban Safari")
+      expect(departure?.legs[0].rows[0].left).toEqual({ label: "Route", value: "Pretoria → Durban" })
+    })
+
+    it("moves the leg's name up to Tour when the booking has no route of its own", () => {
+      const departure = buildDeparture([namedRoute], "Your Journey", { ...context, tourName: null })
+      expect(departure?.tourName).toBe("Durban Safari")
+    })
+
+    it("drops the Tour row when the name only restates the endpoints", () => {
+      const departure = buildDeparture([namedRoute], "Your Journey", { ...context, tourName: "Durban to Pretoria" })
+      expect(departure?.tourName).toBeNull()
+    })
+  })
+
   it("drops the Tour row when the booking route names the same endpoints as the leg's route", () => {
     const trainBlock: VoucherServiceBlock = {
       serviceType: "train",
@@ -492,6 +519,50 @@ describe("buildInvoiceItems", () => {
     markupPct: 0,
     singleSupplementPct: null,
   } as const
+
+  describe("a train line", () => {
+    const trainLine = {
+      description: "Rovos Rail - Durban Safari - Adult",
+      qty: 2,
+      unit_price: 10_000,
+      total: 20_000,
+      pricing_snapshot: {
+        ...base,
+        legId: "service-train",
+        legLabel: "Rovos Rail",
+        supplierId: "supplier-rovos",
+        supplierName: "Rovos Rail",
+        supplierKind: "train_operator",
+        routeName: "Durban Safari",
+        travelDate: "2027-05-14",
+        serviceType: null,
+      } satisfies PricingSnapshot,
+    }
+    const leg = (serviceData: VoucherServiceBlock["serviceData"], supplierId = "supplier-rovos"): VoucherServiceBlock => ({
+      serviceType: "train",
+      title: "Rovos Rail",
+      supplierId,
+      contactDetails: {},
+      displayOrder: 0,
+      serviceData: { departureDate: "2027-05-14", startTime: "10:00", ...serviceData },
+    })
+
+    it("names the leg's endpoints instead of the route's own name, keeping its time", () => {
+      const [item] = buildInvoiceItems([trainLine], [leg({ route: "Durban Safari", routeEndpoints: "Pretoria → Durban" })])
+      expect(item.description).toBe("Rovos Rail — Pretoria → Durban")
+      expect(item.time).toBe("10:00")
+    })
+
+    it("keeps the route's name when the leg has no endpoints", () => {
+      const [item] = buildInvoiceItems([trainLine], [leg({ route: "Durban Safari", routeEndpoints: null })])
+      expect(item.description).toBe("Rovos Rail — Durban Safari")
+    })
+
+    it("ignores another operator's route of the same name", () => {
+      const other = leg({ route: "Durban Safari", routeEndpoints: "Cape Town → Durban" }, "supplier-other")
+      expect(buildInvoiceItems([trainLine], [other])[0].description).toBe("Rovos Rail — Durban Safari")
+    })
+  })
 
   // The two rows from the client's screenshot: a hotel with its first night gifted, and a comped
   // transfer whose route record is named by a short code.
