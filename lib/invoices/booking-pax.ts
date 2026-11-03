@@ -12,6 +12,8 @@ export interface BookingPaxRow {
 export interface PayingPax {
   adults: number
   children: number
+  /** Free infants (child_ages at or under the supplier's infant max). Never divided by or charged. */
+  infants: number
 }
 
 /**
@@ -33,7 +35,7 @@ export function payingPaxSupplierId(
  * never a "Child" fare) and a child past the supplier's child age (priced as an adult) are both in
  * it. Projected through the primary supplier's age buckets — the same projection the voucher and
  * the pricing engine use (lib/packages/passenger-totals.ts) — so the rows divide by the people who
- * actually pay each fare. Infants are left out entirely. Age-bucket lookups that fail fall back to
+ * actually pay each fare. Infants are counted separately (`infants`) and never divided by. Age-bucket lookups that fail fall back to
  * the house defaults (resolveSupplierAgeBuckets), so this never blocks a document from rendering.
  */
 export async function resolvePayingPax(
@@ -41,7 +43,7 @@ export async function resolvePayingPax(
   booking: BookingPaxRow | null | undefined,
   primarySupplierId: string | null,
 ): Promise<PayingPax> {
-  if (!booking) return { adults: 0, children: 0 }
+  if (!booking) return { adults: 0, children: 0, infants: 0 }
   const buckets = await resolveSupplierAgeBuckets(supabase, primarySupplierId)
   const totals = projectPassengerTotals(
     {
@@ -51,5 +53,5 @@ export async function resolvePayingPax(
     },
     buckets,
   )
-  return { adults: totals.adultCount, children: totals.childCount }
+  return { adults: totals.adultCount, children: totals.childCount, infants: totals.infantCount }
 }

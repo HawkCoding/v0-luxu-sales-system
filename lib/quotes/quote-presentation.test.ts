@@ -1323,4 +1323,12 @@ describe("formatQuoteGrandTotalLabel", () => {
     expect(formatQuoteGrandTotalLabel({ adults: 2, children: 0 })).toBe("Total for 2 Adults incl. VAT")
     expect(formatQuoteGrandTotalLabel({ adults: 0, children: 0 })).toBe("Total incl. VAT")
   })
+
+  it("names infants as their own entry", () => {
+    expect(formatQuoteGrandTotalLabel({ adults: 5, children: 1, infants: 1 })).toBe(
+      "Total for 5 Adults, 1 Child & 1 Infant incl. VAT",
+    )
+    expect(formatQuoteGrandTotalLabel({ adults: 2, children: 0, infants: 2 })).toBe("Total for 2 Adults & 2 Infants incl. VAT")
+    expect(formatPaxLabel({ adults: 5, children: 1, infants: 1 })).toBe("5 Adults + 1 Child + 1 Infant")
+  })
 })

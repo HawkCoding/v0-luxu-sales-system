@@ -326,18 +326,42 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       expect(first).toMatch(/Total per Child\s+R\s?25[\s ]?000,00/)
     })
 
-    it("keeps the booking's own counts in the Guests row while the total label counts the paying pax", async () => {
-      // 2 adults + a 1-year-old: the Guests row still names the infant; the label and rows don't.
+    it("names an infant as an Infant in both the Guests row and the total label, never as a Child", async () => {
+      // 2 adults + a 1-year-old: no paying child, so no Child anywhere, no per-child row.
       const [first] = await pages({
         adults: 2,
         children: 1,
-        payingPax: { adults: 2, children: 0 },
+        payingPax: { adults: 2, children: 0, infants: 1 },
         perPersonTotals: { perAdult: 42_500, perChild: null },
       })
 
-      expect(first).toContain("2 Adults + 1 Child")
-      expect(first).toContain("Total for 2 Adults incl. VAT")
+      expect(first).toContain("2 Adults + 1 Infant")
+      expect(first).toContain("Total for 2 Adults & 1 Infant incl. VAT")
+      expect(first).not.toContain("1 Child")
       expect(first).not.toContain("Total per Child")
+    })
+
+    it("names adults, children and infants in the Guests row and the total label", async () => {
+      // 5 adults + 2 children where one is an infant (the quote that surfaced this).
+      const [first] = await pages({
+        adults: 5,
+        children: 2,
+        payingPax: { adults: 5, children: 1, infants: 1 },
+        perPersonTotals: { perAdult: 20_109.09, perChild: 10_054.55 },
+      })
+
+      expect(first).toContain("5 Adults + 1 Child + 1 Infant")
+      expect(first).toContain("Total for 5 Adults, 1 Child & 1 Infant incl. VAT")
+      expect(first).toMatch(/Total per Child\s+R\s?10[\s ]?054,55/)
+
+      // The longer label still sets on one printed line, beside its amount.
+      const printed = await lines({
+        adults: 5,
+        children: 2,
+        payingPax: { adults: 5, children: 1, infants: 1 },
+        perPersonTotals: { perAdult: 20_109.09, perChild: 10_054.55 },
+      })
+      expect(printed.some((line) => line.includes("Total for 5 Adults, 1 Child & 1 Infant incl. VAT"))).toBe(true)
     })
 
     it("prints no per-person rows when none can be stated, and no child row on an adults-only booking", async () => {
