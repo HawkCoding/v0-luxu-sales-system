@@ -359,7 +359,7 @@ describe("allocatePaxGroups", () => {
     const result = allocatePaxGroups({ lines, target: 67_000, rateLabels: RATE_LABELS })
     expect(sentences(result)).toEqual([
       "Twin Deluxe Suite 1 - 2 Adults x R20 000,00 per person (SA)",
-      "Twin Deluxe Suite 2 - 1 Adult x R27 000,00 (single, supplement incl.) (SA)",
+      "Twin Deluxe Suite 2 - 1 Adult x R27 000,00 (single supplement incl.) (SA)",
     ])
     expect(result?.lines[1].parts[0].supplement).toBe(true)
   })
@@ -760,8 +760,8 @@ describe("formatPaxGroupLine / formatPaxGroupParts", () => {
     ])
     expect(formatPaxGroupLine(line, money)).toBe(
       "Twin Deluxe Suite 2 - 1 Adult x R24 100,00 (SA) & 1 Adult x R29 400,00 (TW) & " +
-        "1 Adult x R35 000,00 (single, supplement incl.) (TW) & " +
-        "2 Adults x R1 000,00 per person (single, supplement incl.) & 1 Adult x R5,00",
+        "1 Adult x R35 000,00 (single supplement incl.) (TW) & " +
+        "2 Adults x R1 000,00 per person (single supplement incl.) & 1 Adult x R5,00",
     )
   })
 
@@ -808,7 +808,7 @@ describe("formatPaxGroupPartLines", () => {
     expect(formatPaxGroupPartLines(line, money).map((text) => text.replace(/ /g, " "))).toEqual([
       "1 Adult x R41 939,17 (SA)",
       "1 Adult x R65 339,13 (TW)",
-      "2 Children x R18 900,00 per child (single, supplement incl.)",
+      "2 Children x R18 900,00 per child (single supplement incl.)",
     ])
     expect(formatPaxGroupPartLines(line, (n) => `R${n}`)[0]).toBe("1 Adult x R41939.17 (SA)")
   })
