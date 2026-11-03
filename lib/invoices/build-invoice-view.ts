@@ -248,12 +248,13 @@ export function buildDeparture(
   // no_of_suites is an enquiry-time scalar that drifts once the package is configured in detail.
   const resolvedSuites = outbound.serviceData.numberOfSuites ?? context.suites
 
-  // A train route's name is auto-derived from its own endpoints, so the booking-level "Tour" row
-  // and the leg's "Route" row below it print the same two places with a different arrow. Only a
-  // route named something other than its endpoints ("Pride of Africa") earns both rows.
-  const tourName = sameRouteEndpoints(context.tourName, outbound.serviceData.route)
-    ? null
-    : context.tourName
+  // A train route's name is often auto-derived from its own endpoints, so the booking-level "Tour"
+  // row and the leg's "Route" row below it print the same two places with a different arrow. Only a
+  // route named something other than its endpoints ("Pride of Africa") earns both rows. The Route
+  // row states the endpoints, so with no booking-level route the leg's own name moves up to Tour.
+  const { route: legRouteName, routeEndpoints } = outbound.serviceData
+  const namedTour = context.tourName ?? (routeEndpoints ? legRouteName ?? null : null)
+  const tourName = sameRouteEndpoints(namedTour, routeEndpoints ?? legRouteName) ? null : namedTour
 
   return {
     productLabel: INVOICE_PRODUCT_LABEL[outbound.serviceType],
@@ -297,6 +298,27 @@ export function invoiceItemSchedule(
   return { date, time: times.size === 1 ? [...times][0] : null }
 }
 
+/**
+ * A train line names where it travels ("Rovos Rail — Pretoria → Durban"), not the tour name a one-way
+ * route's snapshot carries. Read from the booked leg at render time, so quotes priced before this
+ * read the same; a line matching no leg keeps its snapshot's route name. Route names are unique per
+ * supplier, so the name finds the leg.
+ */
+function withTrainRouteEndpoints(
+  snapshot: PricingSnapshot | null,
+  blocks: readonly VoucherServiceBlock[],
+): PricingSnapshot | null {
+  if (!snapshot?.routeName) return snapshot
+  const leg = blocks.find(
+    (block) =>
+      block.serviceType === "train" &&
+      block.serviceData.route === snapshot.routeName &&
+      (!snapshot.supplierId || !block.supplierId || block.supplierId === snapshot.supplierId),
+  )
+  const endpoints = leg?.serviceData.routeEndpoints
+  return endpoints ? { ...snapshot, routeName: endpoints } : snapshot
+}
+
 export function buildInvoiceItems(
   lineItems: Array<
     Pick<
@@ -321,7 +343,11 @@ export function buildInvoiceItems(
   const transportPoints = resolveTransportLinePoints(snapshots, transportRequests)
   const items = folded.map((item, index) => {
     const snapshot = snapshots[index]
-    const description = describeInvoiceLine(item.description, snapshot, transportPoints[index])
+    const description = describeInvoiceLine(
+      item.description,
+      withTrainRouteEndpoints(snapshot, blocks),
+      transportPoints[index],
+    )
     const tag = lineScopeTag(lineItems, snapshot, paxGroupNounLabel)
     return {
       pax: Number(item.qty ?? 0),

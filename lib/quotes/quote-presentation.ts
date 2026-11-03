@@ -585,12 +585,13 @@ function describeBlockSentence(block: VoucherServiceBlock): Sentence {
       // bullet ahead of it (checkInOffsetMinutes 0, or no offset known) -- see
       // buildTrainScheduleBullets, which owns the "Check in at … / Departure time: …" wording.
       const scheduleBullets = buildTrainScheduleBullets(d.startTime, d.checkInOffsetMinutes)
+      const route = d.routeEndpoints ?? d.route
       return sentence(
         [
           `${onBoard} ${supplier ? withLeadingThe(supplier) : "the train"}`,
           suites ? `in ${suites}` : null,
           "on an all-inclusive basis",
-          d.route ? `— ${toProseRoute(d.route)}` : null,
+          route ? `— ${toProseRoute(route)}` : null,
         ],
         [scheduleBullets.length === 0 && start ? `Departs at ${start}` : null],
       )

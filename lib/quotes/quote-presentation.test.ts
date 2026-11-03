@@ -549,6 +549,18 @@ describe("buildQuoteItineraryLines", () => {
     })
   })
 
+  it("says where a train travels, not the route's own name", () => {
+    const [boarding] = buildQuoteItineraryLines([
+      {
+        ...trainBlock,
+        serviceData: { ...trainBlock.serviceData, route: "Durban Safari", routeEndpoints: "Pretoria → Durban" },
+      },
+    ])
+
+    expect(boarding.text).toContain("all-inclusive basis — Pretoria to Durban")
+    expect(boarding.text).not.toContain("Durban Safari")
+  })
+
   it("derives nights on board from durationDays and lists supplier inclusions as bullets", () => {
     const [boarding, arrival] = buildQuoteItineraryLines([trainBlock])
 
