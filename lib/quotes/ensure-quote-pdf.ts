@@ -242,8 +242,8 @@ export async function ensureQuotePdf(
       validUntil: quote.validity_until,
       journeyStart: journey.start,
       journeyEnd: journey.end,
-      // The Guests row prints the booking's own counts (infants included), as the e-mail, invoice
-      // and voucher do; only the total's label and the per-person rows use the paying projection.
+      // The Guests row starts from the booking's own counts (the PDF splits the infants out of
+      // children); the total's label and the per-person rows use the paying projection.
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,
       payingPax: pax,

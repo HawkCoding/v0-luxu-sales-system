@@ -13,6 +13,8 @@ export type { BulletLine } from "@/lib/inclusions/bullet-lines"
 export interface QuotePax {
   adults: number
   children: number
+  /** Free under-age travellers, named on their own so they never read as a paying "Child". */
+  infants?: number
 }
 
 export interface QuoteJourneyDates {
@@ -62,12 +64,17 @@ function toIsoDateString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-/** "2 Adults" | "1 Adult + 2 Children" | "" when both counts are 0. */
-export function formatPaxLabel({ adults, children }: QuotePax): string {
+function paxParts({ adults, children, infants = 0 }: QuotePax): string[] {
   const parts: string[] = []
   if (adults > 0) parts.push(`${adults} ${adults === 1 ? "Adult" : "Adults"}`)
   if (children > 0) parts.push(`${children} ${children === 1 ? "Child" : "Children"}`)
-  return parts.join(" + ")
+  if (infants > 0) parts.push(`${infants} ${infants === 1 ? "Infant" : "Infants"}`)
+  return parts
+}
+
+/** "2 Adults" | "1 Adult + 2 Children" | "2 Adults + 1 Child + 1 Infant" | "" when all counts are 0. */
+export function formatPaxLabel(pax: QuotePax): string {
+  return paxParts(pax).join(" + ")
 }
 
 /**
@@ -90,11 +97,12 @@ export function formatTotalLabel(pax: QuotePax): string {
  * incl. VAT" | "Total incl. VAT" when pax is unknown. Distinct from formatTotalLabel (the email's
  * upper-case "TOTAL for 2 Adults + 1 Child"), which the client never asked to change.
  */
-export function formatQuoteGrandTotalLabel({ adults, children }: QuotePax): string {
-  const parts: string[] = []
-  if (adults > 0) parts.push(`${adults} ${adults === 1 ? "Adult" : "Adults"}`)
-  if (children > 0) parts.push(`${children} ${children === 1 ? "Child" : "Children"}`)
-  return parts.length > 0 ? `Total for ${parts.join(" & ")} incl. VAT` : "Total incl. VAT"
+export function formatQuoteGrandTotalLabel(pax: QuotePax): string {
+  const parts = paxParts(pax)
+  if (parts.length === 0) return "Total incl. VAT"
+  // "4 Adults & 1 Child", "4 Adults, 1 Child & 1 Infant".
+  const named = parts.length > 2 ? `${parts.slice(0, -1).join(", ")} & ${parts[parts.length - 1]}` : parts.join(" & ")
+  return `Total for ${named} incl. VAT`
 }
 
 /**
