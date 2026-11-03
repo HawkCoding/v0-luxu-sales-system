@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   detectCountryInText,
@@ -134,3 +136,22 @@ describe("detectCountryInText", () => {
   })
 })
 
+
+describe("Taiwan (migration 20261028120000_country_taiwan)", () => {
+  // Read the seed itself, so the test fails if the migration loses Taiwan's code or an alias.
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20261028120000_country_taiwan.sql"), "utf8")
+  const country = /\('Taiwan',\s*'(\w+)',\s*'(\w+)'\)/.exec(sql)
+  const aliases = [...sql.matchAll(/^\s*\('([^']+)'\),?\s*$/gm)].map((match) => match[1])
+  const aliasMap: CountryAliasMap = new Map(aliases.map((alias) => [alias.trim().toLowerCase(), "Taiwan"]))
+  const codeMap: CountryCodeMap = new Map([["Taiwan", country?.[1] ?? ""]])
+
+  it("seeds Taiwan as TW / TWN", () => {
+    expect(country?.slice(1)).toEqual(["TW", "TWN"])
+  })
+
+  it("prints TW for every way a guest's residence names Taiwan", () => {
+    for (const residence of ["Taiwan", "taiwan ", "TW", "TWN", "Republic of China", "ROC"]) {
+      expect(resolveCountryCode(residence, aliasMap, codeMap), residence).toBe("TW")
+    }
+  })
+})

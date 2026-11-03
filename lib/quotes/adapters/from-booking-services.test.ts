@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Database } from "@/lib/supabase/types"
-import { bookingServicesToLegSelections } from "@/lib/quotes/adapters/from-booking-services"
+import { bookingServicesToLegSelections, parseUnitRateSplits } from "@/lib/quotes/adapters/from-booking-services"
 
 type BookingServiceRow = Database["public"]["Tables"]["booking_services"]["Row"]
 type BookingServiceUnitRow = Database["public"]["Tables"]["booking_service_units"]["Row"]
@@ -71,6 +71,8 @@ function unit(partial: Partial<BookingServiceUnitRow> & Pick<BookingServiceUnitR
     fare_override_set_by: null,
     complimentary_first_night: false,
     rate_type_id: null,
+    pax_group_ids: [],
+    rate_splits: [],
     sort_order: 0,
     origin: "consultant",
     created_at: "2026-01-01T00:00:00Z",
@@ -193,5 +195,55 @@ describe("bookingServicesToLegSelections", () => {
     const [selection] = bookingServicesToLegSelections(services, [])
 
     expect(selection.suiteTypeId).toBe("vehicle-sedan")
+  })
+
+  it("carries each unit's id, pax groups and rate splits through", () => {
+    const services = [service({ id: "svc-1" })]
+    const units = [
+      unit({
+        id: "u1",
+        service_id: "svc-1",
+        suite_type_id: "suite-a",
+        adult_count: 2,
+        pax_group_ids: ["group-2"],
+        rate_splits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+      }),
+      unit({ id: "u2", service_id: "svc-1", suite_type_id: "suite-a", adult_count: 2, sort_order: 1 }),
+    ]
+
+    const [selection] = bookingServicesToLegSelections(services, units)
+
+    expect(selection.units?.[0]).toMatchObject({
+      unitId: "u1",
+      paxGroupIds: ["group-2"],
+      rateSplits: [{ rateTypeId: "rate-tw", adultCount: 1, childCount: 0, infantCount: 0 }],
+    })
+    expect(selection.units?.[1]).toMatchObject({ unitId: "u2", paxGroupIds: [], rateSplits: [] })
+  })
+})
+
+describe("parseUnitRateSplits", () => {
+  it("keeps well-formed splits", () => {
+    expect(
+      parseUnitRateSplits([{ rateTypeId: "rate-sa", adultCount: 1, childCount: 2, infantCount: 0 }]),
+    ).toEqual([{ rateTypeId: "rate-sa", adultCount: 1, childCount: 2, infantCount: 0 }])
+  })
+
+  it("drops anything that is not a split with a rate type, and zeroes counts that are not whole numbers >= 0", () => {
+    expect(
+      parseUnitRateSplits([
+        null,
+        "rate-sa",
+        [],
+        { adultCount: 1 },
+        { rateTypeId: "   ", adultCount: 1 },
+        { rateTypeId: "rate-tw", adultCount: -1, childCount: 1.5, infantCount: "2" },
+      ]),
+    ).toEqual([{ rateTypeId: "rate-tw", adultCount: 0, childCount: 0, infantCount: 0 }])
+  })
+
+  it("reads a non-array as no splits", () => {
+    expect(parseUnitRateSplits(null)).toEqual([])
+    expect(parseUnitRateSplits({ rateTypeId: "rate-sa" })).toEqual([])
   })
 })

@@ -30,7 +30,13 @@ import {
   PREFILL_FIELDS,
   type PrefillField,
 } from "@/lib/traveller-prefill"
-import { useClubNames, useJobReservationDetails, useJobTravellers, type JobTraveller } from "@/lib/use-data"
+import {
+  useClubNames,
+  useJobReservationDetails,
+  useJobTravellers,
+  type JobPaxGroup,
+  type JobTraveller,
+} from "@/lib/use-data"
 import {
   cleanClubMemberships,
   clubMembershipsEqual,
@@ -64,6 +70,19 @@ interface TravellerDraft {
   isChild: boolean
   isPrimary: boolean
   clubMemberships: ClubMembership[]
+  /** The guest's suite on a booking split into pax groups; null = not placed yet. */
+  paxGroupId: string | null
+}
+
+/** The Suite select's "Not placed yet" value (Radix Select forbids an empty string). */
+const NOT_PLACED = "__none"
+
+/** A suite's name without its trailing position ("Twin Deluxe Suite"); a typed name as typed. */
+function shortSuiteLabel(group: Pick<JobPaxGroup, "position" | "label" | "autoLabel">): string {
+  const typed = group.label?.trim()
+  if (typed) return typed
+  const suffix = ` ${group.position}`
+  return group.autoLabel.endsWith(suffix) ? group.autoLabel.slice(0, -suffix.length) : group.autoLabel
 }
 
 let draftKeySeq = 0
@@ -87,6 +106,7 @@ function toDraft(t: JobTraveller): TravellerDraft {
     isChild: t.isChild,
     isPrimary: t.isPrimary,
     clubMemberships: t.clubMemberships ?? [],
+    paxGroupId: t.paxGroupId ?? null,
   }
 }
 
@@ -104,6 +124,7 @@ function emptyDraft(isChild: boolean): TravellerDraft {
     isChild,
     isPrimary: false,
     clubMemberships: [],
+    paxGroupId: null,
   }
 }
 
@@ -121,6 +142,7 @@ function travellerFromCustomer(customer: Customer): TravellerDraft {
     isChild: false,
     isPrimary: true,
     clubMemberships: (customer.clubMemberships ?? []).map((row) => ({ ...row })),
+    paxGroupId: null,
   }
 }
 
@@ -148,11 +170,13 @@ function travellersSnapshot(rows: TravellerDraft[]): string {
       isChild: t.isChild,
       isPrimary: t.isPrimary,
       clubMemberships: cleanClubMemberships(t.clubMemberships),
+      paxGroupId: t.paxGroupId,
     })),
   )
 }
 
 function travellerRowDiffers(a: TravellerDraft, b: TravellerDraft): boolean {
+  // The suite is left out: an enquiry never names one, so placing a guest isn't a difference from it.
   return (
     a.prefix !== b.prefix ||
     a.firstName !== b.firstName ||
@@ -328,6 +352,35 @@ export function JobReservationTab({
   )
 
   const savedTravellerCount = travellersData?.travellers.length ?? 0
+  // The booking's suites (pax groups), resolved by the travellers GET. Empty without groups -- the
+  // tab is then exactly as before.
+  const paxGroups = useMemo(() => travellersData?.paxGroups ?? [], [travellersData])
+  const placedByGroup = new Map<string, number>()
+  for (const traveller of travellers) {
+    if (traveller.paxGroupId) placedByGroup.set(traveller.paxGroupId, (placedByGroup.get(traveller.paxGroupId) ?? 0) + 1)
+  }
+  const placedCount = paxGroups.reduce((sum, group) => sum + (placedByGroup.get(group.id) ?? 0), 0)
+  const overPlacedGroups = paxGroups.filter(
+    (group) => (placedByGroup.get(group.id) ?? 0) > group.adults + group.children + group.infants,
+  )
+  // The read-only "By suite" list, built from the draft rows so it follows every edit. The rows
+  // themselves never re-sort while editing.
+  const guestNameAt = (traveller: TravellerDraft, index: number) =>
+    [traveller.prefix.trim(), traveller.firstName.trim(), traveller.lastName.trim()].filter(Boolean).join(" ") ||
+    `Guest ${index + 1}`
+  const guestsBySuite = paxGroups
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((group) => ({
+      group,
+      names: travellers.flatMap((traveller, index) =>
+        traveller.paxGroupId === group.id ? [guestNameAt(traveller, index)] : [],
+      ),
+    }))
+  const suiteIds = new Set(paxGroups.map((group) => group.id))
+  const unplacedNames = travellers.flatMap((traveller, index) =>
+    traveller.paxGroupId && suiteIds.has(traveller.paxGroupId) ? [] : [guestNameAt(traveller, index)],
+  )
   // Reflects the *saved* roster, not the drafts on screen — the pax it is compared against only
   // moves when the guest list is saved, so anything else would flip on every keystroke.
   const paxComparison = travellersData?.paxComparison ?? null
@@ -464,7 +517,7 @@ export function JobReservationTab({
   const revertTraveller = (key: string) => {
     const seed = travellerSeeds.get(key)
     if (!seed) return
-    setTravellers((rows) => rows.map((row) => (row.key === key ? { ...seed } : row)))
+    setTravellers((rows) => rows.map((row) => (row.key === key ? { ...seed, paxGroupId: row.paxGroupId } : row)))
     clearPrefillMarks(key, [...PREFILL_FIELDS])
   }
 
@@ -554,6 +607,9 @@ export function JobReservationTab({
             isChild: t.isChild,
             isPrimary: t.isPrimary,
             clubMemberships: cleanClubMemberships(t.clubMemberships),
+            // Only sent while the booking has suites: omitted, the server keeps each guest's stored
+            // suite, so a tab loaded before the split can't unplace anyone.
+            ...(paxGroups.length > 0 ? { paxGroupId: t.paxGroupId } : {}),
           })),
         }),
       })
@@ -823,6 +879,39 @@ export function JobReservationTab({
               </AlertDescription>
             </Alert>
           ) : null}
+          {!travellersLoading && paxGroups.length > 0 && travellers.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                Suites: {placedCount} of {travellers.length} guests placed. Guests not placed are listed last, under
+                &quot;Not placed yet&quot;.
+              </p>
+              <details open className="rounded-md border px-3 py-2 text-xs">
+                <summary className="cursor-pointer rounded-sm font-medium focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                  By suite
+                </summary>
+                <ul className="mt-1 space-y-0.5">
+                  {guestsBySuite.map(({ group, names }) => (
+                    <li key={group.id}>
+                      <span className="font-medium">Suite {group.position}</span> · {group.label ?? group.autoLabel} —{" "}
+                      {names.length > 0 ? names.join(", ") : <span className="text-muted-foreground">nobody placed yet</span>}
+                    </li>
+                  ))}
+                  {unplacedNames.length > 0 ? (
+                    <li className="text-muted-foreground">Not placed yet — {unplacedNames.join(", ")}</li>
+                  ) : null}
+                </ul>
+              </details>
+              {overPlacedGroups.map((group) => (
+                <p key={group.id} className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    Suite {group.position} has {placedByGroup.get(group.id) ?? 0} guests placed; it is booked for{" "}
+                    {group.adults + group.children + group.infants}.
+                  </span>
+                </p>
+              ))}
+            </div>
+          ) : null}
           {travellersLoading ? (
             <div className="space-y-2" aria-busy="true">
               <Skeleton className="h-10 w-full" />
@@ -831,9 +920,11 @@ export function JobReservationTab({
           ) : travellers.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">No guests yet</p>
           ) : (
-            travellers.map((traveller) => {
+            travellers.map((traveller, travellerIndex) => {
+              const guestName = [traveller.firstName.trim(), traveller.lastName.trim()].filter(Boolean).join(" ")
               const seed = travellerSeeds.get(traveller.key)
               const differs = seed ? travellerRowDiffers(traveller, seed) : false
+              const placedSuite = paxGroups.find((group) => group.id === traveller.paxGroupId)
               const unreadableDob =
                 traveller.dateOfBirth.trim().length > 0 && normalizeDateOfBirth(traveller.dateOfBirth) === null
               return (
@@ -913,36 +1004,81 @@ export function JobReservationTab({
                       </TooltipTrigger>
                       <TooltipContent>Country of residence</TooltipContent>
                     </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Input
-                          placeholder="Room with"
-                          value={traveller.roomWith}
-                          onChange={(e) => updateTraveller(traveller.key, { roomWith: e.target.value })}
-                          className="sm:col-span-2"
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        Groups guests one line per room on the Travel Voucher, and shows on the Worksheet PDF.
-                        Enter the room-mate&apos;s name, or the same room label (e.g. &quot;Room 1&quot;) for
-                        everyone sharing.
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Input
-                          placeholder="Room type"
-                          value={traveller.roomType}
-                          onChange={(e) => updateTraveller(traveller.key, { roomType: e.target.value })}
-                          className="sm:col-span-2"
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent>Shown on the Worksheet PDF</TooltipContent>
-                    </Tooltip>
+                    {paxGroups.length > 0 ? (
+                      // On a booking split into suites the guest picks their suite instead; the
+                      // hidden Room with / Room type values are kept as they are.
+                      <div className="col-span-2 sm:col-span-2">
+                        <Select
+                          value={traveller.paxGroupId ?? NOT_PLACED}
+                          onValueChange={(value) =>
+                            updateTraveller(traveller.key, { paxGroupId: value === NOT_PLACED ? null : value })
+                          }
+                        >
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <SelectTrigger
+                                className="w-full"
+                                aria-label={guestName ? `Suite for ${guestName}` : `Suite for guest ${travellerIndex + 1}`}
+                              >
+                                {/* The trigger leaves the "2 of 2 placed" count to the open list, where it fits. */}
+                                <SelectValue placeholder="Not placed yet">
+                                  {placedSuite
+                                    ? `Suite ${placedSuite.position} · ${shortSuiteLabel(placedSuite)}`
+                                    : "Not placed yet"}
+                                </SelectValue>
+                              </SelectTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs">
+                              Groups this guest under their suite in the guest details email, on the invoice and on
+                              the voucher.
+                            </TooltipContent>
+                          </Tooltip>
+                          <SelectContent>
+                            <SelectItem value={NOT_PLACED}>Not placed yet</SelectItem>
+                            {paxGroups.map((group) => (
+                              <SelectItem key={group.id} value={group.id}>
+                                Suite {group.position} · {shortSuiteLabel(group)} · {placedByGroup.get(group.id) ?? 0} of{" "}
+                                {group.adults + group.children + group.infants} placed
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Input
+                              placeholder="Room with"
+                              value={traveller.roomWith}
+                              onChange={(e) => updateTraveller(traveller.key, { roomWith: e.target.value })}
+                              className="sm:col-span-2"
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs">
+                            Groups guests one line per room on the Travel Voucher, and shows on the Worksheet PDF.
+                            Enter the room-mate&apos;s name, or the same room label (e.g. &quot;Room 1&quot;) for
+                            everyone sharing.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Input
+                              placeholder="Room type"
+                              value={traveller.roomType}
+                              onChange={(e) => updateTraveller(traveller.key, { roomType: e.target.value })}
+                              className="sm:col-span-2"
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent>Shown on the Worksheet PDF</TooltipContent>
+                        </Tooltip>
+                      </>
+                    )}
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
+                      className="col-span-2 justify-self-end sm:col-span-1 sm:justify-self-auto"
                       onClick={() => removeTraveller(traveller.key)}
                       aria-label="Remove guest"
                     >
@@ -978,8 +1114,8 @@ export function JobReservationTab({
                   ) : null}
                   {traveller.isPrimary ? (
                     <div className="rounded-md border bg-muted/20 p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs font-medium">Billing address</Label>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label className="whitespace-nowrap text-xs font-medium">Billing address</Label>
                         <Button
                           type="button"
                           variant="outline"

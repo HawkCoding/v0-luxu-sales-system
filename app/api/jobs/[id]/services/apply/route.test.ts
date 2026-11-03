@@ -397,6 +397,68 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     )
   })
 
+  it("passes pax groups, each unit's groups and its rate splits through to the pricing engine", async () => {
+    const groupOne = "61616161-6161-4616-8616-616161616161"
+    const groupTwo = "62626262-6262-4626-8626-626262626262"
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      paxGroups: [
+        { id: groupOne, position: 1, label: "Deluxe Suite 1" },
+        { id: groupTwo, position: 2, label: "Deluxe Suite 2" },
+      ],
+      selections: [
+        {
+          legId: TRAIN_SERVICE_ID,
+          selected: true,
+          units: [
+            {
+              suiteTypeId: TRAIN_SUITE_ID,
+              adultCount: 1,
+              paxGroupIds: [groupOne],
+              // A split at the unit's own rate moves nobody, so this still prices as one rate.
+              rateSplits: [{ rateTypeId: RATE_TYPE_DEFAULT_ID, adultCount: 1 }],
+            },
+            { suiteTypeId: TRAIN_SUITE_ID, adultCount: 1, paxGroupIds: [groupTwo] },
+          ],
+        },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    const trainLine = payload.lineItems.find(
+      (line: { pricingSnapshot?: { legId?: string } }) => line.pricingSnapshot?.legId === TRAIN_SERVICE_ID,
+    )
+    expect(trainLine.pricingSnapshot.paxGroups).toEqual([
+      { id: groupOne, position: 1, label: "Deluxe Suite 1" },
+      { id: groupTwo, position: 2, label: "Deluxe Suite 2" },
+    ])
+    expect(
+      trainLine.pricingSnapshot.unitRefs.map((ref: { paxGroupIds?: string[] }) => ref.paxGroupIds),
+    ).toEqual([[groupOne], [groupTwo]])
+  })
+
+  it("400s a unit pax group that isn't a uuid, or a split with a negative count", async () => {
+    for (const unit of [
+      { suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, paxGroupIds: ["suite-1"] },
+      {
+        suiteTypeId: TRAIN_SUITE_ID,
+        adultCount: 2,
+        rateSplits: [{ rateTypeId: RATE_TYPE_DEFAULT_ID, adultCount: -1 }],
+      },
+    ]) {
+      const response = await postApply({
+        jobId: JOB_ID,
+        quoteId: QUOTE_ID,
+        travelDate: "2026-06-01",
+        selections: [{ legId: TRAIN_SERVICE_ID, selected: true, units: [unit] }],
+      })
+      expect(response.status).toBe(400)
+    }
+  })
+
   it("normalises a legacy priceCurrency instead of 400ing the whole request", async () => {
     // booking_services.price_currency is free text with no CHECK constraint — a pre-enum row
     // (or a lowercase code) must not block every other leg's pricing.

@@ -155,4 +155,34 @@ describe("PATCH /api/rate-types/[id]", () => {
     expect(response.status).toBe(200)
     expect(observed!.archived_at).toBeNull()
   })
+
+  it.each([
+    ["SA", "SA"],
+    ["  (TW) ", "TW"],
+    ["", null],
+    [null, null],
+  ])("stores the short label %j as %j and returns it", async (typed, stored) => {
+    let observed: Record<string, unknown> | null = null
+    sessionMocks.from.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "rate_types") return rateTypesQuery((row) => { observed = row })
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await patchRequest({ shortLabel: typed })
+    expect(response.status).toBe(200)
+    expect(observed!.short_label).toBe(stored)
+    expect((await response.json()).shortLabel).toBe(stored)
+  })
+
+  it("refuses a short label longer than a tag", async () => {
+    sessionMocks.from.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "rate_types") return rateTypesQuery()
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await patchRequest({ shortLabel: "South African resident rate" })
+    expect(response.status).toBe(400)
+  })
 })

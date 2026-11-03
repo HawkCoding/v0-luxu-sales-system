@@ -600,3 +600,80 @@ describe("voucherProviderContactLine", () => {
     },
   )
 })
+
+describe("voucherRowsForBlock on a booking split into pax groups", () => {
+  const make = (overrides: Partial<VoucherServiceBlock>): VoucherServiceBlock => ({
+    serviceType: "train",
+    title: "Rovos Rail",
+    contactDetails: {},
+    displayOrder: 0,
+    serviceData: {},
+    ...overrides,
+  })
+
+  it("counts each type when a train holds more than one, keeping QTY as the total", () => {
+    const rows = voucherRowsForBlock(
+      make({
+        serviceData: {
+          suiteType: "Twin Deluxe Suite, Double Deluxe Suite",
+          numberOfSuites: 6,
+          invoiceSuiteCounts: [
+            { label: "Twin Deluxe Suite", count: 5 },
+            { label: "Double Deluxe Suite", count: 1 },
+          ],
+        },
+      }),
+    )
+    expect(rows.find((row) => row.label === "Suite Type")?.cells).toEqual([
+      { label: "Suite Type", value: "5 × Twin Deluxe Suite, 1 × Double Deluxe Suite", span: 2 },
+      { label: "Qty", value: 6 },
+    ])
+  })
+
+  it("keeps a single type's plain name", () => {
+    const rows = voucherRowsForBlock(
+      make({
+        serviceData: {
+          suiteType: "Twin bedded Deluxe Suite with a shower",
+          numberOfSuites: 2,
+          invoiceSuiteCounts: [{ label: "Twin Deluxe Suite", count: 2 }],
+        },
+      }),
+    )
+    expect(rows.find((row) => row.label === "Suite Type")?.cells?.[0].value).toBe("Twin bedded Deluxe Suite with a shower")
+  })
+
+  it("counts each room type on a hotel", () => {
+    const rows = voucherRowsForBlock(
+      make({
+        serviceType: "hotel",
+        serviceData: {
+          roomType: "Classic Room, Family Apartment",
+          numberOfSuites: 3,
+          itinerarySuiteCounts: [
+            { label: "Classic Room", count: 2 },
+            { label: "Family Apartment", count: 1 },
+          ],
+        },
+      }),
+    )
+    expect(rows.find((row) => row.label === "Room Type")?.cells?.[0].value).toBe("2 × Classic Room, 1 × Family Apartment")
+  })
+
+  it("names whose transfer it is and counts them from their suites", () => {
+    const rows = voucherRowsForBlock(
+      make({
+        serviceType: "transfer",
+        serviceData: {
+          passengerCount: 10,
+          guestBreakdown: { adults: 10, children: 0, infants: 0 },
+          pickup: "Hotel",
+          paxGroupGuests: { lines: ["Double Deluxe Suite 6 – Mr A and Mrs B"], adults: 2, children: 0, infants: 0 },
+        },
+      }),
+    )
+    expect(rows.find((row) => row.label === "No of Guests")?.value).toBe("2 Adults")
+    expect(rows.find((row) => row.label === "Guests")?.value).toBe("Double Deluxe Suite 6 – Mr A and Mrs B")
+    expect(rows.find((row) => row.label === "Guests")?.cells).toBeUndefined()
+  })
+})

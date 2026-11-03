@@ -4,13 +4,91 @@ import {
   buildDaysLabel,
   buildDeparture,
   buildInvoiceItems,
+  collapseRepeatedInvoiceItems,
   invoiceItemSchedule,
   invoiceJourneyHeading,
+  numberedGuestCells,
   resolveDurationNights,
   selectPrimaryBlocks,
 } from "@/lib/invoices/build-invoice-view"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { PricingSnapshot } from "@/lib/types"
+import { carmenQuoteLines, carmenServiceBlocks } from "@/lib/pax-groups/carmen-sample.fixtures"
+
+describe("invoice lines and guests on a booking split into pax groups", () => {
+  it("tags a description line whose service only some suites take", () => {
+    const items = buildInvoiceItems(carmenQuoteLines(), carmenServiceBlocks())
+    const tagged = items.filter((item) => item.description.endsWith("only)"))
+
+    expect(tagged.map((item) => item.description)).toEqual([
+      "Transfer One&Only Cape Town to Cape Town International Airport (Suite 6 only)",
+    ])
+  })
+
+  it("names the groups with the primary product's noun", () => {
+    const items = buildInvoiceItems(carmenQuoteLines(), carmenServiceBlocks(), [], "Cabin")
+    expect(items.some((item) => item.description.endsWith("(Cabin 6 only)"))).toBe(true)
+  })
+
+  it("collapses rows that print alike when the invoice prints per-suite prices", () => {
+    const all = buildInvoiceItems(carmenQuoteLines(), carmenServiceBlocks())
+    const collapsed = buildInvoiceItems(carmenQuoteLines(), carmenServiceBlocks(), [], "Suite", true)
+    const key = (item: { date?: string | null; time?: string | null; description: string }) =>
+      [item.date, item.time, item.description.replace(/\s\(Child\)/g, "")].join("|")
+
+    expect(collapsed.length).toBeLessThan(all.length)
+    // One row per date, time and service, in first-seen order, with no "(Child)" left on a merged row.
+    expect(collapsed.map(key)).toEqual([...new Set(all.map(key))])
+    expect(collapsed.filter((item) => item.description.includes("(Child)"))).toEqual([])
+    expect(buildInvoiceItems(carmenQuoteLines(), carmenServiceBlocks(), [], "Suite", false)).toEqual(all)
+  })
+
+  it("keeps rows that differ in date, time or service, and a lone child fare's marker", () => {
+    const row = (description: string, date: string | null = "2026-08-11", time: string | null = "09:00") => ({
+      pax: 1,
+      description,
+      unitPrice: 0,
+      total: 0,
+      date,
+      time,
+    })
+    expect(
+      collapseRepeatedInvoiceItems([
+        row("Rovos Rail — Pretoria → Cape Town"),
+        row("Rovos Rail — Pretoria → Cape Town (Child)"),
+        row("Rovos Rail — Pretoria → Cape Town"),
+        row("Commodore Hotel", "2026-08-14", null),
+        row("Commodore Hotel", "2026-08-15", null),
+        row("Excursion (Child)", "2026-08-16", null),
+      ]).map((item) => [item.description, item.date]),
+    ).toEqual([
+      ["Rovos Rail — Pretoria → Cape Town", "2026-08-11"],
+      ["Commodore Hotel", "2026-08-14"],
+      ["Commodore Hotel", "2026-08-15"],
+      ["Excursion (Child)", "2026-08-16"],
+    ])
+  })
+
+  it("numbers the guest grid by group, the unplaced last as Guest:", () => {
+    const travellers = [
+      { name: "Mr B", pax_group_id: "g2" },
+      { name: "Mr Late", pax_group_id: null },
+      { name: "Mrs A", pax_group_id: "g1" },
+      { name: "Mrs B", pax_group_id: "g2" },
+    ]
+    const groups = [
+      { id: "g1", position: 1 },
+      { id: "g2", position: 2 },
+    ]
+    expect(numberedGuestCells(travellers, groups, (traveller) => traveller.name)).toEqual([
+      { label: "Guest 1.1:", name: "Mrs A" },
+      { label: "Guest 2.1:", name: "Mr B" },
+      { label: "Guest 2.2:", name: "Mrs B" },
+      { label: "Guest:", name: "Mr Late" },
+    ])
+    expect(numberedGuestCells([{ name: "Mr A", pax_group_id: null }], groups, (traveller) => traveller.name)).toBeNull()
+  })
+})
 
 function trainBlock(durationDays: number | null, displayOrder = 0): VoucherServiceBlock {
   return {

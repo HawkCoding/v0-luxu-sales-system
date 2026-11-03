@@ -30,7 +30,9 @@ import {
   DISCOUNT_LABEL,
   formatAgentCommission,
   formatDiscount,
+  formatQuoteGrandTotalLabel,
 } from "@/lib/quotes/quote-presentation"
+import { formatPaxGroupPartLines, type PaxGroupPricing } from "@/lib/quotes/pax-group-pricing"
 import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 /** The invoice recipient. A full tax invoice must name and address them. */
@@ -112,6 +114,19 @@ export interface InvoiceTotals {
    *  paying children (perChild). */
   perAdult?: number | null
   perChild?: number | null
+  /** One line per pax group, adding up to the gross subtotalInclVat (resolvePaxGroupPricing). When
+   *  it has lines it replaces the perAdult / perChild rows; null/absent prints those as before. */
+  paxGroupPricing?: PaxGroupPricing | null
+  /** What a pax group is called ("Suite", "Room", "Cabin"; see paxGroupNoun) — heads the group lines
+   *  "Price per suite". Defaults to "Suite". */
+  paxGroupNoun?: string
+}
+
+/** One guest cell of the box's guest grid as the caller numbered it: "Guest 2.1:" for a guest placed
+ *  in pax group 2, "Guest:" for one not yet placed. */
+export interface InvoiceGuestCell {
+  label: string
+  name: string
 }
 
 /** The figure the "Total incl. VAT:" row prints: net of any printed deduction, else the subtotal. */
@@ -131,6 +146,9 @@ export interface InvoicePdfData {
   consultant?: string | null
   /** Traveller names printed as Guest 1 / Guest 2. Falls back to customerName. */
   guestNames?: string[]
+  /** The guests numbered by pax group ("Guest 2.1:"), in group then traveller order. When present
+   *  and non-empty it replaces the Guest 1 / Guest 2 numbering of guestNames. */
+  numberedGuests?: InvoiceGuestCell[] | null
   billing?: InvoiceBillingParty
   departure?: InvoiceDeparture | null
   items: InvoiceItem[]
@@ -174,15 +192,25 @@ function orDash(value: string | null | undefined): string {
   return value?.trim() || EMPTY
 }
 
-interface GuestCell {
-  label: string
-  name: string
+type GuestCell = InvoiceGuestCell
+
+/** Cells two to a row; an odd last cell gets an empty right one. */
+function pairCells(cells: GuestCell[]): Array<[GuestCell, GuestCell | null]> {
+  const rows: Array<[GuestCell, GuestCell | null]> = []
+  for (let index = 0; index < cells.length; index += 2) rows.push([cells[index], cells[index + 1] ?? null])
+  return rows
 }
 
 /** The guests as box rows, two to a row: Guest 1 | Guest 2, Guest 3 | Guest 4, … Guest 1 falls back
  *  to the customer and Guest 2 always prints (a dash when missing); an odd last guest gets an empty
- *  right cell. */
-function guestRows(guestNames: string[] | undefined, customerName: string): Array<[GuestCell, GuestCell | null]> {
+ *  right cell. Guests numbered by pax group ("Guest 2.1:") print as numbered, still two to a row. */
+function guestRows(
+  guestNames: string[] | undefined,
+  customerName: string,
+  numberedGuests?: InvoiceGuestCell[] | null,
+): Array<[GuestCell, GuestCell | null]> {
+  const numbered = (numberedGuests ?? []).filter((cell) => cell.name.trim())
+  if (numbered.length > 0) return pairCells(numbered.map((cell) => ({ label: cell.label, name: cell.name.trim() })))
   const guests = (guestNames ?? []).map((name) => name.trim()).filter(Boolean)
   const names = [guests[0] ?? customerName ?? "Valued Guest", guests[1] ?? EMPTY, ...guests.slice(2)]
   const rows: Array<[GuestCell, GuestCell | null]> = []
@@ -253,6 +281,10 @@ const BOX_RIGHT_COLUMN = 267.6
 const BOX_RIGHT_LABEL = 55.4
 /** 8pt rows sit on a 10.65pt pitch, as the template sets them. */
 const SMALL_LINE = 10.65 / 8
+/** How far a pax group's wrapped sentence lines sit in from its first line. */
+const GROUP_HANGING_INDENT = 10
+/** Fits "R1 234 567,00" at 9pt Manrope. */
+const GROUP_VALUE_WIDTH = 66
 
 const styles = StyleSheet.create({
   page: {
@@ -382,6 +414,30 @@ const styles = StyleSheet.create({
   },
   totalsLabel: { fontSize: 10, width: 152 },
   totalsValue: { fontSize: 10, flex: 1, textAlign: "right" },
+  // Pax-group lines under a "Price per suite" heading: each suite's name on its own line with the
+  // suite's subtotal level with it, then one line per part indented under it. A point smaller than
+  // the ladder so a six-suite booking stays a compact block above Sub Total.
+  groupBlock: { rowGap: 4.5, paddingBottom: 1 },
+  groupHeading: { ...BOLD, fontSize: 10, paddingLeft: 6.2 },
+  groupRow: { paddingLeft: 6.2, paddingRight: 4.9 },
+  groupHeadRow: { flexDirection: "row" },
+  groupName: {
+    flex: 1,
+    fontSize: 9,
+    lineHeight: 1.3,
+    paddingRight: 8,
+    paddingLeft: GROUP_HANGING_INDENT,
+    textIndent: -GROUP_HANGING_INDENT,
+  },
+  // A part line sits 8pt in under its suite's name, using the column's full width below the subtotal
+  // (so "2 Adults x R44 495,00 per person (SA)" stays whole), and hangs if it still wraps.
+  groupPart: {
+    fontSize: 9,
+    lineHeight: 1.3,
+    paddingLeft: 8 + GROUP_HANGING_INDENT,
+    textIndent: -GROUP_HANGING_INDENT,
+  },
+  groupValue: { fontSize: 9, lineHeight: 1.3, width: GROUP_VALUE_WIDTH, textAlign: "right" },
   outstandingRow: {
     flexDirection: "row",
     paddingLeft: 6.2,
@@ -516,12 +572,32 @@ function TotalsRow({ label, value, bold = false }: { label: string; value: strin
   )
 }
 
+/** One pax group in the totals column: its name on the first line with the suite's subtotal level
+ *  with it, then one line per part ("1 Adult x R41 939,17 (SA)") indented under the name — so a
+ *  part never breaks mid-phrase in the narrow column. */
+function GroupTotalsRow({ label, parts, value }: { label: string; parts: string[]; value: string }) {
+  return (
+    <View style={styles.groupRow} wrap={false}>
+      <View style={styles.groupHeadRow}>
+        <Text style={styles.groupName}>{label}</Text>
+        <Text style={styles.groupValue}>{value}</Text>
+      </View>
+      {parts.map((part, index) => (
+        <Text key={index} style={styles.groupPart}>
+          {part}
+        </Text>
+      ))}
+    </View>
+  )
+}
+
 export function InvoiceDocument({
   invoiceNumber,
   customerName,
   issueDate,
   consultant,
   guestNames,
+  numberedGuests,
   billing,
   departure,
   items,
@@ -545,7 +621,8 @@ export function InvoiceDocument({
   const showBrand = brandPosition !== "hidden"
 
   const bankingRows = BANKING_ROWS.filter(({ key }) => banking[key])
-  const guests = guestRows(guestNames, customerName)
+  const guests = guestRows(guestNames, customerName, numberedGuests)
+  const groupLines = totals.paxGroupPricing?.lines ?? []
   const addressLines = billing?.addressLines?.filter((line) => line.trim()) ?? []
   const layout = billingLayout(guests.length, addressLines.length)
   const companyLeft = layout !== "address-alone"
@@ -686,13 +763,33 @@ export function InvoiceDocument({
         {/* VAT-inclusive amounts only — the sales team's invoices never break out VAT. */}
         <View style={styles.totals} wrap={false}>
           <View style={styles.totalsGroup}>
-            {/* The per-person rows head the ladder, above the Sub Total / Total incl. VAT rows. */}
-            {totals.perAdult != null ? (
-              <TotalsRow label={withColon("Total per Adult")} value={money(totals.perAdult)} />
-            ) : null}
-            {totals.perChild != null ? (
-              <TotalsRow label={withColon("Total per Child")} value={money(totals.perChild)} />
-            ) : null}
+            {/* The per-person rows head the ladder, above the Sub Total / Total incl. VAT rows. On a
+                booking split into pax groups, one line per suite takes their place, adding up to
+                the gross Sub Total (the Total incl. VAT when nothing is deducted). */}
+            {groupLines.length > 0 ? (
+              <>
+                <Text style={styles.groupHeading}>Price per {(totals.paxGroupNoun?.trim() || "Suite").toLowerCase()}</Text>
+                <View style={styles.groupBlock}>
+                  {groupLines.map((line) => (
+                    <GroupTotalsRow
+                      key={line.groupId}
+                      label={line.label}
+                      parts={formatPaxGroupPartLines(line, money)}
+                      value={money(line.subtotal)}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : (
+              <>
+                {totals.perAdult != null ? (
+                  <TotalsRow label={withColon("Total per Adult")} value={money(totals.perAdult)} />
+                ) : null}
+                {totals.perChild != null ? (
+                  <TotalsRow label={withColon("Total per Child")} value={money(totals.perChild)} />
+                ) : null}
+              </>
+            )}
             {hasDeduction ? (
               <TotalsRow label="Sub Total incl. VAT:" value={money(totals.subtotalInclVat)} bold />
             ) : null}
@@ -705,7 +802,15 @@ export function InvoiceDocument({
             {hasVisibleDiscount ? (
               <TotalsRow label={withColon(DISCOUNT_LABEL)} value={formatDiscount(totals.discount ?? 0, money)} />
             ) : null}
-            <TotalsRow label="Total incl. VAT:" value={money(printedTotalInclVat(totals))} bold />
+            <TotalsRow
+              label={
+                groupLines.length > 0 && totals.paxGroupPricing
+                  ? withColon(formatQuoteGrandTotalLabel(totals.paxGroupPricing))
+                  : "Total incl. VAT:"
+              }
+              value={money(printedTotalInclVat(totals))}
+              bold
+            />
           </View>
           <View style={styles.paymentsGroup}>
             {hasDeposit ? (

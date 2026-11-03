@@ -18,13 +18,22 @@ import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { buildBankingDetailsBlock, buildPaymentReference } from "@/lib/invoices/banking-details-block"
-import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
+import { buildGuestInfoBlock, childAgesForTravellers } from "@/lib/templates/guest-info-block"
+import {
+  buildAvailabilityHtml,
+  buildAvailabilitySentence,
+  buildGuestHeadings,
+  loadBookingPaxGroups,
+  type BookingPaxGroupsView,
+} from "@/lib/pax-groups/booking-pax-groups"
+import { paxGroupNoun, type PaxGroupPricing } from "@/lib/quotes/pax-group-pricing"
+import { blockScopeTagger, resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { loadCountryAliasMap, loadCountryCodeMap, resolveCountryCode } from "@/lib/countries"
 import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
 import { buildRoomTokens, buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { emptyStayTokens, loadStayTokens } from "@/lib/templates/stay-tokens"
-import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
+import { buildPaxGroupPricingRows, buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { formatMoney, normaliseCurrency } from "@/lib/money"
 import {
   deriveFlightCapPerPerson,
@@ -128,6 +137,7 @@ interface BookingRow {
   trip_end_date: string | null
   no_of_adults: number | null
   no_of_children: number | null
+  child_ages?: number[] | null
   duration_nights: number | null
   route_reversed: boolean | null
   primary_supplier_id: string | null
@@ -153,6 +163,10 @@ interface QuoteRow {
   quote_number: string | null
   validity_until: string | null
   total: number | null
+  subtotal?: number | null
+  agent_commission?: number | null
+  discount_amount?: number | null
+  discount_visible?: boolean | null
   currency: string | null
   created_at: string | null
   status: string | null
@@ -194,6 +208,7 @@ interface TravellerRow {
   residence: string | null
   is_child: boolean
   sort_order: number | null
+  pax_group_id?: string | null
 }
 
 export async function resolveSharedEmailTokens(
@@ -211,12 +226,13 @@ export async function resolveSharedEmailTokens(
     suiteSelections,
     paymentMethod,
     countryLookup,
+    paxGroups,
   ] = await Promise.all([
       safeQuery<BookingRow>(() =>
         supabase
           .from("bookings")
           .select(
-            "id, booking_number, customer_invoice_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, duration_nights, route_reversed, primary_supplier_id, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
+            "id, booking_number, customer_invoice_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, child_ages, duration_nights, route_reversed, primary_supplier_id, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
           )
           .eq("id", bookingId)
           .maybeSingle(),
@@ -225,7 +241,7 @@ export async function resolveSharedEmailTokens(
         supabase
           .from("quotes")
           .select(
-            "id, quote_number, validity_until, total, currency, created_at, status, journey_class, rate_audience, show_train_only_note",
+            "id, quote_number, validity_until, subtotal, total, agent_commission, discount_amount, discount_visible, currency, created_at, status, journey_class, rate_audience, show_train_only_note",
           )
           .eq("booking_id", bookingId),
       ),
@@ -243,7 +259,7 @@ export async function resolveSharedEmailTokens(
       safeQuery<TravellerRow[]>(() =>
         supabase
           .from("travellers")
-          .select("prefix, first_name, last_name, id_passport, date_of_birth, residence, is_child, sort_order")
+          .select("prefix, first_name, last_name, id_passport, date_of_birth, residence, is_child, sort_order, pax_group_id")
           .eq("booking_id", bookingId),
       ),
       safely(() => loadSuiteSelections(supabase, bookingId), []),
@@ -261,6 +277,9 @@ export async function resolveSharedEmailTokens(
         },
         { aliasMap: new Map<string, string>(), codeMap: new Map<string, string>() },
       ),
+      // Null on a booking not split into pax groups (and on any failure): the guest block stays flat
+      // and {{availability}} / {{paxGroupPricing}} resolve empty.
+      safely<BookingPaxGroupsView | null>(() => loadBookingPaxGroups(supabase, bookingId), null),
     ])
 
   const customer = firstRecord(booking?.customer)
@@ -283,13 +302,18 @@ export async function resolveSharedEmailTokens(
   const departureDate = formatDisplayDateLong(booking?.departure_date ?? null)
 
   const guestTravellers = (travellers ?? []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  // Children are guests too: the block used to drop them here while the deposit route's own copy
+  // listed them, so the same booking's guest list differed by which email carried it.
+  const childAges = childAgesForTravellers(guestTravellers, booking?.child_ages ?? null, booking?.departure_date ?? null)
   const guests = guestTravellers
-    .filter((t) => !t.is_child)
-    .map((t) => ({
+    .map((t, index) => ({
       name: [t.prefix, t.first_name, t.last_name].filter(Boolean).join(" "),
       dateOfBirth: t.date_of_birth,
       countryCode: resolveCountryCode(t.residence, countryLookup.aliasMap, countryLookup.codeMap),
       idNumber: t.id_passport,
+      paxGroupId: t.pax_group_id ?? null,
+      isChild: t.is_child,
+      childAge: childAges[index],
     }))
     .filter((guest) => guest.name.length > 0)
 
@@ -299,6 +323,7 @@ export async function resolveSharedEmailTokens(
     guests,
     adults: booking?.no_of_adults ?? 0,
     children: booking?.no_of_children ?? 0,
+    paxGroups: paxGroups ? { groups: paxGroups.groups, headings: buildGuestHeadings(paxGroups) } : null,
   })
 
   // Resolved after the quote block below sets primarySupplierKind, so {{suiteType}} names what the
@@ -322,6 +347,8 @@ export async function resolveSharedEmailTokens(
   const quoteCurrency = normaliseCurrency(latestQuote?.currency)
 
   let quoteSummaryTable = PLACEHOLDER
+  // {{paxGroupPricing}}: the quote panel's per-suite lines on their own; empty without pax groups.
+  let paxGroupPricingBlock = ""
   let rateLabel: string | null = null
   let trainOnlyNote: string | null = null
   let trainDepartureDate: string | null = null
@@ -335,7 +362,7 @@ export async function resolveSharedEmailTokens(
     try {
       const { data: lineItems } = await supabase
         .from("quote_line_items")
-        .select("unit_price, pricing_snapshot")
+        .select("unit_price, total, pricing_snapshot")
         .eq("quote_id", latestQuote.id)
         // Ordered because the primary-supplier fallbacks are "first leg in array order".
         .order("sort_order", { ascending: true })
@@ -386,6 +413,26 @@ export async function resolveSharedEmailTokens(
       )
       const documentText = await getDocumentTextSettings(supabase)
 
+      // Per-suite lines on the gross subtotal, as the quote PDF prints them. They only reconcile
+      // with a panel that shows that subtotal and what comes off it, so a grouped quote's panel also
+      // carries its subtotal and deductions (as the quote email preview's always has); a quote
+      // without groups builds the panel exactly as before.
+      const paxGroupPricing: PaxGroupPricing | null = await resolvePaxGroupPricing(supabase, {
+        lines: lineItems ?? [],
+        target: Number(latestQuote.subtotal ?? latestQuote.total ?? 0),
+      })
+      const deductions = paxGroupPricing
+        ? {
+            subtotal: latestQuote.subtotal ?? undefined,
+            agentCommission: Number(latestQuote.agent_commission ?? 0),
+            discount: Number(latestQuote.discount_amount ?? 0),
+            discountVisible: latestQuote.discount_visible ?? true,
+          }
+        : {}
+      if (paxGroupPricing) {
+        paxGroupPricingBlock = buildPaxGroupPricingRows(paxGroupPricing, quoteCurrency, { standalone: true })
+      }
+
       quoteSummaryTable = buildQuoteSummaryBlock({
         quoteNumber: latestQuote.quote_number ?? "",
         quoteDate: latestQuote.created_at?.slice(0, 10) ?? "",
@@ -395,6 +442,9 @@ export async function resolveSharedEmailTokens(
         adults: booking?.no_of_adults ?? 0,
         children: booking?.no_of_children ?? 0,
         total: latestQuote.total ?? 0,
+        ...deductions,
+        paxGroupPricing,
+        itineraryScopeTag: blockScopeTagger(lineItems ?? [], paxGroupNoun(primarySupplierKind)),
         currency: quoteCurrency,
         itineraryBlocks,
         packageIncludesHeading: documentText.quote_doc_includes_heading,
@@ -529,6 +579,9 @@ export async function resolveSharedEmailTokens(
     ),
     lastSentDate: orPlaceholder(lastQuoteSentAt ? formatDisplayDateLong(lastQuoteSentAt.sent_at) : null),
     rateLabel: orPlaceholder(rateLabel),
+    // Empty (never the placeholder) without pax groups: Carmen drops these into her own paragraphs,
+    // which must read cleanly on a booking that isn't split into suites.
+    availability: paxGroups ? buildAvailabilitySentence(paxGroups) : "",
   }
 
   const blocks: Record<string, string> = {
@@ -538,6 +591,10 @@ export async function resolveSharedEmailTokens(
     guestInfo,
     quoteSummaryTable,
     trainOnlyNote: trainOnlyNote ?? "",
+    paxGroupPricing: paxGroupPricingBlock,
+    // The body's {{availability}}: the same sentence with its route, date and suites in bold (a
+    // block outranks the plain token in the body; see renderTemplate).
+    availability: paxGroups ? buildAvailabilityHtml(paxGroups) : "",
   }
 
   return { tokens, blocks, primarySupplierId, primarySupplierKind }

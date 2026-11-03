@@ -1,10 +1,12 @@
 import type {
+  BookingPaxGroup,
   BookingTransportRequest,
   CommissionKind,
   PackageDetail,
   PackageLeg,
   ServiceDateAnchor,
   SupplierKind,
+  UnitRateSplit,
 } from "@/lib/types"
 import { isCoreBookingLeg, isTypePricedSupplier, legStatesOwnSpan, SUPPLIER_VOCABULARY } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
@@ -30,6 +32,7 @@ import type { AccommodationPricingBasis } from "@/lib/pricing/accommodation-basi
 import { resolveAccommodationPricingBasis } from "@/lib/pricing/accommodation-basis"
 import { effectiveUnitRateTypeId, supportsUnitRateType } from "@/lib/packages/unit-rate-type"
 import { describeEmptyUnit, findEmptyUnitIndexes, PASSENGER_WARN_SUPPLIER_KINDS } from "@/lib/packages/unit-headcount"
+import { parseUnitRateSplits, supportsRateSplits } from "@/lib/packages/pax-groups"
 
 /**
  * Pure state model for Build Booking's configure step (components/build-booking-dialog.tsx --
@@ -113,6 +116,14 @@ export interface SuiteUnitState {
    *  be sold at different rate levels. Null falls back to the leg's rate type. Airlines keep one
    *  value per leg: their fares are typed, not read off a rate card. */
   rateTypeId: string | null
+  /** The pax groups this unit serves (lib/packages/pax-groups.ts). On the primary leg in group
+   *  mode it is exactly [its own group]; anywhere else [] = shared by every group. Always [] on a
+   *  booking without groups. */
+  paxGroupIds: string[]
+  /** Train, tour and cruise rate-card legs only (supportsRateSplits): guests of this unit who
+   *  price at another rate type than the unit's own -- one SA resident and one international guest
+   *  sharing a suite. Empty = everyone at the unit's rate. */
+  rateSplits: UnitRateSplit[]
 }
 
 export interface SuiteLegState {
@@ -219,6 +230,10 @@ export interface SavedSelectionUnitRow {
   fare_override_infant?: number | null
   fare_override_set_at?: string | null
   rate_type_id?: string | null
+  /** Absent on a catalogue selection row and on rows read before pax groups existed. */
+  pax_group_ids?: string[] | null
+  /** jsonb, parsed defensively (parseUnitRateSplits). Absent like pax_group_ids. */
+  rate_splits?: unknown
 }
 
 export interface SavedSelectionRow {
@@ -283,6 +298,9 @@ export interface SavedPackageState {
    *  confirmed (POST /api/jobs/[id]/services/confirm). */
   servicesConfirmedAt?: string | null
   servicesConfirmedByName?: string | null
+  /** The booking's pax groups (booking_pax_groups), in position order. Empty or absent = none;
+   *  absent on a catalogue selection. */
+  paxGroups?: BookingPaxGroup[]
 }
 
 let draftCounter = 0
@@ -311,6 +329,8 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
     fareOverrideInfant: null,
     fareOverrideSetAt: null,
     rateTypeId: null,
+    paxGroupIds: [],
+    rateSplits: [],
   }
 }
 
@@ -365,6 +385,8 @@ export function createDraftTransportRequest(
     infantCount: isPerPerson ? totals?.infantCount ?? null : null,
     priceOverrideChild: null,
     priceOverrideInfant: null,
+    // A new trip serves every group until the consultant narrows it.
+    paxGroupIds: [],
     sortOrder: 0,
     createdAt: now,
     updatedAt: now,
@@ -1021,6 +1043,10 @@ export function hydrateFromSaved(
         fareOverrideInfant: unit.fare_override_infant ?? null,
         fareOverrideSetAt: unit.fare_override_set_at ?? null,
         rateTypeId: unit.rate_type_id ?? null,
+        paxGroupIds: unit.pax_group_ids ?? [],
+        rateSplits: supportsRateSplits(fallback.supplierKind, legById.get(fallback.legId)?.pricingMode)
+          ? parseUnitRateSplits(unit.rate_splits)
+          : [],
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
@@ -1144,8 +1170,17 @@ export interface PackageSelectionsPatchBody {
       /** Train, hotel, cruise and tour legs only (supportsUnitRateType) — the server rejects it on
        *  any other supplier kind. */
       rateTypeId: string | null
+      /** The pax groups this unit serves; [] = every group. Every id must be in `paxGroups` below
+       *  (or in the booking's stored groups when that is omitted). */
+      paxGroupIds: string[]
+      /** Train, tour and cruise rate-card legs only (supportsRateSplits) — the server rejects a
+       *  split on any other leg. Always [] elsewhere. */
+      rateSplits: UnitRateSplit[]
     }>
   }>
+  /** The booking's pax groups in position order, replacing the stored set (positions = index +
+   *  1). [] removes every group. Omitted leaves the stored groups as they are. */
+  paxGroups?: Array<{ id: string; label: string | null }>
 }
 
 /** A unit's train fare overrides as sent to the server: the unit's own values on a train leg, all
@@ -1166,8 +1201,16 @@ function trainFareOverridePayload(
 // save wins rather than 409ing on a row version that moved for reasons the consultant can't see
 // (a restored draft, another quote's dialog, a movement-time edit). The server still enforces the
 // check for any caller that does send a stamp.
-export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelectionsPatchBody {
+//
+// `paxGroups` is the dialog's group list (lib/packages/pax-groups.ts PaxGroupDraft[], in position
+// order). Pass it on every Build Booking save -- [] included, which clears the stored groups;
+// omitting it leaves the stored groups untouched and validates unit group ids against them.
+export function toPackageSelectionsPatch(
+  states: ApplyLegState[],
+  paxGroups?: readonly { id: string; label: string | null }[],
+): PackageSelectionsPatchBody {
   return {
+    ...(paxGroups ? { paxGroups: paxGroups.map((group) => ({ id: group.id, label: group.label })) } : {}),
     selections: states.map((state) => {
       if (state.kind === "transport") {
         return {
@@ -1247,10 +1290,18 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
           ...trainFareOverridePayload(state.supplierKind, unit),
           rateTypeId: supportsUnitRateType(state.supplierKind) ? unit.rateTypeId : null,
+          paxGroupIds: unit.paxGroupIds ?? [],
+          rateSplits: rateSplitsPayload(state.supplierKind, unit),
         })),
       }
     }),
   }
+}
+
+/** A unit's rate splits as sent to the server: its own on a train, tour or cruise leg, [] on any
+ *  other kind (the server refuses a split there). */
+function rateSplitsPayload(supplierKind: SupplierKind, unit: SuiteUnitState): UnitRateSplit[] {
+  return supportsRateSplits(supplierKind) ? unit.rateSplits ?? [] : []
 }
 
 /** The slice of PATCH /api/jobs/[id]/services' reload response adoptSavedServiceRows reads. */
@@ -1318,6 +1369,8 @@ export interface TransportRequestsPutBody {
     infantCount: number | null
     priceOverrideChild: number | null
     priceOverrideInfant: number | null
+    /** The pax groups this trip serves; [] = every group. */
+    paxGroupIds: string[]
     sortOrder: number
   }>
 }
@@ -1366,6 +1419,7 @@ export function toTransportRequestsPut(
       infantCount: request.infantCount,
       priceOverrideChild: request.priceOverrideChild,
       priceOverrideInfant: request.priceOverrideInfant,
+      paxGroupIds: request.paxGroupIds ?? [],
       sortOrder: index,
     })),
   }
@@ -1412,6 +1466,10 @@ export interface ApplyLegSelectionPayload {
     /** Train, hotel, cruise and tour legs only: this unit's own rate type, overriding the leg's
      *  rateTypeId below. */
     rateTypeId?: string | null
+    /** The pax groups this unit serves; [] = every group (lib/packages/pax-groups.ts). */
+    paxGroupIds?: string[]
+    /** Train, tour and cruise rate-card legs only: guests pricing at another rate type. */
+    rateSplits?: UnitRateSplit[]
   }>
   nights?: number
   /** Hotel legs only: the stay's own pricing basis, overriding the property's default. */
@@ -1472,6 +1530,8 @@ export function toApplySelections(
           manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
           ...trainFareOverridePayload(state.supplierKind, unit),
           rateTypeId: supportsUnitRateType(state.supplierKind) ? unit.rateTypeId ?? undefined : undefined,
+          paxGroupIds: unit.paxGroupIds ?? [],
+          rateSplits: rateSplitsPayload(state.supplierKind, unit),
         })),
       nights: legStatesOwnSpan(state.supplierKind)
         ? state.supplierKind === "hotel_property"

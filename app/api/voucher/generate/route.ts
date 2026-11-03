@@ -13,7 +13,14 @@ import {
 import { projectPassengerTotals, resolveSupplierAgeBuckets } from "@/lib/packages/passenger-totals"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness, type ReadinessWarning } from "@/lib/voucher/check-readiness"
-import { guestNameLinesByRoom } from "@/lib/voucher/guest-rooms"
+import {
+  guestNameLinesByPaxGroup,
+  guestNameLinesByRoom,
+  scopeTransferBlocksToPaxGroups,
+  type PaxGroupHeadcount,
+  type PaxGroupRef,
+} from "@/lib/voucher/guest-rooms"
+import { loadBookingPaxGroups } from "@/lib/pax-groups/booking-pax-groups"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -134,6 +141,44 @@ function normalizeTemplate(template: VoucherTemplateRow | null): VoucherTemplate
   return { ...VOUCHER_TEMPLATE_DEFAULTS, ...template }
 }
 
+/** The booking's pax groups (id, position), read only when a traveller is placed in one. Empty when
+ *  nobody is, or on any failure — the guest lines then fall back to the "Room with" arrangement. */
+interface VoucherPaxGroups {
+  /** Named ("Twin Deluxe Suite 1"), in position order; empty without group mode. */
+  groups: PaxGroupRef[]
+  headcounts: PaxGroupHeadcount[]
+  /** booking_transport_requests.pax_group_ids by request id. */
+  requestGroups: Map<string, string[]>
+}
+
+/** The booking's pax groups as the voucher needs them, or none — the voucher then prints as before. */
+async function loadVoucherPaxGroups(
+  supabase: Parameters<typeof buildVoucherServiceBlocks>[0],
+  bookingId: string,
+): Promise<VoucherPaxGroups> {
+  const none: VoucherPaxGroups = { groups: [], headcounts: [], requestGroups: new Map() }
+  try {
+    const view = await loadBookingPaxGroups(supabase, bookingId)
+    if (!view) return none
+    const { data: requests } = await supabase
+      .from("booking_transport_requests")
+      .select("id, pax_group_ids")
+      .eq("booking_id", bookingId)
+    return {
+      groups: view.groups,
+      headcounts: view.primaryUnits.map((unit) => ({
+        groupId: unit.groupId,
+        adults: unit.adults,
+        children: unit.children,
+        infants: unit.infants,
+      })),
+      requestGroups: new Map((requests ?? []).map((request) => [request.id, request.pax_group_ids ?? []])),
+    }
+  } catch {
+    return none
+  }
+}
+
 export async function POST(req: Request) {
   const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
@@ -171,7 +216,7 @@ export async function POST(req: Request) {
       .order("suite_number"),
     supabase
       .from("travellers")
-      .select("prefix, first_name, last_name, is_child, sort_order, room_with")
+      .select("prefix, first_name, last_name, is_child, sort_order, room_with, pax_group_id")
       .eq("booking_id", parsed.data.jobId)
       .order("sort_order"),
     supabase
@@ -334,10 +379,21 @@ export async function POST(req: Request) {
   // captured yet (a stage gate forces it before deposit_requested, long before a voucher exists).
   const voucherReference = clientInvoiceNumber(booking)
 
+  // On a booking split into pax groups, one guest line per suite from the Reservation tab's Suite
+  // pick; otherwise (or with nobody placed) the "Room with" arrangement as before.
+  // A transfer only some suites take names those suites' guests and counts them from their suites.
+  const paxGroups = await loadVoucherPaxGroups(supabase, booking.id)
+  serviceBlocks = scopeTransferBlocksToPaxGroups(serviceBlocks, {
+    requestGroups: paxGroups.requestGroups,
+    groups: paxGroups.groups,
+    headcounts: paxGroups.headcounts,
+    guests: allTravellers,
+  })
+
   const voucherData: VoucherData = {
     voucherNumber: voucherReference,
     guestNames: buildGuestNames(customer, allTravellers),
-    guestNameLines: guestNameLinesByRoom(allTravellers),
+    guestNameLines: guestNameLinesByPaxGroup(allTravellers, paxGroups.groups) ?? guestNameLinesByRoom(allTravellers),
     consultantName: consultant?.name ?? "",
     supplierName: supplier,
     supplierDescription,
@@ -469,6 +525,11 @@ export async function POST(req: Request) {
   if (deleteBlocksError) return safeSupabaseError("voucher:clear-service-blocks", deleteBlocksError)
 
   if (serviceBlocks.length > 0) {
+    // display_order is an integer column, but a leg's second transfer orders at 2.01 so it sorts
+    // inside its leg: stored as the block's rank, or a suite's own transfer fails the whole voucher.
+    const orderRank = new Map(
+      [...serviceBlocks].sort((a, b) => a.displayOrder - b.displayOrder).map((block, rank) => [block, rank]),
+    )
     const blockRows: Database["public"]["Tables"]["voucher_service_blocks"]["Insert"][] = serviceBlocks.map(
       (block) => ({
         voucher_id: voucherId,
@@ -478,7 +539,7 @@ export async function POST(req: Request) {
         supplier_reference: block.supplierReference ?? null,
         contact_details: block.contactDetails as unknown as Json,
         service_data: block.serviceData as unknown as Json,
-        display_order: block.displayOrder,
+        display_order: orderRank.get(block) ?? 0,
       }),
     )
 

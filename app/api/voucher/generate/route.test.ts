@@ -752,6 +752,28 @@ describe("POST /api/voucher/generate", () => {
     expect(orders).toEqual(["1:hotel", "0:train", "2:additional_service"])
   })
 
+  it("stores a leg's second transfer (ordered 2.01) as a whole number, the column's type", async () => {
+    const built = buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      blocks: [
+        { serviceType: "train", title: "Train", displayOrder: 0 },
+        { serviceType: "transfer", title: "Transfer 1", displayOrder: 2 },
+        { serviceType: "transfer", title: "Transfer 2", displayOrder: 2.01 },
+      ],
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    const rows = built.insertedBlocks as Array<{ display_order: number; title: string }>
+    expect(rows.map((row) => [row.title, row.display_order])).toEqual([
+      ["Train", 0],
+      ["Transfer 1", 1],
+      ["Transfer 2", 2],
+    ])
+  })
+
   it("does not write a vouchers row when PDF rendering fails", async () => {
     const built = buildAuth({ stage: "final_paid", invoiceBalance: 0 })
     vi.mocked(renderVoucherPdf).mockRejectedValueOnce(new Error("pdf boom"))

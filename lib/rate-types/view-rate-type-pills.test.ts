@@ -15,6 +15,7 @@ function makeRateType(overrides: Partial<RateType> & { id: string }): RateType {
     isStandard: false,
     audience: null,
     clientLabel: null,
+    shortLabel: null,
     archivedAt: null,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",

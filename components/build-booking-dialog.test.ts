@@ -111,6 +111,8 @@ function unit(overrides: Partial<SuiteUnitState> & { suiteTypeId: string | null 
     fareOverrideChild: null,
     fareOverrideInfant: null,
     rateTypeId: null,
+    paxGroupIds: [],
+    rateSplits: [],
     ...overrides,
   }
 }

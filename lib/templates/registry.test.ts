@@ -75,10 +75,11 @@ describe("template token scoping", () => {
     ])
   })
 
-  it("the shared vocabulary is unchanged", () => {
+  it("the shared vocabulary is unchanged, plus the two pax-group tokens", () => {
     expect(universalNames()).toEqual([
       "adultCount",
       "amountDue",
+      "availability",
       "bankingDetails",
       "childCount",
       "clientSurname",
@@ -96,6 +97,7 @@ describe("template token scoping", () => {
       "jobNumber",
       "lastSentDate",
       "outstandingAmount",
+      "paxGroupPricing",
       "quoteSummaryTable",
       "receivedAmount",
       "supplierName",
@@ -156,13 +158,14 @@ describe("template token scoping", () => {
   /**
    * Block tokens are inserted as raw HTML rather than escaped, so the set of them is a security
    * boundary as much as a presentation one. Frozen so the scoping change cannot quietly widen it.
+   * paxGroupPricing joins it deliberately: buildPaxGroupPricingRows escapes every value it prints.
    */
-  it("block tokens are unchanged", () => {
+  it("block tokens are unchanged but for paxGroupPricing", () => {
     expect(
       allSpecs()
         .filter((spec) => spec.kind === "block")
         .map((spec) => spec.name)
         .sort(),
-    ).toEqual(["bankingDetails", "guestInfo", "quoteSummaryTable", "trainOnlyNote"])
+    ).toEqual(["bankingDetails", "guestInfo", "paxGroupPricing", "quoteSummaryTable", "trainOnlyNote"])
   })
 })

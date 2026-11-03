@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { ChevronDown, Gift, Info, Plus, Trash2 } from "lucide-react"
+import { useEffect, useState } from "react"
+import { ChevronDown, Gift, Info, MinusCircle, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -42,6 +42,11 @@ import { formatDisplayDate } from "@/lib/date-format"
 import { cn } from "@/lib/utils"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { resolveTransferPax, resolveTransferPricingBasis, type TransferPricingBasis } from "@/lib/pricing/transfer-basis"
+import { unitServesGroup } from "@/lib/packages/pax-groups"
+import { canExcludeGroupFromLeg, describeSharedNote } from "@/lib/packages/pax-group-toggles"
+import { removeFromGroupButtonId, type PaxGroupEditorContext } from "@/components/packages/pax-group-editor-context"
+import { PaxGroupPicker } from "@/components/packages/pax-group-picker"
+import { GroupPaxHint, GroupSharedNote, LegGroupHelper, sumGroupPax } from "@/components/packages/pax-group-unit-notes"
 
 const NONE_VALUE = "__none"
 
@@ -356,6 +361,9 @@ interface TransportLegEditorProps {
    *  prefill (see lib/pricing/transfer-basis.ts resolveTransferPax) — the same prop SuiteLegEditor
    *  takes for the same purpose. */
   expectedTotals?: PassengerTotals | null
+  /** Group mode only: the For control per trip and the per-suite filter. Absent renders exactly as
+   *  before pax groups existed. */
+  paxGroups?: PaxGroupEditorContext
 }
 
 const ZERO_TOTALS: PassengerTotals = { adultCount: 0, childCount: 0, infantCount: 0 }
@@ -370,9 +378,27 @@ export function TransportLegEditor({
   fxRates = { [BASE_CURRENCY]: 1 },
   travelDate = null,
   expectedTotals = null,
+  paxGroups,
 }: TransportLegEditorProps) {
   const isRental = leg.supplierKind === "vehicle_rental"
   const fallbackTotals = expectedTotals ?? ZERO_TOTALS
+
+  // ---- Pax groups (group mode only) ----
+  const groupMode = paxGroups !== undefined
+  const groupNoun = paxGroups?.noun ?? "Suite"
+  const groupList = paxGroups?.groups ?? []
+  const groupIds = groupList.map((group) => group.id)
+  const activeGroupId = paxGroups?.activeGroupId ?? null
+  const activeGroup = activeGroupId ? groupList.find((group) => group.id === activeGroupId) ?? null : null
+  const canRemoveFromActive = activeGroup !== null && canExcludeGroupFromLeg(value, activeGroup.id, groupIds)
+  const legDisplayName = leg.label ?? leg.supplierName
+  // Moves focus to a just-added trip's vehicle category once it has rendered.
+  const [focusRequestId, setFocusRequestId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusRequestId) return
+    document.getElementById(`vehicle-category-${leg.id}-${focusRequestId}`)?.focus()
+    setFocusRequestId(null)
+  }, [focusRequestId, leg.id])
 
   // Collapsed by default so a request's fields aren't drowned out by an empty textarea -- one
   // leg can hold several requests, so this tracks which were manually opened by id rather than a
@@ -477,11 +503,16 @@ export function TransportLegEditor({
   return (
     // border-2 (vs. a request card's plain border below) so one supplier's whole leg reads as a
     // distinct block among several stacked legs -- matches SuiteLegEditor's leg root.
-    <div className="space-y-2 rounded-md border-2 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section
+      aria-labelledby={`service-title-${leg.id}`}
+      className="space-y-2 rounded-md border-2 border-accent p-3 dark:border-accent-link"
+    >
+      <div className="-mx-3 -mt-3 flex flex-wrap items-center justify-between gap-3 rounded-t-sm border-b-2 border-accent bg-muted px-3 py-2.5 only:-mb-3 only:rounded-b-sm only:border-b-0 dark:border-accent-link">
         <div>
           <div className="flex items-center gap-1.5">
-            <div className="text-sm font-medium">{leg.label ?? leg.supplierName}</div>
+            <h3 id={`service-title-${leg.id}`} className="font-sans text-lg font-semibold tracking-normal">
+              {leg.label ?? leg.supplierName}
+            </h3>
             {value.origin === "auto" && (
               <Badge
                 variant="secondary"
@@ -492,39 +523,74 @@ export function TransportLegEditor({
               </Badge>
             )}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xs text-foreground">
             {leg.supplierName} — {isRental ? "Vehicle rental" : "Transfer"}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 whitespace-nowrap text-xs">
             <Checkbox
               checked={value.selected}
               onCheckedChange={(checked) => onChange({ ...value, selected: checked === true })}
             />
             Include in quote & voucher
           </label>
+          {canRemoveFromActive && value.selected && activeGroup && paxGroups ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              id={removeFromGroupButtonId(leg.id)}
+              aria-label={`Remove ${legDisplayName} from ${groupNoun} ${activeGroup.position}`}
+              onClick={() => paxGroups.onRemoveFromLeg(leg.id, activeGroup.id)}
+            >
+              <MinusCircle className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+              Remove from {groupNoun} {activeGroup.position}
+            </Button>
+          ) : null}
           {value.selected ? (
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={() =>
-                onChange({
-                  ...value,
-                  requests: [
-                    ...value.requests,
-                    createDraftTransportRequest(leg, value.routeId, expectedTotals ?? undefined),
-                  ],
-                })
-              }
+              id={groupMode ? `add-unit-${leg.id}` : undefined}
+              onClick={() => {
+                if (activeGroup) {
+                  // In a suite's own view a new trip is that suite's alone, carrying its guests.
+                  const pax = sumGroupPax(groupList, [activeGroup.id])
+                  const draft = createDraftTransportRequest(leg, value.routeId, pax)
+                  const added = {
+                    ...draft,
+                    paxGroupIds: [activeGroup.id],
+                    passengerCount:
+                      draft.pricingBasis === "per_person" ? draft.passengerCount : pax.adultCount + pax.childCount + pax.infantCount,
+                  }
+                  onChange({ ...value, requests: [...value.requests, added] })
+                  setFocusRequestId(added.id)
+                  return
+                }
+                const added = createDraftTransportRequest(leg, value.routeId, expectedTotals ?? undefined)
+                onChange({ ...value, requests: [...value.requests, added] })
+                if (groupMode) setFocusRequestId(added.id)
+              }}
             >
               <Plus className="mr-1 h-3 w-3" />
               Add {isRental ? "vehicle" : "transfer"}
+              {activeGroup ? ` for ${groupNoun} ${activeGroup.position}` : null}
             </Button>
           ) : null}
         </div>
       </div>
+
+      {value.selected && activeGroup ? (
+        <LegGroupHelper
+          legName={legDisplayName}
+          supplierName={leg.supplierName}
+          isHotel={false}
+          noun={groupNoun}
+          position={activeGroup.position}
+        />
+      ) : null}
 
       {value.selected && leg.routes.length > 0 ? (
         <div className="max-w-[280px] space-y-1.5">
@@ -581,7 +647,14 @@ export function TransportLegEditor({
       ) : null}
 
       {value.selected
-        ? value.requests.map((request, index) => {
+        ? value.requests
+            .map((request, index) => ({ request, index }))
+            // Trips keep their own numbers in the per-suite view.
+            .filter(({ request }) => !activeGroup || unitServesGroup({ paxGroupIds: request.paxGroupIds ?? [] }, activeGroup.id))
+            .map(({ request, index }) => {
+            const requestGroupIds = request.paxGroupIds ?? []
+            const servesOnlyActive =
+              activeGroup !== null && requestGroupIds.length === 1 && requestGroupIds[0] === activeGroup.id
             const notesOpen = notesRequestedIds.has(request.id) || Boolean(request.notes?.trim())
             const basis = resolveTransferPricingBasis({
               serviceType: request.serviceType,
@@ -599,7 +672,27 @@ export function TransportLegEditor({
             const overCapacity =
               isPerPerson && requestVehicleCapacity != null && paxTotal > requestVehicleCapacity
             return (
-            <div key={request.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
+            <div key={request.id} className="grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
+              {groupMode ? (
+                <div className="flex flex-wrap items-start justify-between gap-2 md:col-span-2 xl:col-span-3">
+                  <h4 className="font-sans text-sm font-semibold tracking-normal">
+                    {isRental ? "Vehicle" : "Transfer"} {index + 1}
+                  </h4>
+                  <PaxGroupPicker
+                    groups={groupList}
+                    value={requestGroupIds}
+                    onChange={(paxGroupIds) => updateRequest(request.id, { paxGroupIds })}
+                    activeGroupId={activeGroupId}
+                    noun={groupNoun}
+                    itemNoun={tripNoun}
+                    itemNumber={index + 1}
+                    legName={legDisplayName}
+                  />
+                </div>
+              ) : null}
+              {activeGroup ? (
+                <GroupSharedNote text={describeSharedNote(requestGroupIds, activeGroup.id, groupList, groupNoun)} />
+              ) : null}
               <div className="space-y-1.5">
                 <Label>{isRental ? "Pickup point" : "Pickup"}</Label>
                 <Input
@@ -645,7 +738,7 @@ export function TransportLegEditor({
                       value={request.pickupAt}
                       onChange={(pickupAt) => updateRequest(request.id, { pickupAt })}
                       dateDisabled={request.dateAnchor === "pre" || request.dateAnchor === "post"}
-                      className="w-64"
+                      className="w-full max-w-64"
                       aria-label="Pickup date"
                     />
                     {anchorContext && (request.dateAnchor === "pre" || request.dateAnchor === "post") ? (
@@ -721,7 +814,7 @@ export function TransportLegEditor({
                         updateRequest(request.id, { suiteTypeId: next === NONE_VALUE ? null : next })
                       }
                     >
-                      <SelectTrigger id={`vehicle-category-${leg.id}-${request.id}`} className="h-8 w-56">
+                      <SelectTrigger id={`vehicle-category-${leg.id}-${request.id}`} className="h-8 w-56 sm:w-72">
                         <SelectValue placeholder="Select category" />
                       </SelectTrigger>
                       <SelectContent>
@@ -795,11 +888,22 @@ export function TransportLegEditor({
               </div>
               {isPerPerson ? (
                 <div className="space-y-1 md:col-span-2 xl:col-span-3">
+                  {groupMode && requestGroupIds.length > 0 ? (
+                    <GroupPaxHint
+                      ids={requestGroupIds}
+                      pax={pax}
+                      groups={groupList}
+                      noun={groupNoun}
+                      itemNoun={tripNoun}
+                      onMatch={() => updateRequest(request.id, sumGroupPax(groupList, requestGroupIds))}
+                    />
+                  ) : (
                   <p className="text-xs text-muted-foreground">
                     Blank uses the booking's totals ({fallbackTotals.adultCount} adults,{" "}
                     {fallbackTotals.childCount} children, {fallbackTotals.infantCount} infants). Priced total:{" "}
                     {paxTotal}.
                   </p>
+                  )}
                   {overCapacity ? (
                     <p className="text-xs text-amber-600 dark:text-amber-500">
                       {paxTotal} passengers exceeds this vehicle's capacity of {requestVehicleCapacity}.
@@ -850,16 +954,21 @@ export function TransportLegEditor({
                   />
                 </CollapsibleContent>
               </Collapsible>
-              {value.requests.length > 1 ? (
+              {value.requests.length > 1 && (!activeGroup || servesOnlyActive) ? (
                 <div className="flex items-end justify-end">
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
-                    aria-label={`Remove ${isRental ? "vehicle" : "transfer"} ${index + 1}`}
-                    onClick={() =>
-                      onChange({ ...value, requests: value.requests.filter((item) => item.id !== request.id) })
+                    aria-label={
+                      activeGroup
+                        ? `Remove ${tripNoun} ${index + 1} from ${groupNoun} ${activeGroup.position}`
+                        : `Remove ${isRental ? "vehicle" : "transfer"} ${index + 1}`
                     }
+                    onClick={() => {
+                      onChange({ ...value, requests: value.requests.filter((item) => item.id !== request.id) })
+                      if (groupMode) document.getElementById(`add-unit-${leg.id}`)?.focus()
+                    }}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -880,6 +989,6 @@ export function TransportLegEditor({
         }}
         onChange={(next) => onChange({ ...value, ...next })}
       /> */}
-    </div>
+    </section>
   )
 }

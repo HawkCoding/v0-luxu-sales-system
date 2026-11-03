@@ -723,6 +723,44 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.itinerarySuiteCounts).toEqual([{ label: "Deluxe Suite", count: 2 }])
   })
 
+  it("names each suite's bed type in the quote sentence's count on a train split into pax groups", async () => {
+    const unit = (sortOrder: number, group: string, bedroom: string) => ({
+      suite_type_id: "suite-deluxe",
+      sort_order: sortOrder,
+      pax_group_ids: [group],
+      suite_types: { name: "Deluxe Suite" },
+      bedroom_types: { name: bedroom },
+    })
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: null,
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "Rovos Rail",
+            suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: null,
+            units: [unit(0, "g1", "Twin"), unit(1, "g2", "Twin"), unit(2, "g3", "Double")],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    // "in 2 Twin Deluxe Suites and a Double Deluxe Suite", not "in 3 Deluxe Suites".
+    expect(blocks[0].serviceData.itinerarySuiteCounts).toEqual([
+      { label: "Twin Deluxe Suite", count: 2 },
+      { label: "Double Deluxe Suite", count: 1 },
+    ])
+  })
+
   it("composes each train unit's bed/bathroom configuration into its suite label", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({

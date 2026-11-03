@@ -25,7 +25,7 @@ const PROVENANCE_COLUMNS =
   "id, price_override, price_override_set_at, price_override_set_by, pricing_basis, price_override_child, price_override_infant"
 
 function buildSupabase(
-  options: { savedRows?: unknown[]; existingRows?: unknown[]; suppliers?: unknown[] } = {},
+  options: { savedRows?: unknown[]; existingRows?: unknown[]; suppliers?: unknown[]; bookingGroupIds?: string[] } = {},
 ) {
   const savedRows = options.savedRows ?? [{ id: "tr1" }]
   const existingRows = options.existingRows ?? []
@@ -77,6 +77,13 @@ function buildSupabase(
         return {
           select: vi.fn(() => ({
             in: vi.fn(async () => ({ data: suppliers, error: null })),
+          })),
+        }
+      }
+      if (table === "booking_pax_groups") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: (options.bookingGroupIds ?? []).map((id) => ({ id })), error: null })),
           })),
         }
       }
@@ -728,6 +735,67 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
       expect(rows[0].pricing_basis).toBe("per_vehicle")
       expect(rows[0].passenger_count).toBe(6)
       expect(rows[0].adult_count).toBeNull()
+    })
+  })
+
+  describe("pax groups", () => {
+    const GROUP_1 = "00000000-0000-4000-8000-0000000000e1"
+    const GROUP_2 = "00000000-0000-4000-8000-0000000000e2"
+    const FOREIGN_GROUP = "00000000-0000-4000-8000-0000000000ef"
+
+    async function putRows(supabase: ReturnType<typeof buildSupabase>, transportRequests: unknown[]) {
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      return PUT(
+        new Request("http://localhost", {
+          method: "PUT",
+          body: JSON.stringify({ transportRequests }),
+          headers: { "Content-Type": "application/json" },
+        }),
+        { params },
+      )
+    }
+
+    function sentRows(supabase: ReturnType<typeof buildSupabase>) {
+      return (supabase.replaceTransportRequests.mock.calls[0][0] as { p_transport_requests: Record<string, unknown>[] })
+        .p_transport_requests
+    }
+
+    it("stores a trip's groups, keeping only the booking's own and dropping duplicates", async () => {
+      const supabase = buildSupabase({ bookingGroupIds: [GROUP_1, GROUP_2] })
+      const res = await putRows(supabase, [
+        {
+          serviceType: "transfer",
+          pickupPoint: "A",
+          dropoffPoint: "B",
+          paxGroupIds: [GROUP_2, FOREIGN_GROUP, GROUP_2],
+        },
+      ])
+      expect(res.status).toBe(200)
+      expect(sentRows(supabase)[0].pax_group_ids).toEqual([GROUP_2])
+    })
+
+    it("defaults a trip without groups to every group, without reading the groups", async () => {
+      const supabase = buildSupabase()
+      const res = await putRows(supabase, [{ serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B" }])
+      expect(res.status).toBe(200)
+      expect(sentRows(supabase)[0].pax_group_ids).toEqual([])
+      expect(supabase.from).not.toHaveBeenCalledWith("booking_pax_groups")
+    })
+
+    it("rejects a group id that isn't a uuid", async () => {
+      const supabase = buildSupabase()
+      const res = await putRows(supabase, [
+        { serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B", paxGroupIds: ["suite-2"] },
+      ])
+      expect(res.status).toBe(400)
+      expect(supabase.replaceTransportRequests).not.toHaveBeenCalled()
     })
   })
 })

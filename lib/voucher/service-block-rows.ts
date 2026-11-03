@@ -1,6 +1,7 @@
 import type { VoucherServiceBlock, VoucherServiceBlockContact, VoucherServiceType } from "@/lib/generate-voucher"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatBulletLinesInline } from "@/lib/inclusions/bullet-lines"
+import { formatGuestCountText } from "@/lib/voucher/guest-count-text"
 
 export interface VoucherRowCell {
   label: string
@@ -88,7 +89,7 @@ export function voucherRowsForBlock(
     }
     rows.push({ label: "Departure Date", value: fmtWithTime(departureDate, d.startTime) ?? "—" })
     rows.push({ label: "Arrival Date", value: fmtWithTime(arrivalDate, d.endTime) ?? "TBC" })
-    if (d.suiteType) rows.push(suiteRow("Suite Type", d.suiteType, d.numberOfSuites))
+    if (d.suiteType) rows.push(suiteRow("Suite Type", countedTypes(d.invoiceSuiteCounts) ?? d.suiteType, d.numberOfSuites))
     if (d.guestBreakdown) rows.push(guestsRow(d.guestBreakdown))
     if (d.mealPlan) rows.push({ label: "Meal Basis", value: d.mealPlan })
     // Subheadings can't have their own line in a single-value row, so their items are grouped
@@ -101,7 +102,7 @@ export function voucherRowsForBlock(
     // Excursions are deliberately not printed — not something clients have asked to see on the
     // voucher. The underlying data (route defaults, leg overrides) is left in place untouched.
   } else if (block.serviceType === "hotel") {
-    if (d.roomType) rows.push(suiteRow("Room Type", d.roomType, d.numberOfSuites))
+    if (d.roomType) rows.push(suiteRow("Room Type", countedTypes(d.itinerarySuiteCounts) ?? d.roomType, d.numberOfSuites))
     if (d.nights != null) rows.push({ label: "Nights", value: d.nights })
     if (d.guestBreakdown) rows.push(guestsRow(d.guestBreakdown))
     if (d.mealPlan) rows.push({ label: "Meal Plan", value: d.mealPlan })
@@ -118,7 +119,15 @@ export function voucherRowsForBlock(
   } else if (block.serviceType === "transfer") {
     // A per-person transfer prices adult/child/infant separately, so the "N Adults" line would be
     // wrong the moment a booking has children -- print the same 3-cell breakdown train/hotel use.
-    if (d.guestBreakdown) rows.push(guestsRow(d.guestBreakdown))
+    if (d.paxGroupGuests) {
+      // A transfer only some suites take says whose it is, counted from those suites.
+      const { lines, adults, children, infants } = d.paxGroupGuests
+      rows.push({
+        label: "No of Guests",
+        value: formatGuestCountText({ adultCount: adults, childCount: children, infantCount: infants }),
+      })
+      if (lines.length > 0) rows.push({ label: "Guests", value: lines.join("; ") })
+    } else if (d.guestBreakdown) rows.push(guestsRow(d.guestBreakdown))
     else if (d.passengerCount != null) rows.push({ label: "No of Guests", value: `${d.passengerCount} Adults` })
     if (d.vehicleType) rows.push({ label: "Vehicle", value: d.vehicleType })
     // Falls back to the leg's own route name only when the trip has neither a typed pickup nor
@@ -196,6 +205,15 @@ function passengersLine(names: string[]): string {
 function referenceWithContact(reference: string | null | undefined, contactName: string | null | undefined): string {
   const ref = reference ?? "—"
   return contactName ? `${ref} – ${contactName}` : ref
+}
+
+/** "5 × Twin Deluxe Suite, 1 × Double Deluxe Suite" — a leg holding more than one type of suite or
+ *  room counts each, so the row says how many of which (the Qty cell beside it still totals them).
+ *  Null for a single type, which keeps its plain name. */
+function countedTypes(counts: ReadonlyArray<{ label: string; count: number }> | null | undefined): string | null {
+  const named = (counts ?? []).filter((entry) => entry.label.trim() && entry.count > 0)
+  if (named.length < 2) return null
+  return named.map((entry) => `${entry.count} × ${entry.label.trim()}`).join(", ")
 }
 
 /** "Suite Type | Qty" / "Room Type | Qty" — a single two-cell row when a count is known, or a

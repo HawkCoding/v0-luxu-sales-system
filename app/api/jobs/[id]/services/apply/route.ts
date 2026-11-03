@@ -50,6 +50,14 @@ const extraSchema = z.object({
   infantCount: z.number().int().nonnegative().optional(),
 })
 
+/** Guests of one unit who price at another rate type than the unit's own (UnitRateSplit). */
+const rateSplitSchema = z.object({
+  rateTypeId: z.string().uuid(),
+  adultCount: z.number().int().nonnegative().default(0),
+  childCount: z.number().int().nonnegative().default(0),
+  infantCount: z.number().int().nonnegative().default(0),
+})
+
 const unitSelectionSchema = z.object({
   /** booking_service_units.id, when this room has been saved. Used only to look the room's
    * override provenance up server-side — the client never states who set a price. */
@@ -79,6 +87,20 @@ const unitSelectionSchema = z.object({
   /** Train, hotel, cruise and tour legs (supportsUnitRateType): this unit's own rate type,
    * overriding the leg-level rateTypeId below. The pricing engine ignores it on any other kind. */
   rateTypeId: z.string().uuid().nullable().optional(),
+  /** The pax groups this unit serves; empty = every group. Stamped into the lines' unitRefs only --
+   * never read for pricing. */
+  paxGroupIds: z.array(z.string().uuid()).optional(),
+  /** Train, tour and cruise rate-card legs only: guests of this unit priced at another rate type.
+   * The pricing engine ignores them on any other kind, and refuses a split moving more guests of a
+   * kind than the unit holds. */
+  rateSplits: z.array(rateSplitSchema).optional(),
+})
+
+/** A pax group with its printed label already resolved (lib/pax-groups/labels.ts). */
+const paxGroupMetaSchema = z.object({
+  id: z.string().uuid(),
+  position: z.number().int().positive(),
+  label: z.string().trim().min(1).max(200),
 })
 
 const applyServicesSchema = z.object({
@@ -134,6 +156,19 @@ const applyServicesSchema = z.object({
    * only a new line uses takes the current rate.
    */
   amend: z.literal(true).optional(),
+  /**
+   * The booking's pax groups in position order, labels resolved by the dialog. With 2 or more, every
+   * line of the primary service carries them (PricingSnapshot.paxGroups) so the documents can print
+   * one line per group. Omitted or fewer than 2 = a booking without groups.
+   */
+  paxGroups: z
+    .array(paxGroupMetaSchema)
+    .max(100)
+    .optional()
+    .refine(
+      (groups) => !groups || new Set(groups.map((group) => group.id)).size === groups.length,
+      "Each pax group can only be listed once",
+    ),
 })
 
 interface RouteParams {
@@ -305,6 +340,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       quoteCurrency,
       fxRates: effectiveRates,
       fxRateAsOf: fx.rows[0]?.asOf ?? null,
+      paxGroups: parsed.paxGroups ?? [],
     })
 
     const extraLineItems = (

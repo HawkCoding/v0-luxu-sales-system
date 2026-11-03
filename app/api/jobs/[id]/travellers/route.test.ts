@@ -22,6 +22,8 @@ import { GET, PUT } from "./route"
 const BOOKING_ID = "00000000-0000-4000-8000-00000000d001"
 const TRAVELLER_ID = "00000000-0000-4000-8000-00000000d002"
 const CUSTOMER_ID = "00000000-0000-4000-8000-00000000d003"
+const GROUP_1 = "00000000-0000-4000-8000-00000000e001"
+const GROUP_2 = "00000000-0000-4000-8000-00000000e002"
 
 function buildAuthValue(supabase = buildSupabase()) {
   return {
@@ -47,6 +49,12 @@ function buildSupabase(
       id_passport: string | null
       club_memberships?: unknown
     } | null
+    /** booking_pax_groups rows for this booking. */
+    paxGroups?: Array<{ id: string; position: number; label: string | null }>
+    /** booking_services rows (with units) the GET's group list reads names and counts from. */
+    serviceRows?: Array<Record<string, unknown>>
+    /** The stored travellers' placements, read back for guests re-sent without paxGroupId. */
+    storedPlacements?: Record<string, string | null>
   } = {},
 ) {
   const insertCalls: unknown[] = []
@@ -76,11 +84,44 @@ function buildSupabase(
     deleteCalls,
     customerUpdates,
     from: vi.fn((table: string) => {
-      if (table === "travellers") {
+      if (table === "booking_pax_groups") {
+        const groups = opts.paxGroups ?? []
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              order: vi.fn(async () => ({ data: [travellerRow], error: null })),
+              order: vi.fn(async () => ({ data: groups, error: null })),
+              in: vi.fn(async (_col: string, ids: string[]) => ({
+                data: groups.filter((group) => ids.includes(group.id)).map((group) => ({ id: group.id })),
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === "booking_services") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: opts.serviceRows ?? [], error: null })),
+            })),
+          })),
+        }
+      }
+      if (table === "travellers") {
+        return {
+          select: vi.fn((columns: string) => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () =>
+                columns === "id, pax_group_id"
+                  ? {
+                      data: Object.entries(opts.storedPlacements ?? {}).map(([id, groupId]) => ({
+                        id,
+                        pax_group_id: groupId,
+                      })),
+                      error: null,
+                    }
+                  : { data: [travellerRow], error: null },
+              ),
             })),
           })),
           delete: vi.fn(() => ({
@@ -109,6 +150,8 @@ function buildSupabase(
                     : {
                         id: BOOKING_ID,
                         customer_id: customerId,
+                        // The core leg the pax groups hang off; null keeps the train rule.
+                        primary_supplier_id: null,
                         // Read back by the roster/pax comparison attached to every response.
                         no_of_adults: 2,
                         no_of_children: 0,
@@ -182,8 +225,142 @@ describe("GET /api/jobs/[id]/travellers", () => {
         isChild: false,
         sortOrder: 0,
         clubMemberships: [{ club: "Rovos Rail", number: "RR-1" }],
+        paxGroupId: null,
       },
     ])
+    expect(body.paxGroups).toEqual([])
+  })
+
+  it("lists the booking's suites with their automatic names and headcounts", async () => {
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: buildAuthValue(
+        buildSupabase({
+          paxGroups: [
+            { id: GROUP_2, position: 2, label: null },
+            { id: GROUP_1, position: 1, label: "Honeymoon suite" },
+          ],
+          serviceRows: [
+            {
+              id: "svc-hotel",
+              supplier_id: "sup-hotel",
+              sort_order: 0,
+              suppliers: { kind: "hotel_property" },
+              // A hotel room naming group 2 must not be mistaken for its suite.
+              units: [
+                {
+                  pax_group_ids: [GROUP_2],
+                  suite_type_id: "st-room",
+                  bedroom_type_id: null,
+                  adult_count: 9,
+                  child_count: 9,
+                  infant_count: 9,
+                  suite_types: { name: "Ocean View Room" },
+                  bedroom_types: null,
+                },
+              ],
+            },
+            {
+              id: "svc-train",
+              supplier_id: "sup-train",
+              sort_order: 1,
+              suppliers: [{ kind: "train_operator" }],
+              units: [
+                {
+                  pax_group_ids: [GROUP_1],
+                  suite_type_id: "st-deluxe",
+                  bedroom_type_id: "bt-double",
+                  adult_count: 2,
+                  child_count: 0,
+                  infant_count: 0,
+                  suite_types: { name: "Deluxe Suite" },
+                  bedroom_types: { name: "Double" },
+                },
+                {
+                  pax_group_ids: [GROUP_2],
+                  suite_type_id: "st-deluxe",
+                  bedroom_type_id: "bt-twin",
+                  adult_count: 0,
+                  child_count: 2,
+                  infant_count: 1,
+                  suite_types: [{ name: "Deluxe Suite" }],
+                  bedroom_types: [{ name: "Twin" }],
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    })
+    const res = await GET(new Request("http://localhost"), { params })
+    const body = await res.json()
+    expect(body.paxGroups).toEqual([
+      {
+        id: GROUP_1,
+        position: 1,
+        label: "Honeymoon suite",
+        autoLabel: "Double Deluxe Suite 1",
+        adults: 2,
+        children: 0,
+        infants: 0,
+      },
+      { id: GROUP_2, position: 2, label: null, autoLabel: "Twin Deluxe Suite 2", adults: 0, children: 2, infants: 1 },
+    ])
+  })
+})
+
+describe("PUT /api/jobs/[id]/travellers pax groups", () => {
+  beforeEach(() => {
+    authMocks.requireRole.mockReset()
+    auditMocks.writeAuditLog.mockClear()
+  })
+
+  async function put(supabase: ReturnType<typeof buildSupabase>, travellers: Record<string, unknown>[]) {
+    authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue(supabase) })
+    return PUT(
+      new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({ travellers }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      { params },
+    )
+  }
+
+  const guest = { firstName: "Jane", lastName: "Doe", idPassport: "B7654321" }
+
+  it("stores the guest's suite", async () => {
+    const supabase = buildSupabase({ paxGroups: [{ id: GROUP_1, position: 1, label: null }] })
+    const res = await put(supabase, [{ ...guest, paxGroupId: GROUP_1 }, { ...guest, firstName: "Sam", paxGroupId: null }])
+    expect(res.status).toBe(200)
+    expect(supabase.insertCalls[0]).toEqual([
+      expect.objectContaining({ pax_group_id: GROUP_1 }),
+      expect.objectContaining({ pax_group_id: null }),
+    ])
+  })
+
+  it("refuses a suite that isn't one of the booking's, before touching the roster", async () => {
+    const supabase = buildSupabase({ paxGroups: [{ id: GROUP_1, position: 1, label: null }] })
+    const res = await put(supabase, [{ ...guest, paxGroupId: GROUP_2 }])
+    expect(res.status).toBe(400)
+    expect(supabase.deleteCalls).toEqual([])
+    expect(supabase.insertCalls).toHaveLength(0)
+  })
+
+  it("keeps a re-sent guest's suite when the client doesn't send paxGroupId at all", async () => {
+    const supabase = buildSupabase({ storedPlacements: { [TRAVELLER_ID]: GROUP_1 } })
+    const res = await put(supabase, [{ ...guest, id: TRAVELLER_ID }, { ...guest, firstName: "New" }])
+    expect(res.status).toBe(200)
+    expect(supabase.insertCalls[0]).toEqual([
+      expect.objectContaining({ first_name: "Jane", pax_group_id: GROUP_1 }),
+      expect.objectContaining({ first_name: "New", pax_group_id: null }),
+    ])
+  })
+
+  it("rejects a malformed suite id", async () => {
+    const supabase = buildSupabase()
+    const res = await put(supabase, [{ ...guest, paxGroupId: "suite-2" }])
+    expect(res.status).toBe(400)
   })
 })
 

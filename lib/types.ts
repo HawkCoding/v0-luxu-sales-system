@@ -919,6 +919,9 @@ export interface RateType {
   /** Client-facing name for the {{rateLabel}} token, e.g. "SADC Resident special" for a rate whose
    * internal name is "Rovos Rail SADC". Falls back to `name` when null. */
   clientLabel: string | null
+  /** The short tag client documents print after a price on a pax-group line, e.g. "SA" or "TW" for
+   * "2 Adults x R23 800,00 per person (SA)". Null prints nothing. */
+  shortLabel: string | null
   archivedAt: string | null
   createdAt: string
   updatedAt: string
@@ -1053,6 +1056,63 @@ export interface PricingSnapshot {
   /** The nights `occupantCount` was multiplied by — the charged nights, so a gifted night is
    *  already excluded (see complimentaryNights). */
   chargedNights?: number | null
+  /** Hotel, train, tour, cruise and airline lines only: the units (rooms, suites, tour parties) the
+   *  line was priced for — one on a hotel or tour-override line, every merged unit on a train/tour
+   *  variant line. Lets the pax-group lines (lib/quotes/pax-group-pricing.ts) say whose cost a line
+   *  is. Absent on transfers, rentals, extras and commission, and on every line built before
+   *  2026-10-28. */
+  unitRefs?: PricingUnitRef[]
+  /** Transfer/rental lines only: the pax groups this trip serves. Absent or empty = every group. */
+  paxGroupIds?: string[]
+  /** Lines of the booking's primary service, on a booking split into pax groups only: every group,
+   *  in position order. Its presence marks the line as the primary service's, whose unitRefs say
+   *  which group each guest belongs to. */
+  paxGroups?: PaxGroupMeta[]
+}
+
+/** One unit a line was priced for — or one rate slice of it, when some of the unit's guests price
+ *  at another rate type (UnitRateSplit) — with its occupants at pricing time. */
+export interface PricingUnitRef {
+  /** The unit's position on its leg. */
+  index: number
+  unitId?: string
+  adults: number
+  children: number
+  infants: number
+  /** The pax groups this unit serves. Absent or empty = every group. A unit of the primary service
+   *  serves exactly its own group. */
+  paxGroupIds?: string[]
+  /** The rate type this slice priced at. Set on every ref of a unit carrying rate splits. */
+  rateTypeId?: string | null
+}
+
+/** A pax group as the pricing engine stamps it: one per unit of the booking's primary service. */
+export interface PaxGroupMeta {
+  id: string
+  /** 1..N across the whole booking: "Suite 2", guests 2.1 and 2.2. */
+  position: number
+  /** The name documents print: the consultant's typed label, else the unit's bedroom type and
+   *  suite type plus the position ("Twin Deluxe Suite 2"). */
+  label: string
+}
+
+/** Guests of one unit who price at a rate type other than the unit's own — one SA resident and one
+ *  international guest sharing a suite. The unit's remaining guests price at its own rate.
+ *  Stored in booking_service_units.rate_splits. */
+export interface UnitRateSplit {
+  rateTypeId: string
+  adultCount: number
+  childCount: number
+  infantCount: number
+}
+
+/** booking_pax_groups, as the app reads it. */
+export interface BookingPaxGroup {
+  id: string
+  /** 1..N across the booking. */
+  position: number
+  /** Null = the automatic name. */
+  label: string | null
 }
 
 export interface SupplierPackage {
@@ -1383,6 +1443,9 @@ export interface BookingTransportRequest {
    * null. */
   priceOverrideChild: number | null
   priceOverrideInfant: number | null
+  /** The pax groups this trip serves. Empty = every group (and always empty on a booking without
+   *  groups). */
+  paxGroupIds: string[]
   sortOrder: number
   createdAt: string
   createdAtDisplay?: string

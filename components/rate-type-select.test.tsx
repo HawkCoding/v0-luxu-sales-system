@@ -13,6 +13,7 @@ function rateType(id: string, name: string, overrides: Partial<RateType> = {}): 
     isStandard: false,
     audience: null,
     clientLabel: null,
+    shortLabel: null,
     archivedAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -69,5 +70,33 @@ describe("RateTypeSelect", () => {
     openMenu()
 
     expect(screen.getByRole("option", { name: "STO Rate" })).toBeInTheDocument()
+  })
+
+  it("leaves out excluded rates, but never the one already picked", () => {
+    const { unmount } = render(
+      <RateTypeSelect
+        rateTypes={rateTypes}
+        value={null}
+        onChange={vi.fn()}
+        inheritLabel="Suite rate (Rovos Rail SADC)"
+        excludeRateTypeIds={["sadc"]}
+      />,
+    )
+    openMenu()
+    expect(screen.getByRole("option", { name: "Suite rate (Rovos Rail SADC)" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Rovos Rail SADC" })).not.toBeInTheDocument()
+    unmount()
+
+    render(<RateTypeSelect rateTypes={rateTypes} value="sadc" onChange={vi.fn()} excludeRateTypeIds={["sadc"]} />)
+    openMenu()
+    expect(screen.getByRole("option", { name: "Rovos Rail SADC" })).toBeInTheDocument()
+  })
+
+  it("can say what each rate prints as", () => {
+    const labelled = [rateType("sto", "STO Rate", { shortLabel: "TW" }), rateType("rac", "Rack Rate")]
+    render(<RateTypeSelect rateTypes={labelled} value={null} onChange={vi.fn()} showShortLabel />)
+    openMenu()
+    expect(screen.getByRole("option", { name: "STO Rate · prints (TW)" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Rack Rate" })).toBeInTheDocument()
   })
 })

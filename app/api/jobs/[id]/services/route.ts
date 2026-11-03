@@ -8,10 +8,15 @@ import { computeLegPassengerTotals } from "@/lib/packages/passenger-totals"
 import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
 import { learnSuiteAliasesFromUnits } from "@/lib/suites/learn-from-units"
 import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
-import { createServiceClient } from "@/lib/supabase/server"
+import { createServiceClient, type createSessionClient } from "@/lib/supabase/server"
 import type { Database, Json } from "@/lib/supabase/types"
+import type { BookingPaxGroup } from "@/lib/types"
+import { normaliseRateSplits, primaryLegIdOf, rateSplitOverflow, supportsRateSplits } from "@/lib/packages/pax-groups"
+import { effectiveUnitRateTypeId } from "@/lib/packages/unit-rate-type"
 
 export const runtime = "nodejs"
+
+type SessionClient = Awaited<ReturnType<typeof createSessionClient>>
 
 /**
  * Build Booking's equivalent of PATCH /api/jobs/[id]/package-selections, operating on
@@ -56,6 +61,20 @@ const FLIGHT_SCHEDULE_FIELDS = [
 
 const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
+/** Guests of one unit who price at another rate type than the unit's own (UnitRateSplit). */
+const rateSplitSchema = z.object({
+  rateTypeId: z.string().uuid(),
+  adultCount: z.number().int().nonnegative().default(0),
+  childCount: z.number().int().nonnegative().default(0),
+  infantCount: z.number().int().nonnegative().default(0),
+})
+
+/** A pax group as the dialog sends it, in position order. Null label = the automatic name. */
+const paxGroupSchema = z.object({
+  id: z.string().uuid(),
+  label: z.string().trim().max(120).nullable().optional(),
+})
+
 const selectionUnitSchema = z.object({
   id: z.string().uuid().optional(),
   suiteTypeId: z.string().uuid().nullable(),
@@ -89,6 +108,22 @@ const selectionUnitSchema = z.object({
    * overriding the leg-level rateTypeId below. Rejected on any other supplier kind — see the guard
    * in PATCH. */
   rateTypeId: z.string().uuid().nullable().optional(),
+  /** The pax groups this unit serves; [] (or omitted) = every group. Each id must be one of the
+   * body's paxGroups, or of the booking's stored groups when paxGroups is omitted -- see PATCH. */
+  paxGroupIds: z.array(z.string().uuid()).max(50).optional(),
+  /** Train, tour and cruise rate-card legs only (supportsRateSplits): guests on another rate type.
+   * Rejected on any other leg -- see the guard in PATCH. */
+  rateSplits: z.array(rateSplitSchema).max(20).optional(),
+}).superRefine((unit, context) => {
+  // Per passenger kind, the split guests are some of the unit's own guests -- never more.
+  const overflow = rateSplitOverflow(unit, unit.rateSplits ?? [])
+  if (overflow) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rateSplits"],
+      message: `More ${overflow === "child" ? "children" : `${overflow}s`} on other rates than the unit holds`,
+    })
+  }
 })
 
 const updateServiceSchema = z.object({
@@ -159,6 +194,39 @@ const patchServicesSchema = z.object({
    * PUT /api/jobs/[id]/transport-requests. Defaults to false so every other caller is
    * unaffected. */
   deferTripDateRecompute: z.boolean().optional(),
+  /** The booking's pax groups in position order (positions = index + 1), replacing the stored set
+   * via replace_booking_pax_groups before the units are written. [] removes every group; omitted
+   * leaves the stored groups as they are. Build Booking sends it on every save. */
+  paxGroups: z.array(paxGroupSchema).max(50).optional(),
+}).superRefine((body, context) => {
+  if (!body.paxGroups) return
+  const groupIds = new Set<string>()
+  for (const [index, group] of body.paxGroups.entries()) {
+    if (groupIds.has(group.id)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["paxGroups", index, "id"], message: "Duplicate pax group" })
+    }
+    groupIds.add(group.id)
+  }
+  // Groups exist only while the main service has 2 or more units, one group per unit.
+  if (body.paxGroups.length === 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["paxGroups"],
+      message: "A booking splits into suites only when its main service has 2 or more",
+    })
+  }
+  for (const [selectionIndex, selection] of body.selections.entries()) {
+    for (const [unitIndex, unit] of (selection.units ?? []).entries()) {
+      const unknownIndex = (unit.paxGroupIds ?? []).findIndex((groupId) => !groupIds.has(groupId))
+      if (unknownIndex !== -1) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selections", selectionIndex, "units", unitIndex, "paxGroupIds", unknownIndex],
+          message: "Not one of this booking's pax groups",
+        })
+      }
+    }
+  }
 })
 
 interface RouteParams {
@@ -191,6 +259,9 @@ interface ServiceUnitRow {
   fare_override_set_at: string | null
   complimentary_first_night: boolean
   rate_type_id: string | null
+  pax_group_ids: string[]
+  /** UnitRateSplit[] as stored (jsonb); the dialog parses it with parseUnitRateSplits. */
+  rate_splits: Json
 }
 
 interface ServiceWithUnitsRow {
@@ -236,6 +307,24 @@ interface ServiceWithSupplierRow extends ServiceWithUnitsRow {
   /** PostgREST returns an embedded to-one relation as an object, but has shipped it as a
    *  single-element array in the past -- normalise rather than trust one shape. */
   suppliers: SupplierJoinRow | SupplierJoinRow[] | null
+}
+
+/** The booking's pax groups in position order -- returned as `paxGroups` by GET and by the PATCH
+ * reload, so Build Booking hydrates them alongside the units that name them. */
+async function loadPaxGroups(
+  supabase: SessionClient,
+  bookingId: string,
+): Promise<{ groups: BookingPaxGroup[]; error: unknown }> {
+  const { data, error } = await supabase
+    .from("booking_pax_groups")
+    .select("id, position, label")
+    .eq("booking_id", bookingId)
+    .order("position", { ascending: true })
+  if (error) return { groups: [], error }
+  return {
+    groups: (data ?? []).map((row) => ({ id: row.id, position: row.position, label: row.label ?? null })),
+    error: null,
+  }
 }
 
 /** Saved-state read, shaped exactly like GET /api/jobs/[id]/package so the dialog's
@@ -284,9 +373,14 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   if (servicesError) return safeSupabaseError("services:get-services", servicesError)
 
+  const paxGroups = await loadPaxGroups(supabase, id)
+  if (paxGroups.error) return safeSupabaseError("services:get-pax-groups", paxGroups.error)
+
   const serviceRows = (services ?? []) as unknown as ServiceWithSupplierRow[]
 
   return Response.json({
+    // Empty on a booking that isn't split into suites (see lib/packages/pax-groups.ts).
+    paxGroups: paxGroups.groups,
     // No catalogue package concept here; the presence of service rows is the signal instead.
     packageId: serviceRows.length > 0 ? id : null,
     // Which leg the booking exists for -- the one step 2 refuses to let a consultant
@@ -348,7 +442,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const serviceIds = parsed.data.selections.map((selection) => selection.packageLegId)
   const { data: validServices, error: servicesLoadError } = await supabase
     .from("booking_services")
-    .select("id, supplier_id, updated_at, service_date, booking_date, suppliers(kind, name)")
+    .select("id, supplier_id, updated_at, service_date, booking_date, rate_type_id, suppliers(kind, name, pricing_mode)")
     .eq("booking_id", id)
     .in("id", serviceIds)
 
@@ -618,6 +712,20 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       })
     }
 
+    // Guests on another rate type only mean something where every guest prices per person off a
+    // rate card: trains, tours and cruises. A hotel prices the room type, and a manual-pricing leg's
+    // fares are typed, so a split there would be a stored value the pricer never reads.
+    if (
+      !supportsRateSplits(supplierKind, supplier?.pricing_mode) &&
+      selection.units.some((unit) => (unit.rateSplits ?? []).length > 0)
+    ) {
+      return jsonError(
+        "Per-guest rates are only available on train, tour and cruise services priced off a rate card",
+        400,
+        { packageLegId: selection.packageLegId, supplierKind },
+      )
+    }
+
     for (const [unitIndex, unit] of selection.units.entries()) {
       const suiteTypeId = unit.suiteTypeId
       if (!suiteTypeId) continue
@@ -672,6 +780,81 @@ export async function PATCH(req: Request, { params }: RouteParams) {
           { packageLegId: selection.packageLegId, expected: totals, received: summed },
         )
       }
+    }
+  }
+
+  // Pax groups (lib/packages/pax-groups.ts), checked before any write like the unit rules above.
+  // With paxGroups in the body, the schema already holds every unit's ids to that list; without it,
+  // they must be groups the booking already has.
+  const paxGroups = parsed.data.paxGroups
+  const unitsNameGroups = parsed.data.selections.some((selection) =>
+    (selection.units ?? []).some((unit) => (unit.paxGroupIds ?? []).length > 0),
+  )
+  if (paxGroups === undefined && unitsNameGroups) {
+    const stored = await loadPaxGroups(supabase, id)
+    if (stored.error) return safeSupabaseError("services:load-pax-groups", stored.error)
+    const storedIds = new Set(stored.groups.map((group) => group.id))
+    for (const selection of parsed.data.selections) {
+      for (const [unitIndex, unit] of (selection.units ?? []).entries()) {
+        if ((unit.paxGroupIds ?? []).some((groupId) => !storedIds.has(groupId))) {
+          return jsonError(
+            `${supplierNameFor(selection.packageLegId)}: unit ${unitIndex + 1} is assigned to a suite group this booking doesn't have. Reload Build Booking and try again.`,
+            400,
+            { packageLegId: selection.packageLegId, unitIndex },
+          )
+        }
+      }
+    }
+  }
+
+  // Each group IS one unit of the booking's primary service: unit i carries exactly [group i], so
+  // the groups' positions follow the primary units' order. Checked against the payload's own
+  // primary units, which therefore have to travel with the groups.
+  if (paxGroups && paxGroups.length > 0) {
+    const { data: bookingServices, error: bookingServicesError } = await supabase
+      .from("booking_services")
+      .select("id, supplier_id, sort_order, suppliers(kind)")
+      .eq("booking_id", id)
+      .order("sort_order", { ascending: true })
+    if (bookingServicesError) return safeSupabaseError("services:load-primary-leg", bookingServicesError)
+
+    // The first core leg -- the same supplier can sit on two legs. Same rule as the pricer.
+    const primaryLegId = primaryLegIdOf(
+      (bookingServices ?? []).flatMap((row) => {
+        const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers
+        return supplier?.kind
+          ? [{ id: row.id, supplierId: row.supplier_id, supplierKind: supplier.kind as SupplierKind, sortOrder: row.sort_order }]
+          : []
+      }),
+      booking.primary_supplier_id,
+    )
+    const primaryUnits = primaryLegId
+      ? parsed.data.selections.find((selection) => selection.packageLegId === primaryLegId)?.units
+      : undefined
+    if (!primaryLegId || !primaryUnits) {
+      return jsonError(
+        "Suite groups can only be saved together with the main service's suites",
+        400,
+        { primaryLegId: primaryLegId ?? null },
+      )
+    }
+    if (primaryUnits.length !== paxGroups.length) {
+      return jsonError(
+        `${supplierNameFor(primaryLegId)} has ${primaryUnits.length} units but ${paxGroups.length} suite groups were sent — every unit is one group`,
+        400,
+        { packageLegId: primaryLegId, unitCount: primaryUnits.length, groupCount: paxGroups.length },
+      )
+    }
+    const misplacedIndex = primaryUnits.findIndex((unit, index) => {
+      const groupIds = unit.paxGroupIds ?? []
+      return groupIds.length !== 1 || groupIds[0] !== paxGroups[index].id
+    })
+    if (misplacedIndex !== -1) {
+      return jsonError(
+        `${supplierNameFor(primaryLegId)}: unit ${misplacedIndex + 1} must belong to exactly one suite group, its own`,
+        400,
+        { packageLegId: primaryLegId, unitIndex: misplacedIndex },
+      )
     }
   }
 
@@ -794,8 +977,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   // An id is reused only when it was one of this very service's stored units, and only once --
   // anything else (an id from another service, a stale id, a duplicate) gets a fresh one.
   const reusedUnitIds = new Set<string>()
-  const unitRows: BookingServiceUnitInsert[] = servicesWithUnits.flatMap((selection) =>
-    (selection.units ?? []).map((unit, index) => {
+  const unitRows: BookingServiceUnitInsert[] = servicesWithUnits.flatMap((selection) => {
+    const service = serviceById.get(selection.packageLegId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    // The leg's rate as this save leaves it: the payload's, else the stored one. A split on the
+    // unit's own effective rate is dropped -- those guests already price at it.
+    const legRateTypeId = selection.rateTypeId !== undefined ? selection.rateTypeId : service?.rate_type_id ?? null
+    return (selection.units ?? []).map((unit, index) => {
       const reusedId =
         unit.id && existingUnitServiceId.get(unit.id) === selection.packageLegId && !reusedUnitIds.has(unit.id)
           ? unit.id
@@ -851,9 +1039,34 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         fare_override_set_by: !hasFareOverride ? null : fareUnchanged ? previousFare?.setBy ?? user.id : user.id,
         rate_type_id: unit.rateTypeId ?? null,
         origin: "consultant" as const,
+        pax_group_ids: [...new Set(unit.paxGroupIds ?? [])],
+        rate_splits: normaliseRateSplits(
+          unit.rateSplits ?? [],
+          effectiveUnitRateTypeId(supplier?.kind, unit.rateTypeId, legRateTypeId),
+        ) as unknown as Json,
       }
-    }),
-  )
+    })
+  })
+
+  // The groups land before the units that name them (replace_booking_pax_groups upserts the sent
+  // set and deletes the rest -- a deleted group's travellers become unplaced via the FK).
+  if (paxGroups) {
+    const { error: replaceGroupsError } = await supabase.rpc("replace_booking_pax_groups", {
+      p_booking_id: id,
+      p_groups: paxGroups.map((group, index) => ({
+        id: group.id,
+        position: index + 1,
+        label: group.label?.trim() || null,
+      })) as Json,
+    })
+    if (replaceGroupsError) {
+      return safeSupabaseError(
+        "services:replace-pax-groups",
+        replaceGroupsError,
+        "Could not save the suite groups. Nothing was changed for the rooms, cabins or suites — please try again.",
+      )
+    }
+  }
 
   // Delete and insert run in one transaction (replace_booking_service_units), across every service
   // whose payload carries units. As two separate calls, an insert that failed after the delete had
@@ -960,6 +1173,12 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   if (reloadError) return safeSupabaseError("services:reload", reloadError)
 
+  const reloadedGroups = await loadPaxGroups(supabase, id)
+  if (reloadedGroups.error) return safeSupabaseError("services:reload-pax-groups", reloadedGroups.error)
+
   const reloadedRows = (services ?? []) as unknown as ServiceWithUnitsRow[]
-  return Response.json({ selections: reloadedRows.map((row) => ({ ...row, package_leg_id: row.id })) })
+  return Response.json({
+    selections: reloadedRows.map((row) => ({ ...row, package_leg_id: row.id })),
+    paxGroups: reloadedGroups.groups,
+  })
 }

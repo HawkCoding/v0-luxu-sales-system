@@ -6,6 +6,14 @@ import { QuoteDocument } from "./quote-document"
 import { sampleQuotePdfData } from "./sample-data"
 import type { QuotePdfData } from "./quote-document"
 import { renderQuotePdf } from "../render-quote-pdf"
+import { allocatePaxGroups } from "@/lib/quotes/pax-group-pricing"
+import { blockScopeTagger } from "@/lib/quotes/resolve-pax-group-pricing"
+import {
+  CARMEN_RATE_LABELS,
+  CARMEN_SUBTOTAL,
+  carmenQuoteLines,
+  carmenServiceBlocks,
+} from "@/lib/pax-groups/carmen-sample.fixtures"
 
 const QUOTE_NUMBER = "LTT-2026-0001-Q1"
 
@@ -111,6 +119,53 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
     expect(text).not.toContain(QUOTE_NUMBER)
     expect(text).toContain("Prepared for")
     expect(text).toContain("16 July 2026")
+  })
+
+  describe("Travel Package Details across a page break", () => {
+    /** A hotel whose description fills most of the room left under the totals, so the first details
+     *  row can't finish on page 1. */
+    const tallRow = (bullets: number): QuotePdfData["itineraryBlocks"] => [
+      {
+        ...itineraryBlocks[1],
+        serviceData: {
+          ...itineraryBlocks[1].serviceData,
+          inclusions: Array.from({ length: bullets }, (_, index) => `Inclusion number ${index + 1}`),
+        },
+      },
+    ]
+
+    async function positions(bullets: number): Promise<Array<{ page: number; str: string; y: number }>> {
+      const buffer = await renderQuotePdf(data({ itineraryBlocks: tallRow(bullets) }))
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
+      const document = await pdfjs.getDocument({ data: new Uint8Array(buffer), useSystemFonts: false }).promise
+      const runs: Array<{ page: number; str: string; y: number }> = []
+      for (let page = 1; page <= document.numPages; page += 1) {
+        const content = await (await document.getPage(page)).getTextContent()
+        for (const item of content.items) {
+          if ("str" in item && item.str.trim()) runs.push({ page, str: item.str, y: item.transform[5] })
+        }
+      }
+      return runs
+    }
+
+    it("moves the heading to the next page with its first row, never squeezing the row", async () => {
+      const runs = await positions(40)
+      const heading = runs.find((run) => run.str === "Travel Package Details")
+      const first = runs.find((run) => run.str === "Inclusion number 1")
+      const last = runs.find((run) => run.str === "Inclusion number 40")
+      expect(heading && first && last).toBeTruthy()
+      if (!heading || !first || !last) return
+      expect(heading.page).toBe(2)
+      expect(first.page).toBe(2)
+      expect(last.page).toBe(2)
+      // Every bullet on its own line: 39 line pitches apart, not overprinted.
+      expect(first.y - last.y).toBeGreaterThan(39 * 8)
+    })
+
+    it("keeps a short section on the first page", async () => {
+      const runs = await positions(2)
+      expect(runs.find((run) => run.str === "Travel Package Details")?.page).toBe(1)
+    })
   })
 
   it("keeps the quote number out of the PDF viewer's title bar", () => {
@@ -381,6 +436,90 @@ describe("QuoteDocument", { timeout: 30_000 }, () => {
       const text = (await pages({ agentCommission: 0, discountVisible: false })).join(" ")
 
       expect(text).not.toContain("Discount")
+    })
+  })
+
+  describe("pax groups", () => {
+    const quoteLines = carmenQuoteLines()
+    const pricing = allocatePaxGroups({ lines: quoteLines, target: CARMEN_SUBTOTAL, rateLabels: CARMEN_RATE_LABELS })
+    const grouped: Partial<QuotePdfData> = {
+      adults: 8,
+      children: 4,
+      payingPax: { adults: 8, children: 4 },
+      subtotal: CARMEN_SUBTOTAL,
+      agentCommission: 0,
+      discount: 27_240,
+      total: 245_160,
+      perPersonTotals: { perAdult: 20_000, perChild: 10_000 },
+      paxGroupPricing: pricing,
+      itineraryScopeTag: blockScopeTagger(quoteLines),
+      itineraryBlocks: carmenServiceBlocks(),
+    }
+    const normalise = (line: string) => line.replace(/[\s ]+/g, " ").trim()
+
+    it("prints each suite's sentence and subtotal in place of the per-person rows", async () => {
+      const printed = (await lines(grouped)).map(normalise)
+
+      expect(printed).toContain("Twin Deluxe Suite 1 - 2 Adults x R23 800 per person R47 600")
+      expect(printed).toContain("Twin Deluxe Suite 2 - 1 Adult x R24 100 & 1 Adult x R29 400 R53 500")
+      expect(printed).toContain("Twin Deluxe Suite 3 - 2 Children x R18 900 per child R37 800")
+      expect(printed).toContain("Double Deluxe Suite 6 - 2 Adults x R23 800 per person R47 600")
+      expect(printed.join(" ")).not.toContain("(SA)")
+      expect(printed.join(" ")).not.toContain("(TW)")
+      expect(printed.join(" ")).not.toContain("Total per Adult")
+      expect(printed.join(" ")).not.toContain("Total per Child")
+    })
+
+    it("keeps Sub Total, Discount and the grand total below the suites, adding up visibly", async () => {
+      const printed = (await lines(grouped)).map(normalise)
+      const suite6 = printed.findIndex((line) => line.startsWith("Double Deluxe Suite 6"))
+      const subTotal = printed.findIndex((line) => line.startsWith("Sub Total incl. VAT"))
+
+      expect(suite6).toBeGreaterThanOrEqual(0)
+      expect(subTotal).toBeGreaterThan(suite6)
+      expect(printed[subTotal]).toBe("Sub Total incl. VAT R272 400")
+      expect(printed.findIndex((line) => line.startsWith("Discount"))).toBeGreaterThan(subTotal)
+      expect(printed).toContain("Total for 8 Adults & 4 Children incl. VAT R245 160")
+      const subtotals = pricing?.lines.reduce((sum, line) => sum + line.subtotal, 0)
+      expect(subtotals).toBe(CARMEN_SUBTOTAL)
+    })
+
+    it("sets the suites in one right-aligned amounts column, a wrapped sentence hanging under its first line", async () => {
+      const longLabel = "Twin Deluxe Suite 2 for Mr & Mrs Chen (parents travelling with Kayleigh and Annabel)"
+      const renamed = pricing
+        ? { ...pricing, lines: pricing.lines.map((line) => (line.groupId === "g2" ? { ...line, label: longLabel } : line)) }
+        : null
+      const runs = (await pageRuns({ ...grouped, paxGroupPricing: renamed }, 1)).map((run) => ({
+        ...run,
+        str: run.str.replace(/ /g, " "),
+      }))
+      const amounts = ["R47 600", "R53 500", "R37 800", "R32 400"].map((amount) => runOf(runs, amount))
+      for (const amount of amounts) expect(amount.right).toBeCloseTo(amounts[0].right, 0)
+      expect(runOf(runs, "R272 400").right).toBeCloseTo(amounts[0].right, 0)
+
+      const first = runs.find((run) => run.str.startsWith("Twin Deluxe Suite 2 for Mr & Mrs Chen"))
+      const wrapped = runs.find((run) => run.str.startsWith("1 Adult x R24 100"))
+      const suite1 = runs.find((run) => run.str.startsWith("Twin Deluxe Suite 1 -"))
+      expect(first && wrapped && suite1).toBeTruthy()
+      if (!first || !wrapped || !suite1) return
+      expect(first.x).toBeCloseTo(suite1.x, 0)
+      expect(wrapped.x).toBeGreaterThan(first.x + 5)
+    })
+
+    it("tags a service only some suites take in the Travel Package Includes", async () => {
+      const [first] = await pages(grouped)
+
+      expect(first.replace(/ /g, " ")).toContain("Cape Town International Airport (Sedan) at 11h30 (Suite 6 only)")
+      expect(first).not.toContain(") (Suite")
+    })
+
+    it("prints today's rows when the pricing is absent", async () => {
+      const text = (await pages({ ...grouped, paxGroupPricing: null, itineraryScopeTag: undefined })).join(" ")
+
+      expect(text).toContain("Total per Adult")
+      expect(text.replace(/\s+/g, " ")).toContain("R245 160,00")
+      expect(text).not.toContain("Twin Deluxe Suite 1 -")
+      expect(text).not.toContain("only)")
     })
   })
 })

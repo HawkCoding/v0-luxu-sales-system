@@ -1,9 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import { buildInvoiceView, invoiceJourneyHeading } from "@/lib/invoices/build-invoice-view"
+import { buildInvoiceView, collapseRepeatedInvoiceItems, invoiceJourneyHeading } from "@/lib/invoices/build-invoice-view"
+import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
 import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
 import { printedTotalInclVat, type InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
+import { resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { getPaymentMethod } from "@/lib/payment-methods"
 import {
@@ -94,6 +96,13 @@ export async function ensureInvoicePdf(
     journeyHeading: invoiceJourneyHeading(documentText.itinerary_doc_journey_heading, primarySupplierKind),
     primarySupplierKind,
   })
+  // A booking split into pax groups prints one line per suite in place of the per-person rows. They
+  // add up to the GROSS Sub Total, as on the quote (the discount and commission come off below
+  // them); null (no groups, or lines priced before them) keeps the per-person rows.
+  const paxGroupPricing = await resolvePaxGroupPricing(supabase, {
+    lines: view.pricedLines,
+    target: totals.subtotalInclVat,
+  })
 
   let pdfBuffer: Buffer
   try {
@@ -105,9 +114,12 @@ export async function ensureInvoicePdf(
       dueDate: invoice.due_date,
       consultant: view.consultant,
       guestNames: view.guestNames,
+      numberedGuests: view.numberedGuests,
       billing: view.billing,
       departure: view.departure,
-      items: view.items,
+      // The per-suite prices already split the money, so rows that print alike (the adult and child
+      // fares of one train) show once.
+      items: paxGroupPricing ? collapseRepeatedInvoiceItems(view.items) : view.items,
       totals: {
         ...totals,
         ...derivePerPersonTotals({
@@ -117,6 +129,8 @@ export async function ensureInvoicePdf(
           // The figure printed as "Total incl. VAT", so the per-person rows reconcile with it.
           total: printedTotalInclVat(totals),
         }),
+        paxGroupPricing,
+        paxGroupNoun: paxGroupNoun(primarySupplierKind),
       },
       currency: invoice.currency,
       statusLabel,

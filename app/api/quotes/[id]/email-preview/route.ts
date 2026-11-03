@@ -6,6 +6,8 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
+import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
+import { blockScopeTagger, resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { formatMoney } from "@/lib/money"
 import {
   deriveFlightCapPerPerson,
@@ -182,6 +184,13 @@ export async function POST(req: Request, { params }: RouteParams) {
     mapSupplierKindToServiceType(primarySupplierKind),
   )
 
+  // The quote PDF's own per-suite lines on the same gross figure, so the email and the PDF stapled
+  // to it price every suite alike. Null (no pax groups) keeps the per-person line.
+  const paxGroupPricing = await resolvePaxGroupPricing(supabase, {
+    lines: lineItems,
+    target: Number(quote.subtotal ?? quote.total),
+  })
+
   const quoteSummaryTable = buildQuoteSummaryBlock({
     quoteNumber,
     quoteDate,
@@ -195,6 +204,8 @@ export async function POST(req: Request, { params }: RouteParams) {
     agentCommission: Number(quote.agent_commission ?? 0),
     discount: Number(quote.discount_amount ?? 0),
     discountVisible: quote.discount_visible ?? true,
+    paxGroupPricing,
+    itineraryScopeTag: blockScopeTagger(lineItems, paxGroupNoun(primarySupplierKind)),
     currency: quote.currency,
     itineraryBlocks,
     packageIncludesHeading: documentText.quote_doc_includes_heading,

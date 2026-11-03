@@ -38,6 +38,13 @@ interface RateTypeSelectProps {
    * through to the supplier's base rate instead. Omit to require an explicit choice.
    */
   inheritLabel?: string
+  /**
+   * Rates left out of the list (e.g. the unit's own rate on a per-guest select, which the inherit
+   * option already offers). A value already picked stays listed, like allowedRateTypeIds.
+   */
+  excludeRateTypeIds?: string[]
+  /** Adds what each rate prints as on documents: "STO Rate · prints (TW)". */
+  showShortLabel?: boolean
 }
 
 export function RateTypeSelect({
@@ -50,10 +57,14 @@ export function RateTypeSelect({
   triggerClassName,
   label = "Rate type",
   inheritLabel,
+  excludeRateTypeIds,
+  showShortLabel = false,
 }: RateTypeSelectProps) {
-  const allowed = allowedRateTypeIds
-    ? rateTypes.filter((rt) => allowedRateTypeIds.includes(rt.id) || rt.id === value)
-    : rateTypes
+  const allowed = (
+    allowedRateTypeIds
+      ? rateTypes.filter((rt) => allowedRateTypeIds.includes(rt.id) || rt.id === value)
+      : rateTypes
+  ).filter((rt) => !excludeRateTypeIds?.includes(rt.id) || rt.id === value)
 
   if (allowed.length === 0) return null
 
@@ -77,6 +88,7 @@ export function RateTypeSelect({
             <SelectItem key={rt.id} value={rt.id}>
               {rt.name}
               {rt.isDefault ? " (default)" : ""}
+              {showShortLabel && rt.shortLabel ? ` · prints (${rt.shortLabel})` : ""}
             </SelectItem>
           ))}
         </SelectContent>

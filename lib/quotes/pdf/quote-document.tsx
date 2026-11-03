@@ -1,4 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import type { ReactNode } from "react"
 import {
   FOOTER_BRAND_DIVISION_LINE,
   FOOTER_BRAND_PRODUCT_LINE,
@@ -47,9 +48,11 @@ import {
   formatPaxLabel,
   formatPreparedForContact,
   formatQuoteGrandTotalLabel,
+  type ItineraryScopeTag,
   type QuoteSummaryItem,
 } from "@/lib/quotes/quote-presentation"
 import type { PerPersonTotals } from "@/lib/invoices/per-person-totals"
+import { formatPaxGroupLineForPrint, type PaxGroupPricing } from "@/lib/quotes/pax-group-pricing"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 export interface QuotePdfData {
@@ -78,6 +81,13 @@ export interface QuotePdfData {
   /** "Total per Adult" / "Total per Child" — the invoice's own figures (derivePerPersonTotals in
    *  lib/invoices/per-person-totals.ts); a null side omits its line, absent prints neither. */
   perPersonTotals?: PerPersonTotals | null
+  /** One line per pax group ("Twin Deluxe Suite 2 - 1 Adult x R24 100,00 (SA) & …" + its subtotal),
+   *  adding up to the gross subtotal (resolvePaxGroupPricing). When it has lines it replaces the
+   *  "Total per Adult" / "Total per Child" rows; null/absent prints those as before. */
+  paxGroupPricing?: PaxGroupPricing | null
+  /** Tags a "Travel Package Includes" service only some pax groups take ("(Suite 2 only)") —
+   *  blockScopeTagger in lib/quotes/resolve-pax-group-pricing.ts. Absent tags nothing. */
+  itineraryScopeTag?: ItineraryScopeTag
   /** Gross travel price before the agency discount (quotes.subtotal). Only shown when a
    *  commission or visible discount is deducted from it. */
   subtotal?: number
@@ -150,6 +160,8 @@ const DETAIL_TITLE_GAP = 10
 const TOTALS_LEFT = SECTION_LEFT + DATE_COLUMN
 /** Fits "R1 234 567,00" at 10pt Manrope. */
 const TOTALS_VALUE_WIDTH = 80
+/** How far a pax group's wrapped sentence lines sit in from its first line. */
+const GROUP_HANGING_INDENT = 12
 const SMALL_LINE = 10.65 / 8
 const RIGHT_LINE = 9.9 / 8
 /** The details page runs x 48.5 → 547. */
@@ -249,6 +261,23 @@ const styles = StyleSheet.create({
   // Labels end at one fixed edge, right against the amounts column (no colon to mark the gap).
   totalsLabel: { fontSize: 10, flex: 1, paddingRight: 10, textAlign: "right" },
   totalsValue: { fontSize: 10, width: TOTALS_VALUE_WIDTH, textAlign: "right" },
+  // With pax groups the block spans the includes list's full width, its sentences starting under
+  // the dates column, so a suite's line ("Twin Deluxe Suite 2 - 1 Adult x R24 100,00 (SA) & 1 Adult
+  // x R29 400,00 (TW)") sets on one line as the client writes it; the rows below keep their place.
+  totalsWide: { marginLeft: SECTION_LEFT },
+  // A pax group's sentence reads left to right like the client's own wording, a wrapped line
+  // hanging under its first (see GroupTotalsRow).
+  groupBlock: { rowGap: 4, marginBottom: 2 },
+  groupRow: { flexDirection: "row", paddingRight: 4.8 },
+  groupLabel: {
+    fontSize: 10,
+    lineHeight: 1.25,
+    flex: 1,
+    paddingRight: 10,
+    paddingLeft: GROUP_HANGING_INDENT,
+    textIndent: -GROUP_HANGING_INDENT,
+  },
+  groupValue: { fontSize: 10, lineHeight: 1.25, width: TOTALS_VALUE_WIDTH, textAlign: "right" },
 
   disclaimer: {
     fontSize: 10,
@@ -304,6 +333,17 @@ function TotalsRow({ label, value, bold = false }: { label: string; value: strin
   )
 }
 
+/** One pax group: Carmen's sentence left-aligned and wrapping with a hanging indent, the suite's
+ *  subtotal level with its first line in the amounts column. */
+function GroupTotalsRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.groupRow} wrap={false}>
+      <Text style={styles.groupLabel}>{label}</Text>
+      <Text style={styles.groupValue}>{value}</Text>
+    </View>
+  )
+}
+
 export function QuoteDocument({
   quoteNumber,
   customerName,
@@ -319,6 +359,8 @@ export function QuoteDocument({
   journeyDetails,
   total,
   perPersonTotals,
+  paxGroupPricing,
+  itineraryScopeTag,
   subtotal,
   agentCommission = 0,
   discount = 0,
@@ -344,9 +386,13 @@ export function QuoteDocument({
     logoUrl: null,
   }
   const showBrand = brandPosition !== "hidden"
-  const money = (value: number) => formatMoney(value, currency)
+  const groupLines = paxGroupPricing?.lines ?? []
+  // A booking split into suites prints whole rands throughout its totals; others keep their cents.
+  const money = (value: number) =>
+    formatMoney(value, currency, groupLines.length > 0 ? { decimals: false } : undefined)
 
-  const paxLabel = formatPaxLabel({ adults, children })
+  // A booking split into suites reads "&" throughout, like its total; others keep the approved "+".
+  const paxLabel = formatPaxLabel({ adults, children }, paxGroupPricing?.lines.length ? { joiner: " & " } : {})
   const paying = payingPax ?? { adults, children }
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
   const [phone, email] = [customerPhone?.trim() || null, customerEmail?.trim() || null]
@@ -360,12 +406,11 @@ export function QuoteDocument({
     flightCapPerPerson != null
       ? formatFlightCapLine((amount) => formatMoney(amount, currency, { decimals: false }), flightCapPerPerson)
       : null
-  const summaryDays = buildQuoteSummaryDays(sortedBlocks, flightCapBullet)
+  const summaryDays = buildQuoteSummaryDays(sortedBlocks, flightCapBullet, itineraryScopeTag)
   const detailSections = buildQuoteDetailSections(sortedBlocks)
   // The details page's lines carry no closing colon (see withoutTrailingColon).
   const exclusions = uniqueDetailLines(collectQuoteExclusions(sortedBlocks, packageExcludesDefault))
   const excludesTitle = withoutTrailingColon(packageExcludesHeading) || DEFAULT_EXCLUDES_HEADING
-  const hasDetails = detailSections.length > 0 || exclusions.length > 0
 
   const journeyRows: Array<{ label: string; value: string }> = [
     { label: "Travel dates", value: journeyRange ?? "To be confirmed" },
@@ -385,6 +430,32 @@ export function QuoteDocument({
       <Text style={styles.disclaimer}>{disclaimer}</Text>
     </View>
   ) : null
+
+  // Section two's rows, each a direct child of the page. react-pdf only moves an unbreakable block to
+  // the next page when something precedes it in its own parent, so a block nested first in a section
+  // View would be squeezed in place instead.
+  const detailRows: Array<{ key: string; wraps: boolean; title: ReactNode; items: ReactNode }> = [
+    ...detailSections.map((section, index) => ({
+      key: `section-${index}`,
+      wraps: estimatedDetailHeight(section.bullets) > DETAIL_ROW_MAX_HEIGHT,
+      title: section.title.map((line, lineIndex) => (
+        <Text key={lineIndex} style={styles.detailTitleLine}>
+          {line}
+        </Text>
+      )),
+      items: <NestedBulletList lines={section.bullets} />,
+    })),
+    ...(exclusions.length > 0
+      ? [
+          {
+            key: "exclusions",
+            wraps: false,
+            title: <Text style={styles.detailTitleLine}>{excludesTitle}</Text>,
+            items: exclusions.map((item, index) => <BulletRow key={index} text={item} bulletLeft={0} textLeft={10.3} />),
+          },
+        ]
+      : []),
+  ]
 
   return (
     <Document
@@ -473,14 +544,26 @@ export function QuoteDocument({
 
         {/* Pricing closes section one. Never split across a page: a total stranded on its own
             page reads as a separate document. */}
-        <View style={styles.totals} wrap={false}>
-          {/* The per-person rows head the block, above Sub Total or the grand total (client markup). */}
-          {perPersonTotals?.perAdult != null ? (
-            <TotalsRow label="Total per Adult" value={money(perPersonTotals.perAdult)} />
-          ) : null}
-          {perPersonTotals?.perChild != null && paying.children > 0 ? (
-            <TotalsRow label="Total per Child" value={money(perPersonTotals.perChild)} />
-          ) : null}
+        <View style={groupLines.length > 0 ? [styles.totals, styles.totalsWide] : styles.totals} wrap={false}>
+          {/* The per-person rows head the block, above Sub Total or the grand total (client markup).
+              On a booking split into pax groups, one line per suite takes their place; the suite
+              subtotals add up to the Sub Total (or, with nothing deducted, the grand total). */}
+          {groupLines.length > 0 ? (
+            <View style={styles.groupBlock}>
+              {groupLines.map((line) => (
+                <GroupTotalsRow key={line.groupId} label={formatPaxGroupLineForPrint(line, money)} value={money(line.subtotal)} />
+              ))}
+            </View>
+          ) : (
+            <>
+              {perPersonTotals?.perAdult != null ? (
+                <TotalsRow label="Total per Adult" value={money(perPersonTotals.perAdult)} />
+              ) : null}
+              {perPersonTotals?.perChild != null && paying.children > 0 ? (
+                <TotalsRow label="Total per Child" value={money(perPersonTotals.perChild)} />
+              ) : null}
+            </>
+          )}
           {hasDeduction ? (
             <TotalsRow label="Sub Total incl. VAT" value={money(subtotal ?? total)} bold />
           ) : null}
@@ -498,43 +581,42 @@ export function QuoteDocument({
 
         {closing}
 
-        {hasDetails ? (
-          // Section two follows the disclaimer on the same page when it fits (client markup,
-          // 2026-10-22); its heading never strands at a page foot (minPresenceAhead).
-          <View style={{ marginLeft: DETAILS_LEFT, marginRight: DETAILS_RIGHT, marginTop: 12 }}>
-            <Text style={styles.sectionHeading} minPresenceAhead={60}>
-              {DETAILS_HEADING}
-            </Text>
-            <View style={[styles.sectionBody, { paddingTop: 2.5, paddingBottom: 8.1 }]}>
-              {detailSections.map((section, index) => (
-                <View key={index} style={styles.detailRow} wrap={estimatedDetailHeight(section.bullets) > DETAIL_ROW_MAX_HEIGHT}>
-                  <View style={styles.detailTitle}>
-                    {section.title.map((line, lineIndex) => (
-                      <Text key={lineIndex} style={styles.detailTitleLine}>
-                        {line}
-                      </Text>
-                    ))}
-                  </View>
-                  <View style={styles.dayItems}>
-                    <NestedBulletList lines={section.bullets} />
-                  </View>
-                </View>
-              ))}
-              {exclusions.length > 0 ? (
-                <View style={styles.detailRow} wrap={false}>
-                  <View style={styles.detailTitle}>
-                    <Text style={styles.detailTitleLine}>{excludesTitle}</Text>
-                  </View>
-                  <View style={styles.dayItems}>
-                    {exclusions.map((item, index) => (
-                      <BulletRow key={index} text={item} bulletLeft={0} textLeft={10.3} />
-                    ))}
-                  </View>
-                </View>
-              ) : null}
+        {/* Section two follows the disclaimer on the same page when it fits (client markup,
+            2026-10-22). The heading travels with the first row, so it never strands at a page foot;
+            only a row too tall for any page (it may wrap) leaves the heading to demand room below
+            it. The last row carries the section's closing rule. */}
+        {detailRows.map((row, index) => {
+          const isFirst = index === 0
+          const isLast = index === detailRows.length - 1
+          const detailRow = (
+            <View style={styles.detailRow} wrap={row.wraps}>
+              <View style={styles.detailTitle}>{row.title}</View>
+              <View style={styles.dayItems}>{row.items}</View>
             </View>
-          </View>
-        ) : null}
+          )
+          return (
+            <View
+              key={row.key}
+              wrap={row.wraps}
+              style={[
+                { marginLeft: DETAILS_LEFT, marginRight: DETAILS_RIGHT },
+                isFirst ? { marginTop: 12 } : {},
+                isLast ? [styles.sectionBody, { paddingBottom: 8.1 }] : {},
+              ].flat()}
+            >
+              {isFirst ? (
+                <>
+                  <Text style={styles.sectionHeading} minPresenceAhead={row.wraps ? 120 : undefined}>
+                    {DETAILS_HEADING}
+                  </Text>
+                  <View style={{ paddingTop: 2.5 }}>{detailRow}</View>
+                </>
+              ) : (
+                detailRow
+              )}
+            </View>
+          )
+        })}
 
         <DocumentFooter lines={footerLines} />
       </Page>

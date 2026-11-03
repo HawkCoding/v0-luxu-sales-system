@@ -33,15 +33,64 @@ export interface GuestInfoGuest {
   /** Country code as shown to the guest, e.g. "ZA", "UK". */
   countryCode: string | null
   idNumber: string | null
+  /** travellers.pax_group_id — the suite the guest is placed in. Only read in group mode. */
+  paxGroupId?: string | null
+  /** A child prints " – CHD 8" after their line in group mode. */
+  isChild?: boolean
+  /** The child's age (childAgesForTravellers); null prints " – CHD" alone. */
+  childAge?: number | null
+}
+
+/** A booking split into pax groups, as the grouped block heads and numbers it. */
+export interface GuestInfoPaxGroups {
+  groups: ReadonlyArray<{ id: string; position: number }>
+  /** buildGuestHeadings (lib/pax-groups/booking-pax-groups.ts): one heading per group. */
+  headings: ReadonlyArray<{ groupId: string; heading: string }>
 }
 
 export interface GuestInfoInput {
   customerName: string
   customerEmail: string | null
-  /** Named travellers with their DOB/country/ID details. Empty when not yet captured. */
+  /** Named travellers with their DOB/country/ID details, in roster order. Empty when not yet captured. */
   guests: GuestInfoGuest[]
   adults: number
   children: number
+  /** Present on a booking split into pax groups: the guests print under a heading per group,
+   *  numbered "2.1", "2.2". Ignored (the flat list prints) when no guest is placed in a group. */
+  paxGroups?: GuestInfoPaxGroups | null
+}
+
+/** Whole years from a "YYYY-MM-DD" birth date to `asOf` (another date-only string, or today). */
+function ageOn(dateOfBirth: string | null | undefined, asOf: string | null | undefined): number | null {
+  const birth = DATE_ONLY_PATTERN.exec(dateOfBirth ?? "")
+  if (!birth) return null
+  const reference = DATE_ONLY_PATTERN.exec((asOf ?? "").slice(0, 10)) ?? DATE_ONLY_PATTERN.exec(new Date().toISOString().slice(0, 10))
+  if (!reference) return null
+  const [by, bm, bd] = birth.slice(1).map(Number)
+  const [ry, rm, rd] = reference.slice(1).map(Number)
+  const age = ry - by - (rm < bm || (rm === bm && rd < bd) ? 1 : 0)
+  return age >= 0 ? age : null
+}
+
+/**
+ * Each child traveller's age for the " – CHD 8" marker: from their date of birth at `asOf` (the
+ * departure date), else the booking's child_ages in child order. Null for an adult, or a child
+ * whose age is known neither way.
+ */
+export function childAgesForTravellers(
+  travellers: ReadonlyArray<{ is_child?: boolean | null; date_of_birth?: string | null }>,
+  bookingChildAges: readonly number[] | null | undefined,
+  asOf: string | null | undefined,
+): Array<number | null> {
+  let childIndex = 0
+  return travellers.map((traveller) => {
+    if (!traveller.is_child) return null
+    const fromList = bookingChildAges?.[childIndex]
+    childIndex += 1
+    const fromBirth = ageOn(traveller.date_of_birth, asOf)
+    if (fromBirth !== null) return fromBirth
+    return typeof fromList === "number" && Number.isFinite(fromList) ? fromList : null
+  })
 }
 
 function formatPaxCount(adults: number, children: number): string {
@@ -60,13 +109,63 @@ function formatGuestLine(guest: GuestInfoGuest): string {
   return parts.join(" ")
 }
 
+/** "2.1 Mr Hao Chen DOB: 01/07/2017 TW 300000003 – CHD 8". */
+function formatNumberedGuestLine(guest: GuestInfoGuest, number: string | null): string {
+  const child = guest.isChild ? ` – CHD${guest.childAge != null ? ` ${guest.childAge}` : ""}` : ""
+  return `${number ? `${number} ` : ""}${formatGuestLine(guest)}${child}`
+}
+
+const NOT_PLACED_HEADING = "Not yet placed"
+
+/**
+ * The grouped GUEST DETAILS block: a small bold heading over each suite ("Deluxe Suite 2"), its
+ * guests numbered "2.1", "2.2" under it in a paragraph of their own, and guests not yet placed in a
+ * suite last under "Not yet placed". Null when no guest is placed in a known group (the caller
+ * prints the flat list).
+ */
+function buildGroupedGuestLines(guests: GuestInfoGuest[], paxGroups: GuestInfoPaxGroups, rowStyle: string): string | null {
+  if (paxGroups.groups.length < 2) return null
+  const positionOf = new Map(paxGroups.groups.map((group) => [group.id, group.position]))
+  if (!guests.some((guest) => guest.paxGroupId && positionOf.has(guest.paxGroupId))) return null
+
+  const guestsOf = (groupId: string) => guests.filter((guest) => guest.paxGroupId === groupId)
+  const paragraphs: Array<{ heading: string; lines: string[] }> = []
+  const paragraph = (heading: string, lines: string[]) => paragraphs.push({ heading, lines })
+  // The last suite's guests close the block with a paragraph's worth of air, so the template's next
+  // line ("Reservation/Itinerary details") never runs straight on from "6.2 …".
+  const lastStyle = rowStyle.replace(/margin:[^;]*;/, "margin:0 0 16px;")
+  const render = ({ heading, lines }: { heading: string; lines: string[] }, last: boolean) =>
+    `<p style="${last ? lastStyle : rowStyle}">${heading ? `<strong style="font-size:12px;">${escapeHtml(heading)}</strong><br/>` : ""}${lines.join("<br/>")}</p>`
+
+  const headingOf = new Map(paxGroups.headings.map((entry) => [entry.groupId, entry.heading]))
+  for (const group of [...paxGroups.groups].sort((a, b) => a.position - b.position)) {
+    const members = guestsOf(group.id)
+    if (members.length === 0) continue
+    paragraph(
+      headingOf.get(group.id) ?? "",
+      members.map((guest, index) => formatNumberedGuestLine(guest, `${group.position}.${index + 1}`)),
+    )
+  }
+
+  const unplaced = guests.filter((guest) => !guest.paxGroupId || !positionOf.has(guest.paxGroupId))
+  if (unplaced.length > 0) {
+    paragraph(NOT_PLACED_HEADING, unplaced.map((guest) => formatNumberedGuestLine(guest, null)))
+  }
+  return paragraphs.map((entry, index) => render(entry, index === paragraphs.length - 1)).join("")
+}
+
 export function buildGuestInfoBlock(input: GuestInfoInput): string {
   const lineStyle = "margin:0 0 6px;color:#312b24;font-size:13px;line-height:19px;"
   const rowStyle = "margin:0 0 4px;color:#312b24;font-size:13px;line-height:19px;"
 
   const lines: string[] = []
 
-  if (input.guests.length > 0) {
+  const grouped =
+    input.guests.length > 0 && input.paxGroups ? buildGroupedGuestLines(input.guests, input.paxGroups, rowStyle) : null
+
+  if (grouped) {
+    lines.push(grouped)
+  } else if (input.guests.length > 0) {
     // One paragraph with <br/> breaks: separate <p>s get a full paragraph gap in Outlook.
     const guestLines = input.guests.map(formatGuestLine).join("<br/>")
     lines.push(`<p style="${rowStyle}">${guestLines}</p>`)

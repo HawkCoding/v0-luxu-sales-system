@@ -53,6 +53,9 @@ const transportRequestSchema = z.object({
   /** Per-person mode only. priceOverride above is the adult override in that mode. */
   priceOverrideChild: z.number().nonnegative().nullable().optional(),
   priceOverrideInfant: z.number().nonnegative().nullable().optional(),
+  /** The pax groups this trip serves (booking_pax_groups ids); [] = every group, and always [] on
+   *  a booking without groups. Ids that aren't one of the booking's groups are dropped in PUT. */
+  paxGroupIds: z.array(z.string().uuid()).max(50).default([]),
   sortOrder: z.number().int().nonnegative().optional(),
 }).superRefine((request, context) => {
   if (request.serviceType === "rental") {
@@ -215,6 +218,20 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
+  // A trip's pax groups are kept only when they are this booking's own. Dropped rather than
+  // refused: a group removed by a Build Booking save (PATCH /services) leaves its id on trips
+  // another editor may still be holding, and every reader ignores such a stale id anyway -- this
+  // just keeps it, or another booking's id, from being written back.
+  const { data: groupRows, error: groupsError } = parsed.transportRequests.some(
+    (request) => request.paxGroupIds.length > 0,
+  )
+    ? await supabase.from("booking_pax_groups").select("id").eq("booking_id", id)
+    : { data: [] as { id: string }[], error: null }
+  if (groupsError) {
+    return safeSupabaseError("transport-requests:load-pax-groups", groupsError, "Failed to load the booking's suite groups")
+  }
+  const bookingGroupIds = new Set((groupRows ?? []).map((row) => row.id))
+
   const rows: TransportRequestInsertRow[] = []
   for (const [index, request] of parsed.transportRequests.entries()) {
     const previous = request.id ? existingProvenance.get(request.id) : undefined
@@ -297,6 +314,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       adult_count: adultCount,
       child_count: childCount,
       infant_count: infantCount,
+      pax_group_ids: [...new Set(request.paxGroupIds.filter((groupId) => bookingGroupIds.has(groupId)))],
     })
   }
   const rentalRows = parsed.transportRequests.flatMap((request, index) => {

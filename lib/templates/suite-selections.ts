@@ -14,7 +14,7 @@ import type { SupplierKind } from "@/lib/types"
 // suite_phrase_pattern rides along too, so the token gets the same per-supplier
 // wording as the voucher/invoice (see lib/templates/suite-description.ts).
 const SELECT =
-  "id, units:booking_service_units(sort_order, " +
+  "id, units:booking_service_units(id, sort_order, " +
   "suite_type:suite_types(name, supplier:suppliers(kind, suite_phrase_pattern)), bedroom_type:bedroom_types(name), " +
   "bedroom_layout:bedroom_layouts(name), bathroom_type:bathroom_types(name))"
 
@@ -28,6 +28,7 @@ type SuiteTypeRow =
   | null
 
 interface UnitJoinRow {
+  id: string
   sort_order: number | null
   suite_type: SuiteTypeRow
   bedroom_type: NamedRow
@@ -82,6 +83,8 @@ export async function loadSuiteSelections(
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map((unit) => ({
       suiteTypeName: nameOf(unit.suite_type) ?? "",
+      // Each unit is one suite, so {{suiteDescription}} counts five identical ones as five.
+      unitKeys: [unit.id],
       bedroomType: nameOf(unit.bedroom_type),
       bedroomLayout: nameOf(unit.bedroom_layout),
       bathroomType: nameOf(unit.bathroom_type),

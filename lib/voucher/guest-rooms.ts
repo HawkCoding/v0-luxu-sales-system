@@ -147,3 +147,97 @@ export function guestNameLinesByRoom(guests: RoomRosterGuest[]): string[] | null
     .filter(Boolean)
   return lines.length > 1 ? lines : null
 }
+
+/**
+ * The voucher's "Guest Names" on a booking split into pax groups: one line per group in position
+ * order — the Reservation tab's Suite pick, never a guess — then the guests not yet placed together
+ * on a last line. Null when the booking has fewer than two groups or nobody is placed in one (the
+ * caller then falls back to guestNameLinesByRoom), and when the lines would come to just one.
+ */
+export function guestNameLinesByPaxGroup(
+  guests: Array<RoomRosterGuest & { pax_group_id?: string | null }>,
+  groups: ReadonlyArray<PaxGroupRef>,
+): string[] | null {
+  if (groups.length < 2) return null
+  const known = new Set(groups.map((group) => group.id))
+  if (!guests.some((guest) => guest.pax_group_id && known.has(guest.pax_group_id))) return null
+  const lines = [
+    ...placedLines(guests, groups),
+    joinNameList(
+      guests
+        .filter((guest) => !guest.pax_group_id || !known.has(guest.pax_group_id))
+        .map(rosterGuestName)
+        .filter(Boolean),
+    ),
+  ].filter(Boolean)
+  return lines.length > 1 ? lines : null
+}
+
+/** A pax group as the voucher names it: its label ("Twin Deluxe Suite 1") heads its guest line. */
+export interface PaxGroupRef {
+  id: string
+  position: number
+  label?: string | null
+}
+
+/** One line per group that has guests, in position order: "Twin Deluxe Suite 1 – Mr Wei Lin
+ *  and Mrs Mei Wang" (just the names when the group has no label). */
+function placedLines(guests: ReadonlyArray<RoomRosterGuest & { pax_group_id?: string | null }>, groups: ReadonlyArray<PaxGroupRef>): string[] {
+  return [...groups]
+    .sort((a, b) => a.position - b.position)
+    .map((group) => {
+      const names = joinNameList(guests.filter((guest) => guest.pax_group_id === group.id).map(rosterGuestName).filter(Boolean))
+      if (!names) return ""
+      const label = group.label?.trim()
+      return label ? `${label} – ${names}` : names
+    })
+    .filter(Boolean)
+}
+
+/** The suites' own headcount, as a transfer only they take reports it. */
+export interface PaxGroupHeadcount {
+  groupId: string
+  adults: number
+  children: number
+  infants: number
+}
+
+/**
+ * The voucher's transfer blocks on a booking split into pax groups: a trip only some suites take
+ * says whose it is — a "Guests" line per suite — and counts them from those suites' own units, not
+ * the vehicle's passenger count (a minibus for suites 1–5 is not "10 Adults"). Trips shared by every
+ * suite, and every other block, come back unchanged.
+ */
+export function scopeTransferBlocksToPaxGroups<
+  B extends { serviceType: string; transportRequestId?: string | null; serviceData: object },
+>(
+  blocks: readonly B[],
+  {
+    requestGroups,
+    groups,
+    headcounts,
+    guests,
+  }: {
+    /** booking_transport_requests.pax_group_ids by request id. */
+    requestGroups: ReadonlyMap<string, readonly string[]>
+    groups: ReadonlyArray<PaxGroupRef>
+    headcounts: readonly PaxGroupHeadcount[]
+    guests: ReadonlyArray<RoomRosterGuest & { pax_group_id?: string | null }>
+  },
+): B[] {
+  if (groups.length < 2) return [...blocks]
+  const known = new Set(groups.map((group) => group.id))
+  return blocks.map((block) => {
+    if (block.serviceType !== "transfer" || !block.transportRequestId) return block
+    const ids = new Set((requestGroups.get(block.transportRequestId) ?? []).filter((id) => known.has(id)))
+    if (ids.size === 0 || ids.size >= known.size) return block
+    const own = headcounts.filter((count) => ids.has(count.groupId))
+    const paxGroupGuests = {
+      lines: placedLines(guests, groups.filter((group) => ids.has(group.id))),
+      adults: own.reduce((sum, count) => sum + count.adults, 0),
+      children: own.reduce((sum, count) => sum + count.children, 0),
+      infants: own.reduce((sum, count) => sum + count.infants, 0),
+    }
+    return { ...block, serviceData: { ...block.serviceData, paxGroupGuests } }
+  })
+}

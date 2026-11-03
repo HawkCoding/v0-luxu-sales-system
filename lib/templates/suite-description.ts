@@ -5,6 +5,7 @@
 // shower". The vocabulary rows (bedroom/bathroom types) are free text per
 // supplier, so the grammar lives here rather than in the database.
 
+import { pluralUnitLabel } from "@/lib/quotes/quote-presentation"
 import { renderSuitePhrasePattern } from "@/lib/templates/suite-phrase-pattern"
 import type { PricingSnapshot, SupplierKind } from "@/lib/types"
 
@@ -73,6 +74,13 @@ export interface SuiteSelection {
    * definition and always uses the plain grammar.
    */
   phrasePattern?: string | null
+  /**
+   * The booked units this selection stands for (a unit id, or a quote line's leg + unit ref), so
+   * {{suiteDescription}} can count suites rather than lines: one train suite priced on an adult and a
+   * child line, or on two rates, is still one suite. Absent (an older quote with no unit refs) counts
+   * as one suite per distinct phrase, as before.
+   */
+  unitKeys?: readonly string[]
 }
 
 export interface SuiteTokens {
@@ -229,9 +237,30 @@ export function buildSuiteTokens(
   return {
     suiteType: joinNaturally(dedupe(usable.map(suiteTypeWithNoun))),
     suiteConfiguration: joinNaturally(dedupe(usable.map(describeConfiguration))),
-    // Deduped first so identical suites share one article, not one each.
-    suiteDescription: joinNaturally(dedupe(usable.map(formatSuitePhrase)).map(withArticle)),
+    suiteDescription: describeCountedSuites(usable),
   }
+}
+
+/**
+ * "5 Twin bedded Deluxe Suites with a shower and a Double bedded Deluxe Suite with a shower" —
+ * identical phrases counted by the units behind them (unitKeys), each distinct one with its own
+ * article or count. A phrase whose selections carry no unit keys counts once, so a quote priced
+ * before unit refs existed reads exactly as it did.
+ */
+function describeCountedSuites(selections: readonly SuiteSelection[]): string {
+  const counted = new Map<string, Set<string>>()
+  for (const selection of selections) {
+    const phrase = formatSuitePhrase(selection)
+    if (!phrase) continue
+    const keys = counted.get(phrase) ?? new Set<string>()
+    for (const key of selection.unitKeys ?? []) keys.add(key)
+    counted.set(phrase, keys)
+  }
+  return joinNaturally(
+    [...counted.entries()].map(([phrase, keys]) =>
+      keys.size > 1 ? `${keys.size} ${pluralUnitLabel(phrase)}` : withArticle(phrase),
+    ),
+  )
 }
 
 /**
@@ -275,8 +304,12 @@ export function suiteSelectionsFromSnapshots(
     const suiteTypeName = clean(snapshot.suiteTypeName)
     if (!suiteTypeName) continue
 
+    const unitKeys = (snapshot.unitRefs ?? []).map(
+      (ref) => `${snapshot.legId ?? ""}|${ref.unitId ?? `#${ref.index}`}`,
+    )
     selections.push({
       suiteTypeName,
+      ...(unitKeys.length > 0 ? { unitKeys } : {}),
       bedroomType: chosenVariant(snapshot, BEDROOM_TYPE_LABEL),
       bedroomLayout: chosenVariant(snapshot, BEDROOM_LAYOUT_LABEL),
       bathroomType: chosenVariant(snapshot, BATHROOM_TYPE_LABEL),

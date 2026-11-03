@@ -88,3 +88,17 @@ describe("renderTemplate", () => {
     expect(result.bodyHtml).toBe("<p>BT-1 / BT-1</p>")
   })
 })
+
+describe("a block and a scalar of the same name", () => {
+  it("prints the block in the body and the scalar in the subject", () => {
+    const result = renderTemplate({
+      subject: "{{availability}}",
+      bodyHtml: "<p>{{availability}}</p>",
+      tokens: { availability: "On the A to B departure" },
+      blocks: { availability: "On the <strong>A to B</strong> departure" },
+    })
+    expect(result.subject).toBe("On the A to B departure")
+    expect(result.bodyHtml).toBe("<p>On the <strong>A to B</strong> departure</p>")
+    expect(result.warnings).toEqual([])
+  })
+})

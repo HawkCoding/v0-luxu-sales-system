@@ -8,9 +8,39 @@ import {
 } from "@/lib/packages"
 import { applySuiteVariantVocab, fetchSuiteVariantVocab } from "@/lib/packages/suite-variant-vocab"
 import { loadSupplierRateTiersResolver } from "@/lib/rate-types/load-supplier-rate-tiers"
-import type { PackageDetail, SupplierKind } from "@/lib/types"
+import type { PackageDetail, SupplierKind, UnitRateSplit } from "@/lib/types"
 import type { PackageLegSelection, PackageUnitSelection } from "@/lib/quotes/build-from-package"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function wholeCount(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0
+}
+
+/**
+ * booking_service_units.rate_splits (jsonb) as UnitRateSplit[]. PATCH /services validates what it
+ * stores, but jsonb has no schema of its own, so anything that is not a split with a rate type is
+ * dropped rather than priced, and a count that is not a whole number >= 0 reads as 0.
+ */
+export function parseUnitRateSplits(value: unknown): UnitRateSplit[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry): UnitRateSplit[] => {
+    if (!isRecord(entry)) return []
+    const rateTypeId = typeof entry.rateTypeId === "string" ? entry.rateTypeId.trim() : ""
+    if (!rateTypeId) return []
+    return [
+      {
+        rateTypeId,
+        adultCount: wholeCount(entry.adultCount),
+        childCount: wholeCount(entry.childCount),
+        infantCount: wholeCount(entry.infantCount),
+      },
+    ]
+  })
+}
 
 type BookingServiceRow = Database["public"]["Tables"]["booking_services"]["Row"]
 type BookingServiceUnitRow = Database["public"]["Tables"]["booking_service_units"]["Row"]
@@ -227,6 +257,10 @@ export function bookingServicesToLegSelections(
     const unitSelections: PackageUnitSelection[] = serviceUnits
       .filter((unit): unit is BookingServiceUnitRow & { suite_type_id: string } => unit.suite_type_id !== null)
       .map((unit) => ({
+        unitId: unit.id,
+        // Never read for pricing -- stamped into each line's unitRefs for the pax-group lines.
+        paxGroupIds: Array.isArray(unit.pax_group_ids) ? unit.pax_group_ids : [],
+        rateSplits: parseUnitRateSplits(unit.rate_splits),
         suiteTypeId: unit.suite_type_id,
         bedroomTypeId: unit.bedroom_type_id,
         bedroomLayoutId: unit.bedroom_layout_id,
