@@ -35,7 +35,7 @@ export async function GET() {
       .order("created_at", { ascending: false }),
     supabase.from("customers").select("id, first_name, last_name"),
     supabase.from("payments").select("booking_id, amount"),
-    supabase.from("quotes").select("booking_id, total"),
+    supabase.from("quotes").select("booking_id, total, status"),
     supabase
       .from("correspondences")
       .select("booking_id, scheduled_at, created_at")
@@ -68,7 +68,10 @@ export async function GET() {
         : null)
 
     const totalPaid = bookingPayments.reduce((s, p) => s + p.amount, 0)
-    const quoteTotal = bookingQuotes.reduce((s, q) => Math.max(s, q.total), 0) || 1
+    // Superseded and cancelled quotes are history: counting their totals made a booking whose
+    // price came DOWN on a revision look under-paid forever, because the old, higher total won.
+    const liveQuotes = bookingQuotes.filter((q) => q.status !== "superseded" && q.status !== "cancelled")
+    const quoteTotal = liveQuotes.reduce((s, q) => Math.max(s, q.total), 0) || 1
 
     let paymentColor = "red"
     if (totalPaid < 0) paymentColor = "blue"

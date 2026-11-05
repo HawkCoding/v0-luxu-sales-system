@@ -153,6 +153,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
       parent_quote_id: quote.id,
       title: quote.title,
       follow_ups_disabled: quote.follow_ups_disabled,
+      // The configuration the salesperson set on the quote: dropping these reverted a revised quote
+      // to auto-detected values (and a manual-price reason went missing), so carry them over.
+      override_reason: quote.override_reason,
+      journey_class: quote.journey_class,
+      rate_audience: quote.rate_audience,
+      show_train_only_note: quote.show_train_only_note,
     })
     .select()
     .single()

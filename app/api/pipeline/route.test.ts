@@ -20,7 +20,10 @@ vi.mock("@/lib/pipeline/constants", async () => {
 
 import { GET } from "./route"
 
-function buildSupabase() {
+function buildSupabase(
+  quoteRows: Array<Record<string, unknown>> = [{ booking_id: "b1", total: 1000 }],
+  paymentRows: Array<Record<string, unknown>> = [],
+) {
   return {
     from: vi.fn((table: string) => {
       if (table === "bookings") {
@@ -59,10 +62,10 @@ function buildSupabase() {
         }
       }
       if (table === "payments") {
-        return { select: vi.fn(async () => ({ data: [], error: null })) }
+        return { select: vi.fn(async () => ({ data: paymentRows, error: null })) }
       }
       if (table === "quotes") {
-        return { select: vi.fn(async () => ({ data: [{ booking_id: "b1", total: 1000 }], error: null })) }
+        return { select: vi.fn(async () => ({ data: quoteRows, error: null })) }
       }
       if (table === "correspondences") {
         return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
@@ -116,5 +119,27 @@ describe("GET /api/pipeline", () => {
       assignedSalespersonId: "u1",
       assignedSalespersonName: "Jane Doe",
     })
+  })
+
+  it("colours payment off the live quote, not a higher superseded one", async () => {
+    // The price came down on a revision: the old R5 000 quote must not keep the booking "under-paid".
+    authMocks.requireUser.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase: buildSupabase(
+          [
+            { booking_id: "b1", total: 5000, status: "superseded" },
+            { booking_id: "b1", total: 1000, status: "accepted" },
+          ],
+          [{ booking_id: "b1", amount: 1000 }],
+        ),
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "Doe", email: "u@example.com" },
+      },
+    })
+
+    const res = await GET()
+    const body = (await res.json()) as Array<Record<string, unknown>>
+    expect(body[0].paymentColor).toBe("green")
   })
 })

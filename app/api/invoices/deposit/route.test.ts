@@ -323,6 +323,39 @@ describe("PATCH /api/invoices/deposit", () => {
     expect(store.rows("invoices")[0].status).toBe("sent")
   })
 
+  it("keeps a paid invoice paid when it is marked sent again after a re-send", async () => {
+    const INVOICE_ID = "00000000-0000-4000-8000-0000000000b4"
+    const { supabase, store } = seedSupabase([ACCEPTED_QUOTE], undefined, [
+      invoiceRow({ id: INVOICE_ID, status: "paid", sent_at: "2026-05-02T00:00:00.000Z" }),
+    ])
+    mockAuthOk(supabase)
+
+    const res = await PATCH(patchJson({ invoiceId: INVOICE_ID, status: "sent" }))
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).status).toBe("paid")
+    expect(store.rows("invoices")[0].status).toBe("paid")
+    expect(store.rows("invoices")[0].sent_at).toBe("2026-05-02T00:00:00.000Z")
+  })
+
+  it("marks a draft invoice sent and refuses to send a void one", async () => {
+    const DRAFT_ID = "00000000-0000-4000-8000-0000000000b5"
+    const VOID_ID = "00000000-0000-4000-8000-0000000000b6"
+    const { supabase, store } = seedSupabase([ACCEPTED_QUOTE], undefined, [
+      invoiceRow({ id: DRAFT_ID, status: "draft" }),
+      invoiceRow({ id: VOID_ID, status: "void" }),
+    ])
+    mockAuthOk(supabase)
+
+    const sent = await PATCH(patchJson({ invoiceId: DRAFT_ID, status: "sent" }))
+    expect(sent.status).toBe(200)
+    expect(store.rows("invoices").find((row) => row.id === DRAFT_ID)?.status).toBe("sent")
+
+    const voided = await PATCH(patchJson({ invoiceId: VOID_ID, status: "sent" }))
+    expect(voided.status).toBe(409)
+    expect(store.rows("invoices").find((row) => row.id === VOID_ID)?.status).toBe("void")
+  })
+
   it("voids a draft invoice without stamping sent_at", async () => {
     const INVOICE_ID = "00000000-0000-4000-8000-0000000000b3"
     const { supabase, store } = seedSupabase([ACCEPTED_QUOTE], undefined, [

@@ -427,6 +427,27 @@ export async function PATCH(req: Request) {
     }
   }
 
+  if (parsed.data.status === "sent") {
+    // Marking "sent" is what the send dialog does after the email goes out — including when an
+    // invoice is re-sent after an edit. A paid invoice stays paid: the payment is the fact, and
+    // the re-send changes nothing about it. (A void one is not a live invoice to send at all.)
+    const { data: existing, error: existingError } = await supabase
+      .from("invoices")
+      .select("id, status, sent_at")
+      .eq("id", parsed.data.invoiceId)
+      .in("kind", ["deposit", "full"])
+      .maybeSingle()
+
+    if (existingError) return safeSupabaseError("deposit-invoice:sent-lookup", existingError)
+    if (!existing) return jsonError("Invoice not found", 404)
+    if (existing.status === "paid") {
+      return Response.json({ id: existing.id, status: existing.status, sentAt: existing.sent_at })
+    }
+    if (existing.status === "void") {
+      return jsonError("A voided invoice can't be sent", 409)
+    }
+  }
+
   const { data: invoice, error } = await supabase
     .from("invoices")
     .update({

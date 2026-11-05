@@ -696,6 +696,64 @@ describe("POST /api/correspondence", () => {
     expect(mocks.quoteUpdate).toHaveBeenCalled()
   })
 
+  it("sends but never moves the booking backwards when moveStage is an earlier stage", async () => {
+    // The invoice dialog hard-codes deposit_requested; resent at deposit_paid it used to drag the
+    // booking back, because a backward move has no gates.
+    const mocks = buildAuth({ bookingStage: "deposit_paid" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Invoice",
+        kind: "invoice",
+        moveStage: "deposit_requested",
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalledTimes(1)
+    expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+    expect(mocks.pipelineHistoryInsert).not.toHaveBeenCalled()
+  })
+
+  it("re-sending an accepted quote keeps it accepted, stamps the send, and drafts no follow-up", async () => {
+    const mocks = buildAuth({ bookingStage: "deposit_paid", quoteStatus: "accepted" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Quote",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+        moveStage: "quote_sent",
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(mocks.quoteUpdate).toHaveBeenCalledTimes(1)
+    expect(mocks.quoteUpdate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ status: expect.anything() }),
+    )
+    expect(mocks.quoteUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ last_sent_at: expect.any(String) }),
+    )
+    expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+    expect(mocks.followUpInsert).not.toHaveBeenCalled()
+  })
+
+  it("refuses to send a superseded quote", async () => {
+    buildAuth({ quoteStatus: "superseded" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Your quote",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+      }),
+    )
+
+    expect(res.status).toBe(409)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+  })
+
   it("sends a voucher email and applies the voucher_sent transition", async () => {
     // A voucher send only ever happens after the voucher PDF was generated and the invoices were
     // raised and paid, so the gates see all three.
