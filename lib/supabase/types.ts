@@ -1430,6 +1430,7 @@ export type Database = {
           booking_id: string
           channel: string
           created_at: string
+          document_version_id: string | null
           error: string | null
           id: string
           kind: string | null
@@ -1445,6 +1446,7 @@ export type Database = {
           booking_id: string
           channel?: string
           created_at?: string
+          document_version_id?: string | null
           error?: string | null
           id?: string
           kind?: string | null
@@ -1460,6 +1462,7 @@ export type Database = {
           booking_id?: string
           channel?: string
           created_at?: string
+          document_version_id?: string | null
           error?: string | null
           id?: string
           kind?: string | null
@@ -1476,6 +1479,13 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "correspondences_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
             referencedColumns: ["id"]
           },
         ]
@@ -1676,6 +1686,89 @@ export type Database = {
           vip_status?: boolean
         }
         Relationships: []
+      }
+      document_versions: {
+        Row: {
+          booking_id: string
+          created_at: string
+          doc_type: string
+          file_name: string
+          id: string
+          invoice_id: string | null
+          issue_kind: string
+          issued_at: string
+          issued_by: string | null
+          quote_id: string | null
+          sha256: string
+          size_bytes: number
+          storage_path: string
+          version_no: number
+          voucher_id: string | null
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          doc_type: string
+          file_name: string
+          id?: string
+          invoice_id?: string | null
+          issue_kind?: string
+          issued_at?: string
+          issued_by?: string | null
+          quote_id?: string | null
+          sha256: string
+          size_bytes: number
+          storage_path: string
+          version_no: number
+          voucher_id?: string | null
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          doc_type?: string
+          file_name?: string
+          id?: string
+          invoice_id?: string | null
+          issue_kind?: string
+          issued_at?: string
+          issued_by?: string | null
+          quote_id?: string | null
+          sha256?: string
+          size_bytes?: number
+          storage_path?: string
+          version_no?: number
+          voucher_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_versions_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_versions_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_versions_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_versions_voucher_id_fkey"
+            columns: ["voucher_id"]
+            isOneToOne: false
+            referencedRelation: "vouchers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       documents: {
         Row: {

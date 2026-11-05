@@ -31,6 +31,9 @@ const signatureMocks = vi.hoisted(() => ({
   resolveEmailSignature: vi.fn(),
   renderSignatureFragment: vi.fn(),
 }))
+const documentVersionMocks = vi.hoisted(() => ({
+  recordIssuedDocument: vi.fn(),
+}))
 
 vi.mock("@/lib/email/signature", () => ({
   resolveEmailSignature: signatureMocks.resolveEmailSignature,
@@ -77,6 +80,10 @@ vi.mock("@/lib/templates/compose-email", () => ({
 
 vi.mock("@/lib/attachments/email-attachment-library", () => ({
   loadLibraryAttachments: libraryMocks.loadLibraryAttachments,
+}))
+
+vi.mock("@/lib/documents/document-versions", () => ({
+  recordIssuedDocument: documentVersionMocks.recordIssuedDocument,
 }))
 
 import { POST } from "./route"
@@ -478,6 +485,8 @@ describe("POST /api/correspondence", () => {
     libraryMocks.loadLibraryAttachments.mockResolvedValue([])
     claimMocks.claimUnassignedBooking.mockReset()
     claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: true, claimed: false, assignedSalespersonId: null })
+    documentVersionMocks.recordIssuedDocument.mockReset()
+    documentVersionMocks.recordIssuedDocument.mockResolvedValue(undefined)
     signatureMocks.resolveEmailSignature.mockReset()
     signatureMocks.resolveEmailSignature.mockResolvedValue({ fullName: "Carmen" })
     signatureMocks.renderSignatureFragment.mockReset()
@@ -694,6 +703,64 @@ describe("POST /api/correspondence", () => {
     expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
     expect(mocks.pipelineHistoryInsert).not.toHaveBeenCalled()
     expect(mocks.quoteUpdate).toHaveBeenCalled()
+  })
+
+  it("keeps a copy of the quote PDF it attached, linked to the email that carried it", async () => {
+    buildAuth()
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Quote", kind: "quote", quoteId: QUOTE_ID }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(documentVersionMocks.recordIssuedDocument).toHaveBeenCalledTimes(1)
+    expect(documentVersionMocks.recordIssuedDocument).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        bookingId: BOOKING_ID,
+        correspondenceId: "cor-1",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+        issuedBy: "u1",
+        attachments: [expect.objectContaining({ filename: "Quote-26-0001.pdf", contentType: "application/pdf" })],
+      }),
+    )
+  })
+
+  it("passes the client-supplied invoice PDF to the copy store", async () => {
+    buildAuth({ bookingStage: "deposit_requested" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Invoice",
+        kind: "invoice",
+        attachments: [{ filename: "Invoice-244453.pdf", contentBase64: "JVBERg==", contentType: "application/pdf" }],
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(documentVersionMocks.recordIssuedDocument).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        kind: "invoice",
+        attachments: [expect.objectContaining({ filename: "Invoice-244453.pdf", contentBase64: "JVBERg==" })],
+      }),
+    )
+  })
+
+  it("keeps no copy when the email did not go out", async () => {
+    emailMocks.sendEmail.mockResolvedValue({
+      success: false,
+      provider: "resend",
+      providerMessageId: null,
+      error: "smtp 535",
+    })
+    buildAuth()
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Quote", kind: "quote", quoteId: QUOTE_ID }),
+    )
+
+    expect(res.status).toBe(502)
+    expect(documentVersionMocks.recordIssuedDocument).not.toHaveBeenCalled()
   })
 
   it("sends but never moves the booking backwards when moveStage is an earlier stage", async () => {
