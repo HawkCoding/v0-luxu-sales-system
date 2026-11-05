@@ -65,7 +65,7 @@ export function AmendQuoteConfirmDialog({
     <AlertDialog open={open} onOpenChange={(next) => (saving ? undefined : onOpenChange(next))}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Amend the accepted quote?</AlertDialogTitle>
+          <AlertDialogTitle>Save changes to this booking?</AlertDialogTitle>
           <AlertDialogDescription className="flex items-start gap-2 text-foreground">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
             <span>{AMEND_CONFIRM_MESSAGE}</span>
@@ -111,7 +111,10 @@ export function AmendQuoteConfirmDialog({
             Payments, the deposit and the reservation form are kept.
           </li>
           <li>The deposit amount does not change. The balance due follows the new total.</li>
-          <li>Documents show the change the next time they are generated. Nothing is sent.</li>
+          <li>
+            Nothing is sent. The Documents tab will show what the client holds is out of date, and you
+            choose whether to send an update, save one without sending, or leave it.
+          </li>
         </ul>
 
         {difference > 0 && isVoucherSentOrLater(bookingStage) && (
@@ -148,7 +151,7 @@ export function AmendQuoteConfirmDialog({
             }}
           >
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-            Confirm amendment
+            Confirm changes
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

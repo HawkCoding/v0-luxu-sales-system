@@ -9,18 +9,24 @@ import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
 import type { CommissionBreakdown, PricingSnapshot } from "@/lib/types"
 import type { Json } from "@/lib/supabase/types"
 import { writeAuditLog } from "@/lib/audit-write"
+import { bookingEditIneligibilityReason } from "@/lib/quotes/amend-quote"
+import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 
 /**
- * Re-denominates a DRAFT quote into another currency.
+ * Re-denominates a quote into another currency.
  *
- * A sent or accepted quote is deliberately NOT converted in place: the client is holding a
- * document that says one number in one currency, and any invoice raised off it agrees with that
- * document. Changing it underneath them would make all three disagree. Those statuses are
- * rejected here and the UI routes the salesperson to Revise instead, which creates a new version
- * and leaves the original's record intact.
+ * A provisional quote (nothing has gone out) is converted freely. A quote the client already holds
+ * (sent, expired, accepted) can be converted too, but only while NO payment is recorded: payments
+ * are real money in a real currency, and rewriting them would make the booking's balance disagree
+ * with the bank. If money has been received the answer is to remove the payments, change the
+ * currency, and record them again in the new one. The invoices raised off the quote move with it
+ * (same rate), and the Documents tab then shows the client's copies as out of date.
+ *
+ * A replaced (superseded) or cancelled quote is history and is never converted.
  */
 
-const CONVERTIBLE_STATUSES = ["draft", "pricing_incomplete"]
+const PROVISIONAL_STATUSES = ["draft", "pricing_incomplete", "ready"]
+const LIVE_STATUSES = ["sent", "expired", "accepted"]
 
 const postSchema = z.object({
   currency: z.enum(SUPPORTED_CURRENCY_VALUES),
@@ -85,7 +91,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, currency, status, subtotal, total, commission_bonus, agent_commission, discount_type, discount_value, discount_amount",
+      "id, booking_id, currency, status, subtotal, total, commission_bonus, agent_commission, discount_type, discount_value, discount_amount, booking:bookings(stage, cancelled_at)",
     )
     .eq("id", id)
     .single()
@@ -101,18 +107,38 @@ export async function POST(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: `This quote is already in ${toCurrency}.` }, { status: 400 })
   }
 
-  if (!CONVERTIBLE_STATUSES.includes(quote.status)) {
+  const isLive = LIVE_STATUSES.includes(quote.status)
+  if (!PROVISIONAL_STATUSES.includes(quote.status) && !isLive) {
     return NextResponse.json(
-      {
-        error:
-          quote.status === "accepted"
-            ? "An accepted quote can't be re-priced in another currency. Use Revise to create a new version."
-            : "A quote that has been sent can't be re-priced in another currency. Use Revise to create a new version.",
-        // Lets the dialog offer the Revise hand-off rather than just showing a dead end.
-        code: "REQUIRES_REVISION",
-      },
+      { error: "A replaced or cancelled quote can't be re-priced in another currency.", code: "NOT_CONVERTIBLE" },
       { status: 409 },
     )
+  }
+
+  if (isLive) {
+    const quoteBooking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
+    const bookingReason = bookingEditIneligibilityReason({
+      bookingStage: quoteBooking?.stage ?? null,
+      bookingCancelledAt: quoteBooking?.cancelled_at ?? null,
+    })
+    if (bookingReason) return NextResponse.json({ error: bookingReason, code: "NOT_CONVERTIBLE" }, { status: 409 })
+
+    const { data: recordedPayments, error: paymentsError } = await supabase
+      .from("payments")
+      .select("id")
+      .eq("booking_id", quote.booking_id)
+      .limit(1)
+
+    if (paymentsError) return safeSupabaseError("quotes:currency:check-payments", paymentsError)
+    if ((recordedPayments ?? []).length > 0) {
+      return NextResponse.json(
+        {
+          error: `Payments are already recorded in ${fromCurrency}, so the currency can't be changed. Remove the payments, change the currency, then record them again in ${toCurrency}.`,
+          code: "PAYMENTS_RECORDED",
+        },
+        { status: 409 },
+      )
+    }
   }
 
   const { data: existingLines, error: linesError } = await supabase
@@ -213,6 +239,58 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   if (updateError) return safeSupabaseError("quotes:currency:update-quote", updateError)
 
+  // The invoices raised off a quote the client already holds move with it, at the same rate, so the
+  // booking never bills in a currency the quote has left. (A provisional quote has none.)
+  let invoicesConverted = 0
+  let invoiceWarning: string | null = null
+  let invoiceBalance: number | null = null
+  if (isLive) {
+    const { data: liveInvoices, error: invoicesError } = await supabase
+      .from("invoices")
+      .select("id, amount")
+      .eq("booking_id", quote.booking_id)
+      .in("kind", ["deposit", "full"])
+      .neq("status", "void")
+
+    if (invoicesError) {
+      invoiceWarning = "The quote was re-priced, but the invoice could not be updated. Re-issue the invoice from the Documents tab."
+      console.error("quotes:currency:load-invoices", invoicesError)
+    } else {
+      for (const invoice of liveInvoices ?? []) {
+        const { error: invoiceUpdateError } = await supabase
+          .from("invoices")
+          .update({
+            amount: applyFxRate(Number(invoice.amount), rate),
+            currency: toCurrency,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", invoice.id)
+
+        if (invoiceUpdateError) {
+          invoiceWarning =
+            "The quote was re-priced, but the invoice could not be updated. Re-issue the invoice from the Documents tab."
+          console.error("quotes:currency:update-invoice", invoiceUpdateError)
+        } else {
+          invoicesConverted += 1
+        }
+      }
+    }
+
+    // An accepted quote's total is what the balance is measured against.
+    if (quote.status === "accepted") {
+      try {
+        const state = await syncBookingPaymentState(supabase, quote.booking_id, {
+          actorName: profile.actorName,
+          actorUserId: user.id,
+        })
+        invoiceBalance = state?.invoiceBalance ?? null
+      } catch (error) {
+        console.error("quotes:currency:balance-sync", error)
+        invoiceWarning ??= "Saved, but the booking balance could not be refreshed. Reload the booking to check it."
+      }
+    }
+  }
+
   await writeAuditLog(supabase, {
     actor: profile.actorName,
     actorUserId: user.id,
@@ -220,7 +298,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     entityId: id,
     action: "quote_currency_changed",
     before: { currency: fromCurrency, subtotal: Number(quote.subtotal), total: Number(quote.total) },
-    after: { currency: toCurrency, subtotal, total, rate, asOf },
+    after: { currency: toCurrency, subtotal, total, rate, asOf, ...(isLive ? { invoicesConverted } : {}) },
   })
 
   return NextResponse.json({
@@ -231,5 +309,6 @@ export async function POST(req: Request, { params }: RouteParams) {
     rate,
     asOf,
     lineCount: converted.length,
+    ...(isLive ? { invoicesConverted, invoiceBalance, ...(invoiceWarning ? { warning: invoiceWarning } : {}) } : {}),
   })
 }

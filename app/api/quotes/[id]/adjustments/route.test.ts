@@ -3,8 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const authMocks = vi.hoisted(() => ({ requireRole: vi.fn() }))
 const auditMocks = vi.hoisted(() => ({ writeAuditLog: vi.fn(async () => ({ error: null })) }))
 
+const syncMocks = vi.hoisted(() => ({ syncBookingPaymentState: vi.fn() }))
+
 vi.mock("@/lib/api/auth", () => ({ requireRole: authMocks.requireRole }))
 vi.mock("@/lib/audit-write", () => ({ writeAuditLog: auditMocks.writeAuditLog }))
+vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
+  syncBookingPaymentState: syncMocks.syncBookingPaymentState,
+}))
 
 import { PATCH } from "./route"
 
@@ -22,6 +27,8 @@ interface QuoteFixture {
   updated_at?: string
   adults?: number
   children?: number
+  stage?: string
+  cancelledAt?: string | null
 }
 
 interface Captured {
@@ -60,7 +67,12 @@ function buildSupabase(quote: QuoteFixture, captured: Captured) {
                   discount_amount: quote.discount_amount ?? 0,
                   discount_visible: true,
                   updated_at: quote.updated_at ?? NOW,
-                  booking: { no_of_adults: quote.adults ?? 2, no_of_children: quote.children ?? 0 },
+                  booking: {
+                    no_of_adults: quote.adults ?? 2,
+                    no_of_children: quote.children ?? 0,
+                    stage: quote.stage ?? "accepted",
+                    cancelled_at: quote.cancelledAt ?? null,
+                  },
                 },
                 error: null,
               }),
@@ -117,6 +129,8 @@ describe("PATCH /api/quotes/[id]/adjustments", () => {
   beforeEach(() => {
     authMocks.requireRole.mockReset()
     auditMocks.writeAuditLog.mockClear()
+    syncMocks.syncBookingPaymentState.mockReset()
+    syncMocks.syncBookingPaymentState.mockResolvedValue({ invoiceBalance: 0 })
   })
 
   it("401s an unauthenticated caller", async () => {
@@ -153,12 +167,79 @@ describe("PATCH /api/quotes/[id]/adjustments", () => {
     expect(payload.code).toBe("STALE_VERSION")
   })
 
-  it("409s a non-provisional quote", async () => {
+  it.each(["superseded", "cancelled"])("409s a %s quote, which is history", async (status) => {
     const captured: Captured = {}
-    authorise({ status: "sent" }, captured)
+    authorise({ status }, captured)
     const response = await patch(BASE_BODY)
     expect(response.status).toBe(409)
     expect(captured.rpc).toBeUndefined()
+    expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+  })
+
+  it.each(["sent", "expired"])("saves adjustments on a %s quote without touching the booking balance", async (status) => {
+    const captured: Captured = {}
+    authorise({ status }, captured)
+    const response = await patch({ ...BASE_BODY, agentCommission: 1000 })
+
+    expect(response.status).toBe(200)
+    expect(captured.quoteUpdate?.agent_commission).toBe(1000)
+    // Nothing is measured against a quote the client has not accepted yet.
+    expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    expect(await response.json()).not.toHaveProperty("invoiceBalance")
+  })
+
+  it("saves adjustments on an accepted quote and re-derives the booking balance", async () => {
+    const captured: Captured = {}
+    authorise({ status: "accepted", stage: "deposit_paid" }, captured)
+    syncMocks.syncBookingPaymentState.mockResolvedValue({ invoiceBalance: 160_000 })
+
+    const response = await patch({ ...BASE_BODY, discount: { type: "fixed", value: 10_000, visible: true } })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.total).toBe(240_000)
+    expect(payload.invoiceBalance).toBe(160_000)
+    expect(captured.rpc).toBeDefined()
+    expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      expect.objectContaining({ actorName: "Test User", actorUserId: "user-1" }),
+    )
+  })
+
+  it("keeps the saved adjustments and warns when the balance cannot be refreshed", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const captured: Captured = {}
+    authorise({ status: "accepted" }, captured)
+    syncMocks.syncBookingPaymentState.mockRejectedValue(new Error("sync down"))
+
+    const response = await patch(BASE_BODY)
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(captured.rpc).toBeDefined()
+    expect(payload.warning).toMatch(/balance could not be refreshed/)
+    error.mockRestore()
+  })
+
+  it.each([
+    ["closed", null],
+    ["lost", null],
+    ["deposit_paid", "2026-10-01T00:00:00Z"],
+  ])("409s an accepted quote on a closed or cancelled booking (%s)", async (stage, cancelledAt) => {
+    const captured: Captured = {}
+    authorise({ status: "accepted", stage, cancelledAt }, captured)
+    const response = await patch(BASE_BODY)
+
+    expect(response.status).toBe(409)
+    expect(captured.rpc).toBeUndefined()
+    expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+  })
+
+  it("still lets a provisional quote be adjusted on any booking", async () => {
+    const captured: Captured = {}
+    authorise({ status: "draft", stage: "closed" }, captured)
+    expect((await patch(BASE_BODY)).status).toBe(200)
   })
 
   it("saves Commission, Rounding, Agent Commission and Discount together in one request", async () => {

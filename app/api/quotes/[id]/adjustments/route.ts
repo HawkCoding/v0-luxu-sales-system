@@ -4,13 +4,21 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import { computeQuoteAdjustments } from "@/lib/quotes/quote-adjustments"
+import { bookingEditIneligibilityReason } from "@/lib/quotes/amend-quote"
+import { syncBookingPaymentState, type BookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 import { writeAuditLog } from "@/lib/audit-write"
 import type { Json } from "@/lib/supabase/types"
 import type { QuoteLineItem } from "@/lib/types"
 
-// Mirrors the individual Commission/Rounding/Agent Commission/Discount routes' edit gate: all
-// four are only editable while the quote is still provisional, before a client has seen the total.
-const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
+// A quote still being worked on, before a client has seen the total.
+const PROVISIONAL_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
+
+// Commission, Rounding, Agent Commission and Discount can also be changed once the client has the
+// quote (sent) or has accepted it. This used to be provisional-only, which meant a discount agreed
+// after acceptance could only be applied by revising the quote: rewinding the booking and voiding the
+// invoices. A superseded or cancelled quote is history and stays closed. An accepted quote changes
+// the booking's balance, so it re-derives the payment state, like Edit Booking does.
+const EDITABLE_QUOTE_STATUSES = [...PROVISIONAL_QUOTE_STATUSES, "sent", "expired", "accepted"]
 
 const MAX_ADJUSTMENT_VALUE = 1_000_000
 const commissionKind = z.enum(["percent", "per_person", "fixed"])
@@ -64,7 +72,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, status, subtotal, total, commission_bonus, agent_commission, discount_type, discount_value, discount_amount, discount_visible, updated_at, booking:bookings(no_of_adults, no_of_children)",
+      "id, booking_id, status, subtotal, total, commission_bonus, agent_commission, discount_type, discount_value, discount_amount, discount_visible, updated_at, booking:bookings(no_of_adults, no_of_children, stage, cancelled_at)",
     )
     .eq("id", id)
     .single()
@@ -75,9 +83,19 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   if (!EDITABLE_QUOTE_STATUSES.includes(quote.status)) {
     return NextResponse.json(
-      { error: "Pricing adjustments can only be changed on a provisional quote" },
+      { error: "Pricing adjustments can't be changed on a replaced or cancelled quote" },
       { status: 409 },
     )
+  }
+
+  // Once the client has seen the quote, a closed or cancelled booking is a record and stays that way.
+  if (!PROVISIONAL_QUOTE_STATUSES.includes(quote.status)) {
+    const lockedBooking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
+    const bookingReason = bookingEditIneligibilityReason({
+      bookingStage: lockedBooking?.stage ?? null,
+      bookingCancelledAt: lockedBooking?.cancelled_at ?? null,
+    })
+    if (bookingReason) return NextResponse.json({ error: bookingReason }, { status: 409 })
   }
 
   if (parsed.expectedUpdatedAt && parsed.expectedUpdatedAt !== quote.updated_at) {
@@ -179,6 +197,23 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     } as Json,
   })
 
+  // The accepted quote's total is what the booking's balance is measured against, so a changed price
+  // re-derives invoice_balance, overpaid_amount and the paid flags from the recorded payments. The
+  // adjustments are already saved, so a failure is reported as a warning rather than a 500.
+  let paymentState: BookingPaymentState | null = null
+  let balanceWarning: string | null = null
+  if (quote.status === "accepted") {
+    try {
+      paymentState = await syncBookingPaymentState(supabase, quote.booking_id, {
+        actorName: profile.actorName,
+        actorUserId: user.id,
+      })
+    } catch (error) {
+      console.error("quotes:adjustments:balance-sync", error)
+      balanceWarning = "Saved, but the booking balance could not be refreshed. Reload the booking to check it."
+    }
+  }
+
   const { data: updatedQuote, error: updatedQuoteError } = await supabase
     .from("quotes")
     .select("updated_at")
@@ -190,6 +225,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   }
 
   return NextResponse.json({
+    ...(quote.status === "accepted"
+      ? { invoiceBalance: paymentState?.invoiceBalance ?? null, ...(balanceWarning ? { warning: balanceWarning } : {}) }
+      : {}),
     id,
     subtotal: adjustments.subtotal,
     total: adjustments.total,

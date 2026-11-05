@@ -32,7 +32,7 @@ import { QuoteAdjustmentsLedger } from "@/components/quotes/quote-adjustments-le
 import { findCommissionLineIndex } from "@/lib/quotes/apply-commission-bonus"
 import { describeLineDate } from "@/lib/quotes/line-item-date"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
-import { amendIneligibilityReason } from "@/lib/quotes/amend-quote"
+import { amendIneligibilityReason, bookingEditIneligibilityReason } from "@/lib/quotes/amend-quote"
 import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
@@ -225,6 +225,15 @@ export function JobQuotesTab({
         const badge = STATUS_BADGE[q.status] || { variant: "outline" as const, label: q.status }
         const hasIncomplete = q.lineItems.some(isMissingPricing)
         const canEditLines = can("edit:quotes") && EDITABLE_QUOTE_STATUSES.includes(q.status)
+        // Commission, Rounding, Agent Commission and Discount stay editable once the client has the
+        // quote or has accepted it (the server re-derives the balance for an accepted one), unless
+        // the booking is closed or cancelled. The service lines above stay a draft-only edit: they
+        // change through Edit Booking.
+        const canEditAdjustments =
+          can("edit:quotes") &&
+          (EDITABLE_QUOTE_STATUSES.includes(q.status) ||
+            ((q.status === "sent" || q.status === "accepted" || q.status === "expired") &&
+              bookingEditIneligibilityReason({ bookingStage, bookingCancelledAt }) === null))
 
         return (
           <Card key={q.id}>
@@ -274,16 +283,18 @@ export function JobQuotesTab({
                           onRevised={mutate}
                         />
                       )}
-                      {!["cancelled", "superseded", "expired"].includes(q.status) && (
-                        <ConvertQuoteCurrencyDialog
-                          quoteId={q.id}
-                          currency={q.currency}
-                          lineItems={q.lineItems}
-                          total={q.total}
-                          requiresRevision={!["draft", "pricing_incomplete"].includes(q.status)}
-                          onConverted={mutate}
-                        />
-                      )}
+                      {!["cancelled", "superseded", "expired"].includes(q.status) &&
+                        (EDITABLE_QUOTE_STATUSES.includes(q.status) ||
+                          bookingEditIneligibilityReason({ bookingStage, bookingCancelledAt }) === null) && (
+                          <ConvertQuoteCurrencyDialog
+                            quoteId={q.id}
+                            currency={q.currency}
+                            lineItems={q.lineItems}
+                            total={q.total}
+                            alreadySent={!EDITABLE_QUOTE_STATUSES.includes(q.status)}
+                            onConverted={mutate}
+                          />
+                        )}
                       {BUILDABLE_QUOTE_STATUSES.includes(q.status) && (
                         <BuildBookingDialog
                           jobId={jobId}
@@ -431,7 +442,7 @@ export function JobQuotesTab({
               <div className="mt-3">
                 <QuoteAdjustmentsLedger
                   quote={q}
-                  editable={canEditLines}
+                  editable={canEditAdjustments}
                   bookingHeadcount={bookingHeadcount}
                   onSaved={mutate}
                 />
