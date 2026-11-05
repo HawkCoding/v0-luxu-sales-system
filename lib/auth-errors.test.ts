@@ -22,6 +22,12 @@ describe("getLoginErrorMessage", () => {
     expect(getLoginErrorMessage("session-expired")).toMatch(/inactivity/i)
   })
 
+  it("explains a session that could not be refreshed without blaming inactivity", () => {
+    const message = getLoginErrorMessage("session-ended")
+    expect(message).toMatch(/session ended/i)
+    expect(message).not.toMatch(/inactivity/i)
+  })
+
   it("keeps the existing account-link message", () => {
     expect(getLoginErrorMessage("account-link-mismatch")).toMatch(/already linked/i)
   })
