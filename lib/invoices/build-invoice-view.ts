@@ -560,65 +560,52 @@ export async function buildInvoiceView(
     }
   }
 
-  let departure: InvoiceDeparture | null = null
-  // Also dates the description table's lines (their clock time is the booked leg's own).
-  let blocks: VoucherServiceBlock[] = []
-  try {
-    blocks = (
-      await buildVoucherServiceBlocks(supabase, {
-        bookingId,
-        additionalServicesDetails: null,
-        legIds: quoteLegIds,
-        includeUnlinkedTransportRequests: false,
+  const loadDeparture = async (): Promise<{
+    departure: InvoiceDeparture | null
+    blocks: VoucherServiceBlock[]
+  }> => {
+    // Also dates the description table's lines (their clock time is the booked leg's own).
+    let blocks: VoucherServiceBlock[] = []
+    try {
+      blocks = (
+        await buildVoucherServiceBlocks(supabase, {
+          bookingId,
+          additionalServicesDetails: null,
+          legIds: quoteLegIds,
+          includeUnlinkedTransportRequests: false,
+        })
+      ).blocks
+      const primaryBlocks = selectPrimaryBlocks(blocks, booking?.primary_supplier_id ?? null, primarySupplierKind)
+      const departure = buildDeparture(primaryBlocks, journeyHeading, {
+        tourName: route?.name ?? null,
+        durationNights: resolveDurationNights(booking, blocks, primaryBlocks[0] ?? null),
+        durationUnit: primaryProductOf(primarySupplierKind).durationUnit,
+        suites: booking?.no_of_suites ?? 0,
+        adults: booking?.no_of_adults ?? 0,
+        children: booking?.no_of_children ?? 0,
       })
-    ).blocks
-    const primaryBlocks = selectPrimaryBlocks(blocks, booking?.primary_supplier_id ?? null, primarySupplierKind)
-    departure = buildDeparture(primaryBlocks, journeyHeading, {
-      tourName: route?.name ?? null,
-      durationNights: resolveDurationNights(booking, blocks, primaryBlocks[0] ?? null),
-      durationUnit: primaryProductOf(primarySupplierKind).durationUnit,
-      suites: booking?.no_of_suites ?? 0,
-      adults: booking?.no_of_adults ?? 0,
-      children: booking?.no_of_children ?? 0,
-    })
-  } catch (err) {
-    void logError({
-      severity: "Warning",
-      source: "invoice-pdf",
-      message: "Invoice departure information could not be loaded",
-      details: { bookingId, error: err instanceof Error ? err.message : String(err) },
-    })
+      return { departure, blocks }
+    } catch (err) {
+      void logError({
+        severity: "Warning",
+        source: "invoice-pdf",
+        message: "Invoice departure information could not be loaded",
+        details: { bookingId, error: err instanceof Error ? err.message : String(err) },
+      })
+      return { departure: null, blocks }
+    }
   }
-
-  const items = buildInvoiceItems(
-    lineItemRows,
-    blocks,
-    await loadInvoiceTransportRequests(supabase, bookingId, lineItemRows),
-    paxGroupNoun(primarySupplierKind),
-  )
-
-  const travellerName = (traveller: { prefix: string | null; first_name: string; last_name: string }) =>
-    [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim()
-  const guestNames = (travellers ?? []).map(travellerName).filter(Boolean)
-  const numberedGuests = await loadNumberedGuests(supabase, bookingId, travellers ?? [], travellerName)
-
-  const resolvedConsultant = booking
-    ? await resolveConsultant(supabase, {
-        consultant: booking.consultant,
-        assigned_salesperson_id: booking.assigned_salesperson_id,
-      })
-    : null
 
   // Infants and over-age children projected out, bucketed by the same supplier the quote PDF uses
   // (the quote's resolved primary supplier, else the booking's) so both divide by the same people.
-  let quotePrimarySupplierId: string | null = null
-  if (lineItemRows.length > 0) {
+  const loadQuotePrimarySupplierId = async (): Promise<string | null> => {
+    if (lineItemRows.length === 0) return null
     try {
       const quoteConfig = await loadQuoteConfig(supabase, {
         lineItems: lineItemRows.map((row) => ({ pricingSnapshot: row.pricing_snapshot as PricingSnapshot | null })),
         bookingPrimarySupplierId: booking?.primary_supplier_id ?? null,
       })
-      quotePrimarySupplierId = quoteConfig.primarySupplierId
+      return quoteConfig.primarySupplierId
     } catch (err) {
       void logError({
         severity: "Warning",
@@ -626,8 +613,31 @@ export async function buildInvoiceView(
         message: "Invoice quote primary supplier could not be resolved",
         details: { bookingId, quoteId, error: err instanceof Error ? err.message : String(err) },
       })
+      return null
     }
   }
+
+  const travellerName = (traveller: { prefix: string | null; first_name: string; last_name: string }) =>
+    [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim()
+  const guestNames = (travellers ?? []).map(travellerName).filter(Boolean)
+
+  // Read-only and independent of each other, so they run side by side.
+  const [{ departure, blocks }, transportRequests, numberedGuests, resolvedConsultant, quotePrimarySupplierId] =
+    await Promise.all([
+      loadDeparture(),
+      loadInvoiceTransportRequests(supabase, bookingId, lineItemRows),
+      loadNumberedGuests(supabase, bookingId, travellers ?? [], travellerName),
+      booking
+        ? resolveConsultant(supabase, {
+            consultant: booking.consultant,
+            assigned_salesperson_id: booking.assigned_salesperson_id,
+          })
+        : null,
+      loadQuotePrimarySupplierId(),
+    ])
+
+  const items = buildInvoiceItems(lineItemRows, blocks, transportRequests, paxGroupNoun(primarySupplierKind))
+
   const pax = await resolvePayingPax(
     supabase,
     booking,

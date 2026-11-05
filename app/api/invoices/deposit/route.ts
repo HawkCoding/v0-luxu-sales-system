@@ -43,7 +43,18 @@ function addDays(date: Date, days: number): string {
   return next.toISOString().slice(0, 10)
 }
 
+function elapsedMs(startedAt: number): number {
+  return Math.round(performance.now() - startedAt)
+}
+
+async function timed<T>(run: () => Promise<T>): Promise<{ result: T; ms: number }> {
+  const startedAt = performance.now()
+  const result = await run()
+  return { result, ms: elapsedMs(startedAt) }
+}
+
 export async function POST(req: Request) {
+  const requestStartedAt = performance.now()
   const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
 
@@ -249,38 +260,51 @@ export async function POST(req: Request) {
     invoice.display_status,
   )
 
-  // Render + store the invoice PDF and return it as an email attachment.
-  let pdf
-  try {
-    pdf = await ensureInvoicePdf(supabase, {
-      invoice: {
-        id: invoice.id,
-        booking_id: invoice.booking_id,
-        quote_id: invoice.quote_id,
-        invoice_number: invoice.invoice_number,
-        amount: invoice.amount,
-        currency: invoice.currency,
-        due_date: invoice.due_date,
-        created_at: invoice.created_at,
-        status: invoice.status,
-        payment_method_id: invoice.payment_method_id,
-      },
-      bookingNumber: booking.booking_number,
-      displayInvoiceNumber,
-      customerName,
-      statusLabel,
-      totals,
-    })
-  } catch (error) {
-    console.error("deposit-invoice:pdf", error)
-    return jsonError("Deposit invoice PDF could not be generated", 500)
-  }
+  const lookupsMs = elapsedMs(requestStartedAt)
 
-  const banking = method.banking
-  const [countryAliasMap, countryCodeMap] = await Promise.all([
-    loadCountryAliasMap(supabase).catch(() => new Map<string, string>()),
-    loadCountryCodeMap(supabase).catch(() => new Map<string, string>()),
+  // The PDF and the email's data run side by side: the invoice row is saved above, and the email
+  // data reads neither the document row nor invoices.pdf_document_id the PDF step writes.
+  const [pdfStep, emailDataStep] = await Promise.all([
+    // Render + store the invoice PDF and return it as an email attachment.
+    timed(() =>
+      ensureInvoicePdf(supabase, {
+        invoice: {
+          id: invoice.id,
+          booking_id: invoice.booking_id,
+          quote_id: invoice.quote_id,
+          invoice_number: invoice.invoice_number,
+          amount: invoice.amount,
+          currency: invoice.currency,
+          due_date: invoice.due_date,
+          created_at: invoice.created_at,
+          status: invoice.status,
+          payment_method_id: invoice.payment_method_id,
+        },
+        bookingNumber: booking.booking_number,
+        displayInvoiceNumber,
+        customerName,
+        statusLabel,
+        totals,
+      }).catch((error: unknown) => {
+        console.error("deposit-invoice:pdf", error)
+        return null
+      }),
+    ),
+    timed(() =>
+      Promise.all([
+        loadCountryAliasMap(supabase).catch(() => new Map<string, string>()),
+        loadCountryCodeMap(supabase).catch(() => new Map<string, string>()),
+        loadBookingPaxGroups(supabase, booking.id),
+        resolveSharedEmailTokens(supabase, booking.id),
+      ]),
+    ),
   ])
+
+  const pdf = pdfStep.result
+  if (!pdf) return jsonError("Deposit invoice PDF could not be generated", 500)
+
+  const [countryAliasMap, countryCodeMap, bookingPaxGroups, shared] = emailDataStep.result
+  const banking = method.banking
   const childAges = childAgesForTravellers(travellers ?? [], booking.child_ages ?? null, booking.departure_date ?? null)
   const guests = (travellers ?? [])
     .map((traveller, index) => ({
@@ -295,11 +319,10 @@ export async function POST(req: Request) {
     .filter((guest) => guest.name)
   // On a booking split into pax groups the block heads and numbers the guests by suite; null keeps
   // the flat list.
-  const bookingPaxGroups = await loadBookingPaxGroups(supabase, booking.id)
   const paxGroups = bookingPaxGroups
     ? { groups: bookingPaxGroups.groups, headings: buildGuestHeadings(bookingPaxGroups) }
     : null
-  const shared = await resolveSharedEmailTokens(supabase, booking.id)
+  const composeStartedAt = performance.now()
   const composed = isFullPayment
     ? await composeEmail(supabase, "full_payment_request", {
         tokens: {
@@ -356,6 +379,17 @@ export async function POST(req: Request) {
       })
 
   if (!composed) return jsonError("Invoice email template could not be resolved", 500)
+
+  console.info(
+    "deposit-invoice:timing",
+    JSON.stringify({
+      lookupsMs,
+      pdfMs: pdfStep.ms,
+      emailDataMs: emailDataStep.ms,
+      composeMs: elapsedMs(composeStartedAt),
+      totalMs: elapsedMs(requestStartedAt),
+    }),
+  )
 
   return Response.json({
     invoice: {
