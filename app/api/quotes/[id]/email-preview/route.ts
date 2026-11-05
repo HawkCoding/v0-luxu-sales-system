@@ -10,7 +10,7 @@ import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
 import { blockScopeTagger, resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { formatMoney } from "@/lib/money"
 import {
-  deriveFlightCapPerPerson,
+  buildFlightCapResolver,
   deriveJourneyFromBlocks,
   deriveTrainDepartureFromBlocks,
 } from "@/lib/quotes/quote-presentation"
@@ -211,7 +211,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     packageIncludesHeading: documentText.quote_doc_includes_heading,
     packageExcludesHeading: documentText.quote_doc_excludes_heading,
     packageExcludesDefault: documentText.quote_doc_excludes_default,
-    flightCapPerPerson: deriveFlightCapPerPerson(
+    flightCapFor: buildFlightCapResolver(
       lineItems.map((li) => ({
         unitPrice: Number(li.unit_price),
         pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,

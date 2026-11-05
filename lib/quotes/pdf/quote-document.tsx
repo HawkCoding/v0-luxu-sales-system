@@ -43,11 +43,12 @@ import {
   DISCOUNT_LABEL,
   formatAgentCommission,
   formatDiscount,
-  formatFlightCapLine,
+  flightCapLines,
   formatJourneyRange,
   formatPaxLabel,
   formatPreparedForContact,
   formatQuoteGrandTotalLabel,
+  type FlightCapResolver,
   type ItineraryScopeTag,
   type QuoteSummaryItem,
 } from "@/lib/quotes/quote-presentation"
@@ -109,8 +110,8 @@ export interface QuotePdfData {
   packageExcludesHeading?: string
   /** Standing exclusion appended after the suppliers' own; empty omits it. */
   packageExcludesDefault?: string
-  /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
-  flightCapPerPerson?: number | null
+  /** Each flight's own adult fare cap (buildFlightCapResolver); null/absent omits the capped-fare lines. */
+  flightCapFor?: FlightCapResolver | null
   /** SARAIL brand block copy + logo. Omitted falls back to the fixed constants. */
   brand?: DocumentBrand
   /** "hidden" drops the letterhead; the design has no bottom slot, so "bottom" prints it on top. */
@@ -374,7 +375,7 @@ export function QuoteDocument({
   packageIncludesHeading = DEFAULT_INCLUDES_HEADING,
   packageExcludesHeading = DEFAULT_EXCLUDES_HEADING,
   packageExcludesDefault,
-  flightCapPerPerson,
+  flightCapFor,
   brand,
   brandPosition = "top",
   brandLogo = null,
@@ -409,11 +410,11 @@ export function QuoteDocument({
   const hasDeduction = hasAgentCommission || hasVisibleDiscount
 
   const sortedBlocks = sortItineraryBlocksByLegOrder(itineraryBlocks)
-  const flightCapBullet =
-    flightCapPerPerson != null
-      ? formatFlightCapLine((amount) => formatMoney(amount, currency, { decimals: false }), flightCapPerPerson)
-      : null
-  const summaryDays = buildQuoteSummaryDays(sortedBlocks, flightCapBullet, itineraryScopeTag)
+  const summaryDays = buildQuoteSummaryDays(
+    sortedBlocks,
+    flightCapLines(flightCapFor, (amount) => formatMoney(amount, currency, { decimals: false })),
+    itineraryScopeTag,
+  )
   const detailSections = buildQuoteDetailSections(sortedBlocks)
   // The details page's lines carry no closing colon (see withoutTrailingColon).
   const exclusions = uniqueDetailLines(collectQuoteExclusions(sortedBlocks, packageExcludesDefault))

@@ -8,7 +8,7 @@ import {
   buildQuoteItineraryLines,
   buildQuoteSummaryDays,
   collectQuoteExclusions,
-  deriveFlightCapPerPerson,
+  buildFlightCapResolver,
   deriveJourneyFromBlocks,
   deriveTrainDepartureFromBlocks,
   derivePerPersonRate,
@@ -981,25 +981,37 @@ describe("buildQuoteItineraryLines — flights", () => {
 })
 
 describe("buildQuoteItineraryLines — flight cap bullet", () => {
-  it("attaches the cap bullet under the first flight block only", () => {
+  it("attaches each flight block's own cap bullet, and none to other services", () => {
+    const caps: Record<string, string> = { "tr-1": "cap one", "tr-2": "cap two" }
     const lines = buildQuoteItineraryLines(
-      [flightBlock, trainBlock, { ...flightBlock, displayOrder: 3 }],
-      "Flights are capped at R2 000pp — incl. baggage & fees",
+      [
+        { ...flightBlock, transportRequestId: "tr-1" },
+        trainBlock,
+        { ...flightBlock, transportRequestId: "tr-2", displayOrder: 3 },
+      ],
+      (block) => caps[block.transportRequestId ?? ""] ?? null,
     )
     const flightLines = lines.filter((line) => line.text.startsWith("Flight"))
-    const capBullet = { kind: "item", text: "Flights are capped at R2 000pp — incl. baggage & fees" }
-    expect(flightLines[0].bullets).toContainEqual(capBullet)
-    expect(flightLines[1].bullets).not.toContainEqual(capBullet)
+    expect(flightLines[0].bullets).toContainEqual({ kind: "item", text: "cap one" })
+    expect(flightLines[1].bullets).toContainEqual({ kind: "item", text: "cap two" })
+    expect(lines.find((line) => line.text.includes("Blue Train"))?.bullets).not.toContainEqual({
+      kind: "item",
+      text: "cap one",
+    })
   })
 
-  it("adds no bullet when the cap is null", () => {
-    const lines = buildQuoteItineraryLines([flightBlock], null)
-    expect(lines[0].bullets).toEqual([])
+  it("adds no bullet to a flight with no cap", () => {
+    expect(buildQuoteItineraryLines([flightBlock], null)[0].bullets).toEqual([])
+    expect(buildQuoteItineraryLines([flightBlock], () => null)[0].bullets).toEqual([])
   })
 })
 
-describe("deriveFlightCapPerPerson", () => {
-  function flightLine(unitPrice: number, passengerKind: "adult" | "child" = "adult"): QuoteLineItem {
+describe("buildFlightCapResolver", () => {
+  function flightLine(
+    unitPrice: number,
+    passengerKind: "adult" | "child" = "adult",
+    ids: { legId?: string | null; transportRequestId?: string | null } = {},
+  ): QuoteLineItem {
     return {
       description: "Flight",
       qty: 1,
@@ -1010,7 +1022,8 @@ describe("deriveFlightCapPerPerson", () => {
         pricingMode: "manual",
         packageId: "pkg-1",
         packageName: "Test",
-        legId: "leg-1",
+        legId: ids.legId === undefined ? "leg-1" : ids.legId,
+        ...(ids.transportRequestId ? { transportRequestId: ids.transportRequestId } : {}),
         legLabel: null,
         supplierId: "supplier-1",
         supplierName: "SA Airways",
@@ -1031,18 +1044,44 @@ describe("deriveFlightCapPerPerson", () => {
     }
   }
 
-  it("returns the highest adult flight fare across multiple flight lines", () => {
-    expect(deriveFlightCapPerPerson([flightLine(2000), flightLine(5000)])).toBe(5000)
+  it("gives two flights in one leg each their own fare, matched by transport request", () => {
+    const cap = buildFlightCapResolver([
+      flightLine(2600, "adult", { transportRequestId: "tr-1" }),
+      flightLine(2000, "adult", { transportRequestId: "tr-2" }),
+    ])
+    expect(cap({ legId: "leg-1", transportRequestId: "tr-1" })).toBe(2600)
+    expect(cap({ legId: "leg-1", transportRequestId: "tr-2" })).toBe(2000)
+  })
+
+  it("takes the highest adult fare among one flight's own lines", () => {
+    const cap = buildFlightCapResolver([
+      flightLine(2000, "adult", { transportRequestId: "tr-1" }),
+      flightLine(5000, "adult", { transportRequestId: "tr-1" }),
+    ])
+    expect(cap({ transportRequestId: "tr-1" })).toBe(5000)
+  })
+
+  it("falls back to the leg when no line names the flight's request", () => {
+    const cap = buildFlightCapResolver([flightLine(3100, "adult", { legId: "leg-9" })])
+    expect(cap({ legId: "leg-9", transportRequestId: "tr-1" })).toBe(3100)
+    expect(cap({ legId: "leg-9" })).toBe(3100)
+  })
+
+  it("gives a flight no line of its own no cap, never another flight's", () => {
+    const cap = buildFlightCapResolver([flightLine(2600, "adult", { transportRequestId: "tr-1" })])
+    expect(cap({ legId: "leg-2", transportRequestId: "tr-2" })).toBeNull()
+    expect(cap({})).toBeNull()
   })
 
   it("ignores non-adult flight lines and non-flight lines", () => {
     const hotelLine: QuoteLineItem = { description: "Hotel", qty: 1, unitPrice: 9000, total: 9000 }
-    expect(deriveFlightCapPerPerson([flightLine(2000, "child"), hotelLine])).toBeNull()
+    const cap = buildFlightCapResolver([flightLine(2000, "child"), hotelLine])
+    expect(cap({ legId: "leg-1" })).toBeNull()
   })
 
-  it("returns null when no flight has been priced yet", () => {
-    expect(deriveFlightCapPerPerson([flightLine(0)])).toBeNull()
-    expect(deriveFlightCapPerPerson([])).toBeNull()
+  it("returns null for every flight when none has been priced yet", () => {
+    expect(buildFlightCapResolver([flightLine(0)])({ legId: "leg-1" })).toBeNull()
+    expect(buildFlightCapResolver([])({ legId: "leg-1" })).toBeNull()
   })
 })
 
@@ -1197,8 +1236,8 @@ describe("buildQuoteSummaryDays", () => {
     ])
   })
 
-  it("runs a flight's times on in its sentence without a ' | ', with the fare cap under the first flight", () => {
-    const [day] = buildQuoteSummaryDays([flightBlock], "Flights are capped at R2 000pp — incl. baggage & fees")
+  it("runs a flight's times on in its sentence without a ' | ', with the fare cap under it", () => {
+    const [day] = buildQuoteSummaryDays([flightBlock], () => "Flights are capped at R2 000pp — incl. baggage & fees")
 
     expect(day.items).toEqual([
       {
@@ -1206,6 +1245,20 @@ describe("buildQuoteSummaryDays", () => {
         details: ["Flights are capped at R2 000pp — incl. baggage & fees"],
       },
     ])
+  })
+
+  it("gives each of two flights its own fare cap", () => {
+    const first = { ...flightBlock, transportRequestId: "tr-1", displayOrder: 0 }
+    const second = {
+      ...flightBlock,
+      transportRequestId: "tr-2",
+      displayOrder: 1,
+      serviceData: { ...flightBlock.serviceData, departureDate: "2026-07-18" },
+    }
+    const caps: Record<string, string> = { "tr-1": "cap one", "tr-2": "cap two" }
+    const days = buildQuoteSummaryDays([first, second], (block) => caps[block.transportRequestId ?? ""] ?? null)
+
+    expect(days.flatMap((day) => day.items.flatMap((item) => item.details))).toEqual(["cap one", "cap two"])
   })
 
   it("runs a tour's start time on in its sentence without a ' | ' (the email keeps its break)", () => {
