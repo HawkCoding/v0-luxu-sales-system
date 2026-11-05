@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,6 +15,11 @@ import { useJobLegReferences, type JobLegReferenceRow } from "@/lib/use-data"
 
 interface JobReferencesTabProps {
   bookingId: string
+  /** The page keeps this tab mounted so edits survive a tab switch, so its data is refetched each
+   * time it is opened rather than only when the page first loads. */
+  isActive: boolean
+  /** Changes when the booking changes; refetches an open tab. */
+  refreshKey?: string
 }
 
 interface RowDraft {
@@ -33,26 +38,40 @@ function draftFromRow(row: JobLegReferenceRow): RowDraft {
   }
 }
 
-function isDirty(draft: RowDraft, row: JobLegReferenceRow): boolean {
+function draftsMatch(a: RowDraft, b: RowDraft): boolean {
   return (
-    draft.reference !== (row.supplierReference ?? "") ||
-    draft.contactName !== (row.supplierContactName ?? "") ||
-    draft.flightNumber !== (row.flightNumber ?? "") ||
-    draft.footnote !== (row.voucherFootnote ?? "")
+    a.reference === b.reference &&
+    a.contactName === b.contactName &&
+    a.flightNumber === b.flightNumber &&
+    a.footnote === b.footnote
   )
 }
 
-export function JobReferencesTab({ bookingId }: JobReferencesTabProps) {
+function isDirty(draft: RowDraft, row: JobLegReferenceRow): boolean {
+  return !draftsMatch(draft, draftFromRow(row))
+}
+
+export function JobReferencesTab({ bookingId, isActive, refreshKey }: JobReferencesTabProps) {
   const { data, error, isLoading, mutate } = useJobLegReferences(bookingId)
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({})
   const [savingKey, setSavingKey] = useState<string | null>(null)
+  const loadedDrafts = useRef<Record<string, RowDraft>>({})
+
+  useEffect(() => {
+    if (isActive) void mutate()
+  }, [isActive, refreshKey, mutate])
 
   useEffect(() => {
     if (!data) return
+    const previous = loadedDrafts.current
+    const loaded = Object.fromEntries(data.rows.map((row) => [row.key, draftFromRow(row)]))
+    loadedDrafts.current = loaded
+    // A row the consultant has not touched follows the server; one with unsaved typing keeps it.
     setDrafts((prev) => {
       const next = { ...prev }
-      for (const row of data.rows) {
-        if (!(row.key in next)) next[row.key] = draftFromRow(row)
+      for (const [key, draft] of Object.entries(loaded)) {
+        const untouched = !(key in next) || (key in previous && draftsMatch(next[key], previous[key]))
+        if (untouched) next[key] = draft
       }
       return next
     })
