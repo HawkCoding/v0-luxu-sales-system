@@ -14,7 +14,7 @@ instead is this:
 |---|---|
 | The deposit is received | Record the payment, send the payment confirmation. The same invoice is re-attached with the received amount and outstanding balance updated. |
 | The balance is received | Record the payment, send the payment confirmation again. Same invoice, outstanding now zero. |
-| The quote is revised after invoicing | **Amend & Resend Invoice**. Same invoice, new total, payments already received still on it. |
+| The quote is revised after invoicing | **Update & Resend Invoice**. Same invoice, new total, payments already received still on it. |
 
 The client therefore holds one invoice number for the life of the booking, and each email
 they receive carries the current version of it. The figures on it — subtotal, deposit,
@@ -140,21 +140,21 @@ voided draft stays on record as a void invoice.
 
 > [!NOTE]
 > **Change amount** only works on a draft. Once an invoice has been sent, the client has
-> it, and the way to change the figure is a quote revision followed by **Amend & Resend
+> it, and the way to change the figure is a quote revision followed by **Update & Resend
 > Invoice** — see below.
 
-## Amend and Resend
+## Update and Resend
 
 When a quote is revised after the invoice has gone out, the invoice is priced off a quote
 that no longer applies. The booking notices, and the button at the foot of the page becomes
-**Amend & Resend Invoice**.
+**Update & Resend Invoice**.
 
-The dialog is titled **Amend and resend invoice** and explains itself:
+The dialog is titled **Update and resend invoice** and explains itself:
 
 > The quote for *&lt;invoice number&gt;* has been revised. Re-issue the same invoice at the
 > new total — any payment already received stays on record and is shown on the PDF.
 
-Click **Amend & Preview**, then send from the usual preview dialog.
+Click **Update & Preview**, then send from the usual preview dialog.
 
 What the client sees is **the same invoice number**, re-issued, with the new total, the
 amount they have already paid, and the new outstanding balance. Not a credit note, not a

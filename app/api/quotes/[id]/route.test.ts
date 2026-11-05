@@ -165,7 +165,7 @@ describe("PATCH /api/quotes/[id]", () => {
     )
 
     expect(res.status).toBe(409)
-    expect((await res.json()).error).toContain("Revise")
+    expect((await res.json()).error).toContain("Edit Booking")
     expect(rpc).not.toHaveBeenCalled()
   })
 

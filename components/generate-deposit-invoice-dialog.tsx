@@ -44,6 +44,12 @@ interface GenerateDepositInvoiceDialogProps {
    */
   draftInvoice?: Invoice | null
   /**
+   * The booking's invoice that has ALREADY gone out, when the booking has changed since and the
+   * client should get an updated copy. The dialog then behaves like resume mode (nothing to decide:
+   * the invoice keeps its kind and deposit percentage) and goes straight to the preview.
+   */
+  resendInvoice?: Invoice | null
+  /**
    * True when the booking's live invoice was priced off a quote that has since
    * been superseded — the action re-issues that same invoice at the new total.
    */
@@ -137,6 +143,7 @@ export function GenerateDepositInvoiceDialog({
   defaultDepositPercentage,
   departureDate = null,
   draftInvoice = null,
+  resendInvoice = null,
   amending = false,
   onSent,
   onDraftDiscarded,
@@ -170,8 +177,12 @@ export function GenerateDepositInvoiceDialog({
     ? Math.min(100, Math.max(0, numericPercentage))
     : defaultDepositPercentage
   const amountPreview = quote ? quote.total * (validPercentage / 100) : 0
-  const resumingDraft = draftInvoice !== null && !draftDiscarded
-  const resumingFull = resumingDraft && draftInvoice?.kind === "full"
+  // An unsent draft, or an already-sent invoice being re-sent: either way the invoice exists and
+  // keeps its kind and percentage, so there is nothing to ask.
+  const resumeSource = draftInvoice ?? resendInvoice
+  const resendingSentInvoice = draftInvoice === null && resendInvoice !== null
+  const resumingDraft = resumeSource !== null && !draftDiscarded
+  const resumingFull = resumingDraft && resumeSource?.kind === "full"
   const isFullMode = resumingDraft ? resumingFull : payInFull
 
   async function discardDraft() {
@@ -223,7 +234,7 @@ export function GenerateDepositInvoiceDialog({
           depositPercentage: isFullMode
             ? 100
             : resumingDraft
-              ? draftInvoice?.depositPercentage ?? defaultDepositPercentage
+              ? resumeSource?.depositPercentage ?? defaultDepositPercentage
               : validPercentage,
           ...(isFullMode && !resumingDraft ? { dueDate: fullDueDate } : {}),
           ...(!resumingDraft && paymentMethodId ? { paymentMethodId } : {}),
@@ -289,11 +300,13 @@ export function GenerateDepositInvoiceDialog({
             <Button size="sm">
               {resumingDraft ? <Send data-icon="inline-start" /> : <FileText data-icon="inline-start" />}
               {resumingDraft
-                ? resumingFull
-                  ? "Preview & Send Invoice"
-                  : "Preview & Send Deposit Invoice"
+                ? resendingSentInvoice
+                  ? "Send Updated Invoice"
+                  : resumingFull
+                    ? "Preview & Send Invoice"
+                    : "Preview & Send Deposit Invoice"
                 : amending
-                  ? "Amend & Resend Invoice"
+                  ? "Update & Resend Invoice"
                   : "Generate Invoice"}
             </Button>
           </DialogTrigger>
@@ -305,7 +318,7 @@ export function GenerateDepositInvoiceDialog({
             // would only see flash past.
             <>
               <DialogHeader>
-                <DialogTitle>Opening {draftInvoice?.invoiceNumber}</DialogTitle>
+                <DialogTitle>Opening {resumeSource?.invoiceNumber}</DialogTitle>
                 <DialogDescription>Preparing the email preview…</DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-2 py-2">
@@ -316,7 +329,7 @@ export function GenerateDepositInvoiceDialog({
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle>{amending ? "Amend and resend invoice" : "Generate invoice"}</DialogTitle>
+                <DialogTitle>{amending ? "Update and resend invoice" : "Generate invoice"}</DialogTitle>
                 <DialogDescription>
                   {amending
                     ? `The quote for ${displayNumber} has been revised. Re-issue the same invoice at the new total — any payment already received stays on record and is shown on the PDF.`
@@ -400,7 +413,7 @@ export function GenerateDepositInvoiceDialog({
                   Cancel
                 </Button>
                 <Button onClick={generateInvoice} disabled={generating || discarding || !quote}>
-                  {generating ? "Generating..." : amending ? "Amend & Preview" : "Generate"}
+                  {generating ? "Generating..." : amending ? "Update & Preview" : "Generate"}
                 </Button>
               </DialogFooter>
             </>
@@ -412,8 +425,18 @@ export function GenerateDepositInvoiceDialog({
         <PreviewAndSendDialog
           open={previewOpen}
           onOpenChange={setPreviewOpen}
-          title={isFullMode ? "Preview and send invoice" : "Preview and send deposit invoice"}
-          description={`Review ${generated.invoice.invoiceNumber} before sending it to the customer.`}
+          title={
+            resendingSentInvoice
+              ? "Preview and send updated invoice"
+              : isFullMode
+                ? "Preview and send invoice"
+                : "Preview and send deposit invoice"
+          }
+          description={
+            resendingSentInvoice
+              ? `Review the updated ${generated.invoice.invoiceNumber} before sending it to the customer again. Any payment already received stays on record and is shown on the PDF.`
+              : `Review ${generated.invoice.invoiceNumber} before sending it to the customer.`
+          }
           bookingId={jobId}
           initialSubject={generated.email.subject}
           bodyHtml={generated.email.bodyHtml}

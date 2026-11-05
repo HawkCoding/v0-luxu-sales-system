@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { PreviewAndSendDialog } from "./preview-and-send-dialog"
+
+const toastMocks = vi.hoisted(() => ({ warning: vi.fn() }))
+
+vi.mock("sonner", () => ({
+  toast: { warning: toastMocks.warning, success: vi.fn(), error: vi.fn() },
+}))
 
 vi.mock("@/components/email-attachment-picker", () => ({
   EmailAttachmentPicker: () => null,
@@ -11,11 +17,21 @@ vi.mock("@/components/signature-picker", () => ({
 vi.mock("@/components/payment-method-picker", () => ({
   PaymentMethodPicker: () => null,
 }))
+vi.mock("@/components/save-without-sending-button", () => ({
+  SaveWithoutSendingButton: () => null,
+}))
 vi.mock("@/components/ui/html-body-editor", () => ({
   HtmlBodyEditor: () => null,
 }))
+// Runs the send straight away (no undo delay) and reports it the way the real hook does.
 vi.mock("@/hooks/use-optimistic-send", () => ({
-  useOptimisticSend: () => vi.fn(),
+  useOptimisticSend: () => async (options: { perform: () => Promise<unknown> }) => {
+    try {
+      return { ok: true, data: await options.perform() }
+    } catch (error) {
+      return { ok: false, error }
+    }
+  },
 }))
 vi.mock("@/lib/use-data", () => ({
   useEmailAppearanceSettings: () => ({ data: undefined }),
@@ -93,5 +109,70 @@ describe("PreviewAndSendDialog", () => {
     rerender(renderDialog({ open: true, content: "b", subject: "Second" }))
 
     expect(screen.getByLabelText("Subject")).toHaveValue("Second")
+  })
+
+  describe("when the email goes out", () => {
+    const WARNING =
+      "Email sent, but a copy of the PDF could not be kept for the booking history. Tell your administrator."
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      toastMocks.warning.mockReset()
+    })
+
+    async function sendAndWait(response: { ok: boolean; body: unknown }) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ ok: response.ok, json: async () => response.body })),
+      )
+      const onSent = vi.fn()
+      render(
+        <PreviewAndSendDialog
+          open
+          onOpenChange={() => {}}
+          title="Invoice"
+          description="Sends the invoice"
+          bookingId="booking-1"
+          initialSubject="Invoice"
+          bodyHtml={wrap("<p>Hi</p>")}
+          bodyContentHtml="<p>Hi</p>"
+          kind="invoice"
+          onSent={onSent}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Send" }))
+      await waitFor(() => expect(fetch).toHaveBeenCalled())
+      // Let the send's own continuation (the warning, then onSent) run.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      return onSent
+    }
+
+    it("warns that no copy was kept, and still finishes the send, when documentCopyKept is false", async () => {
+      const onSent = await sendAndWait({ ok: true, body: { id: "cor-1", documentCopyKept: false } })
+
+      expect(toastMocks.warning).toHaveBeenCalledTimes(1)
+      expect(toastMocks.warning).toHaveBeenCalledWith(WARNING)
+      expect(onSent).toHaveBeenCalledTimes(1)
+    })
+
+    it("shows no warning when the copy was kept", async () => {
+      const onSent = await sendAndWait({ ok: true, body: { id: "cor-1", documentCopyKept: true } })
+
+      expect(toastMocks.warning).not.toHaveBeenCalled()
+      expect(onSent).toHaveBeenCalledTimes(1)
+    })
+
+    it("shows no warning when the response does not say (an older server)", async () => {
+      await sendAndWait({ ok: true, body: { id: "cor-1" } })
+
+      expect(toastMocks.warning).not.toHaveBeenCalled()
+    })
+
+    it("shows no copy warning when the send itself failed", async () => {
+      const onSent = await sendAndWait({ ok: false, body: { error: "smtp 535", documentCopyKept: false } })
+
+      expect(toastMocks.warning).not.toHaveBeenCalled()
+      expect(onSent).not.toHaveBeenCalled()
+    })
   })
 })

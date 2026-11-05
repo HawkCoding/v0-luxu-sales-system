@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import { Paperclip, Send } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -20,6 +21,7 @@ import { useOptimisticSend } from "@/hooks/use-optimistic-send"
 import { useEmailAppearanceSettings } from "@/lib/use-data"
 import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
 import { SignaturePicker } from "@/components/signature-picker"
+import { SaveWithoutSendingButton } from "@/components/save-without-sending-button"
 import { PaymentMethodPicker } from "@/components/payment-method-picker"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceBankingBlock } from "@/lib/templates/banking-block-slot"
@@ -27,6 +29,10 @@ import { finalizeContentSlot } from "@/lib/templates/email-spacing"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
+
+// Shown after a send whose PDF copy could not be kept (the send response's `documentCopyKept` is false).
+const DOCUMENT_COPY_NOT_KEPT_MESSAGE =
+  "Email sent, but a copy of the PDF could not be kept for the booking history. Tell your administrator."
 
 const HtmlBodyEditor = dynamic(
   () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
@@ -119,6 +125,10 @@ export function PreviewAndSendDialog({
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null)
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(signatureBrandId)
   const [sending, setSending] = useState(false)
+  // Set by the save button, which knows whether this document went out before.
+  const [emailedBefore, setEmailedBefore] = useState(false)
+  const documentWord = kind === "quote" || kind === "invoice" || kind === "voucher" ? kind : null
+  const updatedDocumentLabel = emailedBefore ? documentWord : null
   const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const optimisticSend = useOptimisticSend()
   const { data: emailAppearance } = useEmailAppearanceSettings()
@@ -215,7 +225,9 @@ export function PreviewAndSendDialog({
             signatureBrandId: capturedBrandId,
           }),
         })
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string; documentCopyKept?: boolean }
+          | null
         if (!response.ok) {
           throw new Error(payload?.error ?? "Email could not be sent")
         }
@@ -224,6 +236,10 @@ export function PreviewAndSendDialog({
     })
 
     if (result.ok) {
+      // The email is out either way; only the booking-history copy of its PDF can have gone missing.
+      if (result.data?.documentCopyKept === false) {
+        toast.warning(DOCUMENT_COPY_NOT_KEPT_MESSAGE)
+      }
       await onSent()
     }
   }
@@ -363,16 +379,33 @@ export function PreviewAndSendDialog({
 
         <DialogFooter>
           {secondaryAction}
-          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
+          <Button
+            variant="ghost"
+            className="sm:mr-auto"
+            onClick={() => closeGuard.handleOpenChange(false)}
+            disabled={sending}
+          >
             Cancel
           </Button>
+          <SaveWithoutSendingButton
+            bookingId={bookingId}
+            kind={kind}
+            quoteId={quoteId}
+            voucherId={voucherId}
+            attachments={attachments}
+            disabled={sending || !attachments?.length}
+            onSaved={() => onOpenChange(false)}
+            onEmailedBeforeChange={setEmailedBefore}
+          />
           <Button onClick={handleSend} disabled={sending || !subject.trim()}>
             <Send data-icon="inline-start" />
             {sending
               ? "Sending..."
-              : (attachments?.length ?? 0) + libraryAttachmentIds.length > 0
-                ? "Send with attachment"
-                : "Send"}
+              : updatedDocumentLabel
+                ? `Send updated ${updatedDocumentLabel}`
+                : (attachments?.length ?? 0) + libraryAttachmentIds.length > 0
+                  ? "Send with attachment"
+                  : "Send"}
           </Button>
         </DialogFooter>
       </DialogContent>

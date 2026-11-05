@@ -162,6 +162,9 @@ interface BuildBookingDialogProps {
   /** Present only for an ACCEPTED quote: the dialog runs in "Amend" mode — same build flow, but the
    *  save is confirmed first and sent as `amend: true` (see lib/quotes/amend-quote.ts). */
   amend?: AmendQuoteContext
+  /** Label-only: a quote the client already holds (sent/expired) is edited through the normal
+   *  builder, but the salesperson sees it as "Edit Booking". Behaviour is unchanged. */
+  editBookingWording?: boolean
 }
 
 /** The accepted quote's current money, so the amend confirmation can show old vs new total. */
@@ -439,6 +442,7 @@ export function BuildBookingDialog({
   autoOpen = false,
   onAutoOpenHandled,
   amend,
+  editBookingWording = false,
 }: BuildBookingDialogProps) {
   const isAmend = amend !== undefined
   const [amendConfirmOpen, setAmendConfirmOpen] = useState(false)
@@ -1661,7 +1665,9 @@ export function BuildBookingDialog({
       // stamps, so the record keeps whoever actually accepted the build.
       if (!confirmedStamp) await stampServicesConfirmed()
       if (isAmend) {
-        toast.success(`Quote amended. New total ${formatMoney(saved.total, quoteCurrency)}. No emails were sent.`)
+        toast.success(
+          `Booking updated. New total ${formatMoney(saved.total, quoteCurrency)}. Nothing was emailed: send updated documents from the Documents tab when you are ready.`,
+        )
         if (saved.warning) toast.warning(saved.warning)
       } else {
         toast.success("Booking services applied to quote")
@@ -1704,14 +1710,18 @@ export function BuildBookingDialog({
     >
       <DialogTrigger asChild>
         {isAmend ? (
-          <Button variant="outline" size="sm" title="Change the services on this accepted quote without rewinding the booking">
+          <Button
+            variant="outline"
+            size="sm"
+            title="Change dates, guests or services after the quote was accepted. The stage, payments and invoices stay as they are."
+          >
             <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            Amend
+            Edit Booking
           </Button>
         ) : (
           <Button variant="outline" size="sm">
             <Boxes className="mr-2 h-4 w-4" />
-            Edit Quote
+            {editBookingWording ? "Edit Booking" : "Edit Quote"}
           </Button>
         )}
       </DialogTrigger>
@@ -1764,8 +1774,9 @@ export function BuildBookingDialog({
           >
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden="true" />
             <span>
-              You are amending an accepted booking. Service details are saved to the booking when you
-              click Next; the quote price only changes after you confirm the amendment on the last step.
+              You are editing an accepted booking. Service details are saved to the booking when you
+              click Next; the quote price only changes after you confirm on the last step. The stage does
+              not move and nothing is emailed.
             </span>
           </div>
         )}
@@ -1773,7 +1784,7 @@ export function BuildBookingDialog({
           <>
             <DialogHeader className="text-left">
               <DialogTitle className="flex items-center gap-2">
-                {isAmend ? "Amend this booking's services" : <>Build this booking&apos;s services</>}
+                {isAmend || editBookingWording ? "Edit this booking" : <>Build this booking&apos;s services</>}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
@@ -2244,7 +2255,7 @@ export function BuildBookingDialog({
               <DialogTitle className="flex items-center gap-2">
                 {/* Nothing is being replaced on a first build — the old title
                     contradicted the body copy right below it. */}
-                {isAmend ? "Review amendment" : existingLineItemCount > 0 ? "Confirm replacement" : "Review quote lines"}
+                {isAmend ? "Review changes" : existingLineItemCount > 0 ? "Confirm replacement" : "Review quote lines"}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
@@ -2427,7 +2438,7 @@ export function BuildBookingDialog({
               )}
               {isAmend ? (
                 <Button onClick={() => setAmendConfirmOpen(true)} disabled={applying || incompleteLegs.length > 0}>
-                  {applying ? "Amending…" : "Amend quote…"}
+                  {applying ? "Saving…" : "Save changes…"}
                 </Button>
               ) : (
                 <Button onClick={() => applyToQuote()} disabled={applying || incompleteLegs.length > 0}>

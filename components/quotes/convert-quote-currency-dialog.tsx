@@ -29,15 +29,16 @@ interface ConvertQuoteCurrencyDialogProps {
   currency: string
   lineItems: QuoteLineItem[]
   total: number
-  /** Sent/accepted quotes can't be converted in place — the trigger explains why and points at
-   *  Revise instead of silently re-pricing a document the client already has. */
-  requiresRevision: boolean
+  /** The client already holds this quote (sent or accepted). It can still be converted while no
+   *  payment is recorded, and the dialog says what that changes. */
+  alreadySent: boolean
   onConverted: () => void
 }
 
 /**
- * Re-denominates a quote. Draft quotes convert in place; anything already sent has to go through
- * Revise so the client's copy and any invoice raised off it stay in agreement.
+ * Re-denominates a quote. A quote the client already holds converts too, as long as no payment is
+ * recorded (the server refuses otherwise and says what to do): its invoices move with it, and the
+ * Documents tab then shows the client's copies as out of date.
  *
  * The rate is pre-filled from the shared cache and freely editable — a salesperson often has a
  * better number from the bank than yesterday's ECB close, and nudging it a few cents is the
@@ -48,7 +49,7 @@ export function ConvertQuoteCurrencyDialog({
   currency,
   lineItems,
   total,
-  requiresRevision,
+  alreadySent,
   onConverted,
 }: ConvertQuoteCurrencyDialogProps) {
   const [open, setOpen] = useState(false)
@@ -127,27 +128,25 @@ export function ConvertQuoteCurrencyDialog({
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           <Coins className="mr-1.5 h-3.5 w-3.5" />
-          Currency
+          Change currency
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Change quote currency</DialogTitle>
           <DialogDescription>
-            {requiresRevision
-              ? "This quote has already gone out, so its currency is fixed."
-              : `Re-prices every line from ${from} into the currency you pick. The client only ever sees the new currency.`}
+            {`Re-prices every line from ${from} into the currency you pick. The client only ever sees the new currency.`}
           </DialogDescription>
         </DialogHeader>
 
-        {requiresRevision ? (
-          <p className="text-sm text-muted-foreground">
-            The client is holding a {from} quote, and any invoice raised off it agrees with that
-            document. Use <span className="font-medium text-foreground">Revise</span> instead — it
-            keeps this version on record and starts a new one you can price in another currency.
-          </p>
-        ) : (
-          <div className="space-y-4">
+        <div className="space-y-4">
+            {alreadySent ? (
+              <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-foreground">
+                The client already holds a {from} quote. Any invoice moves to the new currency at the same
+                rate, and nothing is emailed: send updated documents from the Documents tab when you are
+                ready. This can&apos;t be done once a payment is recorded.
+              </p>
+            ) : null}
             <div className="flex items-end gap-3">
               <div className="space-y-1.5">
                 <Label>From</Label>
@@ -207,7 +206,7 @@ export function ConvertQuoteCurrencyDialog({
                   1 {from} = {effectiveRate ?? "—"} {target}
                   {asOf ? ` · ${formatDisplayDate(asOf)}` : ""}
                   {stale ? (
-                    <span className="ml-1.5 text-amber-600 dark:text-amber-500">· stale</span>
+                    <span className="ml-1.5 text-amber-600 dark:text-amber-500">· rate may be out of date</span>
                   ) : null}
                 </p>
               </div>
@@ -254,19 +253,16 @@ export function ConvertQuoteCurrencyDialog({
             {options.length === 0 ? (
               <p className="text-xs text-muted-foreground">No other currency is configured.</p>
             ) : null}
-          </div>
-        )}
+        </div>
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-            {requiresRevision ? "Close" : "Cancel"}
+            Cancel
           </Button>
-          {requiresRevision ? null : (
-            <Button type="button" onClick={() => void convert()} disabled={!target || !effectiveRate || converting}>
-              {converting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-              Re-price in {target || "…"}
-            </Button>
-          )}
+          <Button type="button" onClick={() => void convert()} disabled={!target || !effectiveRate || converting}>
+            {converting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            Re-price in {target || "…"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

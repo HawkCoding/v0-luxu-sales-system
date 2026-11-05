@@ -333,7 +333,7 @@ test("C6 — generate a quote PDF", async ({ page }) => {
     expect(quote, "a priced quote").toBeTruthy()
 
     await gotoJobTab(page, quote!.booking_id, "quotes")
-    const pdfBtn = page.getByRole("button", { name: /^PDF$/ }).first()
+    const pdfBtn = page.getByRole("button", { name: /^View PDF$/ }).first()
     await expect(pdfBtn).toBeVisible({ timeout: 15_000 })
     const respP = page.waitForResponse((r) => /\/api\/quotes\/.+\/pdf/.test(r.url()) && r.request().method() === "POST")
     await pdfBtn.click()

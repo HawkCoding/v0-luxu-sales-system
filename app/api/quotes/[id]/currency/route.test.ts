@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const authMocks = vi.hoisted(() => ({ requireRole: vi.fn() }))
 const auditMocks = vi.hoisted(() => ({ writeAuditLog: vi.fn(async () => {}) }))
+const syncMocks = vi.hoisted(() => ({ syncBookingPaymentState: vi.fn() }))
 
 vi.mock("@/lib/api/auth", () => ({ requireRole: authMocks.requireRole }))
 vi.mock("@/lib/audit-write", () => ({ writeAuditLog: auditMocks.writeAuditLog }))
+vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
+  syncBookingPaymentState: syncMocks.syncBookingPaymentState,
+}))
 
 import { POST } from "./route"
 
@@ -21,11 +25,25 @@ interface QuoteFixture {
   discount_amount?: number
   /** Replaces the default LINES fixture. */
   lines?: unknown[]
+  stage?: string
+  cancelledAt?: string | null
+  /** Payment rows on the booking. */
+  payments?: { id: string }[]
+  /** Invoice rows on the booking. */
+  invoices?: { id: string; amount: number }[]
+  /** Makes the invoice update fail. */
+  invoiceUpdateError?: boolean
 }
 
 interface Captured {
   rpc?: Record<string, unknown>
   quoteUpdate?: Record<string, unknown>
+  invoiceUpdates: { id: string; row: Record<string, unknown> }[]
+  paymentsQueried: boolean
+}
+
+function newCaptured(): Captured {
+  return { invoiceUpdates: [], paymentsQueried: false }
 }
 
 /** Two ZAR lines that a 17.25 rate should turn into R x 17.25 each. */
@@ -91,6 +109,7 @@ function buildSupabase(quote: QuoteFixture, captured: Captured) {
                   discount_type: quote.discount_type ?? null,
                   discount_value: quote.discount_value ?? 0,
                   discount_amount: quote.discount_amount ?? 0,
+                  booking: { stage: quote.stage ?? "accepted", cancelled_at: quote.cancelledAt ?? null },
                 },
                 error: null,
               }),
@@ -100,6 +119,29 @@ function buildSupabase(quote: QuoteFixture, captured: Captured) {
             captured.quoteUpdate = row
             return { eq: async () => ({ error: null }) }
           },
+        }
+      }
+      if (table === "payments") {
+        captured.paymentsQueried = true
+        return {
+          select: () => ({
+            eq: () => ({ limit: async () => ({ data: quote.payments ?? [], error: null }) }),
+          }),
+        }
+      }
+      if (table === "invoices") {
+        return {
+          select: () => ({
+            eq: () => ({
+              in: () => ({ neq: async () => ({ data: quote.invoices ?? [], error: null }) }),
+            }),
+          }),
+          update: (row: Record<string, unknown>) => ({
+            eq: async (_column: string, id: string) => {
+              captured.invoiceUpdates.push({ id, row })
+              return { error: quote.invoiceUpdateError ? { message: "boom" } : null }
+            },
+          }),
         }
       }
       if (table === "quote_line_items") {
@@ -139,10 +181,12 @@ describe("POST /api/quotes/[id]/currency", () => {
   beforeEach(() => {
     authMocks.requireRole.mockReset()
     auditMocks.writeAuditLog.mockClear()
+    syncMocks.syncBookingPaymentState.mockReset()
+    syncMocks.syncBookingPaymentState.mockResolvedValue({ invoiceBalance: 43_125 })
   })
 
   it("converts every line on a draft quote and recomputes the totals", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft" }, captured)
 
     const response = await post({ currency: "USD", rate: 17.25, asOf: "2026-08-13" })
@@ -161,7 +205,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("re-stamps the FX chain against the supplier's original currency", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft" }, captured)
 
     await post({ currency: "USD", rate: 2, asOf: "2026-08-13" })
@@ -172,7 +216,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("converts the manual commission top-up alongside the lines", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft", commission_bonus: 100 }, captured)
 
     await post({ currency: "USD", rate: 2 })
@@ -182,7 +226,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("converts the agent commission alongside the lines and nets it off the new total", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft", agent_commission: 100 }, captured)
 
     const response = await post({ currency: "USD", rate: 2 })
@@ -194,7 +238,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("converts a fixed discount alongside the lines and nets it off the new total", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft", discount_type: "fixed", discount_value: 100, discount_amount: 100 }, captured)
 
     const response = await post({ currency: "USD", rate: 2 })
@@ -207,7 +251,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("leaves a percent discount's value untouched — it is currency-neutral", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft", discount_type: "percent", discount_value: 10, discount_amount: 250 }, captured)
 
     await post({ currency: "USD", rate: 2 })
@@ -234,7 +278,7 @@ describe("POST /api/quotes/[id]/currency", () => {
     }
 
     async function convertedCommission(commission: Record<string, unknown>, qty: number, unitPrice: number) {
-      const captured: Captured = {}
+      const captured = newCaptured()
       authorise({ status: "draft", lines: [LINES[0], commissionLine(commission, qty, unitPrice)] }, captured)
       const response = await post({ currency: "USD", rate: 2 })
       expect(response.status).toBe(200)
@@ -275,39 +319,136 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("also converts a quote that is still pricing_incomplete", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "pricing_incomplete" }, captured)
 
     const response = await post({ currency: "USD", rate: 17.25 })
     expect(response.status).toBe(200)
   })
 
-  it("refuses a sent quote and points at Revise", async () => {
-    const captured: Captured = {}
-    authorise({ status: "sent" }, captured)
+  it("never looks at payments or invoices for a provisional quote", async () => {
+    const captured = newCaptured()
+    authorise({ status: "draft", payments: [{ id: "p1" }] }, captured)
 
     const response = await post({ currency: "USD", rate: 17.25 })
-    const payload = await response.json()
 
-    expect(response.status).toBe(409)
-    expect(payload.code).toBe("REQUIRES_REVISION")
-    expect(payload.error).toMatch(/Revise/)
-    // Nothing may be written when the conversion is refused.
-    expect(captured.rpc).toBeUndefined()
-    expect(captured.quoteUpdate).toBeUndefined()
+    expect(response.status).toBe(200)
+    expect(captured.paymentsQueried).toBe(false)
+    expect(captured.invoiceUpdates).toEqual([])
+    expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    expect(await response.json()).not.toHaveProperty("invoicesConverted")
   })
 
-  it("refuses an accepted quote", async () => {
-    const captured: Captured = {}
-    authorise({ status: "accepted" }, captured)
+  describe("a quote the client already holds", () => {
+    it("converts a sent quote while no payment is recorded", async () => {
+      const captured = newCaptured()
+      authorise({ status: "sent", stage: "quote_sent" }, captured)
 
-    const response = await post({ currency: "USD", rate: 17.25 })
-    expect(response.status).toBe(409)
-    expect(captured.rpc).toBeUndefined()
+      const response = await post({ currency: "USD", rate: 17.25 })
+      const payload = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(payload.currency).toBe("USD")
+      expect(captured.quoteUpdate?.currency).toBe("USD")
+      // Nothing is measured against a quote that has not been accepted.
+      expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    })
+
+    it("converts an accepted quote, moves its invoices to the new currency at the same rate, and re-derives the balance", async () => {
+      const captured = newCaptured()
+      authorise(
+        {
+          status: "accepted",
+          stage: "deposit_requested",
+          invoices: [
+            { id: "inv-deposit", amount: 625 },
+            { id: "inv-extra", amount: 100 },
+          ],
+        },
+        captured,
+      )
+
+      const response = await post({ currency: "USD", rate: 2 })
+      const payload = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(captured.invoiceUpdates.map((u) => u.id)).toEqual(["inv-deposit", "inv-extra"])
+      expect(captured.invoiceUpdates[0].row).toMatchObject({ amount: 1250, currency: "USD" })
+      expect(captured.invoiceUpdates[1].row).toMatchObject({ amount: 200, currency: "USD" })
+      expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(
+        expect.anything(),
+        BOOKING_ID,
+        expect.objectContaining({ actorName: "Test User", actorUserId: "user-1" }),
+      )
+      expect(payload.invoicesConverted).toBe(2)
+      expect(payload.invoiceBalance).toBe(43_125)
+      expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ after: expect.objectContaining({ invoicesConverted: 2 }) }),
+      )
+    })
+
+    it("refuses once any payment is recorded, says what to do, and writes nothing", async () => {
+      const captured = newCaptured()
+      authorise({ status: "accepted", payments: [{ id: "p1" }], invoices: [{ id: "inv-1", amount: 625 }] }, captured)
+
+      const response = await post({ currency: "USD", rate: 17.25 })
+      const payload = await response.json()
+
+      expect(response.status).toBe(409)
+      expect(payload.code).toBe("PAYMENTS_RECORDED")
+      expect(payload.error).toMatch(/Remove the payments, change the currency, then record them again in USD/)
+      expect(captured.rpc).toBeUndefined()
+      expect(captured.quoteUpdate).toBeUndefined()
+      expect(captured.invoiceUpdates).toEqual([])
+      expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ["closed", null],
+      ["lost", null],
+      ["deposit_paid", "2026-10-01T00:00:00Z"],
+    ])("refuses on a closed or cancelled booking (%s)", async (stage, cancelledAt) => {
+      const captured = newCaptured()
+      authorise({ status: "accepted", stage, cancelledAt }, captured)
+
+      const response = await post({ currency: "USD", rate: 17.25 })
+
+      expect(response.status).toBe(409)
+      expect(captured.rpc).toBeUndefined()
+      expect(captured.paymentsQueried).toBe(false)
+    })
+
+    it.each(["superseded", "cancelled"])("never converts a %s quote", async (status) => {
+      const captured = newCaptured()
+      authorise({ status }, captured)
+
+      const response = await post({ currency: "USD", rate: 17.25 })
+
+      expect(response.status).toBe(409)
+      expect((await response.json()).code).toBe("NOT_CONVERTIBLE")
+      expect(captured.rpc).toBeUndefined()
+      expect(captured.quoteUpdate).toBeUndefined()
+    })
+
+    it("keeps the re-priced quote and warns when an invoice cannot be moved", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {})
+      const captured = newCaptured()
+      authorise({ status: "accepted", invoices: [{ id: "inv-1", amount: 625 }], invoiceUpdateError: true }, captured)
+
+      const response = await post({ currency: "USD", rate: 2 })
+      const payload = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(captured.quoteUpdate?.currency).toBe("USD")
+      expect(payload.invoicesConverted).toBe(0)
+      expect(payload.warning).toMatch(/invoice could not be updated/)
+      error.mockRestore()
+    })
   })
 
   it("rejects converting a quote to the currency it is already in", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft", currency: "USD" }, captured)
 
     const response = await post({ currency: "USD", rate: 1 })
@@ -316,7 +457,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("rejects an unsupported currency", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft" }, captured)
 
     const response = await post({ currency: "AUD", rate: 10 })
@@ -324,7 +465,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("rejects a non-positive or absurd rate", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft" }, captured)
 
     expect((await post({ currency: "USD", rate: 0 })).status).toBe(400)
@@ -334,7 +475,7 @@ describe("POST /api/quotes/[id]/currency", () => {
   })
 
   it("writes an audit entry naming both currencies", async () => {
-    const captured: Captured = {}
+    const captured = newCaptured()
     authorise({ status: "draft" }, captured)
 
     await post({ currency: "USD", rate: 17.25 })

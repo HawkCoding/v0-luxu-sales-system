@@ -3,7 +3,7 @@ import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
-import { isAtOrPastStage, isTerminalPipelineStage } from "@/lib/pipeline/validate-transition"
+import { isTerminalPipelineStage } from "@/lib/pipeline/validate-transition"
 import { isCoreBookingLeg, type PipelineStage, type SupplierKind } from "@/lib/types"
 import type { Database } from "@/lib/supabase/types"
 import { seedUnitsForServices } from "@/lib/packages/seed-service-units"
@@ -140,15 +140,18 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   if (removedServiceIds.length > 0) {
     // A rebuild deletes by omission, and nothing here used to look at the booking's stage: the QA
-    // run stripped every leg off a closed, paid, vouchered booking and got a 200 back. Once the
-    // deposit is paid the suppliers are booked and the itinerary is what the client contracted for,
-    // so a removal has to go through a quote revision instead. A build that removes nothing stays
-    // allowed at any stage, so supplier references and admin dates can still be edited late.
+    // run stripped every leg off a closed, paid, vouchered booking and got a 200 back. A finished
+    // (closed) or cancelled booking is a record and stays that way.
+    //
+    // A live booking can drop a service at any stage, including after the deposit: Edit Booking is
+    // how a client's changed plans reach the quote, and the old answer here (revise the quote, which
+    // rewound the booking and made the salesperson redo every step) is what it replaces. The
+    // supplier-side records for a removed service go with it, and telling the supplier is the
+    // salesperson's call. The core leg below is still protected.
     const stage = booking.stage as PipelineStage
-    if (isAtOrPastStage(stage, "deposit_paid") || isTerminalPipelineStage(stage)) {
+    if (isTerminalPipelineStage(stage)) {
       return jsonError(
-        "This booking's deposit is already paid, so its services can no longer be removed. " +
-          "Revise the quote to change what the client is booked on.",
+        "This booking is closed or cancelled, so its services can no longer be removed.",
         409,
         { removedServiceIds },
       )

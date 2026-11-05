@@ -155,6 +155,15 @@ export async function POST(req: Request) {
   // working. Full-payment invoices store a null percentage and are settled by `kindMismatch`.
   const percentageChanged =
     existingInvoice !== null && !isFullPayment && existingInvoice.deposit_percentage !== depositPercentage
+  // A full-payment invoice bills the whole total, so when an edit moves the quote total its amount has
+  // to move with it. (A deposit invoice stays as issued: the difference lands on the final balance.)
+  // Without this the stored amount stayed at the old total, and it is what the payment sync measures
+  // "paid in full" against and what reminders print as the amount due.
+  const fullAmountChanged =
+    existingInvoice !== null &&
+    isFullPayment &&
+    existingInvoice.kind === "full" &&
+    Math.abs(Number(existingInvoice.amount) - amount) >= 0.005
 
   // Resolves to the requested method, else the invoice's own prior method
   // (an amend keeps its bank details unless the salesperson changes them),
@@ -171,6 +180,7 @@ export async function POST(req: Request) {
       !kindMismatch &&
       !stalePricing &&
       !percentageChanged &&
+      !fullAmountChanged &&
       parsed.data.paymentMethodId === undefined
     ) {
       return existingInvoice
@@ -186,7 +196,12 @@ export async function POST(req: Request) {
           // Re-stamped alongside the amount: a revision could have landed the booking on a
           // quote priced in another currency, and the two must never disagree.
           currency: balance.currency,
-          due_date: dueDate,
+          // Refreshing only the amount of a full-payment invoice keeps the due date the client was
+          // given; every other amend re-dates it as before.
+          due_date:
+            fullAmountChanged && !stalePricing && !parsed.data.dueDate && existingInvoice.due_date
+              ? existingInvoice.due_date
+              : dueDate,
           payment_method_id: method.id || null,
           updated_at: new Date().toISOString(),
         })

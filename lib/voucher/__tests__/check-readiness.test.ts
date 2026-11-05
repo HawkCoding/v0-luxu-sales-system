@@ -50,6 +50,52 @@ describe("checkVoucherReadiness", () => {
     expect(result.failures).toContainEqual(expect.objectContaining({ code: "balance_not_zero" }))
   })
 
+  it("treats trip_active, the legacy name for voucher_sent, as eligible", () => {
+    expect(checkVoucherReadiness({ ...readyInput, stage: "trip_active" }).ready).toBe(true)
+  })
+
+  describe("a corrected voucher after the first one has gone out", () => {
+    it("still needs a zero balance for the first voucher, at every stage before it is sent", () => {
+      for (const stage of ["final_paid", "deposit_paid", "accepted"]) {
+        const result = checkVoucherReadiness({ ...readyInput, stage, invoiceBalance: 12500 })
+        expect(result.failures).toContainEqual(expect.objectContaining({ code: "balance_not_zero" }))
+      }
+    })
+
+    it("lets an updated voucher through with money owed, as a warning rather than a failure", () => {
+      for (const stage of ["voucher_sent", "closed", "trip_active"]) {
+        const result = checkVoucherReadiness({ ...readyInput, stage, invoiceBalance: 12500 })
+        expect(result.ready).toBe(true)
+        expect(result.failures).toHaveLength(0)
+        expect(result.warnings).toContainEqual(expect.objectContaining({ code: "balance_outstanding" }))
+      }
+    })
+
+    it("gives no balance warning when nothing is owed", () => {
+      const result = checkVoucherReadiness({ ...readyInput, stage: "voucher_sent", invoiceBalance: 0 })
+      expect(result.warnings.map((w) => w.code)).not.toContain("balance_outstanding")
+    })
+
+    it("still refuses an unknown balance, even after the first voucher", () => {
+      const result = checkVoucherReadiness({ ...readyInput, stage: "voucher_sent", invoiceBalance: null })
+      expect(result.failures).toContainEqual(expect.objectContaining({ code: "balance_not_zero" }))
+    })
+
+    it("still enforces every other requirement for an updated voucher", () => {
+      const result = checkVoucherReadiness({
+        ...readyInput,
+        stage: "voucher_sent",
+        invoiceBalance: 12500,
+        customerEmail: null,
+        missingLegReferenceLabels: ["Hotel: Cape Town"],
+      })
+      expect(result.ready).toBe(false)
+      expect(result.failures.map((f) => f.code)).toEqual(
+        expect.arrayContaining(["customer_email_missing", "leg_references_missing"]),
+      )
+    })
+  })
+
   it("returns departure_date_missing when departureDate is null", () => {
     const result = checkVoucherReadiness({ ...readyInput, departureDate: null })
     expect(result.ready).toBe(false)

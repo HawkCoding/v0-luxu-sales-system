@@ -19,7 +19,7 @@ export const AMEND_NOTE_MAX_LENGTH = 500
 /** Shown (and kept on screen) when Build Booking saved service changes in amend mode but the
  *  amendment itself was never confirmed — the booking's services and the quote now disagree. */
 export const AMEND_UNFINISHED_WARNING =
-  "Service changes were saved, but the quote price was not amended. Open Amend again to finish, or undo the service changes."
+  "Service changes were saved, but the quote price was not updated. Open Edit Booking again to finish, or put the service changes back."
 
 /** Stages at which the voucher has already gone out — a higher total there is money still owed. */
 const VOUCHER_SENT_OR_LATER_STAGES = new Set(["voucher_sent", "trip_active", "closed"])
@@ -68,6 +68,20 @@ export function createAmendServicesTracker(handlers: {
 
 /** Booking stages an accepted quote can no longer be amended in — the booking is finished or off. */
 const NON_AMENDABLE_BOOKING_STAGES = new Set(["closed", "lost"])
+
+/** Why a booking's price can't be changed any more, or null when it can. Quote-status independent. */
+export function bookingEditIneligibilityReason(input: {
+  bookingStage: string | null | undefined
+  bookingCancelledAt: string | null | undefined
+}): string | null {
+  if (input.bookingCancelledAt || input.bookingStage === "lost") {
+    return "This booking is cancelled, so its price can't be changed."
+  }
+  if (input.bookingStage && NON_AMENDABLE_BOOKING_STAGES.has(input.bookingStage)) {
+    return "This booking is closed, so its price can't be changed."
+  }
+  return null
+}
 
 export interface AmendEligibilityInput {
   quoteStatus: string

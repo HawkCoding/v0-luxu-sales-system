@@ -21,7 +21,7 @@ describe("createAmendServicesTracker", () => {
 
     expect(warn).toHaveBeenCalledWith(AMEND_UNFINISHED_WARNING)
     expect(AMEND_UNFINISHED_WARNING).toBe(
-      "Service changes were saved, but the quote price was not amended. Open Amend again to finish, or undo the service changes.",
+      "Service changes were saved, but the quote price was not updated. Open Edit Booking again to finish, or put the service changes back.",
     )
   })
 

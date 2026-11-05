@@ -20,6 +20,9 @@ export type ReadinessWarningCode =
   | "guest_counts_missing"
   | "flight_times_incomplete"
   | "flight_details_incomplete"
+  /** The booking changed after its voucher went out and now owes money. The client already holds a
+   * voucher, so an updated one may be sent, but the balance is not paid yet. */
+  | "balance_outstanding"
   /** Raised by the caller, not by `buildWarnings` -- it compares the booking's roster against its
    * priced pax, which is booking-level rather than per-block. See app/api/voucher/generate. */
   | "guest_count_mismatch"
@@ -78,7 +81,14 @@ export interface VoucherReadinessInput {
   serviceBlocks?: ReadinessBlockSummary[]
 }
 
-const PAID_IN_FULL_STAGES = new Set(["final_paid", "voucher_sent", "closed"])
+const PAID_IN_FULL_STAGES = new Set(["final_paid", "voucher_sent", "closed", "trip_active"])
+
+/**
+ * Stages a booking can only be in once its first voucher has been emailed. `voucher_sent` is never
+ * rolled back by the payment sync, so it is a reliable record that the client already holds one.
+ * (`trip_active` is the legacy name for `voucher_sent`.)
+ */
+const VOUCHER_ISSUED_STAGES = new Set(["voucher_sent", "closed", "trip_active"])
 
 /** Service types a supplier contact/times/etc. warning is meaningful for — additional_service and
  * tour blocks have no real supplier relationship to chase these fields on. */
@@ -187,6 +197,7 @@ function buildWarnings(blocks: ReadinessBlockSummary[]): ReadinessWarning[] {
 
 export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherReadinessResult {
   const failures: ReadinessFailure[] = []
+  const extraWarnings: ReadinessWarning[] = []
 
   if (!PAID_IN_FULL_STAGES.has(input.stage ?? "")) {
     failures.push({
@@ -197,11 +208,23 @@ export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherRead
   }
 
   if (Number(input.invoiceBalance ?? NaN) !== 0) {
-    failures.push({
-      code: "balance_not_zero",
-      message: "The invoice balance must be zero before generating a voucher.",
-      fixHint: "Record all outstanding payments to clear the invoice balance.",
-    })
+    const owed = Number(input.invoiceBalance ?? NaN)
+    if (VOUCHER_ISSUED_STAGES.has(input.stage ?? "") && Number.isFinite(owed) && owed > 0) {
+      // The first voucher needs the balance paid. Once the client holds one, an edit that adds cost
+      // must not stop them being sent a corrected voucher (a changed date, an added guest): it is
+      // flagged instead, so the salesperson sends it knowing money is still owed.
+      extraWarnings.push({
+        code: "balance_outstanding",
+        message: "This booking still has an unpaid balance. The client already holds a voucher, so this updated one can be sent.",
+        fixHint: "Record the payment when it arrives, or send the updated invoice.",
+      })
+    } else {
+      failures.push({
+        code: "balance_not_zero",
+        message: "The invoice balance must be zero before generating a voucher.",
+        fixHint: "Record all outstanding payments to clear the invoice balance.",
+      })
+    }
   }
 
   if (!input.departureDate) {
@@ -224,7 +247,7 @@ export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherRead
     failures.push({
       code: "quoted_leg_missing",
       message: `Services on the accepted quote are no longer in the booking: ${(input.missingQuotedLegLabels ?? []).join(", ")}.`,
-      fixHint: "Re-add the service under Edit Quote, or revise the quote to match what is being delivered.",
+      fixHint: "Re-add the service under Edit Booking, or edit the booking so the quote matches what is being delivered.",
     })
   }
 
@@ -236,7 +259,7 @@ export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherRead
     })
   }
 
-  const warnings = input.serviceBlocks ? buildWarnings(input.serviceBlocks) : []
+  const warnings = [...extraWarnings, ...(input.serviceBlocks ? buildWarnings(input.serviceBlocks) : [])]
 
   return { ready: failures.length === 0, failures, warnings }
 }

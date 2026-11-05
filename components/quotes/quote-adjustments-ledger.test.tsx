@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { toast } from "sonner"
 import { QuoteAdjustmentsLedger } from "./quote-adjustments-ledger"
-import { formatMoney } from "@/lib/money"
+import { currencySymbol, formatMoney } from "@/lib/money"
 import { PER_PERSON_NEEDS_HEADCOUNT_ERROR } from "@/lib/quotes/quote-adjustments"
 import type { CommissionBreakdown, Quote, QuoteLineItem } from "@/lib/types"
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const QUOTE_ID = "00000000-0000-4000-8000-000000000001"
 
@@ -194,5 +197,99 @@ describe("QuoteAdjustmentsLedger", () => {
     render(<QuoteAdjustmentsLedger quote={quote} editable={false} bookingHeadcount={4} onSaved={vi.fn()} />)
 
     expect(screen.getByText(`${money(5000, "ZAR", { decimals: false })} × 4 people`)).toBeInTheDocument()
+  })
+})
+
+describe("QuoteAdjustmentsLedger — currency and wording", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.mocked(toast.success).mockClear()
+  })
+
+  it.each([
+    ["ZAR", currencySymbol("ZAR")],
+    ["USD", currencySymbol("USD")],
+    ["EUR", currencySymbol("EUR")],
+  ])("labels the fixed-amount option with the %s symbol, not a hard-coded R", (currency, symbol) => {
+    render(<QuoteAdjustmentsLedger quote={buildQuote({ currency })} editable bookingHeadcount={2} onSaved={vi.fn()} />)
+
+    const fixed = within(screen.getByRole("radiogroup", { name: "Commission type" })).getByRole("radio", {
+      name: "Fixed amount",
+    })
+    expect(fixed).toHaveTextContent(symbol)
+    if (currency !== "ZAR") expect(fixed).not.toHaveTextContent("R")
+  })
+
+  it("keeps the % and pp options as they were", () => {
+    render(<QuoteAdjustmentsLedger quote={buildQuote({ currency: "USD" })} editable bookingHeadcount={2} onSaved={vi.fn()} />)
+
+    const group = screen.getByRole("radiogroup", { name: "Commission type" })
+    expect(within(group).getByRole("radio", { name: "Percentage" })).toHaveTextContent("%")
+    expect(within(group).getByRole("radio", { name: "Per person" })).toHaveTextContent("pp")
+  })
+
+  async function saveACommission(status: Quote["status"]) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    const onSaved = vi.fn()
+    render(<QuoteAdjustmentsLedger quote={buildQuote({ status })} editable bookingHeadcount={2} onSaved={onSaved} />)
+
+    fireEvent.change(document.getElementById(`quote-adjustments-${QUOTE_ID}-commission-value`) as HTMLElement, {
+      target: { value: "10" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  }
+
+  it.each(["sent", "accepted", "expired"] as const)(
+    "tells the salesperson to send an updated quote after saving on a %s quote",
+    async (status) => {
+      await saveACommission(status)
+      expect(toast.success).toHaveBeenCalledWith(
+        "Pricing saved. Send the client an updated quote so they have the new total.",
+      )
+    },
+  )
+
+  it.each(["draft", "pricing_incomplete", "ready"] as const)(
+    "keeps the plain saved message on a %s quote",
+    async (status) => {
+      await saveACommission(status)
+      expect(toast.success).toHaveBeenCalledWith("Pricing adjustments saved.")
+    },
+  )
+
+  it("explains how a change reaches a client who already has the quote", async () => {
+    // Radix measures the tooltip with ResizeObserver, which jsdom does not have.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    render(<QuoteAdjustmentsLedger quote={buildQuote()} editable bookingHeadcount={2} onSaved={vi.fn()} />)
+
+    fireEvent.focus(screen.getByRole("button", { name: "Commission info" }))
+
+    const tooltip = await screen.findByRole("tooltip")
+    expect(tooltip).toHaveTextContent(
+      "Applied once to the booking's total. On a quote the client already has, save the change, then send them an updated quote.",
+    )
+    expect(tooltip).not.toHaveTextContent("Editable any time before the quote is sent")
+  })
+
+  it("gives the small icon buttons a visible keyboard focus ring", () => {
+    render(
+      <QuoteAdjustmentsLedger
+        quote={buildQuote({ commissionBonus: 500 })}
+        editable
+        bookingHeadcount={2}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Commission info" })).toHaveClass("focus-visible:ring-2")
+    expect(screen.getByRole("button", { name: "Remove rounding" })).toHaveClass("focus-visible:ring-2")
   })
 })

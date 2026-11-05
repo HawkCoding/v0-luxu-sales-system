@@ -547,7 +547,8 @@ test.describe("quickstart quoting", () => {
       const context = await browser.newContext({ storageState: HANDBOOK_USERS.consultant.storageState })
       const page = await context.newPage()
       await page.goto(`/app/bookings/${QS_ENQUIRY_BOOKING}?tab=quotes`)
-      const cardTitle = page.getByText("Quote 1")
+      // Exact: the caption above the cards also reads "Sends Quote 1 to the client."
+      const cardTitle = page.getByText("Quote 1", { exact: true })
       await expect(cardTitle).toBeVisible({ timeout: 60_000 })
       // Frames the quote card rather than the booking header above it.
       await cardTitle.evaluate((element) => element.scrollIntoView({ block: "start" }))

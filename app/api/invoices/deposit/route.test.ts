@@ -318,6 +318,52 @@ describe("POST /api/invoices/deposit", () => {
     expect(store.rows("invoices")).toHaveLength(1)
   })
 
+  it("moves a full-payment invoice to the new quote total, keeping the due date the client was given", async () => {
+    // The quote was edited in place (same id) from R1 000 to R1 500 after a full-payment invoice went out.
+    const { supabase, store } = seedSupabase(
+      [{ ...ACCEPTED_QUOTE, total: 1500 }],
+      undefined,
+      [invoiceRow({ kind: "full", deposit_percentage: null, amount: 1000, status: "sent", due_date: "2026-05-03" })],
+    )
+    mockAuthOk(supabase)
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 100, mode: "full" }))
+
+    expect(res.status).toBe(200)
+    expect(store.rows("invoices")).toHaveLength(1)
+    expect(store.rows("invoices")[0]).toEqual(
+      expect.objectContaining({ id: "invoice-1", kind: "full", amount: 1500, status: "sent", due_date: "2026-05-03" }),
+    )
+  })
+
+  it("leaves a full-payment invoice alone when its total has not moved", async () => {
+    const { supabase, store } = seedSupabase(
+      [ACCEPTED_QUOTE],
+      undefined,
+      [invoiceRow({ kind: "full", deposit_percentage: null, amount: 1000, status: "sent" })],
+    )
+    mockAuthOk(supabase)
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 100, mode: "full" }))
+
+    expect(res.status).toBe(200)
+    expect(store.rows("invoices")[0]).toEqual(expect.objectContaining({ amount: 1000, due_date: "2026-05-04" }))
+  })
+
+  it("does not re-price a deposit invoice when the quote total moves: the difference lands on the final balance", async () => {
+    const { supabase, store } = seedSupabase(
+      [{ ...ACCEPTED_QUOTE, total: 1500 }],
+      undefined,
+      [invoiceRow({ status: "sent" })],
+    )
+    mockAuthOk(supabase)
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))
+
+    expect(res.status).toBe(200)
+    expect(store.rows("invoices")[0]).toEqual(expect.objectContaining({ kind: "deposit", amount: 250, status: "sent" }))
+  })
+
   // The reuse branch used to compare kind, quote and payment method but not the percentage, so a
   // re-issue at a different deposit percentage returned 200 with the old amount untouched — the
   // per-job override quietly doing nothing.

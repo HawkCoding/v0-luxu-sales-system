@@ -14,7 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { DocRecord, DocumentKind, Enquiry, Job, Customer } from "@/lib/types"
 import { AlertCircle, ClipboardList, Download, FileText, Send, Trash2, Upload } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
-import { useJobLegReferences } from "@/lib/use-data"
+import { IssuedDocumentsSection } from "@/components/issued-documents-section"
+import type { IssuedDocumentType } from "@/lib/documents/document-versions"
+import { hasKeptVersion } from "@/lib/documents/issued-documents"
+import { useJobDocumentVersions, useJobLegReferences } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDateTime } from "@/lib/date-format"
 import { getRecordTabHref } from "@/lib/booking-visibility"
@@ -63,7 +66,8 @@ function DocumentDownloadButton({ document, label }: DocumentDownloadButtonProps
   return (
     <Button
       variant="ghost"
-      size="sm"
+      size="icon"
+      className="size-10"
       onClick={() => {
         void downloadDocument(document.id)
       }}
@@ -130,7 +134,7 @@ function DocumentUploadForm({ bookingId, onChange }: DocumentUploadFormProps) {
           </div>
           <div className="space-y-1">
             <Label htmlFor="attachment-kind" className="text-xs">
-              Kind
+              Type of file
             </Label>
             <Select value={kind} onValueChange={(value) => setKind(value as DocumentKind)} disabled={submitting}>
               <SelectTrigger id="attachment-kind" className="w-full sm:w-44">
@@ -164,6 +168,8 @@ interface JobDocumentsTabProps {
   enquiry?: Enquiry
   customer?: Customer
   onChange?: () => Promise<void> | void
+  /** Opens the flow for sending an updated quote or invoice (the voucher's is handled here). */
+  onReviewDocument?: (docType: IssuedDocumentType) => void
   loading?: boolean
   error?: Error | null
 }
@@ -174,6 +180,7 @@ export function JobDocumentsTab({
   enquiry,
   customer,
   onChange,
+  onReviewDocument,
   loading = false,
   error = null,
 }: JobDocumentsTabProps) {
@@ -195,8 +202,21 @@ export function JobDocumentsTab({
     (row) => !row.supplierReference?.trim(),
   ).length
 
+  // Same SWR key as the "Sent to the client" section and the tab badge, so this is no extra fetch.
+  const { data: documentVersions } = useJobDocumentVersions(job?.id)
+  const keptVersions = documentVersions?.versions ?? []
+
   const uploadedDocuments = documents.filter(isUploadedDocument)
-  const generatedDocuments = documents.filter((d) => !isUploadedDocument(d))
+  // Once a kept version of the quote or invoice exists it is listed under "Sent to the client", with
+  // the exact version the client received, so the older generated row for it is left out here (it
+  // goes stale). Until then the row stays: a booking emailed before copies were kept has no download
+  // up there, and while the versions are loading (or failed to load) nothing should flash away.
+  const generatedDocuments = documents.filter((d) => {
+    if (isUploadedDocument(d)) return false
+    if (d.kind === "quote_pdf") return !hasKeptVersion(keptVersions, "quote")
+    if (d.kind === "invoice_pdf") return !hasKeptVersion(keptVersions, "invoice")
+    return true
+  })
 
   async function downloadWorksheet() {
     if (!job) return
@@ -278,56 +298,46 @@ export function JobDocumentsTab({
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        {job && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Booking Worksheet</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Internal place-of-record: pax, invoices, payments, suppliers, gross profit
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={generatingWorksheet}
-                  onClick={() => {
-                    void downloadWorksheet()
-                  }}
-                >
-                  <ClipboardList data-icon="inline-start" />
-                  {generatingWorksheet ? "Generating…" : "Generate Worksheet"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      {job ? (
+        <IssuedDocumentsSection
+          bookingId={job.id}
+          // The voucher dialog lives on this tab; the quote and invoice flows live elsewhere on the page.
+          onReview={(docType) => (docType === "voucher" ? setVoucherOpen(true) : onReviewDocument?.(docType))}
+        />
+      ) : null}
 
-        {canGenerateVoucher && (
-          <Card className={missingReferenceCount > 0 ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}>
+      {canGenerateVoucher && (
+        <section className="space-y-3" aria-labelledby="ready-to-send-heading">
+          <h3 id="ready-to-send-heading" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Ready to send
+          </h3>
+          <Card
+            className={
+              missingReferenceCount > 0 ? "border-amber-500/40 bg-amber-500/5" : "border-primary/20 bg-primary/5"
+            }
+          >
             <CardContent className="p-4">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-foreground">Travel Voucher</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {missingReferenceCount > 0
-                      ? `${missingReferenceCount} ${missingReferenceCount === 1 ? "leg is" : "legs are"} missing a supplier reference number`
-                      : "Builds the voucher PDF from the latest booking details, then opens the email for review"}
+                      ? `Add the supplier reference for ${missingReferenceCount} ${missingReferenceCount === 1 ? "leg" : "legs"} before you can send the voucher.`
+                      : "Creates the travel voucher from the current booking and lets you check the email before it goes."}
                   </p>
                 </div>
                 {missingReferenceCount > 0 ? (
                   <Button
                     size="sm"
                     variant="outline"
+                    className="w-full sm:w-auto"
                     onClick={() => router.push(getRecordTabHref(pathname, job.id, "?tab=references"))}
                   >
                     <AlertCircle data-icon="inline-start" />
                     Add reference numbers
                   </Button>
                 ) : (
-                  <Button size="sm" onClick={() => setVoucherOpen(true)}>
+                  <Button size="sm" className="w-full sm:w-auto" onClick={() => setVoucherOpen(true)}>
                     <Send data-icon="inline-start" aria-hidden />
                     Preview &amp; Send Voucher
                   </Button>
@@ -335,29 +345,63 @@ export function JobDocumentsTab({
               </div>
             </CardContent>
           </Card>
-        )}
+        </section>
+      )}
 
-        {canGenerateVoucher && (
-          <GenerateVoucherDialog
-            open={voucherOpen}
-            onOpenChange={setVoucherOpen}
-            jobId={job.id}
-            bookingNumber={job.jobNumber}
-            invoiceNumber={job.customerInvoiceNumber}
-            onGenerated={onChange}
-            onSent={async () => {
-              await onChange?.()
-            }}
-          />
-        )}
-      </div>
+      {canGenerateVoucher && (
+        <GenerateVoucherDialog
+          open={voucherOpen}
+          onOpenChange={setVoucherOpen}
+          jobId={job.id}
+          bookingNumber={job.jobNumber}
+          invoiceNumber={job.customerInvoiceNumber}
+          onGenerated={onChange}
+          onSent={async () => {
+            await onChange?.()
+          }}
+        />
+      )}
 
-      <section className="space-y-3" aria-labelledby="generated-documents-heading">
-        <h3 id="generated-documents-heading" className="text-sm font-semibold text-foreground">
-          Generated
-        </h3>
+      <section className="space-y-3" aria-labelledby="booking-records-heading">
+        <div>
+          <h3 id="booking-records-heading" className="text-sm font-semibold text-foreground">
+            Booking records
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">For your own use. These are not sent to the client.</p>
+        </div>
+        {job && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Booking Worksheet</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    A summary of this booking for your own use: guests, invoices, payments, suppliers and profit. It is
+                    never sent to the client.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  disabled={generatingWorksheet}
+                  onClick={() => {
+                    void downloadWorksheet()
+                  }}
+                >
+                  <ClipboardList data-icon="inline-start" />
+                  {generatingWorksheet ? "Creating…" : "Create worksheet"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         {generatedDocuments.length === 0 ? (
-          <div className="text-center py-6 text-sm text-muted-foreground">No documents generated</div>
+          job ? null : (
+            <div className="text-center py-6 text-sm text-muted-foreground">
+              Nothing else has been created for this booking yet.
+            </div>
+          )
         ) : (
           generatedDocuments.map((d) => (
             <Card key={d.id}>
@@ -369,7 +413,7 @@ export function JobDocumentsTab({
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{generatedLabel(d)}</p>
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                      Generated: {formatDisplayDateTime(d.generatedAt)}
+                      Created {formatDisplayDateTime(d.generatedAt)}
                       {d.fileName ? ` · ${d.fileName}` : ""}
                     </p>
                   </div>
@@ -388,7 +432,7 @@ export function JobDocumentsTab({
 
       <section className="space-y-3" aria-labelledby="uploaded-documents-heading">
         <h3 id="uploaded-documents-heading" className="text-sm font-semibold text-foreground">
-          Uploaded
+          Files you uploaded
         </h3>
         {job && canUpload ? <DocumentUploadForm bookingId={job.id} onChange={onChange} /> : null}
         {uploadedDocuments.length === 0 ? (
@@ -419,7 +463,8 @@ export function JobDocumentsTab({
                     {canDelete ? (
                       <Button
                         variant="ghost"
-                        size="sm"
+                        size="icon"
+                        className="size-10"
                         onClick={() => void handleDelete(d.id)}
                         disabled={deletingId === d.id}
                         aria-label={`Delete ${label}`}
