@@ -1108,10 +1108,18 @@ export default function JobDetailPage() {
           />
         </TabsContent>
         <TabsContent value="times" forceMount className="data-[state=inactive]:hidden">
-          <JobTransferTimesTab bookingId={id} />
+          <JobTransferTimesTab
+            bookingId={id}
+            isActive={activeTab === "times"}
+            refreshKey={data?.job?.updatedAt}
+          />
         </TabsContent>
         <TabsContent value="references" forceMount className="data-[state=inactive]:hidden">
-          <JobReferencesTab bookingId={id} />
+          <JobReferencesTab
+            bookingId={id}
+            isActive={activeTab === "references"}
+            refreshKey={data?.job?.updatedAt}
+          />
         </TabsContent>
         <TabsContent value="payments">
           <div className="mb-3 flex justify-end">

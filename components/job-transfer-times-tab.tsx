@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AlertCircle, Plane, Car } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -18,6 +18,11 @@ import { useJobMovementTimes, type JobMovementTimeRow } from "@/lib/use-data"
 
 interface JobTransferTimesTabProps {
   bookingId: string
+  /** The page keeps this tab mounted so edits survive a tab switch, so its data is refetched each
+   * time it is opened rather than only when the page first loads. */
+  isActive: boolean
+  /** Changes when the booking changes; refetches an open tab. */
+  refreshKey?: string
 }
 
 interface RowDraft {
@@ -46,9 +51,12 @@ function draftFromRow(row: JobMovementTimeRow): RowDraft {
   }
 }
 
+function draftsMatch(a: RowDraft, b: RowDraft): boolean {
+  return (Object.keys(a) as Array<keyof RowDraft>).every((field) => a[field] === b[field])
+}
+
 function isDirty(draft: RowDraft, row: JobMovementTimeRow): boolean {
-  const saved = draftFromRow(row)
-  return (Object.keys(saved) as Array<keyof RowDraft>).some((field) => draft[field] !== saved[field])
+  return !draftsMatch(draft, draftFromRow(row))
 }
 
 /** The same two rules the server enforces, so an impossible schedule is caught under the fields
@@ -67,17 +75,27 @@ function scheduleError(draft: RowDraft): string | null {
   return null
 }
 
-export function JobTransferTimesTab({ bookingId }: JobTransferTimesTabProps) {
+export function JobTransferTimesTab({ bookingId, isActive, refreshKey }: JobTransferTimesTabProps) {
   const { data, error, isLoading, mutate } = useJobMovementTimes(bookingId)
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({})
   const [savingKey, setSavingKey] = useState<string | null>(null)
+  const loadedDrafts = useRef<Record<string, RowDraft>>({})
+
+  useEffect(() => {
+    if (isActive) void mutate()
+  }, [isActive, refreshKey, mutate])
 
   useEffect(() => {
     if (!data) return
+    const previous = loadedDrafts.current
+    const loaded = Object.fromEntries(data.rows.map((row) => [row.key, draftFromRow(row)]))
+    loadedDrafts.current = loaded
+    // A row the consultant has not touched follows the server; one with unsaved typing keeps it.
     setDrafts((prev) => {
       const next = { ...prev }
-      for (const row of data.rows) {
-        if (!(row.key in next)) next[row.key] = draftFromRow(row)
+      for (const [key, draft] of Object.entries(loaded)) {
+        const untouched = !(key in next) || (key in previous && draftsMatch(next[key], previous[key]))
+        if (untouched) next[key] = draft
       }
       return next
     })
@@ -369,8 +387,8 @@ export function JobTransferTimesTab({ bookingId }: JobTransferTimesTabProps) {
 
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No flights or transfers are booked on this job yet — they appear here once the booking
-            is built.
+            No flights or transfers are on this job yet. Add them in Build Booking and they will
+            appear here.
           </p>
         ) : null}
 
