@@ -106,6 +106,7 @@ Reference files: `lib/supabase/server.ts`, `app/app/layout.tsx`
 - Always check the Supabase `error` field before using `data`
 - Auth in server code: `const { data: { user } } = await supabase.auth.getUser()`
 - Migrations: apply locally with `pnpm db:reset`, regenerate types with `pnpm run db:types`
+- `pnpm db:reset` also refills local with anonymised copies of the real production bookings (read-only pull via `.env.production.local`); without that file it still resets and warns. Re-run just the refill with `pnpm db:seed:prod-bookings`; `pnpm db:reset:bare` resets with no refill
 - Applying pending migrations to a hosted database is autonomous: when `pnpm db:status` reports a target BEHIND, push it without asking — `pnpm db:remote:push:dev` for development, `pnpm db:remote:push:prod` for production. Destructive migrations (`DELETE`, `DROP`, `TRUNCATE`, data-mutating `UPDATE`) are included; apply them and report what changed afterwards
 - Production pushes need `ALLOW_PRODUCTION_DB_PUSH=I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION` set in the shell first. `-ConfirmProduction` is already baked into the npm script — passing it again fails with `ParameterAlreadyBound`
 - The `migrate-prod` CI job still pushes pending migrations to production on every merge to `main` (see `.github/workflows/db-migrations.yml`); a manual prod push just gets there first, and re-running is a no-op

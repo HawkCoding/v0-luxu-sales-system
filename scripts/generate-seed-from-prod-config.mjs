@@ -342,6 +342,14 @@ out += idRemapBlock({
   rows: load("payment_methods"),
   referencingColumns: [{ table: "invoices", column: "payment_method_id" }],
 })
+// Prod may have renamed the auto-created 'Primary' row, so the name-based remap
+// above misses it and it would stay as a second default. Drop any local method
+// that is not one of prod's.
+{
+  const ids = load("payment_methods").map((r) => `'${r.id}'`).join(", ")
+  out += `update public.invoices set payment_method_id = null where payment_method_id is not null and payment_method_id not in (${ids});\n`
+  out += `delete from public.payment_methods where id not in (${ids});\n`
+}
 out += upsertBlock("payment_methods", load("payment_methods"), ["id"])
 // 20260727100000_signature_brands.sql auto-creates 'sa-rail' / 'luxus-travel'
 // / 'arnelia-house' rows (fresh ids) on every migration run. Leaf table
