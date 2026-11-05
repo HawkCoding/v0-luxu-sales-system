@@ -134,4 +134,31 @@ describe("ensureInvoicePdf per-person rows", () => {
     expect(data.totals.perChild).toBe(15_300)
     expect((data.totals.perAdult ?? 0) * 3 + (data.totals.perChild ?? 0) * 1).toBe(107_100)
   })
+
+  it("splits the gross Sub Total, so a discount does not lower the per-person rows", async () => {
+    const { ensureInvoicePdf } = await import("./ensure-invoice-pdf")
+    await ensureInvoicePdf(fakeSupabase() as never, {
+      invoice: {
+        id: "invoice-1",
+        booking_id: "booking-1",
+        quote_id: "quote-1",
+        invoice_number: "INV-1",
+        amount: 96_390,
+        currency: "ZAR",
+        due_date: null,
+        created_at: "2026-10-02T00:00:00Z",
+        status: "sent",
+      },
+      bookingNumber: "LTT-26-0001",
+      displayInvoiceNumber: "39023",
+      customerName: "Carmen De Jongh",
+      statusLabel: "Provisional",
+      totals: { ...TOTALS, discount: 10_710, discountVisible: true, totalInclVat: 96_390 },
+    })
+
+    const [data] = renderInvoicePdf.mock.calls[0] as unknown as [{ totals: InvoiceTotals }]
+    // Same R107 100 gross as above, not the R96 390 left after the discount.
+    expect(data.totals.perAdult).toBe(30_600)
+    expect(data.totals.perChild).toBe(15_300)
+  })
 })

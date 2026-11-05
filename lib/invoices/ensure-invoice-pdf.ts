@@ -3,7 +3,7 @@ import type { Database } from "@/lib/supabase/types"
 import { buildInvoiceView, collapseRepeatedInvoiceItems, invoiceJourneyHeading } from "@/lib/invoices/build-invoice-view"
 import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
 import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
-import { printedTotalInclVat, type InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
+import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
 import { resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
@@ -126,8 +126,9 @@ export async function ensureInvoicePdf(
           lines: view.pricedLines,
           adults: view.pax.adults,
           children: view.pax.children,
-          // The figure printed as "Total incl. VAT", so the per-person rows reconcile with it.
-          total: printedTotalInclVat(totals),
+          // The gross Sub Total, not the net total: the per-person rows head the block above Sub
+          // Total, so they read at full price, before the discount and agent commission come off.
+          total: totals.subtotalInclVat,
         }),
         paxGroupPricing,
         paxGroupNoun: paxGroupNoun(primarySupplierKind),

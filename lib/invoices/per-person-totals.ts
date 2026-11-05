@@ -12,7 +12,7 @@ export interface PerPersonInput {
   adults: number
   /** Paying children. Infants are never counted here, so a free infant never dilutes the split. */
   children: number
-  /** The figure the document prints as its total ("Total incl. VAT") — what the rows must add up to. */
+  /** The gross "Sub Total incl. VAT", before any discount or agent commission — what the rows must add up to. */
   total: number
 }
 
