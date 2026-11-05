@@ -19,7 +19,7 @@ import {
   decideGatedTransition,
   loadTransitionContext,
 } from "@/lib/pipeline/run-gated-transition"
-import type { GateFailure } from "@/lib/pipeline/validate-transition"
+import { isAtOrPastStage, type GateFailure } from "@/lib/pipeline/validate-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
@@ -189,7 +189,16 @@ export async function POST(req: Request) {
 
   const customerRecord = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
 
-  const movingStage = Boolean(parsed.data.moveStage && booking.stage !== parsed.data.moveStage)
+  // A send only ever moves the booking FORWARD. The dialogs hard-code their target (an invoice
+  // email says `deposit_requested`, a quote says `quote_sent`), so resending one after the booking
+  // has moved on would otherwise drag it backwards: a backward move has no gates, so it simply
+  // went through. A target the booking is already at or past is ignored; the email still goes.
+  const moveStage =
+    parsed.data.moveStage && !isAtOrPastStage(booking.stage as PipelineStage, parsed.data.moveStage)
+      ? parsed.data.moveStage
+      : undefined
+
+  const movingStage = Boolean(moveStage)
   const transitionBooking = {
     id: booking.id,
     stage: booking.stage as PipelineStage,
@@ -201,25 +210,25 @@ export async function POST(req: Request) {
     revision_reset_at: booking.revision_reset_at,
   }
 
-  if (movingStage && parsed.data.moveStage) {
+  if (movingStage && moveStage) {
     // The full evidence set, not just quotes: the gate that refuses `deposit_paid` without a
     // recorded payment reads `payments`, which this route never loaded, so it could never fire.
     const gateContext = await loadTransitionContext(supabase, {
       bookingId,
       customerId: booking.customer_id,
       fromStage: booking.stage as PipelineStage,
-      targetStage: parsed.data.moveStage,
+      targetStage: moveStage,
     })
 
     const preSendDecision = decideGatedTransition({
       booking: transitionBooking,
       customer: customerRecord ?? null,
-      targetStage: parsed.data.moveStage,
+      targetStage: moveStage,
       context: gateContext,
       manualConfirmations: parsed.data.manualConfirmations,
       override: parsed.data.override,
     })
-    const gateFailures = gatesFor(preSendDecision.failures, parsed.data.moveStage).filter((failure) =>
+    const gateFailures = gatesFor(preSendDecision.failures, moveStage).filter((failure) =>
       PRE_SEND_GATE_IDS.has(failure.gateId),
     )
 
@@ -271,6 +280,11 @@ export async function POST(req: Request) {
 
     if (quoteStatusError) return safeSupabaseError("correspondence:load-quote-status", quoteStatusError)
     if (!quoteRow) return jsonError("Quote not found", 404)
+    // A superseded or cancelled quote is history: its lines no longer match what the booking is, and
+    // sending it would also re-stamp it as `sent`. The current quote is the one to send.
+    if (quoteRow.status === "superseded" || quoteRow.status === "cancelled") {
+      return jsonError("This quote has been replaced or cancelled — send the current quote instead.", 409)
+    }
     if (quoteRow.status === "pricing_incomplete") {
       return jsonError(
         "This quote still has unpriced lines — price them before sending, or the total will be short.",
@@ -493,10 +507,31 @@ export async function POST(req: Request) {
     )
   }
 
+  // Set when the quote the client has just been sent is already past "sent" (the booking accepted
+  // it), so the follow-up nudge below stays off.
+  let quoteAlreadyAccepted = false
+
   if (parsed.data.quoteId) {
+    const { data: sentQuote, error: sentQuoteError } = await supabase
+      .from("quotes")
+      .select("status")
+      .eq("id", parsed.data.quoteId)
+      .maybeSingle()
+
+    if (sentQuoteError) return safeSupabaseError("correspondence:load-sent-quote", sentQuoteError)
+
+    // Re-sending an accepted quote must not knock it back to "sent": every accepted-quote reader
+    // (billing, the payment sync, the voucher scope) would then stop seeing it. Only the send
+    // timestamp moves.
+    quoteAlreadyAccepted = sentQuote?.status === "accepted"
+    const nextStatus = quoteAlreadyAccepted ? "accepted" : "sent"
+
     const { error: quoteUpdateError } = await supabase
       .from("quotes")
-      .update({ status: "sent", last_sent_at: parsed.data.sentAt ?? now })
+      .update({
+        ...(quoteAlreadyAccepted ? {} : { status: "sent" }),
+        last_sent_at: parsed.data.sentAt ?? now,
+      })
       .eq("id", parsed.data.quoteId)
       .eq("booking_id", bookingId)
 
@@ -508,7 +543,7 @@ export async function POST(req: Request) {
       entityType: "Quote",
       entityId: parsed.data.quoteId,
       action: "quote_sent",
-      after: { status: "sent", sent_at: parsed.data.sentAt ?? now } as Json,
+      after: { status: nextStatus, sent_at: parsed.data.sentAt ?? now } as Json,
     })
   }
 
@@ -582,8 +617,8 @@ export async function POST(req: Request) {
     })
   }
 
-  if (parsed.data.moveStage && booking.stage !== parsed.data.moveStage) {
-    const targetStage = parsed.data.moveStage
+  if (moveStage) {
+    const targetStage = moveStage
     const fromStage = booking.stage as PipelineStage
 
     // Re-loaded now that the correspondence row exists: the gates this send is what satisfies
@@ -657,7 +692,10 @@ export async function POST(req: Request) {
 
   // Draft a scheduled follow-up 48h out — quote emails only, composed from the
   // editable follow_up template so the draft is a real, sendable email.
-  if (parsed.data.kind === "quote") {
+  // Not once the client has accepted: a "have you had a chance to look at the quote" nudge to
+  // someone who already said yes is worse than none.
+  const bookingPastQuoteStage = isAtOrPastStage(booking.stage as PipelineStage, "accepted")
+  if (parsed.data.kind === "quote" && !quoteAlreadyAccepted && !bookingPastQuoteStage) {
     const customerName = formatCustomerSalutation(customerRecord) || "Valued Guest"
     const shared = await resolveSharedEmailTokens(supabase, booking.id)
     const followUp = await composeEmail(supabase, "follow_up", {
