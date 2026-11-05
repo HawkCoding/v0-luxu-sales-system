@@ -21,6 +21,7 @@ import {
 } from "@/lib/pipeline/run-gated-transition"
 import { isAtOrPastStage, type GateFailure } from "@/lib/pipeline/validate-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
+import { recordIssuedDocument } from "@/lib/documents/document-versions"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -506,6 +507,18 @@ export async function POST(req: Request) {
       { status: 502 },
     )
   }
+
+  // Keep the exact PDF this email carried and link the email to it, so the copy the client received
+  // can be found after the live file is regenerated. Best-effort: the email is already out.
+  await recordIssuedDocument(supabase, {
+    bookingId,
+    correspondenceId: cor.id,
+    kind: parsed.data.kind,
+    attachments: baseAttachments,
+    quoteId: parsed.data.quoteId,
+    voucherId: parsed.data.voucherId,
+    issuedBy: auth.value.user.id,
+  })
 
   // Set when the quote the client has just been sent is already past "sent" (the booking accepted
   // it), so the follow-up nudge below stays off.
