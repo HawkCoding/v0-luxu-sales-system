@@ -110,7 +110,7 @@ function GroupCard({ group, bookingId, onReview, onDecided }: GroupCardProps) {
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm font-medium text-foreground">{group.label}</p>
               <Badge variant="secondary" className="text-[10px]">
-                Latest sent: copy {group.latest.versionNo}
+                Latest: copy {group.latest.versionNo}
               </Badge>
               {group.latest.contentChanged ? (
                 <Badge variant="outline" className="text-[10px] border-amber-500/60 text-amber-700 dark:text-amber-400">
@@ -193,11 +193,11 @@ export function IssuedDocumentsSection({ bookingId, onReview }: IssuedDocumentsS
     <section className="space-y-3" aria-labelledby="issued-documents-heading">
       <div>
         <h3 id="issued-documents-heading" className="text-sm font-semibold text-foreground">
-          Sent to client
+          Issued documents
         </h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          The exact PDFs that were emailed. Open one to see what the client received, even if the booking has changed
-          since.
+          The exact PDFs that were emailed to the client, plus any saved without sending. Open one to see what was
+          issued, even if the booking has changed since.
         </p>
       </div>
       {groups.map((group) => (

@@ -64,8 +64,8 @@ describe("IssuedDocumentsSection", () => {
 
     render(<IssuedDocumentsSection bookingId="b1" />)
 
-    expect(screen.getByText("Sent to client")).toBeTruthy()
-    expect(screen.getAllByText(/Latest sent: copy/)).toHaveLength(2)
+    expect(screen.getByText("Issued documents")).toBeTruthy()
+    expect(screen.getAllByText(/Latest: copy/)).toHaveLength(2)
     expect(screen.getByRole("button", { name: "Download Quote copy 2" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Download Quote copy 1" })).toBeNull()
 
