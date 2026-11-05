@@ -176,6 +176,37 @@ describe("POST /api/invoices/deposit", () => {
     expect(body.attachment.filename).toBe("Invoice-244453.pdf")
   })
 
+  it("returns the PDF error, not a generic failure, when the PDF step fails", async () => {
+    const { supabase } = seedSupabase([ACCEPTED_QUOTE])
+    mockAuthOk(supabase)
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    pdfMocks.ensureInvoicePdf.mockRejectedValueOnce(new Error("render failed"))
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))
+    const body = (await res.json()) as { error: string }
+
+    expect(res.status).toBe(500)
+    expect(body.error).toBe("Deposit invoice PDF could not be generated")
+    expect(body).not.toHaveProperty("attachment")
+    expect(consoleError).toHaveBeenCalledWith("deposit-invoice:pdf", expect.any(Error))
+    consoleError.mockRestore()
+  })
+
+  it("logs step timings as numbers only, with no customer data", async () => {
+    const { supabase } = seedSupabase([ACCEPTED_QUOTE])
+    mockAuthOk(supabase)
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {})
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))
+
+    expect(res.status).toBe(200)
+    const timingCall = consoleInfo.mock.calls.find(([label]) => label === "deposit-invoice:timing")
+    const timing = JSON.parse(String(timingCall?.[1])) as Record<string, unknown>
+    expect(Object.keys(timing).sort()).toEqual(["composeMs", "emailDataMs", "lookupsMs", "pdfMs", "totalMs"])
+    for (const value of Object.values(timing)) expect(typeof value).toBe("number")
+    consoleInfo.mockRestore()
+  })
+
   it("returns 400 when no invoice number has been entered on the job", async () => {
     const { supabase, store } = createSupabaseMock({
       bookings: [{ id: BOOKING_ID, booking_number: "BT-2026-0001", customer_id: "customer-1" }],
