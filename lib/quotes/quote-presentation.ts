@@ -177,19 +177,47 @@ const LUGGAGE_STORAGE_NOTE = "Guests can store their luggage at reception."
  * unambiguous when a booking has more than one flight leg or cabin, and never understates.
  * Suppressed (null) when no flight has been priced yet, so a R0 placeholder is never shown as a cap.
  */
-export function deriveFlightCapPerPerson(
-  lineItems: readonly Pick<QuoteLineItem, "unitPrice" | "pricingSnapshot">[],
-): number | null {
-  const adultFlightFares = lineItems
-    .filter(
-      (item) =>
-        item.pricingSnapshot?.supplierKind === "airline" &&
-        item.pricingSnapshot?.passengerKind === "adult" &&
-        item.unitPrice > 0,
-    )
-    .map((item) => item.unitPrice)
+export type FlightCapResolver = (block: Pick<VoucherServiceBlock, "legId" | "transportRequestId">) => number | null
 
-  return adultFlightFares.length > 0 ? Math.max(...adultFlightFares) : null
+/**
+ * Each flight's own per-person fare cap. A flight block is one transport request, so its priced
+ * adult airline lines are the ones whose snapshot names that request; a request no line names (a
+ * quote priced before trips were stamped) falls back to its leg's lines. A flight with no priced
+ * adult line gets null — no cap line rather than another flight's figure.
+ */
+export function buildFlightCapResolver(
+  lineItems: readonly Pick<QuoteLineItem, "unitPrice" | "pricingSnapshot">[],
+): FlightCapResolver {
+  const adultFares = lineItems.flatMap((item) =>
+    item.pricingSnapshot?.supplierKind === "airline" &&
+    item.pricingSnapshot.passengerKind === "adult" &&
+    item.unitPrice > 0
+      ? [{ unitPrice: item.unitPrice, legId: item.pricingSnapshot.legId, requestId: item.pricingSnapshot.transportRequestId }]
+      : [],
+  )
+  const highest = (fares: Array<{ unitPrice: number }>): number | null =>
+    fares.length > 0 ? Math.max(...fares.map((fare) => fare.unitPrice)) : null
+
+  return (block) =>
+    (block.transportRequestId ? highest(adultFares.filter((fare) => fare.requestId === block.transportRequestId)) : null) ??
+    (block.legId ? highest(adultFares.filter((fare) => fare.legId === block.legId)) : null)
+}
+
+/** A flight block's formatted cap line ("Flights are capped at …"), or null when it has none. */
+export type FlightCapLineResolver = (
+  block: Pick<VoucherServiceBlock, "legId" | "transportRequestId">,
+) => string | null
+
+/** Pairs a {@link FlightCapResolver} with the document's money formatter. */
+export function flightCapLines(
+  resolveCap: FlightCapResolver | null | undefined,
+  amountFormatter: (amount: number) => string,
+): FlightCapLineResolver | null {
+  if (!resolveCap) return null
+  return (block) => {
+    const cap = resolveCap(block)
+    return cap != null ? formatFlightCapLine(amountFormatter, cap) : null
+  }
 }
 
 /** "Flights are capped at R2 000pp — incl. baggage & fees" */
@@ -739,20 +767,19 @@ function placeEndLines<T extends { dateISO: string | null }>(
  * and a separate check-out line on a later date — so lines are re-sorted by date afterwards, then
  * any exact duplicate (same date, same text, same bullets) is collapsed to one.
  *
- * `flightCapBullet` (already formatted, e.g. "Flights are capped at R2 000pp — incl. baggage &
- * fees" via {@link formatFlightCapLine}) is attached under the *first* flight block only, one
- * combined line for the whole quote rather than repeated per flight.
+ * `flightCapFor` returns a flight's already-formatted cap line (e.g. "Flights are capped at
+ * R2 000pp — incl. baggage & fees" via {@link formatFlightCapLine}); every flight block carries its
+ * own, since each flight is priced on its own.
  *
  * `scopeTag` appends "(Suite 2 only)" to a service only some pax groups take; absent, no line changes.
  */
 export function buildQuoteItineraryLines(
   blocks: VoucherServiceBlock[],
-  flightCapBullet?: string | null,
+  flightCapFor?: FlightCapLineResolver | null,
   scopeTag?: ItineraryScopeTag,
 ): QuoteItineraryLine[] {
   const mainLines: QuoteItineraryLine[] = []
   const endLines: Array<PendingEndLine<QuoteItineraryLine>> = []
-  let flightCapAttached = false
 
   blocks.forEach((block) => {
     const d = block.serviceData
@@ -774,10 +801,8 @@ export function buildQuoteItineraryLines(
     // Special requests / allergies (booking_services.notes) are for the operator, not the
     // client -- they belong on the confirmation/voucher (which reads serviceData.notes
     // separately) and never on a document the client themselves reads.
-    if (flightCapBullet && !flightCapAttached && block.serviceType === "airline") {
-      bullets.push({ kind: "item", text: flightCapBullet })
-      flightCapAttached = true
-    }
+    const flightCapBullet = block.serviceType === "airline" ? flightCapFor?.(block) : null
+    if (flightCapBullet) bullets.push({ kind: "item", text: flightCapBullet })
 
     mainLines.push({
       dateISO: d.departureDate ?? null,
@@ -859,13 +884,12 @@ export interface QuoteSummaryDay {
  */
 export function buildQuoteSummaryDays(
   blocks: VoucherServiceBlock[],
-  flightCapBullet?: string | null,
+  flightCapFor?: FlightCapLineResolver | null,
   scopeTag?: ItineraryScopeTag,
 ): QuoteSummaryDay[] {
   type SummaryLine = { dateISO: string | null; items: QuoteSummaryItem[] }
   const mainLines: SummaryLine[] = []
   const endLines: Array<PendingEndLine<SummaryLine>> = []
-  let flightCapAttached = false
 
   blocks.forEach((block) => {
     const d = block.serviceData
@@ -881,10 +905,8 @@ export function buildQuoteSummaryDays(
       const times = trainScheduleTimes(d.startTime, d.checkInOffsetMinutes)
       if (times) item.details.push(`Check in at ${times.checkIn} - Train departs at ${times.departure}`)
     }
-    if (flightCapBullet && !flightCapAttached && block.serviceType === "airline") {
-      item.details.push(flightCapBullet)
-      flightCapAttached = true
-    }
+    const flightCapBullet = block.serviceType === "airline" ? flightCapFor?.(block) : null
+    if (flightCapBullet) item.details.push(flightCapBullet)
     mainLines.push({ dateISO: d.departureDate ?? null, items: [item] })
 
     const endLine = describeEndLine(block)

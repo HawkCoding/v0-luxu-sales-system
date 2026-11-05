@@ -287,7 +287,7 @@ describe.skipIf(!OUT)("render design-review samples", { timeout: 60_000 }, () =>
       total: familyTotal,
       subtotal: familyTotal,
       perPersonTotals: derivePerPersonTotals({ lines: familyLines, adults: 4, children: 2, total: familyTotal }),
-      flightCapPerPerson: 4100,
+      flightCapFor: () => 4100,
       itineraryBlocks: familyBlocks,
       title: "QUOTATION",
       footerText: DESIGN_SETTINGS.quoteFooterText,

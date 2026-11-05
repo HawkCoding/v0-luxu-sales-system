@@ -36,7 +36,7 @@ import { emptyStayTokens, loadStayTokens } from "@/lib/templates/stay-tokens"
 import { buildPaxGroupPricingRows, buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { formatMoney, normaliseCurrency } from "@/lib/money"
 import {
-  deriveFlightCapPerPerson,
+  buildFlightCapResolver,
   deriveJourneyFromBlocks,
   deriveTrainDepartureFromBlocks,
   formatPaxLabel,
@@ -450,7 +450,7 @@ export async function resolveSharedEmailTokens(
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,
-        flightCapPerPerson: deriveFlightCapPerPerson(
+        flightCapFor: buildFlightCapResolver(
           (lineItems ?? []).map((li) => ({
             unitPrice: Number(li.unit_price),
             pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,

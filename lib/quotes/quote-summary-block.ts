@@ -22,13 +22,14 @@ import {
   DISCOUNT_LABEL,
   formatAgentCommission,
   formatDiscount,
-  formatFlightCapLine,
+  flightCapLines,
   formatJourneyRange,
   formatPaxLabel,
   formatTotalLabel,
   TRAVEL_DATES_LABEL,
   VAT_INCLUSIVE_SUFFIX,
   WARNING_TEXT_COLOR,
+  type FlightCapResolver,
   type ItineraryScopeTag,
 } from "@/lib/quotes/quote-presentation"
 import { formatPaxGroupLine, type PaxGroupPricing } from "@/lib/quotes/pax-group-pricing"
@@ -64,8 +65,8 @@ export interface QuoteSummaryInput {
   packageExcludesHeading?: string
   /** Standing exclusion appended after the suppliers' own; empty omits it. */
   packageExcludesDefault?: string
-  /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
-  flightCapPerPerson?: number | null
+  /** Each flight's own adult fare cap (buildFlightCapResolver); null/absent omits the capped-fare bullets. */
+  flightCapFor?: FlightCapResolver | null
   /** One line per pax group on the gross subtotal (resolvePaxGroupPricing), as the quote PDF prints
    *  them. When it has lines they replace the "N Adults x R… per person" line. */
   paxGroupPricing?: PaxGroupPricing | null
@@ -260,9 +261,11 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
 
   let itinerary = ""
   const moneyNoDecimals = (amount: number) => formatMoney(amount, input.currency, { decimals: false })
-  const flightCapBullet =
-    input.flightCapPerPerson != null ? formatFlightCapLine(moneyNoDecimals, input.flightCapPerPerson) : null
-  const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet, input.itineraryScopeTag)
+  const itineraryLines = buildQuoteItineraryLines(
+    sortedBlocks,
+    flightCapLines(input.flightCapFor, moneyNoDecimals),
+    input.itineraryScopeTag,
+  )
   if (itineraryLines.length > 0) {
     const heading = input.packageIncludesHeading || DEFAULT_INCLUDES_HEADING
     const items = itineraryLines

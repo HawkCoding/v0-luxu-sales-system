@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
-import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import { buildFlightCapResolver, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { payingPaxSupplierId, resolvePayingPax } from "@/lib/invoices/booking-pax"
 import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
 import {
@@ -276,7 +276,7 @@ export async function ensureQuotePdf(
       // the footer's {{currency}} merge field.
       currency: quote.currency,
       itineraryBlocks,
-      flightCapPerPerson: deriveFlightCapPerPerson(
+      flightCapFor: buildFlightCapResolver(
         (lineItems ?? []).map((li) => ({
           unitPrice: Number(li.unit_price),
           pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
