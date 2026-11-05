@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  countChangedDocuments,
   formatFileSize,
   groupIssuedDocuments,
   versionForCorrespondence,
@@ -13,6 +14,7 @@ function version(overrides: Partial<IssuedDocumentVersion> & Pick<IssuedDocument
     issuedAt: "2026-11-01T10:00:00.000Z",
     issueKind: "sent",
     quoteNumber: null,
+    contentChanged: null,
     sends: [],
     ...overrides,
   }
@@ -43,6 +45,19 @@ describe("groupIssuedDocuments", () => {
   it("leaves out a document type that was never issued", () => {
     const groups = groupIssuedDocuments([version({ id: "i1", docType: "invoice", versionNo: 1 })])
     expect(groups.map((group) => group.label)).toEqual(["Invoice"])
+  })
+})
+
+describe("countChangedDocuments", () => {
+  it("counts documents whose latest copy has changed, ignoring unknown and earlier copies", () => {
+    expect(
+      countChangedDocuments([
+        version({ id: "q1", docType: "quote", versionNo: 1, contentChanged: true }),
+        version({ id: "q2", docType: "quote", versionNo: 2, contentChanged: false }),
+        version({ id: "i1", docType: "invoice", versionNo: 1, contentChanged: true }),
+        version({ id: "v1", docType: "voucher", versionNo: 1, contentChanged: null }),
+      ]),
+    ).toBe(1)
   })
 })
 

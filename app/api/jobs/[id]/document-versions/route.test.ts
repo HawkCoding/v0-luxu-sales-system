@@ -3,6 +3,10 @@ import { NextResponse } from "next/server"
 
 const authMocks = vi.hoisted(() => ({ requireUser: vi.fn() }))
 vi.mock("@/lib/api/auth", () => ({ requireUser: authMocks.requireUser }))
+const fingerprintMocks = vi.hoisted(() => ({ computeContentFingerprint: vi.fn() }))
+vi.mock("@/lib/documents/content-fingerprint", () => ({
+  computeContentFingerprint: fingerprintMocks.computeContentFingerprint,
+}))
 
 import { GET } from "./route"
 
@@ -69,6 +73,67 @@ const quoteRow = {
 describe("GET /api/jobs/[id]/document-versions", () => {
   beforeEach(() => {
     authMocks.requireUser.mockReset()
+    fingerprintMocks.computeContentFingerprint.mockReset()
+    fingerprintMocks.computeContentFingerprint.mockResolvedValue("fp-1")
+  })
+
+  it("flags only the latest copy of a document when the booking no longer matches its fingerprint", async () => {
+    mockAuth({
+      versionRows: [
+        { ...quoteRow, id: "ver-q2", version_no: 2, quote_id: "quote-1", invoice_id: null, content_fingerprint: "fp-old" },
+        { ...quoteRow, id: "ver-q1", version_no: 1, quote_id: "quote-1", invoice_id: null, content_fingerprint: "fp-older" },
+        {
+          ...quoteRow,
+          id: "ver-i1",
+          doc_type: "invoice",
+          version_no: 1,
+          quote: null,
+          quote_id: null,
+          invoice_id: "inv-1",
+          content_fingerprint: "fp-1",
+        },
+      ],
+    })
+
+    const body = (await (await call()).json()) as { versions: Array<{ id: string; contentChanged: boolean | null }> }
+    const changed = Object.fromEntries(body.versions.map((v) => [v.id, v.contentChanged]))
+
+    // Changed: quote 2 was sent against fp-old and the booking now reads fp-1.
+    expect(changed["ver-q2"]).toBe(true)
+    // An earlier copy is superseded by definition, so it is not compared.
+    expect(changed["ver-q1"]).toBeNull()
+    // Unchanged: the invoice fingerprint still matches.
+    expect(changed["ver-i1"]).toBe(false)
+    expect(fingerprintMocks.computeContentFingerprint).toHaveBeenCalledTimes(2)
+    expect(fingerprintMocks.computeContentFingerprint).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ docType: "invoice", invoiceId: "inv-1" }),
+    )
+  })
+
+  it("reports unknown, never changed, for a copy with no fingerprint or when the comparison fails", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    fingerprintMocks.computeContentFingerprint.mockRejectedValue(new Error("travellers: boom"))
+    mockAuth({
+      versionRows: [
+        { ...quoteRow, id: "ver-q1", quote_id: "quote-1", invoice_id: null, content_fingerprint: "fp-old" },
+        {
+          ...quoteRow,
+          id: "ver-v1",
+          doc_type: "voucher",
+          quote: null,
+          quote_id: null,
+          invoice_id: null,
+          content_fingerprint: null,
+        },
+      ],
+    })
+
+    const body = (await (await call()).json()) as { versions: Array<{ id: string; contentChanged: boolean | null }> }
+    expect(body.versions.map((v) => v.contentChanged)).toEqual([null, null])
+    // The copy with no fingerprint is not even compared.
+    expect(fingerprintMocks.computeContentFingerprint).toHaveBeenCalledTimes(1)
+    error.mockRestore()
   })
 
   it("returns 401 when unauthenticated", async () => {

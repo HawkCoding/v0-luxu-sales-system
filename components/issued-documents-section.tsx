@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { ChevronDown, ChevronRight, Download, FileText } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileText } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -76,12 +76,23 @@ function GroupCard({ group }: { group: IssuedDocumentGroup }) {
             <FileText className="w-3.5 h-3.5 text-muted-foreground" />
           </div>
           <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm font-medium text-foreground">{group.label}</p>
               <Badge variant="secondary" className="text-[10px]">
                 Latest sent: copy {group.latest.versionNo}
               </Badge>
+              {group.latest.contentChanged ? (
+                <Badge variant="outline" className="text-[10px] border-amber-500/60 text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="w-3 h-3" aria-hidden />
+                  Changed since sent
+                </Badge>
+              ) : null}
             </div>
+            {group.latest.contentChanged ? (
+              <p className="text-xs text-muted-foreground">
+                The booking has changed since this was emailed, so the client may be holding an out-of-date copy.
+              </p>
+            ) : null}
             <VersionRow version={group.latest} label={group.label} />
           </div>
         </div>
