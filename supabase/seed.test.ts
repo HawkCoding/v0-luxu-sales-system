@@ -39,13 +39,20 @@ describe("local Supabase seed", () => {
     expect(seedSql).not.toContain("::regclass")
     expect(seedSql).not.toContain("job_number_counters")
     expect(seedSql).toContain("'The Blue Train'")
-    expect(seedSql).toContain("'LTT-2025-0001'")
     expect(seedSql).toContain("insert into public.booking_number_sequences")
     expect(seedSql).toContain("max(parsed.sequence_number)")
     // Both the current LTT-YY-NNNN and legacy LTT-YYYY-NNNN numbers feed the
     // high-water mark; a 2-digit year maps back to the full-year sequence key.
     expect(seedSql).toContain("booking_number ~ '^LTT-([0-9]{2}|[0-9]{4})-[0-9]{4}$'")
     expect(seedSql).toContain("when length(raw.year_text) = 2 then 2000 + raw.year_text::integer")
+  })
+
+  it("seeds no showcase bookings or customers (those come from scripts/seed-bookings-from-prod.mjs)", () => {
+    expect(seedSql).not.toContain("insert into public.bookings")
+    expect(seedSql).not.toContain("insert into public.customers")
+    expect(seedSql).not.toContain("insert into public.quotes")
+    expect(seedSql).not.toContain("insert into public.invoices")
+    expect(seedSql).not.toMatch(/'LTT-(20)?\d{2}-\d{4}'/)
   })
 
   it("carries no product prefix in booking or quote numbers", () => {
