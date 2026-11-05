@@ -1,0 +1,69 @@
+import type { IssuedDocumentType } from "@/lib/documents/document-versions"
+
+/**
+ * What the booking page knows about the PDFs that have gone out: one entry per distinct copy, with
+ * the emails that carried it. Built from `document_versions` (see lib/documents/document-versions.ts).
+ */
+
+export interface IssuedDocumentSend {
+  correspondenceId: string
+  subject: string
+  sentAt: string | null
+  recipients: string[]
+}
+
+export interface IssuedDocumentVersion {
+  id: string
+  docType: IssuedDocumentType
+  versionNo: number
+  fileName: string
+  sizeBytes: number
+  issuedAt: string
+  issueKind: "sent" | "saved"
+  /** The quote the copy was issued from; null for invoices and vouchers, or if the quote is gone. */
+  quoteNumber: string | null
+  /** Newest first. Empty for a copy that was saved without being emailed. */
+  sends: IssuedDocumentSend[]
+}
+
+export interface IssuedDocumentGroup {
+  docType: IssuedDocumentType
+  label: string
+  latest: IssuedDocumentVersion
+  earlier: IssuedDocumentVersion[]
+}
+
+const GROUP_ORDER: IssuedDocumentType[] = ["quote", "invoice", "voucher"]
+
+const GROUP_LABELS: Record<IssuedDocumentType, string> = {
+  quote: "Quote",
+  invoice: "Invoice",
+  voucher: "Voucher",
+}
+
+/** One group per document type that has been issued, in quote → invoice → voucher order, latest first. */
+export function groupIssuedDocuments(versions: IssuedDocumentVersion[]): IssuedDocumentGroup[] {
+  return GROUP_ORDER.flatMap((docType) => {
+    const ofType = versions
+      .filter((version) => version.docType === docType)
+      .sort((a, b) => b.versionNo - a.versionNo)
+
+    const [latest, ...earlier] = ofType
+    if (!latest) return []
+    return [{ docType, label: GROUP_LABELS[docType], latest, earlier }]
+  })
+}
+
+/** The copy an email carried, or null when it carried none we kept. */
+export function versionForCorrespondence(
+  versions: IssuedDocumentVersion[],
+  correspondenceId: string,
+): IssuedDocumentVersion | null {
+  return versions.find((version) => version.sends.some((send) => send.correspondenceId === correspondenceId)) ?? null
+}
+
+/** "1.2 MB" / "86 KB" for the history rows. */
+export function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
+}

@@ -2,6 +2,7 @@
 
 import useSWR from "swr"
 import type { ClubMembership } from "@/lib/club-memberships"
+import type { IssuedDocumentVersion } from "@/lib/documents/issued-documents"
 import type {
   AuditLog,
   Booking,
@@ -263,6 +264,15 @@ export interface JobLegReferenceRow {
 export function useJobLegReferences(bookingId: string | null | undefined) {
   return useSWR<{ rows: JobLegReferenceRow[] }>(
     bookingId ? `/api/jobs/${bookingId}/leg-references` : null,
+    fetcher,
+    swrOptions,
+  )
+}
+
+/** The PDFs that have gone out on a booking, one entry per distinct copy kept. */
+export function useJobDocumentVersions(bookingId: string | null | undefined) {
+  return useSWR<{ versions: IssuedDocumentVersion[] }>(
+    bookingId ? `/api/jobs/${bookingId}/document-versions` : null,
     fetcher,
     swrOptions,
   )

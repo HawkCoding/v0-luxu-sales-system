@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { DocRecord, DocumentKind, Enquiry, Job, Customer } from "@/lib/types"
 import { AlertCircle, ClipboardList, Download, FileText, Send, Trash2, Upload } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
+import { IssuedDocumentsSection } from "@/components/issued-documents-section"
 import { useJobLegReferences } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -278,6 +279,8 @@ export function JobDocumentsTab({
 
   return (
     <div className="space-y-6">
+      {job ? <IssuedDocumentsSection bookingId={job.id} /> : null}
+
       <div className="space-y-3">
         {job && (
           <Card>
