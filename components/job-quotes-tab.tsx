@@ -127,6 +127,16 @@ export function JobQuotesTab({
   // Quotes arrive oldest-first from the API; the send button targets the newest sendable one.
   const latestSendableQuote =
     [...quotes].reverse().find((q) => EDITABLE_QUOTE_STATUSES.includes(q.status)) ?? null
+  // With no draft left to send, the quote the client holds can still go out again after it has been
+  // rebuilt: previously the button was disabled ("Create a quote first") and a sent quote that was
+  // edited had no way to be re-sent from here. The server only moves the stage forward, so sending
+  // an accepted quote again changes nothing about the booking.
+  const currentIssuedQuote =
+    latestSendableQuote === null
+      ? ([...quotes].reverse().find((q) => q.status === "sent" || q.status === "accepted") ?? null)
+      : null
+  const quoteToSend = latestSendableQuote ?? currentIssuedQuote
+  const sendingAnUpdate = currentIssuedQuote !== null
 
   async function cancelQuote(quoteId: string) {
     setCancellingQuoteId(quoteId)
@@ -191,18 +201,18 @@ export function JobQuotesTab({
           />
           <Button
             size="sm"
-            disabled={!latestSendableQuote}
-            title={latestSendableQuote ? undefined : "Create a quote first"}
+            disabled={!quoteToSend}
+            title={quoteToSend ? undefined : "Create a quote first"}
             onClick={() => setPreviewSendOpen(true)}
           >
             <Mail className="w-3.5 h-3.5 mr-1.5" />
-            Preview & Send
+            {sendingAnUpdate ? "Preview & Send Updated Quote" : "Preview & Send"}
           </Button>
         </div>
       )}
-      {latestSendableQuote && (
+      {quoteToSend && (
         <QuotePreviewSendDialog
-          quote={latestSendableQuote}
+          quote={quoteToSend}
           bookingNumber={bookingNumber}
           customerName={customerName}
           emailImportNeedsReview={emailImportNeedsReview}
