@@ -5,7 +5,7 @@ import type { IssuedDocumentVersion } from "@/lib/documents/issued-documents"
 
 const dataMocks = vi.hoisted(() => ({ useJobDocumentVersions: vi.fn() }))
 vi.mock("@/lib/use-data", () => ({ useJobDocumentVersions: dataMocks.useJobDocumentVersions }))
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }))
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 import { IssuedDocumentsSection } from "./issued-documents-section"
 
@@ -89,6 +89,67 @@ describe("IssuedDocumentsSection", () => {
 
     expect(screen.getAllByText("Changed since sent")).toHaveLength(1)
     expect(screen.getByText(/may be holding an out-of-date copy/)).toBeTruthy()
+  })
+
+  describe("when the booking has changed since a document was sent", () => {
+    function mockChanged(docType: "quote" | "invoice" | "voucher") {
+      const mutate = vi.fn(async () => undefined)
+      dataMocks.useJobDocumentVersions.mockReturnValue({
+        data: { versions: [version({ id: "latest-1", docType, versionNo: 2, contentChanged: true })] },
+        error: undefined,
+        mutate,
+      })
+      return mutate
+    }
+
+    it("offers to review and send an updated copy, handing the document type to the page", () => {
+      mockChanged("invoice")
+      const onReview = vi.fn()
+      render(<IssuedDocumentsSection bookingId="b1" onReview={onReview} />)
+
+      fireEvent.click(screen.getByRole("button", { name: /Review & send updated invoice/ }))
+      expect(onReview).toHaveBeenCalledWith("invoice")
+    })
+
+    it("offers nothing to review for a document that has not changed", () => {
+      dataMocks.useJobDocumentVersions.mockReturnValue({
+        data: { versions: [version({ id: "v1", docType: "quote", versionNo: 1, contentChanged: false })] },
+        error: undefined,
+      })
+      render(<IssuedDocumentsSection bookingId="b1" onReview={vi.fn()} />)
+
+      expect(screen.queryByRole("button", { name: /Review & send updated/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Leave as is" })).not.toBeInTheDocument()
+    })
+
+    it("records 'Leave as is' against the latest copy and refreshes the list", async () => {
+      const mutate = mockChanged("quote")
+      const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }))
+      vi.stubGlobal("fetch", fetchMock)
+
+      render(<IssuedDocumentsSection bookingId="b1" onReview={vi.fn()} />)
+      fireEvent.click(screen.getByRole("button", { name: "Leave as is" }))
+
+      await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { method: string; body: string }]
+      expect(url).toBe("/api/jobs/b1/document-versions/acknowledge")
+      expect(init.method).toBe("POST")
+      expect(JSON.parse(init.body)).toEqual({ versionId: "latest-1" })
+    })
+
+    it("does not refresh, and says why, when 'Leave as is' fails", async () => {
+      const mutate = mockChanged("voucher")
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ ok: false, json: async () => ({ error: "Document not found" }) })),
+      )
+
+      render(<IssuedDocumentsSection bookingId="b1" onReview={vi.fn()} />)
+      fireEvent.click(screen.getByRole("button", { name: "Leave as is" }))
+
+      await waitFor(() => expect(screen.getByRole("button", { name: "Leave as is" })).toBeEnabled())
+      expect(mutate).not.toHaveBeenCalled()
+    })
   })
 
   it("opens the stored copy through a signed link when downloading", async () => {

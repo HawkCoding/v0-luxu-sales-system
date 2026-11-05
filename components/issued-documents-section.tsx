@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, ChevronDown, ChevronRight, Download, FileText } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileText, Send } from "lucide-react"
+import type { IssuedDocumentType } from "@/lib/documents/document-versions"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -64,9 +65,39 @@ function VersionRow({ version, label }: { version: IssuedDocumentVersion; label:
   )
 }
 
-function GroupCard({ group }: { group: IssuedDocumentGroup }) {
+interface GroupCardProps {
+  group: IssuedDocumentGroup
+  bookingId: string
+  /** Opens the flow that previews and sends (or saves) the updated document. */
+  onReview?: (docType: IssuedDocumentType) => void
+  /** Refetches the copies after a decision, so the flag and the tab count update. */
+  onDecided: () => Promise<unknown> | void
+}
+
+function GroupCard({ group, bookingId, onReview, onDecided }: GroupCardProps) {
   const [showEarlier, setShowEarlier] = useState(false)
+  const [leaving, setLeaving] = useState(false)
   const earlierCount = group.earlier.length
+
+  async function leaveAsIs() {
+    setLeaving(true)
+    try {
+      const response = await fetch(`/api/jobs/${bookingId}/document-versions/acknowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId: group.latest.id }),
+      })
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null
+      if (!response.ok) throw new Error(payload?.error ?? "Could not record that")
+
+      toast.success(`Left as is. The ${group.label.toLowerCase()} the client holds stays the current one.`)
+      await onDecided()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not record that")
+    } finally {
+      setLeaving(false)
+    }
+  }
 
   return (
     <Card>
@@ -89,9 +120,23 @@ function GroupCard({ group }: { group: IssuedDocumentGroup }) {
               ) : null}
             </div>
             {group.latest.contentChanged ? (
-              <p className="text-xs text-muted-foreground">
-                The booking has changed since this was emailed, so the client may be holding an out-of-date copy.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  The booking has changed since this was emailed, so the client may be holding an out-of-date copy.
+                  Send them an update, save one without sending, or leave it as is.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {onReview ? (
+                    <Button size="sm" onClick={() => onReview(group.docType)}>
+                      <Send data-icon="inline-start" aria-hidden />
+                      Review &amp; send updated {group.label.toLowerCase()}
+                    </Button>
+                  ) : null}
+                  <Button size="sm" variant="outline" onClick={() => void leaveAsIs()} disabled={leaving}>
+                    {leaving ? "Saving..." : "Leave as is"}
+                  </Button>
+                </div>
+              </div>
             ) : null}
             <VersionRow version={group.latest} label={group.label} />
           </div>
@@ -129,6 +174,8 @@ function GroupCard({ group }: { group: IssuedDocumentGroup }) {
 
 interface IssuedDocumentsSectionProps {
   bookingId: string
+  /** Opens the flow that previews and sends (or saves) an updated document of this type. */
+  onReview?: (docType: IssuedDocumentType) => void
 }
 
 /**
@@ -136,8 +183,8 @@ interface IssuedDocumentsSectionProps {
  * with every earlier copy kept below. Renders nothing until a document has gone out, so a booking
  * that has sent nothing looks exactly as it did.
  */
-export function IssuedDocumentsSection({ bookingId }: IssuedDocumentsSectionProps) {
-  const { data, error } = useJobDocumentVersions(bookingId)
+export function IssuedDocumentsSection({ bookingId, onReview }: IssuedDocumentsSectionProps) {
+  const { data, error, mutate } = useJobDocumentVersions(bookingId)
   const groups = groupIssuedDocuments(data?.versions ?? [])
 
   if (error || groups.length === 0) return null
@@ -154,7 +201,13 @@ export function IssuedDocumentsSection({ bookingId }: IssuedDocumentsSectionProp
         </p>
       </div>
       {groups.map((group) => (
-        <GroupCard key={group.docType} group={group} />
+        <GroupCard
+          key={group.docType}
+          group={group}
+          bookingId={bookingId}
+          onReview={onReview}
+          onDecided={() => mutate()}
+        />
       ))}
     </section>
   )

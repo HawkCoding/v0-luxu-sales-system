@@ -314,6 +314,36 @@ describe("recordIssuedDocument", () => {
     error.mockRestore()
   })
 
+  it("can keep a copy without an email: saved, linked to no correspondence, and returns its id", async () => {
+    const { client, insertSpy, correspondenceUpdate } = makeClient()
+    const id = await recordIssuedDocument(client, {
+      bookingId: BOOKING_ID,
+      kind: "invoice",
+      attachments: [attachment("Invoice-244453.pdf")],
+      issuedBy: "user-1",
+      issueKind: "saved",
+    })
+    expect(id).toBe("ver-1")
+    expect(insertSpy).toHaveBeenCalledWith(expect.objectContaining({ issue_kind: "saved", issued_by: "user-1" }))
+    expect(correspondenceUpdate).not.toHaveBeenCalled()
+  })
+
+  it("returns null when nothing could be kept", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const { client } = makeClient({ uploadError: { message: "nope", statusCode: 500 } })
+    expect(
+      await recordIssuedDocument(client, {
+        bookingId: BOOKING_ID,
+        kind: "quote",
+        attachments: [attachment("Quote-26-0039.pdf")],
+      }),
+    ).toBeNull()
+    expect(
+      await recordIssuedDocument(client, { bookingId: BOOKING_ID, kind: "reservation_received", attachments: [] }),
+    ).toBeNull()
+    error.mockRestore()
+  })
+
   it("captures the invoice, linking the live invoice and the email", async () => {
     const { client, insertSpy, correspondenceUpdate } = makeClient({ invoiceId: "inv-9" })
     await recordIssuedDocument(client, {

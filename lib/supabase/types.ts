@@ -1687,6 +1687,48 @@ export type Database = {
         }
         Relationships: []
       }
+      document_version_acknowledgements: {
+        Row: {
+          acknowledged_at: string
+          acknowledged_by: string | null
+          booking_id: string
+          document_version_id: string
+          fingerprint: string
+          id: string
+        }
+        Insert: {
+          acknowledged_at?: string
+          acknowledged_by?: string | null
+          booking_id: string
+          document_version_id: string
+          fingerprint: string
+          id?: string
+        }
+        Update: {
+          acknowledged_at?: string
+          acknowledged_by?: string | null
+          booking_id?: string
+          document_version_id?: string
+          fingerprint?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_version_acknowledgements_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_version_acknowledgements_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       document_versions: {
         Row: {
           booking_id: string

@@ -1,7 +1,7 @@
 "use client"
 
 import { useJobDetail, useAssignableUsers, useJobDocumentVersions } from "@/lib/use-data"
-import { countChangedDocuments } from "@/lib/documents/issued-documents"
+import { countChangedDocuments, groupIssuedDocuments } from "@/lib/documents/issued-documents"
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -467,6 +467,26 @@ export default function JobDetailPage() {
       invoice.status !== "void" &&
       quoteRows.find((quote) => quote.id === invoice.quoteId)?.status === "superseded",
   )
+  // The invoice the client holds, when the booking has changed since it was emailed: it can be sent
+  // again as it is (same kind and deposit percentage), from the Documents tab or the strip below.
+  const invoiceChangedSinceSent =
+    groupIssuedDocuments(documentVersionsData?.versions ?? []).find((group) => group.docType === "invoice")?.latest
+      .contentChanged === true
+  const resendableInvoice =
+    invoiceChangedSinceSent && !invoiceNeedsAmendment
+      ? ((invoices.find(
+          (invoice: { kind: string; status: string }) =>
+            (invoice.kind === "deposit" || invoice.kind === "full") &&
+            (invoice.status === "sent" || invoice.status === "paid"),
+        ) as Invoice | undefined) ?? null)
+      : null
+
+  // "Review & send updated …" on the Documents tab. The voucher's dialog sits on that tab; the quote's
+  // is on the Quotes tab and the invoice's is opened here.
+  const reviewIssuedDocument = (docType: "quote" | "invoice" | "voucher") => {
+    if (docType === "quote") setActiveTab("quotes")
+    else if (docType === "invoice") setDepositInvoiceOpen(true)
+  }
 
   const canEditInvoiceNumber = can("edit:jobs")
   const currentInvoiceNumber = (job as { customerInvoiceNumber?: string | null } | undefined)?.customerInvoiceNumber ?? ""
@@ -1162,6 +1182,7 @@ export default function JobDetailPage() {
             enquiry={enquiry}
             customer={customer}
             onChange={mutate}
+            onReviewDocument={reviewIssuedDocument}
             loading={isLoading}
             error={error as Error | null}
           />
@@ -1226,7 +1247,7 @@ export default function JobDetailPage() {
         )}
 
       {can("send:correspondence") &&
-        (!hasSentDepositInvoice || invoiceNeedsAmendment) &&
+        (!hasSentDepositInvoice || invoiceNeedsAmendment || resendableInvoice !== null) &&
         depositInvoiceStageReached && (
         <div className="flex justify-end gap-2">
           <GenerateDepositInvoiceDialog
@@ -1239,6 +1260,7 @@ export default function JobDetailPage() {
             defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
             departureDate={enquiry?.departureDate ?? null}
             draftInvoice={draftDepositInvoice}
+            resendInvoice={resendableInvoice}
             amending={invoiceNeedsAmendment}
             onSent={async () => {
               await mutate()
@@ -1318,6 +1340,7 @@ export default function JobDetailPage() {
         defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
         departureDate={enquiry?.departureDate ?? null}
         draftInvoice={draftDepositInvoice}
+        resendInvoice={resendableInvoice}
         amending={invoiceNeedsAmendment}
         onSent={async () => {
           setDepositInvoiceOpen(false)

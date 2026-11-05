@@ -39,6 +39,25 @@ export interface IssuedDocumentGroup {
   earlier: IssuedDocumentVersion[]
 }
 
+/**
+ * Which document family an email of this `kind` carries, or null when it carries none. Lives here,
+ * not beside the server-side capture code, because the send dialogs (client components) need it too.
+ */
+export function issuedDocumentTypeForKind(kind: string | null | undefined): IssuedDocumentType | null {
+  switch (kind?.toLowerCase()) {
+    case "quote":
+      return "quote"
+    case "invoice":
+    case "payment_received":
+    case "payment_reminder":
+      return "invoice"
+    case "voucher":
+      return "voucher"
+    default:
+      return null
+  }
+}
+
 const GROUP_ORDER: IssuedDocumentType[] = ["quote", "invoice", "voucher"]
 
 const GROUP_LABELS: Record<IssuedDocumentType, string> = {
