@@ -9,7 +9,7 @@ The supplier booking step is captured by the `deposit_paid` stage plus the per-s
 
 Key domain rules:
 - Quotes are valid 14 days and versioned (e.g. `LTT-26-0001-Q1`) — the booking-number prefix is `LTT`, set by `JOB_NUMBER_PREFIX` in `lib/job-numbering.ts`. New bookings use a 2-digit year (`LTT-26-0039`); bookings created before the switch keep their legacy 4-digit-year numbers (`LTT-2026-0038`) — anything that parses a booking number must accept both
-- Default deposit is configurable in Settings (default 25%, overridable per job at invoice generation) — a booking cannot be confirmed without `deposit_paid = TRUE`
+- Default deposit is configurable in Settings (default 25%, overridable per job at invoice generation) — a booking cannot be confirmed without `deposit_paid = TRUE`. Clients rarely pay the exact deposit, so `deposit_paid` also turns TRUE once total payments reach R5,000 (`MIN_DEPOSIT_PAID_AMOUNT` in `lib/invoices/sync-booking-payment-state.ts`), even when the invoiced deposit is larger
 - Voucher is only available when `invoice_balance = 0`
 - Core tables: `customers`, `jobs`, `quotes`, `quote_items`, `invoices`, `payments`, `suppliers`
 

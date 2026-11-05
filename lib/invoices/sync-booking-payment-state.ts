@@ -3,6 +3,9 @@ import { writeAuditLog } from "@/lib/audit-write"
 import { getCrossedForwardStages } from "@/lib/pipeline/validate-transition"
 import type { Database } from "@/lib/supabase/types"
 
+/** Total received (ZAR) at or above which a booking counts as deposit paid, whatever the invoiced deposit. */
+export const MIN_DEPOSIT_PAID_AMOUNT = 5000
+
 export interface BookingPaymentState {
   totalPaid: number
   depositPaid: boolean
@@ -101,7 +104,12 @@ export async function syncBookingPaymentState(
     : fullInvoice
       ? Number(fullInvoice.amount)
       : null
-  const derivedDepositPaid = depositThreshold !== null && totalPaid >= depositThreshold
+  // Clients rarely pay the exact deposit, so any total received at or above the
+  // minimum counts as the deposit being paid (capped by the invoice amount when
+  // that is smaller, so a tiny deposit still clears).
+  const effectiveDepositThreshold =
+    depositThreshold === null ? null : Math.min(depositThreshold, MIN_DEPOSIT_PAID_AMOUNT)
+  const derivedDepositPaid = effectiveDepositThreshold !== null && totalPaid >= effectiveDepositThreshold
   // A manual "deposit received" confirmation is sticky: amounts can still
   // set deposit_paid true, but they can never clear a confirmed deposit.
   const isDepositPaid = derivedDepositPaid || currentBooking?.deposit_confirmed_manually === true
