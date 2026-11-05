@@ -138,3 +138,22 @@ describe("GenerateDepositInvoiceDialog — sending an updated invoice", () => {
     expect(screen.getByRole("button", { name: "Preview & Send Deposit Invoice" })).toBeInTheDocument()
   })
 })
+
+describe("GenerateDepositInvoiceDialog — after a quote revision", () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it("offers 'Update & Resend Invoice' rather than 'Amend'", () => {
+    renderDialog({ amending: true })
+    expect(screen.getByRole("button", { name: "Update & Resend Invoice" })).toBeInTheDocument()
+    expect(screen.queryByText(/amend/i)).not.toBeInTheDocument()
+  })
+
+  it("titles the dialog 'Update and resend invoice' with an 'Update & Preview' button", () => {
+    renderDialog({ amending: true, open: true, trigger: false })
+    expect(screen.getByText("Update and resend invoice")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Update & Preview" })).toBeInTheDocument()
+    expect(screen.queryByText(/amend/i)).not.toBeInTheDocument()
+  })
+})

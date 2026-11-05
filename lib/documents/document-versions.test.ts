@@ -8,6 +8,7 @@ vi.mock("@/lib/documents/content-fingerprint", () => ({
 import {
   captureIssuedDocument,
   documentVersionStoragePath,
+  hasIssuedDocumentToKeep,
   issuedDocumentTypeForKind,
   pickIssuedAttachment,
   recordIssuedDocument,
@@ -131,6 +132,28 @@ describe("pickIssuedAttachment", () => {
 
   it("ignores non-PDF attachments", () => {
     expect(pickIssuedAttachment("quote", [attachment("notes.txt", PDF_BASE64, "text/plain")])).toBeNull()
+  })
+})
+
+describe("hasIssuedDocumentToKeep", () => {
+  it("is true when the kind carries a document and its PDF is attached", () => {
+    expect(hasIssuedDocumentToKeep("quote", [attachment("Quote-26-0039.pdf")])).toBe(true)
+    expect(hasIssuedDocumentToKeep("invoice", [attachment("Invoice-244453.pdf")])).toBe(true)
+    expect(hasIssuedDocumentToKeep("voucher", [attachment("Voucher-244453.pdf")])).toBe(true)
+  })
+
+  it("is false for a kind that carries no issued document", () => {
+    expect(hasIssuedDocumentToKeep("reservation_received", [attachment("Form.pdf")])).toBe(false)
+    expect(hasIssuedDocumentToKeep(null, [attachment("Form.pdf")])).toBe(false)
+  })
+
+  it("is false when the document's PDF is not among the attachments", () => {
+    expect(hasIssuedDocumentToKeep("invoice", [])).toBe(false)
+    expect(hasIssuedDocumentToKeep("voucher", [attachment("Itinerary-244453.pdf")])).toBe(false)
+  })
+
+  it("is false for an empty file, which is never kept", () => {
+    expect(hasIssuedDocumentToKeep("quote", [attachment("Quote-26-0039.pdf", "")])).toBe(false)
   })
 })
 

@@ -306,7 +306,7 @@ export function GenerateDepositInvoiceDialog({
                     ? "Preview & Send Invoice"
                     : "Preview & Send Deposit Invoice"
                 : amending
-                  ? "Amend & Resend Invoice"
+                  ? "Update & Resend Invoice"
                   : "Generate Invoice"}
             </Button>
           </DialogTrigger>
@@ -329,7 +329,7 @@ export function GenerateDepositInvoiceDialog({
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle>{amending ? "Amend and resend invoice" : "Generate invoice"}</DialogTitle>
+                <DialogTitle>{amending ? "Update and resend invoice" : "Generate invoice"}</DialogTitle>
                 <DialogDescription>
                   {amending
                     ? `The quote for ${displayNumber} has been revised. Re-issue the same invoice at the new total — any payment already received stays on record and is shown on the PDF.`
@@ -413,7 +413,7 @@ export function GenerateDepositInvoiceDialog({
                   Cancel
                 </Button>
                 <Button onClick={generateInvoice} disabled={generating || discarding || !quote}>
-                  {generating ? "Generating..." : amending ? "Amend & Preview" : "Generate"}
+                  {generating ? "Generating..." : amending ? "Update & Preview" : "Generate"}
                 </Button>
               </DialogFooter>
             </>

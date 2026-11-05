@@ -18,7 +18,7 @@ booking's **Quotes** tab.
 
 A booking can carry several quotes. Each is numbered off the booking number with a version
 suffix — `LTT-26-0001-Q1`, then `-Q2` and so on — but the cards on screen are titled
-**Quote 1**, **Quote 2**, in the order they were raised. Hover the title to see the full
+**Quote 1**, **Quote 2**, with the newest quote first. Hover the title to see the full
 number.
 
 The badge next to the title is the quote's status:
@@ -30,11 +30,16 @@ The badge next to the title is the quote's status:
 | **Sent** | Emailed to the customer. Still editable and still re-buildable. |
 | **Accepted** | The customer accepted it. Locked — only **Revise** touches it. |
 | **Expired** | Past its shelf life. Not editable; **Revise** it to start a new version. |
-| **Superseded** | Replaced by a revision. Kept as a record; nothing can change it. |
+| **Replaced** | Replaced by a revision. Kept as a record; nothing can change it. |
 | **Cancelled** | Abandoned. Kept as a record; nothing can change it. |
 
 A separate red **Missing pricing** badge appears beside the status whenever any line on the
-quote is still unpriced.
+quote is still unpriced. A **Provisional (Incomplete)** quote already says so, so it does not
+get the extra badge.
+
+Under the title, a quote that has been sent reads *"Sent to the client"* with the date and
+time. A working quote that has not been emailed reads *"Not sent to the client yet"*. A short
+line under the header also says what to do next with that quote.
 
 > [!NOTE]
 > Quote numbers and quote dates are deliberately hidden from everything the customer sees.
@@ -350,16 +355,16 @@ time you rebuild.
 A quote must keep at least one line. Removing the last one is refused with *"A quote needs at
 least one line. Cancel the quote instead."*
 
-The bin icons disappear on a **Sent**, **Accepted**, **Expired**, **Superseded** or
+The bin icons disappear on a **Sent**, **Accepted**, **Expired**, **Replaced** or
 **Cancelled** quote. A sent quote can still be rebuilt through Build Booking — nothing renders
 off a quote until it is accepted — but an accepted one cannot be touched at all.
 
 ## The quote PDF
 
-Click **PDF** on the quote card. The document is generated, stored against the booking, and
+Click **View PDF** on the quote card. The document is generated, stored against the booking, and
 opens in a new tab. It is also listed on the booking's **Documents** tab.
 
-Pressing **PDF** again re-renders the document from the quote as it stands now, so a quote
+Pressing **View PDF** again re-renders the document from the quote as it stands now, so a quote
 that has changed since the last download produces a fresh PDF rather than the stale one.
 
 The PDF carries the customer's name, the journey dates, the traveller counts, the itinerary
@@ -376,8 +381,8 @@ number or the quote date.
 
 **Preview & Send** sits at the top of the Quotes tab. It always targets the newest quote that
 has not been sent yet — so on a booking with several quotes, check the card badges before you
-press it. It is disabled, with the tooltip *"Create a quote first"*, when there is no sendable
-quote.
+press it. A line beside the button says which quote it sends (*"Sends Quote 2 to the client."*).
+When there is no sendable quote the button is disabled and that line says why.
 
 The dialog is two panes: **Compose** on the left, a live **Preview** of the actual email on the
 right. The chevron buttons on each pane collapse the other one when you want the full width.
@@ -510,10 +515,10 @@ Accepted, ready for the amended invoice.
 
 ## Changing the quote currency
 
-**Currency** on the quote card re-denominates the whole quote — every line is re-priced into
+**Change currency** on the quote card re-denominates the whole quote — every line is re-priced into
 the currency you choose, and the customer only ever sees the new one.
 
-1. Click **Currency**.
+1. Click **Change currency**.
 2. Pick the target currency in **To**.
 3. Check the **Rate**. It is pre-filled from the published rate and is freely editable — type
    your bank's number if you have a better one. The refresh button re-fetches and drops any
@@ -533,17 +538,19 @@ them would make all three disagree.
 > the new provisional version. That means accepting everything a revision does to the booking —
 > read the Revise section above before you start.
 
-The **Currency** button is hidden on cancelled, superseded and expired quotes.
+The **Change currency** button is hidden on cancelled, replaced and expired quotes.
 
 ## Cancelling a quote
 
-**Cancel** marks a quote **Cancelled**. It stays on the booking as a record; nothing about it
-can be changed afterwards.
+**Cancel Quote** marks a quote **Cancelled**. It stays on the booking as a record; nothing about
+it can be changed afterwards. A window asks you to confirm first (**Keep quote** or **Cancel
+quote**), because a cancelled quote cannot be reopened. On a quote the client has already
+received, the window also warns that the client is not told it was cancelled.
 
-Cancel is available on **Provisional**, **Provisional (Incomplete)** and **Sent** quotes only.
-An accepted quote cannot be cancelled — the attempt is refused with *"Only quotes that have not
-been accepted can be cancelled"* — and neither can one that is already expired, superseded or
-cancelled.
+Cancel Quote is available on **Provisional**, **Provisional (Incomplete)** and **Sent** quotes
+only. An accepted quote cannot be cancelled — the attempt is refused with *"Only quotes that
+have not been accepted can be cancelled"* — and neither can one that is already expired,
+replaced or cancelled.
 
 > [!NOTE]
 > Cancelling a quote does not move the booking's stage and does not touch any invoice raised

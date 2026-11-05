@@ -33,6 +33,8 @@ function call(body: unknown, id = BOOKING_ID) {
 interface Options {
   alreadySent?: boolean
   quote?: { id: string; booking_id: string; status: string } | null
+  /** Sent emails on the booking, when no kept copy was emailed. */
+  emailedRows?: unknown[]
 }
 
 function mockAuth(options: Options = {}) {
@@ -53,6 +55,27 @@ function mockAuth(options: Options = {}) {
           error: null,
         }))
         return chain
+      }
+      if (table === "correspondences") {
+        // Emails sent on the booking, for a document emailed before copies were kept.
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(async () => ({ data: options.emailedRows ?? [], error: null })),
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === "invoices") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(() => ({ order: vi.fn(async () => ({ data: [], error: null })) })),
+            })),
+          })),
+        }
       }
       if (table === "quotes") {
         return {
@@ -114,6 +137,19 @@ describe("POST /api/jobs/[id]/document-versions (save without sending)", () => {
     expect(res.status).toBe(409)
     expect((await res.json()).error).toMatch(/first invoice has to be emailed/i)
     expect(versionMocks.recordIssuedDocument).not.toHaveBeenCalled()
+  })
+
+  it("allows saving when the invoice was emailed before copies were kept", async () => {
+    mockAuth({
+      alreadySent: false,
+      emailedRows: [{ id: "cor-old", kind: "invoice", subject: "Invoice", sent_at: "2026-09-01T08:00:00.000Z", recipients: [] }],
+    })
+    const res = await call({ kind: "invoice", attachments: [invoiceAttachment] })
+    expect(res.status).toBe(200)
+    expect(versionMocks.recordIssuedDocument).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "invoice", issueKind: "saved" }),
+    )
   })
 
   it("keeps the prepared invoice as a saved copy and audits it, with no email or stage move", async () => {

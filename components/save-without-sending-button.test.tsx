@@ -27,8 +27,8 @@ function version(docType: IssuedDocumentVersion["docType"], issueKind: IssuedDoc
 
 const attachments = [{ filename: "Invoice-1.pdf", contentBase64: "JVBERg==", contentType: "application/pdf" }]
 
-function mockVersions(versions: IssuedDocumentVersion[]) {
-  dataMocks.useJobDocumentVersions.mockReturnValue({ data: { versions }, mutate: dataMocks.mutate })
+function mockVersions(versions: IssuedDocumentVersion[], emailedDocTypes?: IssuedDocumentVersion["docType"][]) {
+  dataMocks.useJobDocumentVersions.mockReturnValue({ data: { versions, emailedDocTypes }, mutate: dataMocks.mutate })
 }
 
 describe("SaveWithoutSendingButton", () => {
@@ -62,6 +62,32 @@ describe("SaveWithoutSendingButton", () => {
 
   it("does not count a copy that was only saved as having been emailed", () => {
     mockVersions([version("invoice", "saved")])
+    const { container } = render(
+      <SaveWithoutSendingButton bookingId="b1" kind="invoice" attachments={attachments} onSaved={vi.fn()} />,
+    )
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("appears when the document was emailed before copies were kept, with a note that nothing is emailed", () => {
+    mockVersions([], ["invoice"])
+    const onEmailedBeforeChange = vi.fn()
+    render(
+      <SaveWithoutSendingButton
+        bookingId="b1"
+        kind="invoice"
+        attachments={attachments}
+        onSaved={vi.fn()}
+        onEmailedBeforeChange={onEmailedBeforeChange}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Save without sending" })).toBeEnabled()
+    expect(screen.getByText("Keeps this version on the booking. The client is not emailed.")).toBeTruthy()
+    expect(onEmailedBeforeChange).toHaveBeenLastCalledWith(true)
+  })
+
+  it("stays hidden, with no note, when only a different document type was emailed before", () => {
+    mockVersions([], ["quote"])
     const { container } = render(
       <SaveWithoutSendingButton bookingId="b1" kind="invoice" attachments={attachments} onSaved={vi.fn()} />,
     )

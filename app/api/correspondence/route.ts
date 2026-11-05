@@ -21,7 +21,7 @@ import {
 } from "@/lib/pipeline/run-gated-transition"
 import { isAtOrPastStage, type GateFailure } from "@/lib/pipeline/validate-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
-import { recordIssuedDocument } from "@/lib/documents/document-versions"
+import { hasIssuedDocumentToKeep, recordIssuedDocument } from "@/lib/documents/document-versions"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -509,8 +509,11 @@ export async function POST(req: Request) {
   }
 
   // Keep the exact PDF this email carried and link the email to it, so the copy the client received
-  // can be found after the live file is regenerated. Best-effort: the email is already out.
-  await recordIssuedDocument(supabase, {
+  // can be found after the live file is regenerated. Best-effort: the email is already out, so a
+  // failure never changes the outcome, but it is reported (`documentCopyKept`) so the salesperson
+  // is told rather than finding an empty history later.
+  const copyExpected = hasIssuedDocumentToKeep(parsed.data.kind, baseAttachments)
+  const keptCopyId = await recordIssuedDocument(supabase, {
     bookingId,
     correspondenceId: cor.id,
     kind: parsed.data.kind,
@@ -519,6 +522,9 @@ export async function POST(req: Request) {
     voucherId: parsed.data.voucherId,
     issuedBy: auth.value.user.id,
   })
+  // True when there was nothing to keep (a kind that carries no issued document, or no such PDF
+  // attached), so only a copy that should have been kept and was not raises the warning.
+  const documentCopyKept = !copyExpected || Boolean(keptCopyId)
 
   // Set when the quote the client has just been sent is already past "sent" (the booking accepted
   // it), so the follow-up nudge below stays off.
@@ -762,5 +768,6 @@ export async function POST(req: Request) {
     error: cor.error,
     providerMessageId: cor.provider_message_id,
     recipients: cor.recipients,
+    documentCopyKept,
   })
 }

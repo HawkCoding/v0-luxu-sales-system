@@ -128,7 +128,7 @@ export function ConvertQuoteCurrencyDialog({
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           <Coins className="mr-1.5 h-3.5 w-3.5" />
-          Currency
+          Change currency
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
@@ -206,7 +206,7 @@ export function ConvertQuoteCurrencyDialog({
                   1 {from} = {effectiveRate ?? "—"} {target}
                   {asOf ? ` · ${formatDisplayDate(asOf)}` : ""}
                   {stale ? (
-                    <span className="ml-1.5 text-amber-600 dark:text-amber-500">· stale</span>
+                    <span className="ml-1.5 text-amber-600 dark:text-amber-500">· rate may be out of date</span>
                   ) : null}
                 </p>
               </div>

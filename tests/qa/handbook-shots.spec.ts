@@ -493,7 +493,8 @@ test.describe("ch04 quoting", () => {
       const page = await context.newPage()
       await page.goto(`/app/bookings/${CH04_DRAFT_BOOKING}?tab=quotes`)
       await expect(page.getByRole("button", { name: /preview & send/i })).toBeVisible({ timeout: 60_000 })
-      const cardTitle = page.getByText("Quote 1")
+      // Exact: the caption above the cards also reads "Sends Quote 1 to the client."
+      const cardTitle = page.getByText("Quote 1", { exact: true })
       await expect(cardTitle).toBeVisible()
       // Frames the quote card rather than the booking header above it.
       await cardTitle.evaluate((element) => element.scrollIntoView({ block: "start" }))
@@ -522,7 +523,7 @@ test.describe("ch04 quoting", () => {
       await expect(page.getByText("Extra").first()).toBeVisible()
       await expect(page.getByText("Complimentary night")).toBeVisible()
       // Every badge and note sits inside the card, so frame the card itself.
-      await page.getByText("Quote 1").evaluate((element) => element.scrollIntoView({ block: "start" }))
+      await page.getByText("Quote 1", { exact: true }).evaluate((element) => element.scrollIntoView({ block: "start" }))
       await shot(page, "04-quote-lines")
       await context.close()
     } finally {
@@ -662,6 +663,12 @@ test.describe("ch04 quoting", () => {
   })
 
   test("04 revise", async ({ browser }) => {
+    // The Revise button was removed from the Quotes tab: Edit Booking replaces it, so there is no
+    // "Revise" button to click and this capture cannot run. Skipped on purpose rather than deleted;
+    // the handbook rewrite that drops the Revise sections should swap it for an Edit Booking shot
+    // (the "Edit Booking" button on the accepted quote opens the "Edit this booking" dialog).
+    test.skip(true, "Revise was removed from the Quotes tab; replace this shot with Edit Booking in the handbook rewrite.")
+
     loadQaEnv()
     const supabase = createQaSupabase()
     const { data: quote, error } = await supabase

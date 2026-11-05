@@ -37,7 +37,7 @@ Money. Invoice out, payments in, balance to zero.
    booking to Deposit Invoice Sent. WARNING callout.
 5. **Changing your mind before sending** — the resume state, and **Change amount**, which
    voids the draft and reopens the form.
-6. **Amend and Resend** — after a quote revision, the button changes and re-issues the same
+6. **Update and Resend** — after a quote revision, the button changes and re-issues the same
    invoice at the new total, keeping payments already received on record. Explain what the
    client sees.
 7. **Recording a payment** — date, amount in the booking currency, method (EFT, Credit

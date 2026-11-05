@@ -82,9 +82,13 @@ vi.mock("@/lib/attachments/email-attachment-library", () => ({
   loadLibraryAttachments: libraryMocks.loadLibraryAttachments,
 }))
 
-vi.mock("@/lib/documents/document-versions", () => ({
-  recordIssuedDocument: documentVersionMocks.recordIssuedDocument,
-}))
+// Only the capture itself is mocked: whether a send was expected to keep a copy is the real rule.
+vi.mock("@/lib/documents/document-versions", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/documents/document-versions")>(
+    "@/lib/documents/document-versions",
+  )
+  return { ...actual, recordIssuedDocument: documentVersionMocks.recordIssuedDocument }
+})
 
 import { POST } from "./route"
 
@@ -486,7 +490,7 @@ describe("POST /api/correspondence", () => {
     claimMocks.claimUnassignedBooking.mockReset()
     claimMocks.claimUnassignedBooking.mockResolvedValue({ ok: true, claimed: false, assignedSalespersonId: null })
     documentVersionMocks.recordIssuedDocument.mockReset()
-    documentVersionMocks.recordIssuedDocument.mockResolvedValue(undefined)
+    documentVersionMocks.recordIssuedDocument.mockResolvedValue("ver-1")
     signatureMocks.resolveEmailSignature.mockReset()
     signatureMocks.resolveEmailSignature.mockResolvedValue({ fullName: "Carmen" })
     signatureMocks.renderSignatureFragment.mockReset()
@@ -745,6 +749,47 @@ describe("POST /api/correspondence", () => {
         attachments: [expect.objectContaining({ filename: "Invoice-244453.pdf", contentBase64: "JVBERg==" })],
       }),
     )
+  })
+
+  it("reports documentCopyKept true when the copy was kept", async () => {
+    buildAuth()
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Quote", kind: "quote", quoteId: QUOTE_ID }),
+    )
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).documentCopyKept).toBe(true)
+  })
+
+  it("reports documentCopyKept false, and still succeeds, when the copy of a mapped kind could not be kept", async () => {
+    documentVersionMocks.recordIssuedDocument.mockResolvedValue(null)
+    buildAuth()
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Quote", kind: "quote", quoteId: QUOTE_ID }),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.documentCopyKept).toBe(false)
+    expect(body.status).toBe("sent")
+  })
+
+  it("reports documentCopyKept true for a kind that carries no issued document", async () => {
+    documentVersionMocks.recordIssuedDocument.mockResolvedValue(null)
+    buildAuth()
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello", kind: "quote_follow_up" }))
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).documentCopyKept).toBe(true)
+  })
+
+  it("reports documentCopyKept true when a mapped kind went out without its PDF, so there was nothing to keep", async () => {
+    documentVersionMocks.recordIssuedDocument.mockResolvedValue(null)
+    buildAuth({ bookingStage: "deposit_requested" })
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Invoice", kind: "invoice" }))
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).documentCopyKept).toBe(true)
   })
 
   it("keeps no copy when the email did not go out", async () => {

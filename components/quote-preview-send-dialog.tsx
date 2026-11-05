@@ -61,6 +61,8 @@ interface QuotePreviewSendDialogProps {
   bookingNumber: string
   customerName: string
   emailImportNeedsReview?: boolean
+  /** The Quotes tab already knows this send is an update; keeps the title and button in step with its button. */
+  sendingAnUpdate?: boolean
   onSent: () => void
   /** Controlled mode: when provided, the dialog renders no trigger button. */
   open?: boolean
@@ -90,6 +92,10 @@ interface PreviewResponse {
 }
 
 type PaneView = "both" | "editor" | "preview"
+
+// Shown after a send whose PDF copy could not be kept (the send response's `documentCopyKept` is false).
+const DOCUMENT_COPY_NOT_KEPT_MESSAGE =
+  "Email sent, but a copy of the PDF could not be kept for the booking history. Tell your administrator."
 
 function ConfigToggleRow({
   label,
@@ -122,6 +128,7 @@ function ConfigToggleRow({
             key={option.value}
             type="button"
             disabled={disabled}
+            aria-pressed={value === option.value}
             onClick={() => onChange(option.value)}
             className={cn(
               "px-2 py-1 text-xs transition-colors",
@@ -142,6 +149,7 @@ export function QuotePreviewSendDialog({
   quote,
   bookingNumber,
   emailImportNeedsReview = false,
+  sendingAnUpdate = false,
   onSent,
   open: controlledOpen,
   onOpenChange,
@@ -159,6 +167,9 @@ export function QuotePreviewSendDialog({
   const [warnings, setWarnings] = useState<string[]>([])
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [sending, setSending] = useState(false)
+  // Set by the save button, which knows whether a quote has gone out on this booking before.
+  const [savedButtonEmailedBefore, setEmailedBefore] = useState(false)
+  const emailedBefore = savedButtonEmailedBefore || sendingAnUpdate
   const [error, setError] = useState<string | null>(null)
   const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const [config, setConfig] = useState<QuoteConfigPreview | null>(null)
@@ -332,7 +343,7 @@ export function QuotePreviewSendDialog({
             signatureBrandId: capturedBrandId,
           }),
         })
-        const payload = (await response.json()) as { error?: string }
+        const payload = (await response.json()) as { error?: string; documentCopyKept?: boolean }
         if (!response.ok) {
           throw new Error(payload.error ?? "Failed to send quote")
         }
@@ -341,6 +352,10 @@ export function QuotePreviewSendDialog({
     })
 
     if (result.ok) {
+      // The email is out either way; only the booking-history copy of its PDF can have gone missing.
+      if (result.data.documentCopyKept === false) {
+        toast.warning(DOCUMENT_COPY_NOT_KEPT_MESSAGE)
+      }
       onSent()
     }
   }
@@ -365,7 +380,7 @@ export function QuotePreviewSendDialog({
           onDiscard={closeGuard.confirmDiscard}
         />
         <DialogHeader>
-          <DialogTitle>Preview & Send Quote</DialogTitle>
+          <DialogTitle>{emailedBefore ? "Preview & Send Updated Quote" : "Preview & Send Quote"}</DialogTitle>
           <DialogDescription>
             Review the customer email before sending {formatQuoteDisplayLabel(quote.quoteNumber)}. The
             quote PDF is attached automatically.
@@ -428,6 +443,7 @@ export function QuotePreviewSendDialog({
                     </span>
                     {savingConfig && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                   </div>
+                  <p className="text-muted-foreground">Changing these updates the quote straight away.</p>
                   {config.primarySupplierName && (
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Primary</span>
@@ -579,7 +595,12 @@ export function QuotePreviewSendDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
+          <Button
+            variant="ghost"
+            className="sm:mr-auto"
+            onClick={() => closeGuard.handleOpenChange(false)}
+            disabled={sending}
+          >
             Cancel
           </Button>
           <SaveWithoutSendingButton
@@ -591,6 +612,7 @@ export function QuotePreviewSendDialog({
               setOpen(false)
               onSent()
             }}
+            onEmailedBeforeChange={setEmailedBefore}
           />
           <Button
             onClick={handleSend}
@@ -603,7 +625,7 @@ export function QuotePreviewSendDialog({
             }
           >
             {sending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
-            Send
+            {emailedBefore ? "Send updated quote" : "Send"}
           </Button>
         </DialogFooter>
       </DialogContent>

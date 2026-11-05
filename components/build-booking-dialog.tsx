@@ -162,6 +162,9 @@ interface BuildBookingDialogProps {
   /** Present only for an ACCEPTED quote: the dialog runs in "Amend" mode — same build flow, but the
    *  save is confirmed first and sent as `amend: true` (see lib/quotes/amend-quote.ts). */
   amend?: AmendQuoteContext
+  /** Label-only: a quote the client already holds (sent/expired) is edited through the normal
+   *  builder, but the salesperson sees it as "Edit Booking". Behaviour is unchanged. */
+  editBookingWording?: boolean
 }
 
 /** The accepted quote's current money, so the amend confirmation can show old vs new total. */
@@ -439,6 +442,7 @@ export function BuildBookingDialog({
   autoOpen = false,
   onAutoOpenHandled,
   amend,
+  editBookingWording = false,
 }: BuildBookingDialogProps) {
   const isAmend = amend !== undefined
   const [amendConfirmOpen, setAmendConfirmOpen] = useState(false)
@@ -1717,7 +1721,7 @@ export function BuildBookingDialog({
         ) : (
           <Button variant="outline" size="sm">
             <Boxes className="mr-2 h-4 w-4" />
-            Edit Quote
+            {editBookingWording ? "Edit Booking" : "Edit Quote"}
           </Button>
         )}
       </DialogTrigger>
@@ -1780,7 +1784,7 @@ export function BuildBookingDialog({
           <>
             <DialogHeader className="text-left">
               <DialogTitle className="flex items-center gap-2">
-                {isAmend ? "Edit this booking" : <>Build this booking&apos;s services</>}
+                {isAmend || editBookingWording ? "Edit this booking" : <>Build this booking&apos;s services</>}
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>

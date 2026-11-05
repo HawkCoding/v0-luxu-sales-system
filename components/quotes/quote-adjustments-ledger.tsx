@@ -59,9 +59,19 @@ function buildSavedDraft(quote: Quote): Draft {
   }
 }
 
+/** Classes that give the small icon buttons a visible keyboard focus ring and a larger tap target
+ *  without moving anything (the padding and the negative margin cancel out). */
+const ICON_BUTTON_CLASSES =
+  "-m-2 rounded p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+
+/** Statuses where the client already holds the quote, so a saved change only reaches them once an
+ *  updated quote is sent. */
+const CLIENT_HOLDS_QUOTE_STATUSES: readonly string[] = ["sent", "accepted", "expired"]
+
 const KIND_OPTIONS: { key: CommissionKind; label: string; name: string }[] = [
   { key: "percent", label: "%", name: "Percentage" },
   { key: "per_person", label: "pp", name: "Per person" },
+  // The label is replaced with the quote currency's symbol where the toggle is rendered.
   { key: "fixed", label: "R", name: "Fixed amount" },
 ]
 
@@ -75,12 +85,15 @@ function KindToggle({
   id,
   label,
   value,
+  currency,
   onChange,
 }: {
   id: string
   /** Names the group for assistive tech, e.g. "Commission type". */
   label: string
   value: CommissionKind
+  /** The quote currency; its symbol labels the fixed-amount option, as on the value input beside it. */
+  currency: string
   onChange: (kind: CommissionKind) => void
 }) {
   return (
@@ -100,7 +113,7 @@ function KindToggle({
               selected ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {option.label}
+            {option.key === "fixed" ? currencySymbol(currency) : option.label}
           </button>
         )
       })}
@@ -168,7 +181,11 @@ function LedgerRow({
         {tooltip && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label={`${label} info`} className="text-muted-foreground/60 hover:text-foreground">
+              <button
+                type="button"
+                aria-label={`${label} info`}
+                className={cn("text-muted-foreground/60 hover:text-foreground", ICON_BUTTON_CLASSES)}
+              >
                 <Info className="h-3 w-3" />
               </button>
             </TooltipTrigger>
@@ -184,7 +201,7 @@ function LedgerRow({
           type="button"
           onClick={onRemove}
           aria-label={removeLabel}
-          className="text-muted-foreground hover:text-destructive"
+          className={cn("text-muted-foreground hover:text-destructive", ICON_BUTTON_CLASSES)}
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -342,7 +359,11 @@ export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSa
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
       if (!response.ok) throw new Error(payload.error ?? "Failed to save pricing adjustments")
       onSaved()
-      toast.success("Pricing adjustments saved.")
+      toast.success(
+        CLIENT_HOLDS_QUOTE_STATUSES.includes(quote.status)
+          ? "Pricing saved. Send the client an updated quote so they have the new total."
+          : "Pricing adjustments saved.",
+      )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save pricing adjustments")
     } finally {
@@ -379,13 +400,14 @@ export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSa
 
       <LedgerRow
         label="Commission"
-        tooltip="Applied once to the booking's total. Editable any time before the quote is sent."
+        tooltip="Applied once to the booking's total. On a quote the client already has, save the change, then send them an updated quote."
         control={
           <>
             <KindToggle
               id={`${idPrefix}-commission-kind`}
               label="Commission type"
               value={commissionActiveType}
+              currency={quote.currency}
               onChange={(kind) =>
                 setDraft((d) => ({ ...d, commissionType: kind }))
               }
@@ -458,6 +480,7 @@ export function QuoteAdjustmentsLedger({ quote, editable, bookingHeadcount, onSa
                 id={`${idPrefix}-discount-kind`}
                 label="Discount type"
                 value={discountActiveType}
+                currency={quote.currency}
                 onChange={(kind) => setDraft((d) => ({ ...d, discountType: kind }))}
               />
               <ValueInput

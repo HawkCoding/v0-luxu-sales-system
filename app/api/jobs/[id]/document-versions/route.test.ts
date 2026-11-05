@@ -25,6 +25,10 @@ interface Options {
   sendError?: { message: string } | null
   /** "Leave as is" decisions, newest first. */
   ackRows?: unknown[]
+  /** Every sent email on the booking (id, kind, subject, sent_at, recipients). */
+  emailedRows?: unknown[]
+  /** Invoices with status sent or paid, newest first (sent_at). */
+  invoiceRows?: unknown[]
 }
 
 function mockAuth(options: Options = {}) {
@@ -43,6 +47,7 @@ function mockAuth(options: Options = {}) {
       if (table === "correspondences") {
         return {
           select: vi.fn(() => ({
+            // The emails that carried a kept copy.
             in: vi.fn((...args: unknown[]) => {
               sendsIn(...args)
               return {
@@ -51,6 +56,23 @@ function mockAuth(options: Options = {}) {
                 })),
               }
             }),
+            // Every email sent on the booking, for documents emailed before copies were kept.
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(async () => ({ data: options.emailedRows ?? [], error: null })),
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === "invoices") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(() => ({
+                order: vi.fn(async () => ({ data: options.invoiceRows ?? [], error: null })),
+              })),
+            })),
           })),
         }
       }
@@ -192,8 +214,93 @@ describe("GET /api/jobs/[id]/document-versions", () => {
     const { sendsIn } = mockAuth({ versionRows: [] })
     const res = await call()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ versions: [] })
+    expect(await res.json()).toEqual({ versions: [], emailedDocTypes: [] })
     expect(sendsIn).not.toHaveBeenCalled()
+  })
+
+  describe("documents emailed before copies were kept", () => {
+    const emailedQuote = {
+      id: "cor-old-q",
+      kind: "quote",
+      subject: "Your quote",
+      sent_at: "2026-09-01T08:00:00.000Z",
+      recipients: ["ada@example.test"],
+    }
+
+    it("adds a stand-in with no file and an unknown change state for an emailed quote with no kept copy", async () => {
+      mockAuth({ versionRows: [], emailedRows: [emailedQuote] })
+
+      const body = (await (await call()).json()) as { versions: Array<Record<string, unknown>>; emailedDocTypes: string[] }
+
+      expect(body.versions).toHaveLength(1)
+      expect(body.versions[0]).toMatchObject({
+        id: "legacy-quote",
+        docType: "quote",
+        legacy: true,
+        versionNo: 0,
+        fileName: "",
+        // Nothing was compared, so neither changed nor up to date.
+        contentChanged: null,
+        issuedAt: "2026-09-01T08:00:00.000Z",
+        sends: [{ correspondenceId: "cor-old-q", recipients: ["ada@example.test"] }],
+      })
+      expect(body.emailedDocTypes).toEqual(["quote"])
+      expect(fingerprintMocks.computeContentFingerprint).not.toHaveBeenCalled()
+    })
+
+    it("counts an invoice that has a sent date even with no email on record", async () => {
+      mockAuth({ versionRows: [], invoiceRows: [{ sent_at: "2026-09-02T08:00:00.000Z" }] })
+
+      const body = (await (await call()).json()) as { versions: Array<Record<string, unknown>> }
+      expect(body.versions[0]).toMatchObject({
+        docType: "invoice",
+        legacy: true,
+        contentChanged: null,
+        issuedAt: "2026-09-02T08:00:00.000Z",
+        sends: [],
+      })
+    })
+
+    it("does not count an invoice with no sent date and no email, e.g. a draft that a payment turned to paid", async () => {
+      mockAuth({ versionRows: [], invoiceRows: [{ sent_at: null }] })
+
+      expect(await (await call()).json()).toEqual({ versions: [], emailedDocTypes: [] })
+    })
+
+    it("ignores emails that carry no quote, invoice or voucher", async () => {
+      mockAuth({ versionRows: [], emailedRows: [{ ...emailedQuote, kind: "reservation_received" }] })
+      expect(await (await call()).json()).toEqual({ versions: [], emailedDocTypes: [] })
+    })
+
+    it("drops the stand-in once a real copy of that document has been emailed, and still reports it as emailed", async () => {
+      mockAuth({
+        versionRows: [{ ...quoteRow, issue_kind: "sent", quote_id: null, invoice_id: null, content_fingerprint: null }],
+        emailedRows: [emailedQuote],
+      })
+
+      const body = (await (await call()).json()) as { versions: Array<{ id: string; legacy?: boolean }>; emailedDocTypes: string[] }
+      expect(body.versions.map((v) => v.id)).toEqual(["ver-q1"])
+      expect(body.versions[0].legacy).toBeUndefined()
+      expect(body.emailedDocTypes).toEqual(["quote"])
+    })
+
+    it("keeps the stand-in beside a copy that was only saved, so the record of the email is not lost", async () => {
+      mockAuth({
+        versionRows: [{ ...quoteRow, issue_kind: "saved", quote_id: null, invoice_id: null, content_fingerprint: null }],
+        emailedRows: [emailedQuote],
+      })
+
+      const body = (await (await call()).json()) as {
+        versions: Array<{ id: string; legacy?: boolean; issueKind: string; versionNo: number }>
+        emailedDocTypes: string[]
+      }
+      expect(body.versions.map((v) => v.id)).toEqual(["ver-q1", "legacy-quote"])
+      expect(body.versions[0]).toMatchObject({ issueKind: "saved", versionNo: 1 })
+      expect(body.versions[0].legacy).toBeUndefined()
+      // The stand-in sorts below every real version, so the saved one is the latest.
+      expect(body.versions[1]).toMatchObject({ legacy: true, versionNo: 0 })
+      expect(body.emailedDocTypes).toEqual(["quote"])
+    })
   })
 
   it("maps each copy with the emails that carried it", async () => {

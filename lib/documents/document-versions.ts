@@ -194,6 +194,26 @@ export async function captureIssuedDocument(
   }
 }
 
+/**
+ * Whether an email of this kind with these attachments carries a document that
+ * `recordIssuedDocument` is expected to keep. False for a kind that carries none (a reservation
+ * acknowledgement) and for a kind whose PDF is not among the attachments, where a null result from
+ * `recordIssuedDocument` is expected and not a failure to tell the salesperson about.
+ */
+export function hasIssuedDocumentToKeep(
+  kind: string | null | undefined,
+  attachments: IssuedAttachment[],
+): boolean {
+  const docType = issuedDocumentTypeForKind(kind)
+  if (!docType) return false
+
+  const attachment = pickIssuedAttachment(docType, attachments)
+  if (!attachment) return false
+
+  // Mirrors captureIssuedDocument, which keeps nothing for an empty file.
+  return Buffer.from(attachment.contentBase64, "base64").length > 0
+}
+
 export interface RecordIssuedDocumentInput {
   bookingId: string
   /** The email that carried the document; absent when the copy is kept without being sent. */

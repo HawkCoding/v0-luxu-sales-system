@@ -112,8 +112,9 @@ export function AmendQuoteConfirmDialog({
           </li>
           <li>The deposit amount does not change. The balance due follows the new total.</li>
           <li>
-            Nothing is sent. The Documents tab will show what the client holds is out of date, and you
-            choose whether to send an update, save one without sending, or leave it.
+            Nothing is sent. To tell the client, use Preview &amp; Send Updated Quote on the Quotes tab,
+            or save the update without sending. The Documents tab shows which documents the client
+            holds are out of date.
           </li>
         </ul>
 

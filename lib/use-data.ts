@@ -2,7 +2,7 @@
 
 import useSWR from "swr"
 import type { ClubMembership } from "@/lib/club-memberships"
-import type { IssuedDocumentVersion } from "@/lib/documents/issued-documents"
+import type { DocumentVersionsResponse } from "@/lib/documents/issued-documents"
 import type {
   AuditLog,
   Booking,
@@ -271,7 +271,7 @@ export function useJobLegReferences(bookingId: string | null | undefined) {
 
 /** The PDFs that have gone out on a booking, one entry per distinct copy kept. */
 export function useJobDocumentVersions(bookingId: string | null | undefined) {
-  return useSWR<{ versions: IssuedDocumentVersion[] }>(
+  return useSWR<DocumentVersionsResponse>(
     bookingId ? `/api/jobs/${bookingId}/document-versions` : null,
     fetcher,
     swrOptions,

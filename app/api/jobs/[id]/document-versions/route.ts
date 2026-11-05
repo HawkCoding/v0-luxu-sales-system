@@ -4,6 +4,7 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
 import { computeContentFingerprint } from "@/lib/documents/content-fingerprint"
 import { recordIssuedDocument, type IssuedAttachment, type IssuedDocumentType } from "@/lib/documents/document-versions"
+import { loadEmailedDocuments } from "@/lib/documents/emailed-documents"
 import { issuedDocumentTypeForKind } from "@/lib/documents/issued-documents"
 import type { IssuedDocumentSend, IssuedDocumentVersion } from "@/lib/documents/issued-documents"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
@@ -61,6 +62,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .order("issued_at", { ascending: false })
 
   if (error) return safeSupabaseError("document-versions:list", error)
+
+  // Independent of everything below, so it runs alongside the sends, acknowledgements and
+  // fingerprints instead of after them. It never throws (a failed lookup reads as "nothing emailed").
+  const emailedPromise = loadEmailedDocuments(supabase, parsedId.data)
 
   const versionIds = (rows ?? []).map((row) => row.id)
   const sendsByVersion = new Map<string, IssuedDocumentSend[]>()
@@ -157,7 +162,39 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     }
   })
 
-  return Response.json({ versions })
+  // Documents emailed before copies were kept have no row above. Surface each as a stand-in so the
+  // salesperson can still see it went out and reach the update path.
+  const emailed = await emailedPromise
+  const sentTypes = new Set(versions.filter((version) => version.issueKind === "sent").map((version) => version.docType))
+  const legacyVersions: IssuedDocumentVersion[] = []
+  for (const [docType, record] of emailed) {
+    // Superseded once a real copy has been EMAILED for this type. A copy only saved without
+    // sending is not an email, so the stand-in stays as the record that the client was sent one.
+    if (sentTypes.has(docType)) continue
+    legacyVersions.push({
+      id: `legacy-${docType}`,
+      docType,
+      versionNo: 0,
+      fileName: "",
+      sizeBytes: 0,
+      issuedAt: record.sends[0]?.sentAt ?? record.fallbackSentAt ?? new Date(0).toISOString(),
+      issueKind: "sent",
+      quoteNumber: null,
+      // Unknown, not changed: nothing was ever compared (no kept copy, no fingerprint), so neither
+      // "changed" nor "up to date" would be true. The page presents a legacy entry as "Not checked"
+      // from the `legacy` flag and still offers the update path.
+      contentChanged: null,
+      sends: record.sends,
+      legacy: true,
+    })
+  }
+
+  const emailedDocTypes = new Set<IssuedDocumentType>(emailed.keys())
+  for (const version of versions) {
+    if (version.issueKind === "sent") emailedDocTypes.add(version.docType)
+  }
+
+  return Response.json({ versions: [...versions, ...legacyVersions], emailedDocTypes: [...emailedDocTypes] })
 }
 
 /**
@@ -199,7 +236,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .maybeSingle()
 
   if (sentError) return safeSupabaseError("document-versions:save:sent-check", sentError)
-  if (!alreadySent) {
+  // No kept copy was emailed, but the document may still have been emailed before copies were kept.
+  const emailedEarlier = alreadySent ? true : (await loadEmailedDocuments(supabase, bookingId)).has(docType)
+  if (!emailedEarlier) {
     return jsonError(
       `The first ${DOCUMENT_LABELS[docType]} has to be emailed to the client. Saving without sending is for updates after that.`,
       409,
