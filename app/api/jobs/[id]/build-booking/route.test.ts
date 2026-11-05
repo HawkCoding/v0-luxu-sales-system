@@ -548,9 +548,27 @@ describe("POST /api/jobs/[id]/build-booking — removal guards", () => {
     }
   }
 
-  it("refuses to drop a leg once the deposit is paid, and deletes nothing", async () => {
+  // Edit Booking replaces Revise, so a client dropping a transfer after the deposit no longer means
+  // rewinding the booking: the leg goes, along with its transport requests.
+  it.each(["deposit_paid", "final_paid", "voucher_sent"])(
+    "allows dropping a non-core leg at %s, deleting it with its transport requests",
+    async (stage) => {
+      const { built, request } = rebuildWithout([transferLeg.id], {
+        stage,
+        primarySupplierId: SUPPLIER_A,
+        existingServices: [hotelCoreLeg, transferLeg],
+      })
+
+      const res = await request
+      expect(res.status).toBe(200)
+      expect(built.transportDelete).toHaveBeenCalled()
+      expect(built.serviceDelete).toHaveBeenCalled()
+    },
+  )
+
+  it.each(["closed", "lost"])("refuses to drop a leg on a %s booking, and deletes nothing", async (stage) => {
     const { built, request } = rebuildWithout([transferLeg.id], {
-      stage: "deposit_paid",
+      stage,
       primarySupplierId: SUPPLIER_A,
       existingServices: [hotelCoreLeg, transferLeg],
     })
@@ -561,7 +579,19 @@ describe("POST /api/jobs/[id]/build-booking — removal guards", () => {
     expect(built.transportDelete).not.toHaveBeenCalled()
   })
 
-  it("still allows the same removal before the deposit is paid", async () => {
+  it("still refuses the core leg after the deposit, whatever the stage", async () => {
+    const { built, request } = rebuildWithout([hotelCoreLeg.id], {
+      stage: "deposit_paid",
+      primarySupplierId: SUPPLIER_A,
+      existingServices: [hotelCoreLeg, transferLeg],
+    })
+
+    const res = await request
+    expect(res.status).toBe(400)
+    expect(built.serviceDelete).not.toHaveBeenCalled()
+  })
+
+  it("allows the same removal before the deposit is paid", async () => {
     const { built, request } = rebuildWithout([transferLeg.id], {
       stage: "accepted",
       primarySupplierId: SUPPLIER_A,

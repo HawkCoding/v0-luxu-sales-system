@@ -32,7 +32,11 @@ vi.mock("@/components/revise-quote-dialog", () => ({
 vi.mock("@/components/quotes/convert-quote-currency-dialog", () => ({ ConvertQuoteCurrencyDialog: () => null }))
 vi.mock("@/components/create-quote-dialog", () => ({ CreateQuoteDialog: () => null }))
 vi.mock("@/components/quote-preview-send-dialog", () => ({ QuotePreviewSendDialog: () => null }))
-vi.mock("@/components/quotes/quote-adjustments-ledger", () => ({ QuoteAdjustmentsLedger: () => null }))
+vi.mock("@/components/quotes/quote-adjustments-ledger", () => ({
+  QuoteAdjustmentsLedger: ({ quote, editable }: { quote: { id: string }; editable: boolean }) => (
+    <div data-testid={`ledger-${quote.id}`} data-editable={String(editable)} />
+  ),
+}))
 
 import { JobQuotesTab } from "./job-quotes-tab"
 
@@ -121,6 +125,42 @@ describe("JobQuotesTab — Amend", () => {
     const amendButtons = screen.getAllByRole("button", { name: "Amend" })
     expect(amendButtons).toHaveLength(1)
     expect(amendButtons[0]).toHaveAttribute("data-quote-id", "current")
+  })
+})
+
+describe("JobQuotesTab — price adjustments", () => {
+  function ledgerEditable(id: string): string | null {
+    return screen.getByTestId(`ledger-${id}`).getAttribute("data-editable")
+  }
+
+  it.each(["draft", "pricing_incomplete", "ready", "sent", "accepted", "expired"] as const)(
+    "lets Commission, Rounding and Discount be changed on a %s quote",
+    (status) => {
+      renderTab([buildQuote({ id: "q", status })])
+      expect(ledgerEditable("q")).toBe("true")
+    },
+  )
+
+  it.each(["superseded", "cancelled"] as const)("keeps a %s quote's adjustments read-only", (status) => {
+    renderTab([buildQuote({ id: "q", status })])
+    expect(ledgerEditable("q")).toBe("false")
+  })
+
+  it("keeps a sent or accepted quote read-only once the booking is closed or cancelled", () => {
+    for (const booking of [
+      { stage: "closed", cancelledAt: null },
+      { stage: "lost", cancelledAt: null },
+      { stage: "deposit_paid", cancelledAt: "2026-10-01T00:00:00Z" },
+    ]) {
+      const view = renderTab([buildQuote({ id: "q", status: "accepted" })], booking)
+      expect(ledgerEditable("q")).toBe("false")
+      view.unmount()
+    }
+  })
+
+  it("still lets a provisional quote be adjusted whatever the booking stage", () => {
+    renderTab([buildQuote({ id: "q", status: "draft" })], { stage: "closed", cancelledAt: null })
+    expect(ledgerEditable("q")).toBe("true")
   })
 })
 

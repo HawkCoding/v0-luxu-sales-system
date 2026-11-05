@@ -247,7 +247,7 @@ export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherRead
     failures.push({
       code: "quoted_leg_missing",
       message: `Services on the accepted quote are no longer in the booking: ${(input.missingQuotedLegLabels ?? []).join(", ")}.`,
-      fixHint: "Re-add the service under Edit Quote, or revise the quote to match what is being delivered.",
+      fixHint: "Re-add the service under Edit Booking, or edit the booking so the quote matches what is being delivered.",
     })
   }
 

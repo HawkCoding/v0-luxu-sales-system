@@ -146,7 +146,23 @@ async function documentSource(
       : []
     const quoteId = typeof invoice?.quote_id === "string" ? invoice.quote_id : null
     const { quote_id: _quoteId, ...invoiceContent } = invoice ?? {}
-    return { invoice: invoice ? invoiceContent : null, lines: await quoteLines(supabase, quoteId) }
+    // The invoice prints the quote's totals (what is left to pay follows the live quote, while the
+    // deposit row stays as issued), so a discount or commission change moves them with no line
+    // changing. Without these an invoice would not be flagged when only the total moved.
+    const [quote] = quoteId
+      ? await rows(
+          supabase
+            .from("quotes")
+            .select("subtotal, total, currency, agent_commission, discount_amount, discount_visible")
+            .eq("id", quoteId),
+          "invoice quote",
+        )
+      : []
+    return {
+      invoice: invoice ? invoiceContent : null,
+      quote: quote ?? null,
+      lines: await quoteLines(supabase, quoteId),
+    }
   }
 
   // Voucher: scoped to what the accepted quote bought.

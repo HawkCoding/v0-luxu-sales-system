@@ -133,7 +133,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       {
         error:
           quote.status === "accepted"
-            ? "An accepted quote cannot be edited. Use Amend to change it in place, or Revise to create a new version."
+            ? "An accepted quote cannot be edited directly. Use Edit Booking to change it."
             : `A ${quote.status} quote cannot be edited.`,
       },
       { status: 409 },

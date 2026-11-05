@@ -18,7 +18,8 @@ import type { CommissionKind, Quote } from "@/lib/types"
 
 interface QuoteAdjustmentsLedgerProps {
   quote: Quote
-  /** False on a sent/accepted quote, or without the edit:quotes permission — renders read-only. */
+  /** False on a replaced/cancelled quote, a closed/cancelled booking, or without the edit:quotes
+   *  permission — renders read-only. */
   editable: boolean
   /** The booking's current headcount (adults + children, infants excluded) — what every
    *  per-person Commission/Discount is multiplied by, same as the adjustments API. */

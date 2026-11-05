@@ -118,7 +118,7 @@ describe("AmendQuoteConfirmDialog", () => {
     fireEvent.change(screen.getByLabelText("Note (optional)"), {
       target: { value: "  Client asked for an extra night  " },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Confirm amendment" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm changes" }))
 
     expect(onConfirm).toHaveBeenCalledWith("Client asked for an extra night")
   })
@@ -126,7 +126,7 @@ describe("AmendQuoteConfirmDialog", () => {
   it("confirms without a note", () => {
     const { onConfirm } = renderDialog()
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm amendment" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm changes" }))
 
     expect(onConfirm).toHaveBeenCalledWith(undefined)
   })
@@ -135,6 +135,6 @@ describe("AmendQuoteConfirmDialog", () => {
     renderDialog({ saving: true })
 
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: /Confirm amendment/ })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /Confirm changes/ })).toBeDisabled()
   })
 })

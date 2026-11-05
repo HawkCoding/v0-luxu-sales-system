@@ -193,6 +193,21 @@ describe("computeContentFingerprint", () => {
     expect(new Set(fingerprints).size).toBe(3)
   })
 
+  it("flags an invoice when only the quote total moved (a discount or commission), with no line changing", async () => {
+    const before = await fingerprint(baseFixture(), "invoice")
+    const discounted = baseFixture()
+    discounted.quotes[0].total = 800
+    discounted.quotes[0].discount_amount = 200
+    expect(await fingerprint(discounted, "invoice")).not.toBe(before)
+  })
+
+  it("does not let a voucher notice a price-only change: it prints no prices", async () => {
+    const before = await fingerprint(baseFixture(), "voucher")
+    const discounted = baseFixture()
+    discounted.quotes[0].total = 800
+    expect(await fingerprint(discounted, "voucher")).toBe(before)
+  })
+
   it("flags an invoice amount or due date change", async () => {
     const before = await fingerprint(baseFixture(), "invoice")
     const amount = baseFixture()
