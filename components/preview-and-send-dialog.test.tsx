@@ -11,6 +11,9 @@ vi.mock("@/components/signature-picker", () => ({
 vi.mock("@/components/payment-method-picker", () => ({
   PaymentMethodPicker: () => null,
 }))
+vi.mock("@/components/save-without-sending-button", () => ({
+  SaveWithoutSendingButton: () => null,
+}))
 vi.mock("@/components/ui/html-body-editor", () => ({
   HtmlBodyEditor: () => null,
 }))

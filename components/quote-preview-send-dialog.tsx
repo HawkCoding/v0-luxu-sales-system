@@ -38,6 +38,7 @@ import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
+import { SaveWithoutSendingButton } from "@/components/save-without-sending-button"
 
 /** In-memory only -- compared against `serverBaseline` to detect unsent edits for the
  *  discard-on-close prompt. Never persisted (see the removed localStorage autosave: ticking an
@@ -581,6 +582,16 @@ export function QuotePreviewSendDialog({
           <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
             Cancel
           </Button>
+          <SaveWithoutSendingButton
+            bookingId={quote.jobId}
+            kind="quote"
+            quoteId={quote.id}
+            disabled={sending || loadingPreview}
+            onSaved={() => {
+              setOpen(false)
+              onSent()
+            }}
+          />
           <Button
             onClick={handleSend}
             disabled={

@@ -15,6 +15,7 @@ import type { DocRecord, DocumentKind, Enquiry, Job, Customer } from "@/lib/type
 import { AlertCircle, ClipboardList, Download, FileText, Send, Trash2, Upload } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { IssuedDocumentsSection } from "@/components/issued-documents-section"
+import type { IssuedDocumentType } from "@/lib/documents/document-versions"
 import { useJobLegReferences } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -165,6 +166,8 @@ interface JobDocumentsTabProps {
   enquiry?: Enquiry
   customer?: Customer
   onChange?: () => Promise<void> | void
+  /** Opens the flow for sending an updated quote or invoice (the voucher's is handled here). */
+  onReviewDocument?: (docType: IssuedDocumentType) => void
   loading?: boolean
   error?: Error | null
 }
@@ -175,6 +178,7 @@ export function JobDocumentsTab({
   enquiry,
   customer,
   onChange,
+  onReviewDocument,
   loading = false,
   error = null,
 }: JobDocumentsTabProps) {
@@ -279,7 +283,13 @@ export function JobDocumentsTab({
 
   return (
     <div className="space-y-6">
-      {job ? <IssuedDocumentsSection bookingId={job.id} /> : null}
+      {job ? (
+        <IssuedDocumentsSection
+          bookingId={job.id}
+          // The voucher dialog lives on this tab; the quote and invoice flows live elsewhere on the page.
+          onReview={(docType) => (docType === "voucher" ? setVoucherOpen(true) : onReviewDocument?.(docType))}
+        />
+      ) : null}
 
       <div className="space-y-3">
         {job && (

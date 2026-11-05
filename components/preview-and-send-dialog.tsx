@@ -20,6 +20,7 @@ import { useOptimisticSend } from "@/hooks/use-optimistic-send"
 import { useEmailAppearanceSettings } from "@/lib/use-data"
 import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
 import { SignaturePicker } from "@/components/signature-picker"
+import { SaveWithoutSendingButton } from "@/components/save-without-sending-button"
 import { PaymentMethodPicker } from "@/components/payment-method-picker"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceBankingBlock } from "@/lib/templates/banking-block-slot"
@@ -366,6 +367,15 @@ export function PreviewAndSendDialog({
           <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
             Cancel
           </Button>
+          <SaveWithoutSendingButton
+            bookingId={bookingId}
+            kind={kind}
+            quoteId={quoteId}
+            voucherId={voucherId}
+            attachments={attachments}
+            disabled={sending || !attachments?.length}
+            onSaved={() => onOpenChange(false)}
+          />
           <Button onClick={handleSend} disabled={sending || !subject.trim()}>
             <Send data-icon="inline-start" />
             {sending

@@ -23,6 +23,8 @@ interface Options {
   versionError?: { message: string } | null
   sendRows?: unknown[]
   sendError?: { message: string } | null
+  /** "Leave as is" decisions, newest first. */
+  ackRows?: unknown[]
 }
 
 function mockAuth(options: Options = {}) {
@@ -49,6 +51,15 @@ function mockAuth(options: Options = {}) {
                 })),
               }
             }),
+          })),
+        }
+      }
+      if (table === "document_version_acknowledgements") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: options.ackRows ?? [], error: null })),
+            })),
           })),
         }
       }
@@ -109,6 +120,33 @@ describe("GET /api/jobs/[id]/document-versions", () => {
       expect.anything(),
       expect.objectContaining({ docType: "invoice", invoiceId: "inv-1" }),
     )
+  })
+
+  it("clears the flag after 'Leave as is', and brings it back once the booking changes again", async () => {
+    const row = { ...quoteRow, id: "ver-q1", quote_id: "quote-1", invoice_id: null, content_fingerprint: "fp-old" }
+
+    // The booking now reads fp-1; the salesperson accepted exactly that.
+    mockAuth({ versionRows: [row], ackRows: [{ document_version_id: "ver-q1", fingerprint: "fp-1", acknowledged_at: "2026-11-04" }] })
+    let body = (await (await call()).json()) as { versions: Array<{ contentChanged: boolean | null }> }
+    expect(body.versions[0].contentChanged).toBe(false)
+
+    // They accepted an earlier state; the booking has changed again since.
+    mockAuth({ versionRows: [row], ackRows: [{ document_version_id: "ver-q1", fingerprint: "fp-between", acknowledged_at: "2026-11-04" }] })
+    body = (await (await call()).json()) as { versions: Array<{ contentChanged: boolean | null }> }
+    expect(body.versions[0].contentChanged).toBe(true)
+  })
+
+  it("uses the newest 'Leave as is' when there are several", async () => {
+    const row = { ...quoteRow, id: "ver-q1", quote_id: "quote-1", invoice_id: null, content_fingerprint: "fp-old" }
+    mockAuth({
+      versionRows: [row],
+      ackRows: [
+        { document_version_id: "ver-q1", fingerprint: "fp-1", acknowledged_at: "2026-11-05" },
+        { document_version_id: "ver-q1", fingerprint: "fp-older", acknowledged_at: "2026-11-03" },
+      ],
+    })
+    const body = (await (await call()).json()) as { versions: Array<{ contentChanged: boolean | null }> }
+    expect(body.versions[0].contentChanged).toBe(false)
   })
 
   it("reports unknown, never changed, for a copy with no fingerprint or when the comparison fails", async () => {

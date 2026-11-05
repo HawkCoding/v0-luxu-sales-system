@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { computeContentFingerprint } from "@/lib/documents/content-fingerprint"
+import { issuedDocumentTypeForKind } from "@/lib/documents/issued-documents"
 
 /**
  * Issued-document history.
@@ -25,21 +26,8 @@ export interface IssuedAttachment {
   contentType?: string
 }
 
-/** Which document family an email of this `kind` carries, or null when it carries none. */
-export function issuedDocumentTypeForKind(kind: string | null | undefined): IssuedDocumentType | null {
-  switch (kind?.toLowerCase()) {
-    case "quote":
-      return "quote"
-    case "invoice":
-    case "payment_received":
-    case "payment_reminder":
-      return "invoice"
-    case "voucher":
-      return "voucher"
-    default:
-      return null
-  }
-}
+// Defined in issued-documents.ts so client components can use it without pulling in node:crypto.
+export { issuedDocumentTypeForKind }
 
 function isPdf(attachment: IssuedAttachment): boolean {
   return attachment.contentType === "application/pdf" || /\.pdf$/i.test(attachment.filename)
@@ -208,7 +196,9 @@ export async function captureIssuedDocument(
 
 export interface RecordIssuedDocumentInput {
   bookingId: string
-  correspondenceId: string
+  /** The email that carried the document; absent when the copy is kept without being sent. */
+  correspondenceId?: string
+  issueKind?: "sent" | "saved"
   kind: string | null | undefined
   attachments: IssuedAttachment[]
   quoteId?: string | null
@@ -218,15 +208,17 @@ export interface RecordIssuedDocumentInput {
 
 /**
  * Called by the send route once an email has gone out: keeps the document it carried and links the
- * email to that copy. Never throws and never affects the send.
+ * email to that copy. Also used to keep a copy WITHOUT an email (`issueKind: "saved"`, no
+ * `correspondenceId`). Never throws and never affects a send; returns the kept copy's id, or null
+ * when nothing was kept.
  */
-export async function recordIssuedDocument(supabase: Client, input: RecordIssuedDocumentInput): Promise<void> {
+export async function recordIssuedDocument(supabase: Client, input: RecordIssuedDocumentInput): Promise<string | null> {
   try {
     const docType = issuedDocumentTypeForKind(input.kind)
-    if (!docType) return
+    if (!docType) return null
 
     const attachment = pickIssuedAttachment(docType, input.attachments)
-    if (!attachment) return
+    if (!attachment) return null
 
     let invoiceId: string | null = null
     if (docType === "invoice") {
@@ -267,17 +259,23 @@ export async function recordIssuedDocument(supabase: Client, input: RecordIssued
       invoiceId,
       voucherId: docType === "voucher" ? input.voucherId ?? null : null,
       issuedBy: input.issuedBy ?? null,
+      issueKind: input.issueKind ?? "sent",
       contentFingerprint,
     })
-    if (!versionId) return
+    if (!versionId) return null
 
-    const { error: linkError } = await supabase
-      .from("correspondences")
-      .update({ document_version_id: versionId })
-      .eq("id", input.correspondenceId)
+    if (input.correspondenceId) {
+      const { error: linkError } = await supabase
+        .from("correspondences")
+        .update({ document_version_id: versionId })
+        .eq("id", input.correspondenceId)
 
-    if (linkError) console.error("document-versions:link", linkError)
+      if (linkError) console.error("document-versions:link", linkError)
+    }
+
+    return versionId
   } catch (error) {
     console.error("document-versions:record", error)
+    return null
   }
 }
