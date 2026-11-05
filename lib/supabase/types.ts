@@ -1690,6 +1690,7 @@ export type Database = {
       document_versions: {
         Row: {
           booking_id: string
+          content_fingerprint: string | null
           created_at: string
           doc_type: string
           file_name: string
@@ -1707,6 +1708,7 @@ export type Database = {
         }
         Insert: {
           booking_id: string
+          content_fingerprint?: string | null
           created_at?: string
           doc_type: string
           file_name: string
@@ -1724,6 +1726,7 @@ export type Database = {
         }
         Update: {
           booking_id?: string
+          content_fingerprint?: string | null
           created_at?: string
           doc_type?: string
           file_name?: string

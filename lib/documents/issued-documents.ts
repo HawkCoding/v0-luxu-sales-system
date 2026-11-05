@@ -22,6 +22,12 @@ export interface IssuedDocumentVersion {
   issueKind: "sent" | "saved"
   /** The quote the copy was issued from; null for invoices and vouchers, or if the quote is gone. */
   quoteNumber: string | null
+  /**
+   * Whether the booking data this was printed from has changed since it was sent. Only worked out
+   * for the latest copy of each document; null elsewhere, and null (never "changed") whenever it
+   * could not be determined, e.g. a copy kept before fingerprints existed.
+   */
+  contentChanged: boolean | null
   /** Newest first. Empty for a copy that was saved without being emailed. */
   sends: IssuedDocumentSend[]
 }
@@ -52,6 +58,11 @@ export function groupIssuedDocuments(versions: IssuedDocumentVersion[]): IssuedD
     if (!latest) return []
     return [{ docType, label: GROUP_LABELS[docType], latest, earlier }]
   })
+}
+
+/** How many documents have changed since they were last sent: the badge on the Documents tab. */
+export function countChangedDocuments(versions: IssuedDocumentVersion[]): number {
+  return groupIssuedDocuments(versions).filter((group) => group.latest.contentChanged === true).length
 }
 
 /** The copy an email carried, or null when it carried none we kept. */

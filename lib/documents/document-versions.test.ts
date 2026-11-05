@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const fingerprintMocks = vi.hoisted(() => ({ computeContentFingerprint: vi.fn() }))
+vi.mock("@/lib/documents/content-fingerprint", () => ({
+  computeContentFingerprint: fingerprintMocks.computeContentFingerprint,
+}))
+
 import {
   captureIssuedDocument,
   documentVersionStoragePath,
@@ -269,6 +275,45 @@ describe("captureIssuedDocument", () => {
 })
 
 describe("recordIssuedDocument", () => {
+  beforeEach(() => {
+    fingerprintMocks.computeContentFingerprint.mockReset()
+    fingerprintMocks.computeContentFingerprint.mockResolvedValue("fp-now")
+  })
+
+  it("stores the fingerprint of the booking as it was when the document went out", async () => {
+    const { client, insertSpy } = makeClient()
+    await recordIssuedDocument(client, {
+      bookingId: BOOKING_ID,
+      correspondenceId: "cor-1",
+      kind: "quote",
+      attachments: [attachment("Quote-26-0039.pdf")],
+      quoteId: "quote-1",
+    })
+    expect(fingerprintMocks.computeContentFingerprint).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bookingId: BOOKING_ID, docType: "quote", quoteId: "quote-1" }),
+    )
+    expect(insertSpy).toHaveBeenCalledWith(expect.objectContaining({ content_fingerprint: "fp-now" }))
+  })
+
+  it("still keeps the copy, with no fingerprint, when the fingerprint cannot be taken", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    fingerprintMocks.computeContentFingerprint.mockRejectedValue(new Error("travellers: boom"))
+    const { client, insertSpy, correspondenceUpdate } = makeClient()
+
+    await recordIssuedDocument(client, {
+      bookingId: BOOKING_ID,
+      correspondenceId: "cor-1",
+      kind: "quote",
+      attachments: [attachment("Quote-26-0039.pdf")],
+      quoteId: "quote-1",
+    })
+
+    expect(insertSpy).toHaveBeenCalledWith(expect.objectContaining({ content_fingerprint: null }))
+    expect(correspondenceUpdate).toHaveBeenCalledWith({ document_version_id: "ver-1" })
+    error.mockRestore()
+  })
+
   it("captures the invoice, linking the live invoice and the email", async () => {
     const { client, insertSpy, correspondenceUpdate } = makeClient({ invoiceId: "inv-9" })
     await recordIssuedDocument(client, {

@@ -1,6 +1,7 @@
 "use client"
 
-import { useJobDetail, useAssignableUsers } from "@/lib/use-data"
+import { useJobDetail, useAssignableUsers, useJobDocumentVersions } from "@/lib/use-data"
+import { countChangedDocuments } from "@/lib/documents/issued-documents"
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -181,6 +182,10 @@ export default function JobDetailPage() {
   const searchParams = useSearchParams()
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
+  // Quote / invoice / voucher PDFs emailed to the client that the booking has since moved on from;
+  // surfaced on the Documents tab label so a change is not hidden behind a tab nobody opened.
+  const { data: documentVersionsData } = useJobDocumentVersions(id)
+  const changedDocumentCount = countChangedDocuments(documentVersionsData?.versions ?? [])
   // The pathname whose section has already been checked against the record — see the
   // canonical-URL effect below.
   const canonicalCheckedPathRef = useRef<string | null>(null)
@@ -1054,7 +1059,14 @@ export default function JobDetailPage() {
           <TabsTrigger value="references" className="text-xs">Voucher Details</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
-          <TabsTrigger value="documents" className="text-xs">Documents ({documents.length})</TabsTrigger>
+          <TabsTrigger value="documents" className="text-xs">
+            Documents ({documents.length})
+            {changedDocumentCount > 0 ? (
+              <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-1.5 text-[10px] font-medium text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
+                {changedDocumentCount} changed
+              </span>
+            ) : null}
+          </TabsTrigger>
           <TabsTrigger value="notes" className="text-xs">Notes</TabsTrigger>
           <TabsTrigger value="audit" className="text-xs">Audit Log</TabsTrigger>
         </TabsList>

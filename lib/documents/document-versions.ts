@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
+import { computeContentFingerprint } from "@/lib/documents/content-fingerprint"
 
 /**
  * Issued-document history.
@@ -85,6 +86,8 @@ export interface CaptureIssuedDocumentInput {
   voucherId?: string | null
   issuedBy?: string | null
   issueKind?: "sent" | "saved"
+  /** Fingerprint of the booking data the document was printed from (lib/documents/content-fingerprint.ts). */
+  contentFingerprint?: string | null
 }
 
 type Client = SupabaseClient<Database>
@@ -176,6 +179,7 @@ export async function captureIssuedDocument(
           size_bytes: bytes.length,
           issue_kind: input.issueKind ?? "sent",
           issued_by: input.issuedBy ?? null,
+          content_fingerprint: input.contentFingerprint ?? null,
         })
         .select("id")
         .single()
@@ -241,6 +245,20 @@ export async function recordIssuedDocument(supabase: Client, input: RecordIssued
       invoiceId = data?.id ?? null
     }
 
+    // What the booking looked like when this went out. Failing to take it only means this copy can
+    // never be reported as changed ("unknown"); it must not stop the copy being kept.
+    let contentFingerprint: string | null = null
+    try {
+      contentFingerprint = await computeContentFingerprint(supabase, {
+        bookingId: input.bookingId,
+        docType,
+        quoteId: docType === "quote" ? input.quoteId ?? null : null,
+        invoiceId,
+      })
+    } catch (error) {
+      console.error("document-versions:fingerprint", error)
+    }
+
     const versionId = await captureIssuedDocument(supabase, {
       bookingId: input.bookingId,
       docType,
@@ -249,6 +267,7 @@ export async function recordIssuedDocument(supabase: Client, input: RecordIssued
       invoiceId,
       voucherId: docType === "voucher" ? input.voucherId ?? null : null,
       issuedBy: input.issuedBy ?? null,
+      contentFingerprint,
     })
     if (!versionId) return
 

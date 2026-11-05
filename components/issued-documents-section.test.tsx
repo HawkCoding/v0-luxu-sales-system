@@ -16,6 +16,7 @@ function version(overrides: Partial<IssuedDocumentVersion> & Pick<IssuedDocument
     issuedAt: "2026-11-01T10:00:00.000Z",
     issueKind: "sent",
     quoteNumber: null,
+    contentChanged: null,
     sends: [
       { correspondenceId: `cor-${overrides.id}`, subject: "Sent", sentAt: "2026-11-01T10:00:00.000Z", recipients: ["ada@example.test"] },
     ],
@@ -70,6 +71,24 @@ describe("IssuedDocumentsSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /1 earlier copy/ }))
     expect(screen.getByRole("button", { name: "Download Quote copy 1" })).toBeTruthy()
+  })
+
+  it("flags a latest copy the booking has moved on from, and only that one", () => {
+    dataMocks.useJobDocumentVersions.mockReturnValue({
+      data: {
+        versions: [
+          version({ id: "q1", docType: "quote", versionNo: 1, contentChanged: true }),
+          version({ id: "i1", docType: "invoice", versionNo: 1, contentChanged: false }),
+          version({ id: "v1", docType: "voucher", versionNo: 1, contentChanged: null }),
+        ],
+      },
+      error: undefined,
+    })
+
+    render(<IssuedDocumentsSection bookingId="b1" />)
+
+    expect(screen.getAllByText("Changed since sent")).toHaveLength(1)
+    expect(screen.getByText(/may be holding an out-of-date copy/)).toBeTruthy()
   })
 
   it("opens the stored copy through a signed link when downloading", async () => {
