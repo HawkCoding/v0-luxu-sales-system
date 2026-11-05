@@ -111,7 +111,13 @@ export async function ensureQuotePdf(
     quoteBooking?.booking_number,
   )
 
-  if (!force && quote.pdf_document_id) {
+  // A superseded or cancelled quote is a record of what was once offered. Its lines are frozen, but
+  // the dates, guests and itinerary a render reads are the booking's CURRENT ones, so re-rendering
+  // it (the download button forces one) would overwrite the stored file with a document that never
+  // existed. Serve what was stored; only render it if it never had a file.
+  const historical = quote.status === "superseded" || quote.status === "cancelled"
+
+  if ((!force || historical) && quote.pdf_document_id) {
     const { data: existingDoc } = await supabase
       .from("documents")
       .select("id, booking_id, kind, status, storage_path, created_at")

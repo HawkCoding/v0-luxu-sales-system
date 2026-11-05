@@ -124,6 +124,32 @@ describe("JobQuotesTab — Amend", () => {
   })
 })
 
+describe("JobQuotesTab — sending", () => {
+  it("sends the draft when there is one", () => {
+    renderTab([buildQuote({ status: "draft" })])
+    expect(screen.getByRole("button", { name: "Preview & Send" })).toBeEnabled()
+  })
+
+  it.each(["sent", "accepted"] as const)(
+    "lets the %s quote the client holds be sent again once nothing else is waiting",
+    (status) => {
+      renderTab([buildQuote({ status })])
+      expect(screen.getByRole("button", { name: "Preview & Send Updated Quote" })).toBeEnabled()
+    },
+  )
+
+  it("does not offer to resend a superseded or cancelled quote", () => {
+    renderTab([buildQuote({ status: "superseded" }), buildQuote({ id: "q2", status: "cancelled" })])
+    expect(screen.getByRole("button", { name: "Preview & Send" })).toBeDisabled()
+  })
+
+  it("prefers a waiting draft over resending the issued quote", () => {
+    renderTab([buildQuote({ id: "issued", status: "accepted" }), buildQuote({ id: "draft", status: "draft" })])
+    expect(screen.getByRole("button", { name: "Preview & Send" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "Preview & Send Updated Quote" })).not.toBeInTheDocument()
+  })
+})
+
 describe("JobQuotesTab — line dates", () => {
   it("shows a dash for a line with no pricing snapshot", () => {
     renderTab([buildQuote({})])

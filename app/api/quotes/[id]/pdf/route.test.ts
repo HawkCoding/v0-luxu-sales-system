@@ -23,7 +23,9 @@ const QUOTE_ID = "00000000-0000-4000-8000-00000000eeee"
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 const DOCUMENT_ID = "00000000-0000-4000-8000-00000000dddd"
 
-function buildAuth() {
+const STORED_PATH = "quotes/LTT-26-0001-Q1/Quote-26-0001.pdf"
+
+function buildAuth(options: { status?: string; pdfDocumentId?: string | null } = {}) {
   const storageUpload = vi.fn(async () => ({ error: null }))
   const storageSignedUrl = vi.fn(async () => ({
     data: { signedUrl: "https://storage.example.com/quote.pdf" },
@@ -44,7 +46,8 @@ function buildAuth() {
                   id: QUOTE_ID,
                   booking_id: BOOKING_ID,
                   quote_number: "LTT-26-0001-Q1",
-                  status: "ready",
+                  status: options.status ?? "ready",
+                  pdf_document_id: options.pdfDocumentId ?? null,
                   validity_until: "2026-06-01",
                   subtotal: 1000,
                   total: 1000,
@@ -84,6 +87,20 @@ function buildAuth() {
                 in: vi.fn(() => ({
                   order: vi.fn(async () => ({ data: [], error: null })),
                 })),
+              })),
+              // The already-stored file a non-forced request serves instead of rendering.
+              maybeSingle: vi.fn(async () => ({
+                data: options.pdfDocumentId
+                  ? {
+                      id: options.pdfDocumentId,
+                      booking_id: BOOKING_ID,
+                      kind: "quote_pdf",
+                      status: "generated",
+                      storage_path: STORED_PATH,
+                      created_at: "2026-05-02T00:00:00.000Z",
+                    }
+                  : null,
+                error: null,
               })),
             })),
           })),
@@ -187,6 +204,38 @@ describe("POST /api/quotes/[id]/pdf", () => {
     const body = await res.json()
     expect(body.document.id).toBe(DOCUMENT_ID)
     expect(body.url).toBe("https://storage.example.com/quote.pdf")
+  })
+
+  it("serves the stored file of a superseded quote instead of re-rendering it from the current booking", async () => {
+    const { storageUpload, storageSignedUrl, documentUpsert } = buildAuth({
+      status: "superseded",
+      pdfDocumentId: DOCUMENT_ID,
+    })
+
+    const res = await POST(new Request("http://localhost"), { params: Promise.resolve({ id: QUOTE_ID }) })
+
+    expect(res.status).toBe(200)
+    expect(pdfMocks.renderQuotePdf).not.toHaveBeenCalled()
+    expect(storageUpload).not.toHaveBeenCalled()
+    expect(documentUpsert).not.toHaveBeenCalled()
+    expect(storageSignedUrl).toHaveBeenCalledWith("LTT-26-0001-Q1/Quote-26-0001.pdf", 3600, {
+      download: "Quote-26-0001.pdf",
+    })
+    expect((await res.json()).document.id).toBe(DOCUMENT_ID)
+  })
+
+  it("still renders a superseded quote that never had a stored file", async () => {
+    buildAuth({ status: "superseded", pdfDocumentId: null })
+    const res = await POST(new Request("http://localhost"), { params: Promise.resolve({ id: QUOTE_ID }) })
+    expect(res.status).toBe(200)
+    expect(pdfMocks.renderQuotePdf).toHaveBeenCalledOnce()
+  })
+
+  it("still re-renders a live quote on request, so edits show up", async () => {
+    buildAuth({ status: "sent", pdfDocumentId: DOCUMENT_ID })
+    const res = await POST(new Request("http://localhost"), { params: Promise.resolve({ id: QUOTE_ID }) })
+    expect(res.status).toBe(200)
+    expect(pdfMocks.renderQuotePdf).toHaveBeenCalledOnce()
   })
 
   it("returns 500 when PDF render fails and does not upload to storage", async () => {
