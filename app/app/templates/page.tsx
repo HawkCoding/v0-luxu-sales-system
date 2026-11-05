@@ -331,7 +331,7 @@ export default function TemplatesPage() {
         return
       }
       toast.success("Template saved")
-      mutate()
+      await mutate()
       setEditing(null)
     } catch {
       toast.error("Failed to save template")

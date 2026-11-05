@@ -21,6 +21,7 @@ import { AuthHashErrorNotice } from "@/components/auth-hash-error-notice"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { EmailTestModeBanner } from "@/components/email-test-mode-banner"
 import { SessionTimeoutGuard } from "@/components/session-timeout-guard"
+import { ApiSessionRecovery } from "@/components/api-session-recovery"
 import { useEnquiryCount } from "@/lib/use-data"
 import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 import { useClientErrorReporter, usePointerEventsGuard } from "@/hooks/use-pointer-events-guard"
@@ -230,6 +231,7 @@ function AppShell({ children }: { children: ReactNode }) {
       className="flex flex-1 min-h-0 overflow-hidden bg-app-canvas"
     >
       <SessionTimeoutGuard />
+      <ApiSessionRecovery />
       {mobileOpen && (
         <div className="fixed inset-0 bg-foreground/20 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}

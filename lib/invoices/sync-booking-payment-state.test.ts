@@ -160,6 +160,26 @@ describe("syncBookingPaymentState", () => {
     expect(result?.invoiceBalance).toBe(9000)
   })
 
+  it("sets deposit_paid true when payments reach R5,000 even if below the invoiced deposit", async () => {
+    const { supabase } = makeSupabase({
+      quote: { total: 100000 },
+      payments: [{ amount: 5000 }],
+      depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 25000, status: "sent" },
+    })
+    const result = await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(result?.depositPaid).toBe(true)
+  })
+
+  it("keeps deposit_paid false below R5,000 when the invoiced deposit is larger", async () => {
+    const { supabase } = makeSupabase({
+      quote: { total: 100000 },
+      payments: [{ amount: 4999 }],
+      depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 25000, status: "sent" },
+    })
+    const result = await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(result?.depositPaid).toBe(false)
+  })
+
   it("sets deposit_paid true when payments exactly cover deposit threshold", async () => {
     const { supabase, invoiceUpdate, auditInsert } = makeSupabase({
       payments: [{ amount: 2500 }],
