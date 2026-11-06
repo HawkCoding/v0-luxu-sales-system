@@ -1417,10 +1417,65 @@ export async function PATCH(
     }
   }
 
+  // Removed cards go first. The overlap exclusion constraint is checked row by row, so a card
+  // that is being merged into a wider period (or replaced) would otherwise collide with the
+  // old row that is still waiting to be deleted below. The overlap check above already ran on
+  // the incoming set only, so the DB must not be asked to compare against rows that are leaving.
+  if (rateCardIdsToDelete.length > 0) {
+    const { error: deleteRateCardsError } = await deleteInChunks(
+      supabase,
+      "rate_cards",
+      rateCardIdsToDelete,
+    )
+
+    if (deleteRateCardsError) {
+      logSupplierMutationError("rate-cards-delete", supplierId, deleteRateCardsError)
+      return NextResponse.json(
+        { error: "Failed to remove old supplier rate cards" },
+        { status: 500 },
+      )
+    }
+  }
+
   if (normalizedRateCards.length > 0) {
-    const { error: rateCardsError } = await supabase
+    let { error: rateCardsError } = await supabase
       .from("rate_cards")
       .upsert(normalizedRateCards, { onConflict: "id" })
+
+    // Edited periods can also collide with each other mid-batch (one shrinks while its
+    // neighbour grows into the freed days). The final set is overlap-free, so retry row by row
+    // in passes: each pass applies whatever now fits until nothing is left or no progress.
+    if (rateCardsError?.code === "23P01") {
+      let pending = [...normalizedRateCards]
+      let lastError = rateCardsError
+      while (pending.length > 0) {
+        const stillPending: typeof pending = []
+        for (const rateCard of pending) {
+          const { error: rowError } = await supabase
+            .from("rate_cards")
+            .upsert(rateCard, { onConflict: "id" })
+          if (rowError) {
+            if (rowError.code !== "23P01") {
+              lastError = rowError
+              stillPending.length = 0
+              stillPending.push(rateCard)
+              break
+            }
+            lastError = rowError
+            stillPending.push(rateCard)
+          }
+        }
+        if (stillPending.length === 0) {
+          rateCardsError = null
+          break
+        }
+        if (stillPending.length === pending.length) {
+          rateCardsError = lastError
+          break
+        }
+        pending = stillPending
+      }
+    }
 
     if (rateCardsError) {
       logSupplierMutationError("rate-cards-upsert", supplierId, rateCardsError)
@@ -1444,22 +1499,6 @@ export async function PATCH(
       }
       return NextResponse.json(
         { error: "Failed to update supplier rate cards" },
-        { status: 500 },
-      )
-    }
-  }
-
-  if (rateCardIdsToDelete.length > 0) {
-    const { error: deleteRateCardsError } = await deleteInChunks(
-      supabase,
-      "rate_cards",
-      rateCardIdsToDelete,
-    )
-
-    if (deleteRateCardsError) {
-      logSupplierMutationError("rate-cards-delete", supplierId, deleteRateCardsError)
-      return NextResponse.json(
-        { error: "Failed to remove old supplier rate cards" },
         { status: 500 },
       )
     }
