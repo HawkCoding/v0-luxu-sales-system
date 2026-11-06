@@ -60,6 +60,9 @@ import { describeEmptyUnit, findEmptyUnitIndexes } from "@/lib/packages/unit-hea
 // services PATCH so all three agree.
 import { primaryLegIdOf, RATE_SPLIT_SUPPLIER_KINDS } from "@/lib/packages/pax-groups"
 
+/** Qty basis shown on a tour line priced by a typed override -- the amount is the unit's total. */
+const TOUR_OVERRIDE_UNIT_LABEL = "total price"
+
 /** An airline seat, hotel room or cruise cabin may hold more or fewer people than the booking, but
  *  never nobody -- it would price at R0 per person or bill an empty room (lib/packages/unit-headcount.ts). */
 function assertNoEmptyUnits(
@@ -1893,7 +1896,9 @@ export async function buildPackageQuoteLineItems({
               supplierDescription,
               suiteTypeId,
               suiteTypeName,
-              unit,
+              // The typed amount is the whole unit's total, so the leg's "per person" label would
+              // misread it as one traveller's fare.
+              unit: TOUR_OVERRIDE_UNIT_LABEL,
               hideRoomConfig: true,
               sourceCurrency: overrideCurrency,
               tourOverride: {
