@@ -2065,6 +2065,8 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].qty).toBe(1)
     expect(lineItems[0].unitPrice).toBe(2000)
     expect(lineItems[0].total).toBe(2000)
+    // The Qty column must not read "per person" -- the amount is the whole unit's total.
+    expect(lineItems[0].pricingSnapshot?.unit).toBe("total price")
     expect(lineItems[0].pricingSnapshot?.manualTourPrice).toBe(2000)
     expect(lineItems[0].pricingSnapshot?.manualTourPriceBase).toBe(850)
     expect(lineItems[0].pricingSnapshot?.manualTourPriceSetByName).toBe("Carmen de Jager")

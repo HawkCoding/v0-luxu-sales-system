@@ -513,7 +513,7 @@ function TourPriceOverride({
     <div className="space-y-3 rounded-md border bg-muted/40 p-3 md:col-span-2 xl:col-span-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <Label>Price override</Label>
+          <Label>Total price override</Label>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -525,8 +525,8 @@ function TourPriceOverride({
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-64">
-              The client sees only the amount. This price applies to this booking alone and is
-              never saved as a rate.
+              Enter the total for everyone on this tour, not a per-person price. The client sees only
+              the amount. This price applies to this booking alone and is never saved as a rate.
               {unit.manualTourPriceSetAt ? ` Last set ${formatDisplayDate(unit.manualTourPriceSetAt)}.` : ""}
             </TooltipContent>
           </Tooltip>
@@ -555,9 +555,9 @@ function TourPriceOverride({
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })
-                : "Flat price"
+                : "Total price"
             }
-            aria-label={`Price override for tour unit ${index + 1}`}
+            aria-label={`Total price override for tour unit ${index + 1}`}
             value={unit.manualTourPrice ?? null}
             onValueChange={onChange}
           />
@@ -584,8 +584,8 @@ function TourPriceOverride({
           </div>
           <p className="text-xs text-muted-foreground">
             {baseRateCard
-              ? `Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} per adult.`
-              : "No rate card covers this tour, so nothing is being replaced."}
+              ? `Total for all guests. Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} per adult.`
+              : "Total for all guests. No rate card covers this tour, so nothing is being replaced."}
           </p>
         </div>
       ) : (
