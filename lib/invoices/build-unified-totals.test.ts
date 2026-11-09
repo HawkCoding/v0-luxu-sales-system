@@ -42,6 +42,80 @@ describe("buildUnifiedTotals", () => {
     expect(totals.fullPayment).toBeUndefined()
   })
 
+  describe("recorded payments", () => {
+    const quoteTotal = 344180
+    const base = {
+      quoteTotal,
+      quoteSubtotal: quoteTotal,
+      quote: { ...makeBalance().quote, total: quoteTotal, subtotal: quoteTotal },
+    }
+
+    it("shows the recorded deposit and final payment instead of the calculated 25/75 split", () => {
+      const totals = buildUnifiedTotals({
+        balance: makeBalance({
+          ...base,
+          totalPaid: quoteTotal,
+          balance: 0,
+          payments: [
+            { amount: 85157.5, receivedAt: "2026-07-01" },
+            { amount: 259022.5, receivedAt: "2026-11-05" },
+          ],
+        }),
+        departureDate: "2026-12-01",
+        depositPercentage: 25,
+        depositAmount: 86045,
+      })
+      expect(totals.depositAmount).toBe(85157.5)
+      expect(totals.depositPercentage).toBeNull()
+      expect(totals.finalAmount).toBe(259022.5)
+      expect(totals.outstanding).toBe(0)
+    })
+
+    it("shows the amount still due as final while only the deposit is recorded", () => {
+      const totals = buildUnifiedTotals({
+        balance: makeBalance({
+          ...base,
+          totalPaid: 85157.5,
+          balance: 259022.5,
+          payments: [{ amount: 85157.5, receivedAt: "2026-07-01" }],
+        }),
+        departureDate: "2026-12-01",
+        depositPercentage: 25,
+        depositAmount: 86045,
+      })
+      expect(totals.depositAmount).toBe(85157.5)
+      expect(totals.finalAmount).toBe(259022.5)
+    })
+
+    it("keeps the calculated ladder when nothing is recorded", () => {
+      const totals = buildUnifiedTotals({
+        balance: makeBalance({ ...base, payments: [] }),
+        departureDate: "2026-12-01",
+        depositPercentage: 25,
+        depositAmount: 86045,
+      })
+      expect(totals.depositAmount).toBe(86045)
+      expect(totals.depositPercentage).toBe(25)
+      expect(totals.finalAmount).toBe(258135)
+    })
+
+    it("keeps the calculated ladder while a token payment has not covered the deposit", () => {
+      const totals = buildUnifiedTotals({
+        balance: makeBalance({
+          ...base,
+          totalPaid: 1000,
+          balance: 343180,
+          payments: [{ amount: 1000, receivedAt: "2026-07-01" }],
+        }),
+        departureDate: "2026-12-01",
+        depositPercentage: 25,
+        depositAmount: 86045,
+      })
+      expect(totals.depositAmount).toBe(86045)
+      expect(totals.depositPercentage).toBe(25)
+    })
+  })
+
   it("suppresses the deposit row and shows the full total in full mode", () => {
     const totals = buildUnifiedTotals({
       balance: makeBalance({ quoteTotal: 10000, balance: 10000 }),
