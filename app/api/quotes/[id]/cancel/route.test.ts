@@ -14,7 +14,15 @@ import { POST } from "./route"
 
 const QUOTE_ID = "00000000-0000-4000-8000-00000000dddd"
 
-function buildAuth(quoteData: { status: string } | null) {
+const PARENT_ID = "00000000-0000-4000-8000-00000000eeee"
+
+interface ParentOptions {
+  parentStatus?: string | null
+  /** Other revisions of the same parent. */
+  siblings?: Array<{ id: string; status: string }>
+}
+
+function buildAuth(quoteData: { status: string; parentQuoteId?: string | null } | null, parent: ParentOptions = {}) {
   const auditInsert = vi.fn(async () => ({ error: null }))
   const quoteUpdate = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
 
@@ -23,14 +31,29 @@ function buildAuth(quoteData: { status: string } | null) {
       if (table === "quotes") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              single: vi.fn(async () => ({
-                data: quoteData
-                  ? { id: QUOTE_ID, status: quoteData.status, quote_number: "BT-2026-0001-Q1", booking_id: "b1" }
-                  : null,
-                error: quoteData ? null : { message: "not found" },
-              })),
-            })),
+            eq: vi.fn((column: string) => {
+              if (column === "parent_quote_id") {
+                return { neq: vi.fn(async () => ({ data: parent.siblings ?? [], error: null })) }
+              }
+              return {
+                single: vi.fn(async () => ({
+                  data: quoteData
+                    ? {
+                        id: QUOTE_ID,
+                        status: quoteData.status,
+                        quote_number: "BT-2026-0001-Q1",
+                        booking_id: "b1",
+                        parent_quote_id: quoteData.parentQuoteId ?? null,
+                      }
+                    : null,
+                  error: quoteData ? null : { message: "not found" },
+                })),
+                maybeSingle: vi.fn(async () => ({
+                  data: parent.parentStatus ? { id: PARENT_ID, status: parent.parentStatus } : null,
+                  error: null,
+                })),
+              }
+            }),
           })),
           update: quoteUpdate,
         }
@@ -94,10 +117,59 @@ describe("POST /api/quotes/[id]/cancel", () => {
 
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toEqual({ id: QUOTE_ID, status: "cancelled" })
+    expect(body).toEqual({ id: QUOTE_ID, status: "cancelled", reactivatedQuoteId: null })
     expect(quoteUpdate).toHaveBeenCalledWith({ status: "cancelled" })
     expect(auditInsert).toHaveBeenCalledWith(
       expect.objectContaining({ action: "quote_cancelled", entity_id: QUOTE_ID }),
     )
+  })
+
+  describe("cancelling a revision", () => {
+    it("brings the superseded parent quote back as sent", async () => {
+      const { quoteUpdate, auditInsert } = buildAuth(
+        { status: "draft", parentQuoteId: PARENT_ID },
+        { parentStatus: "superseded" },
+      )
+      const res = await POST(req(), routeParams)
+
+      expect(res.status).toBe(200)
+      expect((await res.json()).reactivatedQuoteId).toBe(PARENT_ID)
+      expect(quoteUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }))
+      expect(auditInsert).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "quote_reactivated", entity_id: PARENT_ID }),
+      )
+    })
+
+    it("leaves the parent closed when another revision of it is still live", async () => {
+      const { quoteUpdate } = buildAuth(
+        { status: "draft", parentQuoteId: PARENT_ID },
+        { parentStatus: "superseded", siblings: [{ id: "other", status: "draft" }] },
+      )
+      const res = await POST(req(), routeParams)
+
+      expect(res.status).toBe(200)
+      expect((await res.json()).reactivatedQuoteId).toBeNull()
+      expect(quoteUpdate).toHaveBeenCalledTimes(1)
+    })
+
+    it("reactivates when the only other revisions are dead", async () => {
+      buildAuth(
+        { status: "draft", parentQuoteId: PARENT_ID },
+        { parentStatus: "superseded", siblings: [{ id: "old", status: "cancelled" }] },
+      )
+      const res = await POST(req(), routeParams)
+      expect((await res.json()).reactivatedQuoteId).toBe(PARENT_ID)
+    })
+
+    it("does not touch a parent that is not superseded", async () => {
+      const { quoteUpdate } = buildAuth(
+        { status: "draft", parentQuoteId: PARENT_ID },
+        { parentStatus: "accepted" },
+      )
+      const res = await POST(req(), routeParams)
+
+      expect((await res.json()).reactivatedQuoteId).toBeNull()
+      expect(quoteUpdate).toHaveBeenCalledTimes(1)
+    })
   })
 })

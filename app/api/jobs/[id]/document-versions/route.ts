@@ -19,6 +19,10 @@ const DOCUMENT_LABELS: Record<IssuedDocumentType, string> = {
   voucher: "voucher",
 }
 
+/** Quote statuses that become "sent" when the quote is saved without sending. An unpriced
+ *  (pricing_incomplete) quote is not a quote the client could hold, so it is left alone. */
+const PRE_SEND_QUOTE_STATUSES = new Set(["draft", "ready"])
+
 const saveSchema = z.object({
   /** The email kind the document would have been sent under; decides which document it is. */
   kind: z.enum(["quote", "invoice", "payment_received", "payment_reminder", "voucher"]),
@@ -246,6 +250,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   let attachments: IssuedAttachment[] = parsed.data.attachments ?? []
+  let savedQuote: { id: string; status: string } | null = null
 
   if (docType === "quote") {
     if (!parsed.data.quoteId) return jsonError("quoteId is required to save a quote", 400)
@@ -261,6 +266,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (quote.status === "superseded" || quote.status === "cancelled") {
       return jsonError("This quote has been replaced or cancelled — save the current quote instead.", 409)
     }
+    savedQuote = { id: quote.id, status: quote.status }
 
     try {
       const ensured = await ensureQuotePdf(supabase, quote.id, {
@@ -300,6 +306,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   })
 
   if (!versionId) return jsonError("A copy of the document could not be kept", 500)
+
+  // Saving a quote without sending still makes it the quote the client holds: an earlier version was
+  // already emailed (checked above), so the booking's "sent quote" gate must see it. Without this the
+  // quote stayed "Provisional" and blocked the move to Quote Accepted. last_sent_at is left alone
+  // because nothing was emailed.
+  if (savedQuote && PRE_SEND_QUOTE_STATUSES.has(savedQuote.status)) {
+    const { error: promoteError } = await supabase
+      .from("quotes")
+      .update({ status: "sent", updated_at: new Date().toISOString() })
+      .eq("id", savedQuote.id)
+      .eq("booking_id", bookingId)
+    if (promoteError) return safeSupabaseError("document-versions:save:quote-status", promoteError)
+
+    await writeAuditLog(supabase, {
+      actor: profile.actorName,
+      actorUserId: user.id,
+      entityType: "Quote",
+      entityId: savedQuote.id,
+      action: "quote_saved_without_sending",
+      before: { status: savedQuote.status },
+      after: { status: "sent" },
+    })
+  }
 
   await writeAuditLog(supabase, {
     actor: profile.actorName,
