@@ -224,10 +224,12 @@ export function JobQuotesTab({
     setCancellingQuoteId(quoteId)
     try {
       const response = await fetch(`/api/quotes/${quoteId}/cancel`, { method: "POST" })
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; reactivatedQuoteId?: string | null }
       if (!response.ok) throw new Error(payload.error ?? "Failed to cancel quote")
       mutate()
-      toast.success("Quote cancelled.")
+      toast.success(
+        payload.reactivatedQuoteId ? "Quote cancelled. The earlier quote is live again." : "Quote cancelled.",
+      )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to cancel quote")
     } finally {

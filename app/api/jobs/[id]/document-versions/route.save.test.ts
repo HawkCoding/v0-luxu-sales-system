@@ -40,6 +40,8 @@ interface Options {
 function mockAuth(options: Options = {}) {
   const download = vi.fn(async () => ({ data: new Blob(["quote-pdf-bytes"]), error: null }))
   const sentLookup = vi.fn()
+  const quoteUpdateEq = vi.fn(async () => ({ error: null }))
+  const quoteUpdate = vi.fn((_values: Record<string, unknown>) => ({ eq: vi.fn(() => ({ eq: quoteUpdateEq })) }))
   const supabase = {
     from: vi.fn((table: string) => {
       if (table === "document_versions") {
@@ -79,6 +81,7 @@ function mockAuth(options: Options = {}) {
       }
       if (table === "quotes") {
         return {
+          update: quoteUpdate,
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
@@ -100,7 +103,7 @@ function mockAuth(options: Options = {}) {
     ok: true,
     value: { supabase, user: { id: "u1" }, profile: { actorName: "Jane Doe" } },
   })
-  return { download, sentLookup }
+  return { download, sentLookup, quoteUpdate }
 }
 
 const invoiceAttachment = { filename: "Invoice-244453.pdf", contentBase64: "JVBERg==", contentType: "application/pdf" }
@@ -207,6 +210,31 @@ describe("POST /api/jobs/[id]/document-versions (save without sending)", () => {
       }),
     )
   })
+
+  it.each(["draft", "ready"])("marks a %s quote sent when it is saved without sending", async (status) => {
+    const { quoteUpdate } = mockAuth({ quote: { id: QUOTE_ID, booking_id: BOOKING_ID, status } })
+    const res = await call({ kind: "quote", quoteId: QUOTE_ID })
+
+    expect(res.status).toBe(200)
+    // last_sent_at is not written: nothing was emailed.
+    expect(quoteUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }))
+    expect(quoteUpdate.mock.calls[0][0]).not.toHaveProperty("last_sent_at")
+    expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "quote_saved_without_sending", entityId: QUOTE_ID }),
+    )
+  })
+
+  it.each(["sent", "accepted", "expired", "pricing_incomplete"])(
+    "leaves a %s quote's status alone when it is saved without sending",
+    async (status) => {
+      const { quoteUpdate } = mockAuth({ quote: { id: QUOTE_ID, booking_id: BOOKING_ID, status } })
+      const res = await call({ kind: "quote", quoteId: QUOTE_ID })
+
+      expect(res.status).toBe(200)
+      expect(quoteUpdate).not.toHaveBeenCalled()
+    },
+  )
 
   it("needs a quote id for a quote, and refuses another booking's or a replaced quote", async () => {
     mockAuth()
