@@ -182,11 +182,11 @@ describe("tripTitle and departureDateShort", () => {
     )
 
     expect(tokens.availability).toBe(
-      "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite with a ¾ bath.",
+      "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with showers & 1 x Double bedded Deluxe Suite with a ¾ bath.",
     )
     // The body's copy carries Carmen's bold; a block outranks the plain token there.
     expect(blocks.availability).toBe(
-      "On the <strong>Pretoria to Cape Town</strong> departure, <strong>11 August 2026</strong> we can still assist you with <strong>5 x Twin bedded Deluxe Suites with a shower &amp; 1 x Double bedded Deluxe Suite with a ¾ bath</strong>.",
+      "On the <strong>Pretoria to Cape Town</strong> departure, <strong>11 August 2026</strong> we can still assist you with <strong>5 x Twin bedded Deluxe Suites with showers &amp; 1 x Double bedded Deluxe Suite with a ¾ bath</strong>.",
     )
     expect(blocks.guestInfo).toContain(
       '<strong style="font-size:12px;">Deluxe Suite 2</strong><br/>2.1 Mr Jun Chen',

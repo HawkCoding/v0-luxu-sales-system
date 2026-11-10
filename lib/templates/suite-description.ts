@@ -242,7 +242,7 @@ export function buildSuiteTokens(
 }
 
 /**
- * "5 Twin bedded Deluxe Suites with a shower and a Double bedded Deluxe Suite with a shower" —
+ * "5 Twin bedded Deluxe Suites with showers and a Double bedded Deluxe Suite with a shower" —
  * identical phrases counted by the units behind them (unitKeys), each distinct one with its own
  * article or count. A phrase whose selections carry no unit keys counts once, so a quote priced
  * before unit refs existed reads exactly as it did.

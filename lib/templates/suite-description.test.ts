@@ -119,6 +119,22 @@ describe("buildSuiteTokens", () => {
     )
   })
 
+  it("gives several identical suites a plural bathroom, one suite keeps the singular", () => {
+    const twin = {
+      suiteTypeName: "Deluxe",
+      bedroomType: "Twin",
+      bathroomType: "Shower",
+      supplierKind: "train_operator" as const,
+    }
+
+    expect(buildSuiteTokens([{ ...twin, unitKeys: ["a|1", "a|2"] }]).suiteDescription).toBe(
+      "2 Twin bedded Deluxe Suites with showers",
+    )
+    expect(buildSuiteTokens([{ ...twin, unitKeys: ["a|1"] }]).suiteDescription).toBe(
+      "a Twin bedded Deluxe Suite with a shower",
+    )
+  })
+
   it("joins three suites with commas and a final 'and'", () => {
     const tokens = buildSuiteTokens([
       { suiteTypeName: "A" },
@@ -409,7 +425,7 @@ describe("{{suiteDescription}} counting suites", () => {
       { ...double, unitKeys: ["u6"] },
     ]
     expect(buildSuiteTokens(selections).suiteDescription).toBe(
-      "5 Twin bedded Deluxe Suites with a shower and a Double bedded Deluxe Suite with a shower",
+      "5 Twin bedded Deluxe Suites with showers and a Double bedded Deluxe Suite with a shower",
     )
   })
 
@@ -427,7 +443,7 @@ describe("{{suiteDescription}} counting suites", () => {
       snapshot({ supplierKind: "train_operator", selectedVariants: variants("Double"), unitRefs: [ref(4, "u5")] }),
     ])
     expect(buildSuiteTokens(selections).suiteDescription).toBe(
-      "4 Twin bedded Deluxe Suites with a shower and a Double bedded Deluxe Suite with a shower",
+      "4 Twin bedded Deluxe Suites with showers and a Double bedded Deluxe Suite with a shower",
     )
   })
 

@@ -432,7 +432,7 @@ const SUITE_NOUN_PATTERN =
 const CONFIGURATION_START = /\s+with\s|,|\s-\s/i
 
 /** "Deluxe Suite" → "Deluxe Suites", "Twin bedded Deluxe Suite with a shower" → "Twin bedded Deluxe
- *  Suites with a shower" — the type's own noun (the last one before any configuration) takes the
+ *  Suites with showers" — the type's own noun (the last one before any configuration) takes the
  *  plural. Null when the type carries none to pluralise. */
 function pluralSuiteLabel(label: string): string | null {
   const configurationAt = label.search(CONFIGURATION_START)
@@ -446,7 +446,25 @@ function pluralSuiteLabel(label: string): string | null {
   if (!last || last.index === undefined) return null
   if (last[2]) return label
   const end = last.index + last[1].length
-  return `${label.slice(0, end)}s${label.slice(end)}`
+  return `${label.slice(0, end)}s${pluralBathroomTail(label.slice(end))}`
+}
+
+/** "with a shower" → "with showers": several suites each have their own bathroom, so a singular
+ *  "with a shower" reads as one shared by all of them. Only an article-led "with a/an …" is touched,
+ *  up to the next comma (the layout): "with a shower and bath, Crosswise" → "with showers and baths,
+ *  Crosswise". A configuration with no article ("with Shower") is left as written. */
+function pluralBathroomTail(tail: string): string {
+  return tail.replace(/\bwith\s+an?\s+([^,]+)/i, (_whole, bathroom: string) => {
+    const plural = bathroom
+      .split(/(\s+and\s+)/i)
+      .map((part, index) =>
+        index % 2 === 1 ? part : part.replace(/(\S+)(\s*)$/, (_w, word: string, space: string) =>
+          `${/s$/i.test(word) ? word : `${word}s`}${space}`,
+        ),
+      )
+      .join("")
+    return `with ${plural}`
+  })
 }
 
 /** "Deluxe Suite" → "Deluxe Suites", "Twin Deluxe Suite with Shower" → "Twin Deluxe Suites with

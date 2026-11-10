@@ -65,6 +65,21 @@ describe("pluralUnitLabel", () => {
     )
     expect(pluralUnitLabel("Presidential")).toBe("Presidential")
   })
+
+  it("pluralises an article-led bathroom so several suites don't share one", () => {
+    expect(pluralUnitLabel("Twin bedded Deluxe Suite with a shower")).toBe(
+      "Twin bedded Deluxe Suites with showers",
+    )
+    expect(pluralUnitLabel("Double bedded Deluxe Suite with a ¾ bath")).toBe(
+      "Double bedded Deluxe Suites with ¾ baths",
+    )
+    expect(pluralUnitLabel("Twin bedded Royal Suite with a shower and bath, Lengthways")).toBe(
+      "Twin bedded Royal Suites with showers and baths, Lengthways",
+    )
+    expect(pluralUnitLabel("Family Suite with an en-suite bathroom")).toBe(
+      "Family Suites with en-suite bathrooms",
+    )
+  })
 })
 
 describe("TRAVEL_DATES_LABEL", () => {
@@ -1334,7 +1349,7 @@ describe("room and suite counts in the itinerary sentence", () => {
           itinerarySuiteCounts: [{ label: "Twin bedded Deluxe Suite with a shower", count: 3 }],
         },
       }),
-    ).toContain("in 3 Twin bedded Deluxe Suites with a shower on")
+    ).toContain("in 3 Twin bedded Deluxe Suites with showers on")
   })
 
   it("pluralises the room type's noun, never an en-suite bathroom's", () => {
@@ -1352,7 +1367,7 @@ describe("room and suite counts in the itinerary sentence", () => {
           itinerarySuiteCounts: [{ label: "Double bedded Deluxe Suite with an En Suite Shower", count: 2 }],
         },
       }),
-    ).toContain("in 2 Double bedded Deluxe Suites with an En Suite Shower on")
+    ).toContain("in 2 Double bedded Deluxe Suites with En Suite Showers on")
     expect(
       sentenceOf({
         ...trainBlock,
@@ -1361,7 +1376,7 @@ describe("room and suite counts in the itinerary sentence", () => {
           itinerarySuiteCounts: [{ label: "Double bedded Deluxe Suite with a shower, Lengthways", count: 2 }],
         },
       }),
-    ).toContain("in 2 Double bedded Deluxe Suites with a shower, Lengthways on")
+    ).toContain("in 2 Double bedded Deluxe Suites with showers, Lengthways on")
   })
 
   it("uses 'a' before a vowel letter with a consonant sound", () => {

@@ -125,13 +125,13 @@ describe("buildGuestHeadings", () => {
 describe("buildAvailabilitySentence", () => {
   it("counts the suites by bedroom, suite and bathroom type on the route's departure, in the {{suiteDescription}} grammar", () => {
     expect(buildAvailabilitySentence(carmenView())).toBe(
-      "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite with a ¾ bath.",
+      "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with showers & 1 x Double bedded Deluxe Suite with a ¾ bath.",
     )
   })
 
   it("puts the route, date and suites in bold for the email body, escaping every value", () => {
     expect(buildAvailabilityHtml(carmenView())).toBe(
-      "On the <strong>Pretoria to Cape Town</strong> departure, <strong>11 August 2026</strong> we can still assist you with <strong>5 x Twin bedded Deluxe Suites with a shower &amp; 1 x Double bedded Deluxe Suite with a ¾ bath</strong>.",
+      "On the <strong>Pretoria to Cape Town</strong> departure, <strong>11 August 2026</strong> we can still assist you with <strong>5 x Twin bedded Deluxe Suites with showers &amp; 1 x Double bedded Deluxe Suite with a ¾ bath</strong>.",
     )
     const view = carmenView()
     expect(buildAvailabilityHtml({ ...view, routeName: "<i>A</i> to B" })).toContain("<strong>&lt;i&gt;A&lt;/i&gt; to B</strong>")
