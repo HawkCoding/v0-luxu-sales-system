@@ -497,6 +497,29 @@ export async function POST(req: Request) {
 
   if (error || !cor) return safeSupabaseError("correspondence:insert", error)
 
+  // One Booking-entity entry per send attempt, whatever its kind, so the booking's audit trail
+  // always shows what went out (or failed), to whom, and whether it was meant to move the stage.
+  await writeAuditLog(supabase, {
+    actor: profile.actorName,
+    actorUserId: auth.value.user.id,
+    entityType: "Booking",
+    entityId: bookingId,
+    action: success ? "email_sent" : "email_failed",
+    meta: {
+      correspondence_id: cor.id,
+      kind: parsed.data.kind ?? null,
+      channel: parsed.data.channel ?? "email",
+      subject: cor.subject,
+      recipients: recipientsArray,
+      status: cor.status,
+      error: success ? null : sendResult.error ?? null,
+      quote_id: parsed.data.quoteId ?? null,
+      attachment_count: baseAttachments.length,
+      requested_stage: parsed.data.moveStage ?? null,
+      scheduled_followup: Boolean(parsed.data.scheduledCorrespondenceId),
+    },
+  })
+
   if (!success) {
     return Response.json(
       {
@@ -563,6 +586,7 @@ export async function POST(req: Request) {
       entityId: parsed.data.quoteId,
       action: "quote_sent",
       after: { status: nextStatus, sent_at: parsed.data.sentAt ?? now } as Json,
+      meta: { booking_id: bookingId, correspondence_id: cor.id },
     })
   }
 

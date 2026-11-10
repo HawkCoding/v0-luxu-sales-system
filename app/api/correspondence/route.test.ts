@@ -635,7 +635,16 @@ describe("POST /api/correspondence", () => {
     expect(mocks.pipelineHistoryInsert).not.toHaveBeenCalled()
     expect(mocks.quoteUpdate).not.toHaveBeenCalled()
     expect(mocks.followUpInsert).not.toHaveBeenCalled()
-    expect(mocks.auditInsert).not.toHaveBeenCalled()
+    // The failed attempt is still recorded on the booking, and nothing else is.
+    expect(mocks.auditInsert).toHaveBeenCalledTimes(1)
+    expect(mocks.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "email_failed",
+        entity_type: "Booking",
+        entity_id: BOOKING_ID,
+        meta_json: expect.objectContaining({ correspondence_id: "cor-1", error: "smtp 535" }),
+      }),
+    )
   })
 
   it("on successful quote_sent: updates quote, applies transition, writes pipeline_history and audit", async () => {
@@ -680,6 +689,18 @@ describe("POST /api/correspondence", () => {
     )
     expect(mocks.auditInsert).toHaveBeenCalledWith(
       expect.objectContaining({ action: "stage_change", entity_id: BOOKING_ID }),
+    )
+    expect(mocks.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "email_sent",
+        entity_type: "Booking",
+        entity_id: BOOKING_ID,
+        meta_json: expect.objectContaining({
+          correspondence_id: "cor-1",
+          kind: "quote",
+          requested_stage: "quote_sent",
+        }),
+      }),
     )
     expect(mocks.followUpInsert).toHaveBeenCalledTimes(1)
     // The booking's earlier pending follow-up is cancelled before the new one is drafted, so a
