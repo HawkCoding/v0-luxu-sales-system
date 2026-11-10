@@ -226,12 +226,12 @@ const trainOnlyNote: TemplateTokenSpec = {
 const availability: TemplateTokenSpec = {
   name: "availability",
   description:
-    "What the main product can still offer, counted from the booking's suites: \"On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite with a shower\" — the route, date and suites in bold in the email (empty unless the booking is split into suites)",
+    "What the main product can still offer, counted from the booking's suites: \"On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with showers & 1 x Double bedded Deluxe Suite with a shower\" — the route, date and suites in bold in the email (empty unless the booking is split into suites)",
   // Scalar so the editor keeps it inline inside a paragraph; the send path also supplies a block of
   // the same name carrying the bold, which the body prefers (renderTemplate).
   kind: "scalar",
   sample:
-    "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite with a ¾ bath.",
+    "On the Pretoria to Cape Town departure, 11 August 2026 we can still assist you with 5 x Twin bedded Deluxe Suites with showers & 1 x Double bedded Deluxe Suite with a ¾ bath.",
 }
 const paxGroupPricing: TemplateTokenSpec = {
   name: "paxGroupPricing",

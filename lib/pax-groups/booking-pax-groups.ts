@@ -309,7 +309,7 @@ function renderAvailability(
 
 /**
  * The {{availability}} sentence: "On the Pretoria to Cape Town departure, 11 August 2025 we can
- * still assist you with 5 x Twin bedded Deluxe Suites with a shower & 1 x Double bedded Deluxe Suite
+ * still assist you with 5 x Twin bedded Deluxe Suites with showers & 1 x Double bedded Deluxe Suite
  * with a shower." — the primary units counted by bedroom, suite and bathroom type, in the
  * {{suiteDescription}} grammar. Empty when no unit names a type. Plain text (a subject line, the
  * plain-text part); the body uses buildAvailabilityHtml.
