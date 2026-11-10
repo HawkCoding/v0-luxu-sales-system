@@ -189,6 +189,22 @@ function firstNonEmpty(...candidates: Person[][]): Person[] {
   return candidates.find((candidate) => candidate.length > 0) ?? []
 }
 
+/**
+ * The booking's per-person or fixed commission, excluding any Rounding bonus folded into the line
+ * (the bonus rides pro rata). Extras that carry their own commission are left to the scale.
+ */
+export function flatCommissionOf(lines: readonly { pricing_snapshot: unknown }[]): number {
+  let flat = 0
+  for (const line of lines) {
+    const commission = snapshotOf(line)?.commission
+    if (!commission || snapshotOf(line)?.isExtra) continue
+    if (commission.type !== "per_person" && commission.type !== "fixed") continue
+    const amount = Number(commission.amount)
+    if (Number.isFinite(amount) && amount > 0) flat += amount
+  }
+  return flat
+}
+
 function splitEvenly(amount: number, persons: readonly Person[]): void {
   if (persons.length === 0) return
   const share = amount / persons.length
@@ -232,8 +248,9 @@ function compareParts(a: Omit<PaxGroupPricePart, "count" | "perPerson">, b: Omit
  * - a recipient set that comes out empty falls back to the wider set, then to everyone;
  * - singleSupplementPct > 0 marks the recipients as carrying a single supplement.
  *
- * Every person is then scaled by `target / Σ`, which spreads commission (and the Rounding folded into
- * it) pro rata. Each group's persons are bucketed by (kind, rate type, supplement), each bucket priced
+ * A per-person or fixed commission is split equally per paying guest (flatCommissionOf) and taken
+ * off `target` first. Every person is then scaled by `(target − flat) / Σ`, which spreads a percent
+ * commission (and the Rounding folded into any commission) pro rata. Each group's persons are bucketed by (kind, rate type, supplement), each bucket priced
  * at its mean to the cent; identical buckets in different groups (a raw mean within half a cent)
  * share one price. The cent residual is then settled so the subtotals add up to `target` exactly, on
  * a bucket whose price no other group shares: a bucket of one, else the largest bucket the residual
@@ -352,7 +369,13 @@ export function allocatePaxGroups({ lines, target, rateLabels }: PaxGroupPricing
 
   const rawSum = everyone.reduce((sum, person) => sum + person.raw, 0)
   if (!(rawSum > 0) || everyone.some((person) => person.raw < 0)) return null
-  const scale = target / rawSum
+
+  // A per-person or fixed commission is a flat amount, not a share of price: every paying guest
+  // carries the same slice, so a single-supplement guest pays no more of it than a twin guest.
+  // Percent commission and the Rounding folded into the line stay in the scaled pool.
+  const flatTotal = flatCommissionOf(lines)
+  const flatShare = flatTotal > 0 && target - flatTotal > 0 ? flatTotal / everyone.length : 0
+  const scale = (target - flatShare * everyone.length) / rawSum
 
   const labelOf = (rateTypeId: string | null): string | null => {
     if (!rateTypeId) return null
@@ -372,7 +395,7 @@ export function allocatePaxGroups({ lines, target, rateLabels }: PaxGroupPricing
         sum: 0,
       }
       bucket.count += 1
-      bucket.sum += person.raw * scale
+      bucket.sum += person.raw * scale + flatShare
       buckets.set(key, bucket)
     }
     const parts: CentPart[] = [...buckets.values()]

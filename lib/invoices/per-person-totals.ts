@@ -1,3 +1,4 @@
+import { flatCommissionOf } from "@/lib/quotes/pax-group-pricing"
 import type { PricingSnapshot } from "@/lib/types"
 
 /** A quote_line_items row, or the subset this module needs. */
@@ -72,10 +73,11 @@ function splitRounded(total: number, adults: number, children: number, rawPerAdu
  *
  * With children: each person's own fare (per-person lines tagged adult or child, summed over every
  * leg) is exact. Everything else — per-room hotels, per-vehicle transfers, per-day rentals, a
- * fixed-package total, manual/overridden tour prices, commission of any kind, Agent Commission and
+ * fixed-package total, manual/overridden tour prices, a percent commission, Agent Commission and
  * Discount — is a shared cost, spread over the party in proportion to each person's own fare, so a
  * child on a lower fare carries a smaller share. That is the same as scaling both fares by
- * total ÷ (adult fares + child fares).
+ * total ÷ (adult fares + child fares). A per-person or fixed commission is the exception: it is the
+ * same flat slice per paying guest (adult or child), added to both rows after the rest is scaled.
  *
  * Children whose child fares exist but are all R0 (free on every fare) carry nothing: Total per
  * Child R0,00, adults total ÷ adults — and the same the other way round. When one side has no
@@ -111,9 +113,15 @@ export function derivePerPersonTotals({ lines, adults, children, total }: PerPer
     }
   }
 
+  // A per-person or fixed commission is a flat slice per paying guest, not a share of fare: take it
+  // off first, scale the rest, and add the same slice back to both rows.
+  const flat = flatCommissionOf(lines)
+  const flatShare = flat > 0 && total - flat > 0 ? flat / (adults + children) : 0
+  const rest = total - flatShare * (adults + children)
+
   const fares = adultFares + childFares
   if (adultFares > 0 && childFares > 0) {
-    return splitRounded(total, adults, children, (adultFares / adults) * (total / fares))
+    return splitRounded(total, adults, children, (adultFares / adults) * (rest / fares) + flatShare)
   }
   // Free on every fare of their own: that side carries nothing.
   if (adultFares > 0 && hasChildFareLine) return { perAdult: round2(total / adults), perChild: 0 }
@@ -121,7 +129,7 @@ export function derivePerPersonTotals({ lines, adults, children, total }: PerPer
 
   // One side (or both) has no fare line to weigh by: own fares stay with their side, shared costs
   // split equally per paying guest.
-  const shared = total - fares
-  if (shared < 0) return splitRounded(total, adults, children, (adultFares / adults) * (total / fares))
-  return splitRounded(total, adults, children, adultFares / adults + shared / (adults + children))
+  const shared = rest - fares
+  if (shared < 0) return splitRounded(total, adults, children, (adultFares / adults) * (rest / fares) + flatShare)
+  return splitRounded(total, adults, children, adultFares / adults + shared / (adults + children) + flatShare)
 }

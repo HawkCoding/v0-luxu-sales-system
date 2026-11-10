@@ -300,6 +300,71 @@ describe("allocatePaxGroups", () => {
     ])
   })
 
+  describe("flat commission", () => {
+    const meta = groups(2)
+    // Suite 1: two adults sharing at R20 000 each. Suite 2: one adult alone at R30 000 (R20 000 +
+    // 50% single supplement).
+    const fares = () => [
+      trainFare(40_000, meta, [ref({ index: 0, adults: 2, groups: ["g1"] })]),
+      trainFare(30_000, meta, [ref({ index: 1, adults: 1, groups: ["g2"] })], { singleSupplementPct: 50 }),
+    ]
+    const flat = (type: "per_person" | "fixed", amount: number, bonus = 0) =>
+      line(amount + bonus, {
+        passengerKind: "service",
+        commission: { type, value: type === "per_person" ? amount / 3 : amount, amount, source: "line", ...(bonus ? { bonus } : {}) },
+      })
+
+    it("gives each guest the same slice of a per-person commission, single supplement or not", () => {
+      // R2 000 a head: 2 × (R20 000 + R2 000) and R30 000 + R2 000. Spread by price it would be
+      // R43 429 / R32 571.
+      const result = allocatePaxGroups({ lines: [...fares(), flat("per_person", 6_000)], target: 76_000 })
+      expect(result?.lines.map((groupLine) => groupLine.subtotal)).toEqual([44_000, 32_000])
+      expect(result?.lines[0].parts[0]).toMatchObject({ count: 2, perPerson: 22_000 })
+      expectAddsUp(result, 76_000)
+    })
+
+    it("splits a fixed commission equally per guest", () => {
+      const result = allocatePaxGroups({ lines: [...fares(), flat("fixed", 6_000)], target: 76_000 })
+      expect(result?.lines.map((groupLine) => groupLine.subtotal)).toEqual([44_000, 32_000])
+      expectAddsUp(result, 76_000)
+    })
+
+    it("spreads the Rounding folded into the commission pro rata, the commission itself per guest", () => {
+      // R100 of Rounding rides the R70 000 of fares (+0,143%), the R6 000 stays R2 000 a head:
+      // 2 × (R20 028,57 + R2 000) and R30 042,86 + R2 000.
+      const result = allocatePaxGroups({ lines: [...fares(), flat("per_person", 6_000, 100)], target: 76_100 })
+      expect(result?.lines.map((groupLine) => groupLine.subtotal)).toEqual([44_057.14, 32_042.86])
+      expectAddsUp(result, 76_100)
+    })
+
+    it("still spreads a percent commission pro rata", () => {
+      const percent = line(7_000, {
+        passengerKind: "service",
+        commission: { type: "percent", value: 10, amount: 7_000, source: "line" },
+      })
+      const result = allocatePaxGroups({ lines: [...fares(), percent], target: 77_000 })
+      expect(result?.lines.map((groupLine) => groupLine.subtotal)).toEqual([44_000, 33_000])
+    })
+
+    it("falls back to pro rata when the flat amount would leave nothing for the fares", () => {
+      const result = allocatePaxGroups({ lines: [...fares(), flat("fixed", 80_000)], target: 70_000 })
+      expectAddsUp(result, 70_000)
+    })
+
+    it("gives a child the same flat slice as an adult", () => {
+      const lines = [
+        trainFare(20_000, meta, [ref({ index: 0, adults: 1, children: 1, groups: ["g1"] })]),
+        trainFare(10_000, meta, [ref({ index: 0, adults: 1, children: 1, groups: ["g1"] })], { passengerKind: "child" }),
+        trainFare(20_000, meta, [ref({ index: 1, adults: 1, groups: ["g2"] })]),
+        flat("per_person", 6_000),
+      ]
+      const result = allocatePaxGroups({ lines, target: 56_000 })
+      // Fares R20 000 / R10 000 / R20 000 plus R2 000 a head.
+      expect(result?.lines.map((groupLine) => groupLine.subtotal)).toEqual([34_000, 22_000])
+      expect(result?.lines[0].parts.map((part) => part.perPerson)).toEqual([22_000, 12_000])
+    })
+  })
+
   it("gives an infant's fare to the adults of the infant's suite", () => {
     const meta = groups(2)
     const lines = [

@@ -61,12 +61,12 @@ describe("derivePerPersonTotals", () => {
     expect(reconstructedCents(result, 2, 2)).toBe(13_000_000)
   })
 
-  it("spreads commission, Agent Commission and Discount the same way", () => {
+  it("spreads a percent commission, Agent Commission and Discount pro rata to the fares", () => {
     const commission = line(9_000, {
       legId: null,
       passengerKind: "service",
       unit: "per person",
-      commission: { type: "per_person", value: 2_250, amount: 9_000, source: "line" } as PricingSnapshot["commission"],
+      commission: { type: "percent", value: 10, amount: 9_000, source: "line" } as PricingSnapshot["commission"],
     })
     // R90 000 of fares + R9 000 commission − R13 500 discount = R85 500, i.e. 95% of the fares.
     expect(
@@ -77,6 +77,42 @@ describe("derivePerPersonTotals", () => {
         total: 85_500,
       }),
     ).toEqual({ perAdult: 28_500, perChild: 14_250 })
+  })
+
+  it("gives every paying guest the same slice of a per-person commission, child or adult", () => {
+    const commission = line(9_000, {
+      legId: null,
+      passengerKind: "service",
+      unit: "per person",
+      commission: { type: "per_person", value: 2_250, amount: 9_000, source: "line" } as PricingSnapshot["commission"],
+    })
+    // R90 000 of fares + R9 000 commission − R13 500 discount = R85 500. The R9 000 is R2 250 a
+    // head; the rest (R76 500) is 85% of the fares.
+    const result = derivePerPersonTotals({
+      lines: [adultFare(60_000), childFare(30_000), commission],
+      adults: 2,
+      children: 2,
+      total: 85_500,
+    })
+    expect(result).toEqual({ perAdult: 27_750, perChild: 15_000 })
+    expect(reconstructedCents(result, 2, 2)).toBe(8_550_000)
+  })
+
+  it("splits a fixed commission equally per paying guest", () => {
+    const commission = line(8_000, {
+      legId: null,
+      passengerKind: "service",
+      unit: "per booking",
+      commission: { type: "fixed", value: 8_000, amount: 8_000, source: "line" } as PricingSnapshot["commission"],
+    })
+    // Fares R60 000 + R30 000, fixed R8 000 across 4 guests = R2 000 each; total R98 000.
+    const result = derivePerPersonTotals({
+      lines: [adultFare(60_000), childFare(30_000), commission],
+      adults: 2,
+      children: 2,
+      total: 98_000,
+    })
+    expect(result).toEqual({ perAdult: 32_000, perChild: 17_000 })
   })
 
   it("treats a fixed-package total or an overridden tour price as shared", () => {
