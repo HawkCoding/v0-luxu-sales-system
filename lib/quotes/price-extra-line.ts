@@ -269,6 +269,7 @@ export async function priceExtraLineItems(
 
   const cardCurrency = normaliseCurrency(card.currency)
   const wasConverted = cardCurrency !== targetCurrency
+  let fixedCommissionApplied = false
 
   function addLine(
     lineDescription: string,
@@ -286,13 +287,16 @@ export async function priceExtraLineItems(
     let commissionBreakdown: CommissionBreakdown | null = null
     let commissionAmount = 0
     const resolved: ResolvedCommission = commission
-    if (resolved.type !== null) {
+    // A fixed commission is one amount for the whole extra, charged on its first fare line only —
+    // not once per adult, child and infant line.
+    if (resolved.type !== null && !(resolved.type === "fixed" && fixedCommissionApplied)) {
       commissionAmount = calculateCommissionAmount({
         amountAfterMarkup: lineSubtotal,
         passengerCount: qty,
         resolved,
       })
       commissionBreakdown = buildCommissionBreakdown(resolved, commissionAmount)
+      if (resolved.type === "fixed") fixedCommissionApplied = true
     }
     const total = Math.round((lineSubtotal + commissionAmount) * 100) / 100
 

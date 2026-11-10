@@ -5,6 +5,7 @@ import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
 import { derivePerPersonTotals } from "@/lib/invoices/per-person-totals"
 import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
+import { subtotalNetOfHiddenDiscount } from "@/lib/quotes/hidden-discount"
 import { resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { getPaymentMethod } from "@/lib/payment-methods"
@@ -96,12 +97,15 @@ export async function ensureInvoicePdf(
     journeyHeading: invoiceJourneyHeading(documentText.itinerary_doc_journey_heading, primarySupplierKind),
     primarySupplierKind,
   })
+  // A hidden discount has no row of its own, so it is folded into the subtotal here: the suites and
+  // the Sub Total add up to the printed total, which matches the deposit and outstanding amount.
+  const printedSubtotal = subtotalNetOfHiddenDiscount(totals.subtotalInclVat, totals.discount, totals.discountVisible)
   // A booking split into pax groups prints one line per suite in place of the per-person rows. They
-  // add up to the GROSS Sub Total, as on the quote (the discount and commission come off below
-  // them); null (no groups, or lines priced before them) keeps the per-person rows.
+  // add up to the Sub Total, as on the quote (a visible discount and the agent commission come off
+  // below them); null (no groups, or lines priced before them) keeps the per-person rows.
   const paxGroupPricing = await resolvePaxGroupPricing(supabase, {
     lines: view.pricedLines,
-    target: totals.subtotalInclVat,
+    target: printedSubtotal,
   })
 
   let pdfBuffer: Buffer
@@ -122,13 +126,15 @@ export async function ensureInvoicePdf(
       items: paxGroupPricing ? collapseRepeatedInvoiceItems(view.items) : view.items,
       totals: {
         ...totals,
+        subtotalInclVat: printedSubtotal,
         ...derivePerPersonTotals({
           lines: view.pricedLines,
           adults: view.pax.adults,
           children: view.pax.children,
-          // The gross Sub Total, not the net total: the per-person rows head the block above Sub
-          // Total, so they read at full price, before the discount and agent commission come off.
-          total: totals.subtotalInclVat,
+          // The Sub Total, not the net total: the per-person rows head the block above Sub Total, so
+          // they read at full price, before a visible discount and the agent commission come off. A
+          // hidden discount has no row, so it is already out of the Sub Total.
+          total: printedSubtotal,
         }),
         paxGroupPricing,
         paxGroupNoun: paxGroupNoun(primarySupplierKind),

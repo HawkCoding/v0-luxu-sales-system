@@ -127,7 +127,7 @@ export function PaxGroupPriceTable({
         </table>
       </div>
       <p className="text-xs text-muted-foreground">
-        These lines print on the quote and invoice exactly as shown. Figures are before discount and commission.
+        These lines print on the quote and invoice exactly as shown. Figures include our commission and are before any agent commission or discount.
         {unpriced ? ` ${noun} prices show once every service is priced.` : ""}
       </p>
     </section>

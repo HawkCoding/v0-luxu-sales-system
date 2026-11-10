@@ -27,6 +27,7 @@ import {
   type BookingPaxGroupsView,
 } from "@/lib/pax-groups/booking-pax-groups"
 import { paxGroupNoun, type PaxGroupPricing } from "@/lib/quotes/pax-group-pricing"
+import { subtotalNetOfHiddenDiscount } from "@/lib/quotes/hidden-discount"
 import { blockScopeTagger, resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { loadCountryAliasMap, loadCountryCodeMap, resolveCountryCode } from "@/lib/countries"
 import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
@@ -419,11 +420,23 @@ export async function resolveSharedEmailTokens(
       // without groups builds the panel exactly as before.
       const paxGroupPricing: PaxGroupPricing | null = await resolvePaxGroupPricing(supabase, {
         lines: lineItems ?? [],
-        target: Number(latestQuote.subtotal ?? latestQuote.total ?? 0),
+        // A hidden discount is folded into the suites so they add up to the total printed below them.
+        target: subtotalNetOfHiddenDiscount(
+          Number(latestQuote.subtotal ?? latestQuote.total ?? 0),
+          Number(latestQuote.discount_amount ?? 0),
+          latestQuote.discount_visible ?? true,
+        ),
       })
       const deductions = paxGroupPricing
         ? {
-            subtotal: latestQuote.subtotal ?? undefined,
+            subtotal:
+              latestQuote.subtotal == null
+                ? undefined
+                : subtotalNetOfHiddenDiscount(
+                    Number(latestQuote.subtotal),
+                    Number(latestQuote.discount_amount ?? 0),
+                    latestQuote.discount_visible ?? true,
+                  ),
             agentCommission: Number(latestQuote.agent_commission ?? 0),
             discount: Number(latestQuote.discount_amount ?? 0),
             discountVisible: latestQuote.discount_visible ?? true,

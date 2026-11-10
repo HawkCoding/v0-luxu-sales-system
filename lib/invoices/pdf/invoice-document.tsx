@@ -129,10 +129,10 @@ export interface InvoiceGuestCell {
   name: string
 }
 
-/** The figure the "Total incl. VAT:" row prints: net of any printed deduction, else the subtotal. */
+/** The figure the "Total incl. VAT:" row prints: net of any deduction (a hidden discount included,
+ *  which the deposit and outstanding amount are worked from too), else the subtotal. */
 export function printedTotalInclVat(totals: InvoiceTotals): number {
-  const hasDeduction =
-    Boolean(totals.agentCommission) || ((totals.discountVisible ?? true) && Boolean(totals.discount))
+  const hasDeduction = Boolean(totals.agentCommission) || Boolean(totals.discount)
   return hasDeduction ? (totals.totalInclVat ?? totals.subtotalInclVat) : totals.subtotalInclVat
 }
 

@@ -149,6 +149,24 @@ describe("priceExtraLineItems", () => {
     expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
   })
 
+  it("charges a fixed commission once per extra, not once per fare line", async () => {
+    const { lineItems } = await priceExtraLineItems({
+      supabase: buildSupabase([SADC_2026, BTLD_OPEN]),
+      jobId: JOB_ID,
+      travelDate: "2026-08-25",
+      supplierId: SUPPLIER_ID,
+      routeId: ROUTE_ID,
+      suiteTypeId: SUITE_ID,
+      rateTypeId: SADC,
+      fallbackRateTypeId: BTLD,
+      commissionOverride: { type: "fixed", value: 1000 },
+    })
+    expect(lineItems.length).toBeGreaterThan(1)
+    const charged = lineItems.reduce((sum, li) => sum + li.total - li.unitPrice * li.qty, 0)
+    expect(Math.round(charged * 100) / 100).toBe(1000)
+    expect(lineItems.filter((li) => li.pricingSnapshot?.commission).length).toBe(1)
+  })
+
   it("reports the date, not the rate type, when nothing covers the travel date", async () => {
     await expect(price("2020-01-01", SADC)).rejects.toThrow(/No rate card covers 2020-01-01/)
   })

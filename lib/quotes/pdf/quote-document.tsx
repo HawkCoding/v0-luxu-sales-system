@@ -391,8 +391,15 @@ export function QuoteDocument({
   const showBrand = brandPosition !== "hidden"
   const groupLines = paxGroupPricing?.lines ?? []
   // A booking split into suites prints whole rands throughout its totals; others keep their cents.
-  const money = (value: number) =>
-    formatMoney(value, currency, groupLines.length > 0 ? { decimals: false } : undefined)
+  // Rounding each suite alone could print figures that add up to a different total, so when any
+  // figure is not a whole rand the cents stay.
+  const isWholeRand = (value: number) => Math.abs(value - Math.round(value)) < 0.005
+  const wholeRands =
+    groupLines.length > 0 &&
+    isWholeRand(total) &&
+    isWholeRand(subtotal ?? total) &&
+    groupLines.every((line) => isWholeRand(line.subtotal) && line.parts.every((part) => isWholeRand(part.perPerson)))
+  const money = (value: number) => formatMoney(value, currency, wholeRands ? { decimals: false } : undefined)
 
   const infants = payingPax?.infants ?? 0
   // The booking's no_of_children counts its infants; name them on their own in the Guests row.

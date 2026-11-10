@@ -7,6 +7,7 @@ import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
+import { subtotalNetOfHiddenDiscount } from "@/lib/quotes/hidden-discount"
 import { blockScopeTagger, resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 import { formatMoney } from "@/lib/money"
 import {
@@ -188,7 +189,12 @@ export async function POST(req: Request, { params }: RouteParams) {
   // to it price every suite alike. Null (no pax groups) keeps the per-person line.
   const paxGroupPricing = await resolvePaxGroupPricing(supabase, {
     lines: lineItems,
-    target: Number(quote.subtotal ?? quote.total),
+    // A hidden discount is folded into the suites so they add up to the total printed below them.
+    target: subtotalNetOfHiddenDiscount(
+      Number(quote.subtotal ?? quote.total),
+      Number(quote.discount_amount ?? 0),
+      quote.discount_visible ?? true,
+    ),
   })
 
   const quoteSummaryTable = buildQuoteSummaryBlock({
@@ -200,7 +206,10 @@ export async function POST(req: Request, { params }: RouteParams) {
     adults: booking?.no_of_adults ?? 0,
     children: booking?.no_of_children ?? 0,
     total: quote.total,
-    subtotal: quote.subtotal,
+    subtotal:
+      quote.subtotal == null
+        ? quote.subtotal
+        : subtotalNetOfHiddenDiscount(Number(quote.subtotal), Number(quote.discount_amount ?? 0), quote.discount_visible ?? true),
     agentCommission: Number(quote.agent_commission ?? 0),
     discount: Number(quote.discount_amount ?? 0),
     discountVisible: quote.discount_visible ?? true,

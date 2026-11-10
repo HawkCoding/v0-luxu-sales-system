@@ -430,6 +430,9 @@ describe("renderInvoicePdf smoke", { timeout: 20_000 }, () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
     const text = await extractPdfText(buffer)
     expect(text).not.toContain("Discount")
+    // The total printed is the discounted one, the figure the deposit is worked from.
+    expect(text.replace(/[\s ]+/g, " ")).toContain("R62 600,00")
+    expect(text.replace(/[\s ]+/g, " ")).not.toContain("R63 900,00")
   })
 
   it("renders a paid-up invoice without banking details configured", async () => {

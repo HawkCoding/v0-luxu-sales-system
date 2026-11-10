@@ -34,6 +34,7 @@ import type { PricingSnapshot } from "@/lib/types"
 import { loadSupplierKind } from "@/lib/suppliers/load-supplier-kind"
 import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
 import { paxGroupNoun } from "@/lib/quotes/pax-group-pricing"
+import { subtotalNetOfHiddenDiscount } from "@/lib/quotes/hidden-discount"
 import { blockScopeTagger, resolvePaxGroupPricing } from "@/lib/quotes/resolve-pax-group-pricing"
 
 export const QUOTE_BUCKET = "quotes"
@@ -233,9 +234,17 @@ export async function ensureQuotePdf(
   )
   // A booking split into pax groups prints one line per suite in place of the per-person rows, on
   // the same gross figure; null (no groups, or a quote priced before them) keeps those rows.
+  // A hidden discount has no row of its own, so it is folded in here: the suites, and every row
+  // above the total, already add up to what the total prints.
+  const grossSubtotal = Number(quote.subtotal ?? quote.total)
+  const printedSubtotal = subtotalNetOfHiddenDiscount(
+    grossSubtotal,
+    Number(quote.discount_amount ?? 0),
+    quote.discount_visible ?? true,
+  )
   const paxGroupPricing = await resolvePaxGroupPricing(supabase, {
     lines: lineItems ?? [],
-    target: Number(quote.subtotal ?? quote.total),
+    target: printedSubtotal,
   })
 
   let pdfBuffer: Buffer
@@ -269,11 +278,11 @@ export async function ensureQuotePdf(
         lines: lineItems ?? [],
         adults: pax.adults,
         children: pax.children,
-        total: Number(quote.subtotal ?? quote.total),
+        total: printedSubtotal,
       }),
       paxGroupPricing,
       itineraryScopeTag: blockScopeTagger(lineItems ?? [], paxGroupNoun(primarySupplierKind)),
-      subtotal: quote.subtotal,
+      subtotal: printedSubtotal,
       agentCommission: Number(quote.agent_commission ?? 0),
       discount: Number(quote.discount_amount ?? 0),
       discountVisible: quote.discount_visible ?? true,
