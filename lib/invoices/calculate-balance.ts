@@ -34,7 +34,15 @@ export interface InvoiceBalance {
   totalPaid: number
   /** Date of the most recent payment, or null when nothing is paid yet. */
   lastPaymentAt: string | null
+  /** Individual recorded captures (refunds excluded), oldest first. Lets the invoice show the
+   *  deposit and final payment as actually paid instead of the calculated split. */
+  payments?: RecordedPayment[]
   balance: number
+}
+
+export interface RecordedPayment {
+  amount: number
+  receivedAt: string | null
 }
 
 export async function calculateInvoiceBalance(
@@ -51,7 +59,7 @@ export async function calculateInvoiceBalance(
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
-      supabase.from("payments").select("amount, received_at").eq("booking_id", bookingId),
+      supabase.from("payments").select("amount, received_at, payment_kind").eq("booking_id", bookingId),
     ])
 
   if (quoteError) throw quoteError
@@ -95,6 +103,10 @@ export async function calculateInvoiceBalance(
     return latest === null || at > latest ? at : latest
   }, null)
   const balance = Math.max(0, Math.round((Number(quote.total) - totalPaid) * 100) / 100)
+  const recordedPayments: RecordedPayment[] = (payments ?? [])
+    .filter((payment) => payment.payment_kind !== "refund" && Number(payment.amount ?? 0) > 0)
+    .map((payment) => ({ amount: Number(payment.amount), receivedAt: payment.received_at ?? null }))
+    .sort((a, b) => (a.receivedAt ?? "").localeCompare(b.receivedAt ?? ""))
 
   return {
     quote,
@@ -106,6 +118,7 @@ export async function calculateInvoiceBalance(
     currency: quote.currency,
     totalPaid,
     lastPaymentAt,
+    payments: recordedPayments,
     balance,
   }
 }

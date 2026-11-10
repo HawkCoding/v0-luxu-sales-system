@@ -1,5 +1,6 @@
 import type { InvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { computeFinalDueDate } from "@/lib/invoices/invoice-status"
+import { MIN_DEPOSIT_PAID_AMOUNT } from "@/lib/invoices/sync-booking-payment-state"
 import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 
 function round2(value: number): number {
@@ -44,16 +45,36 @@ export function buildUnifiedTotals(input: {
     }
   }
 
-  const depositAmount = input.depositAmount
+  let depositAmount = input.depositAmount
+  let depositPercentage = input.depositPercentage
+  let finalAmount = Math.max(0, round2(balance.quoteTotal - (depositAmount ?? 0)))
+
+  // Once the deposit is actually paid, show what was recorded instead of the calculated split:
+  // the earliest payment is the deposit, the rest is the final payment (or, until that arrives,
+  // whatever is still outstanding). The calculated "25%" no longer applies, so the percentage goes.
+  const [firstPayment, ...laterPayments] = balance.payments ?? []
+  if (
+    depositAmount !== null &&
+    firstPayment &&
+    firstPayment.amount >= Math.min(depositAmount, MIN_DEPOSIT_PAID_AMOUNT)
+  ) {
+    depositAmount = round2(firstPayment.amount)
+    depositPercentage = null
+    finalAmount =
+      laterPayments.length > 0
+        ? round2(laterPayments.reduce((sum, payment) => sum + payment.amount, 0))
+        : Math.max(0, round2(balance.quoteTotal - depositAmount))
+  }
+
   return {
     subtotalInclVat: balance.quoteSubtotal,
     agentCommission: balance.agentCommission,
     discount: balance.discount,
     discountVisible: balance.discountVisible,
     totalInclVat: balance.quoteTotal,
-    depositPercentage: input.depositPercentage,
+    depositPercentage,
     depositAmount,
-    finalAmount: Math.max(0, round2(balance.quoteTotal - (depositAmount ?? 0))),
+    finalAmount,
     finalDueDate: computeFinalDueDate(input.departureDate),
     amountReceived: balance.totalPaid,
     amountReceivedAt: balance.lastPaymentAt,
