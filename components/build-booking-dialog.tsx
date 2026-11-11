@@ -2367,8 +2367,8 @@ export function BuildBookingDialog({
                             </Badge>
                           ) : null}
                           {li.pricingSnapshot?.pricingMode === "manual" && isMissingPricing(li) ? (
-                            <Badge variant="destructive" className="ml-1.5 align-middle text-[9px]">
-                              Fare required
+                            <Badge variant="outline" className="ml-1.5 align-middle text-[9px]">
+                              No fare entered
                             </Badge>
                           ) : null}
                         </div>

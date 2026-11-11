@@ -423,7 +423,7 @@ function RoomPriceOverride({
             </p>
           ) : chargedNights > 0 ? (
             <p className="text-xs text-amber-600 dark:text-amber-500">
-              Price required — the quote will flag this room until it&apos;s priced.
+              No price entered — this room goes on the quote at R0.
             </p>
           ) : null}
           {firstNightFree ? (
@@ -2238,7 +2238,7 @@ export function SuiteLegEditor({
                     </div>
                     {!unit.manualAdultPrice ? (
                       <p className="text-xs text-amber-600 dark:text-amber-500">
-                        Fare required — the quote will flag this line until it's priced.
+                        No fare entered — this line goes on the quote at R0.
                       </p>
                     ) : null}
                     <ConvertedFareHint

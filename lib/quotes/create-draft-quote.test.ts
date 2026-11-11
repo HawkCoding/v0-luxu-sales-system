@@ -75,6 +75,31 @@ describe("createDraftQuoteForBooking", () => {
     expect(store.rows("quote_line_items")).toHaveLength(1)
   })
 
+  it("leaves a quote as draft when a line is at R0 — a flight can be free", async () => {
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: { id: BOOKING_ID, legs: [{ id: "svc-1" }, { id: "svc-2" }] },
+      services: [{ id: "svc-1" }, { id: "svc-2" }],
+      units: [],
+    })
+    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({
+      lineItems: [
+        { description: "Blue Train - Adult", qty: 2, unitPrice: 1000, total: 2000 },
+        { description: "Flight JNB-CPT", qty: 2, unitPrice: 0, total: 0 },
+      ],
+      incompleteLegs: [],
+    })
+    const { supabase, store } = createSupabaseMock()
+
+    await createDraftQuoteForBooking({
+      supabase: supabase as never,
+      bookingId: BOOKING_ID,
+      bookingNumber: "BT-2026-0001",
+      travelDate: "2026-09-01",
+    })
+
+    expect(store.rows("quotes")[0]).toMatchObject({ status: "draft", total: 2000 })
+  })
+
   it("prices with the default commission from settings", async () => {
     adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
       detail: { id: BOOKING_ID, legs: [{ id: "svc-1" }] },

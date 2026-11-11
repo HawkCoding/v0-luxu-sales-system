@@ -339,31 +339,37 @@ describe("JobQuotesTab — order", () => {
 })
 
 describe("JobQuotesTab — next step on each card", () => {
-  const PRICE_GAP_EDITABLE = "Some services have no price yet. Use Edit Quote to price them before sending."
+  const UNFINISHED_EDITABLE = "This quote is not finished. Use Edit Quote to finish every service before sending."
 
-  it.each(["pricing_incomplete", "draft", "ready"] as const)(
-    "tells the salesperson to price the unpriced services on a %s quote",
+  it("tells the salesperson to finish an unfinished (pricing_incomplete) quote", () => {
+    renderTab([buildQuote({ status: "pricing_incomplete" })])
+    expect(screen.getByText(UNFINISHED_EDITABLE)).toBeInTheDocument()
+    expect(screen.queryByText(/Not sent yet/)).not.toBeInTheDocument()
+  })
+
+  it.each(["draft", "ready"] as const)(
+    "does not hold back a %s quote because a line is at R0 — it is ready to send",
     (status) => {
       renderTab([buildQuote({ status, lineItems: UNPRICED_LINES })])
-      expect(screen.getByText(PRICE_GAP_EDITABLE)).toBeInTheDocument()
-      expect(screen.queryByText(/Not sent yet/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/not finished/)).not.toBeInTheDocument()
+      expect(screen.getByText(/Not sent yet/)).toBeInTheDocument()
     },
   )
 
-  it("says the same on a pricing-incomplete quote even when the lines look priced", () => {
+  it("points at Edit Booking, the button a sent quote really has, for an unfinished quote", () => {
     renderTab([buildQuote({ status: "pricing_incomplete" })])
-    expect(screen.getByText(PRICE_GAP_EDITABLE)).toBeInTheDocument()
+    expect(screen.getByText(UNFINISHED_EDITABLE)).toBeInTheDocument()
   })
 
-  it("points at Edit Booking, the button a sent quote really has, for an unpriced line", () => {
+  it("says nothing about an R0 line on a sent quote", () => {
     renderTab([buildQuote({ status: "sent", lineItems: UNPRICED_LINES })])
-    expect(screen.getByText("Some services have no price yet. Use Edit Booking to price them.")).toBeInTheDocument()
+    expect(screen.queryByText(/not finished|no price yet/)).not.toBeInTheDocument()
   })
 
-  it("says nothing about prices on a cancelled or replaced quote", () => {
+  it("says nothing about being unfinished on a cancelled or replaced quote", () => {
     for (const status of ["cancelled", "superseded"] as const) {
       const view = renderTab([buildQuote({ status, lineItems: UNPRICED_LINES })])
-      expect(screen.queryByText(/no price yet/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/not finished/)).not.toBeInTheDocument()
       view.unmount()
     }
   })
@@ -418,7 +424,7 @@ describe("JobQuotesTab — next step on each card", () => {
   it("has no next step for an expired, replaced or cancelled quote", () => {
     for (const status of ["expired", "superseded", "cancelled"] as const) {
       const view = renderTab([buildQuote({ status })])
-      expect(screen.queryByText(/Waiting for the client|Accepted\.|Not sent yet|no price yet/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Waiting for the client|Accepted\.|Not sent yet|not finished/)).not.toBeInTheDocument()
       view.unmount()
     }
   })
@@ -503,15 +509,15 @@ describe("JobQuotesTab — header", () => {
     expect(screen.getByText("Provisional")).toBeInTheDocument()
   })
 
-  it("does not add a Missing pricing badge beside Provisional (Incomplete)", () => {
+  it("does not add an R0 line badge beside Provisional (Incomplete)", () => {
     renderTab([buildQuote({ status: "pricing_incomplete", lineItems: UNPRICED_LINES })])
     expect(screen.getByText("Provisional (Incomplete)")).toBeInTheDocument()
-    expect(screen.queryByText("Missing pricing")).not.toBeInTheDocument()
+    expect(screen.queryByText("R0 line")).not.toBeInTheDocument()
   })
 
-  it("still adds the Missing pricing badge on any other quote with an unpriced line", () => {
+  it("adds the R0 line badge on any other quote with a line at R0", () => {
     renderTab([buildQuote({ status: "draft", lineItems: UNPRICED_LINES })])
-    expect(screen.getByText("Missing pricing")).toBeInTheDocument()
+    expect(screen.getByText("R0 line")).toBeInTheDocument()
   })
 
   it("labels the PDF button View PDF", () => {

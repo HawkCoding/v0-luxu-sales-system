@@ -33,9 +33,10 @@ The badge next to the title is the quote's status:
 | **Replaced** | Replaced by a revision. Kept as a record; nothing can change it. |
 | **Cancelled** | Abandoned. Kept as a record; nothing can change it. |
 
-A separate red **Missing pricing** badge appears beside the status whenever any line on the
-quote is still unpriced. A **Provisional (Incomplete)** quote already says so, so it does not
-get the extra badge.
+A separate **R0 line** badge appears beside the status whenever any line on the quote has no
+price entered. It is a reminder only — an R0 line never stops you sending or amending the
+quote. A **Provisional (Incomplete)** quote means a service is not finished yet and cannot be
+sent; open **Edit Quote** and finish every service.
 
 Under the title, a quote that has been sent reads *"Sent to the client"* with the date and
 time. A working quote that has not been emailed reads *"Not sent to the client yet"*. A short
@@ -298,8 +299,8 @@ the subtotal and total.
 The line-item table shows description, quantity (with its unit underneath — *per person*,
 *per night*), unit price and total. Watch for:
 
-- **TBD** in red in the unit-price column — the line is unpriced and needs fixing before this
-  quote goes out.
+- **No price** in amber in the unit-price column — no price was entered, so the line is at R0.
+  Check it is meant to be free; it will not stop the quote going out.
 - **Included** — the line is part of a fixed-price package and its price sits on that
   package's total line, not here.
 - An **Extra** badge — an ad-hoc line that is not part of the built services. Extra lines

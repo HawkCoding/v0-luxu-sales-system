@@ -631,7 +631,7 @@ describe("PATCH /api/quotes/[id]", () => {
       expect(rpc).not.toHaveBeenCalled()
     })
 
-    it("refuses an amendment that adds an unpriced line", async () => {
+    it("allows an amendment that adds an R0 line — a service can carry no charge", async () => {
       const { rpc } = buildAuth([acceptedLine], "accepted")
 
       const res = await PATCH(
@@ -645,9 +645,8 @@ describe("PATCH /api/quotes/[id]", () => {
         routeParams,
       )
 
-      expect(res.status).toBe(400)
-      expect((await res.json()).error).toContain("needs a price")
-      expect(rpc).not.toHaveBeenCalled()
+      expect(res.status).toBe(200)
+      expect(rpc).toHaveBeenCalled()
     })
 
     it("tolerates an unchanged R0 line the accepted quote already carried", async () => {

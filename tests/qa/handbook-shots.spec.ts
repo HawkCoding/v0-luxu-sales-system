@@ -408,8 +408,8 @@ const PRICED_QUOTE_LINES: SeedQuoteLine[] = [
 
 /**
  * The same quote with one of everything the chapter describes: a converted line, a
- * room price override, a complimentary night, an unpriced line (TBD + the card's
- * "Missing pricing" badge), an Extra line, and a commission line carrying rounding.
+ * room price override, a complimentary night, an unpriced line ("No price" + the card's
+ * "R0 line" badge), an Extra line, and a commission line carrying rounding.
  */
 const BADGED_QUOTE_LINES: SeedQuoteLine[] = [
   {
@@ -519,7 +519,7 @@ test.describe("ch04 quoting", () => {
       const context = await browser.newContext({ storageState: HANDBOOK_USERS.consultant.storageState })
       const page = await context.newPage()
       await page.goto(`/app/bookings/${CH04_DRAFT_BOOKING}?tab=quotes`)
-      await expect(page.getByText("Missing pricing")).toBeVisible({ timeout: 60_000 })
+      await expect(page.getByText("R0 line")).toBeVisible({ timeout: 60_000 })
       await expect(page.getByText("Extra").first()).toBeVisible()
       await expect(page.getByText("Complimentary night")).toBeVisible()
       // Every badge and note sits inside the card, so frame the card itself.

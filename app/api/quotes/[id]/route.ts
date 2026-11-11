@@ -7,7 +7,6 @@ import { jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import {
   calculateQuoteTotals,
-  isMissingPricing,
   isPricingEngineLineItem,
   resolveLineTotal,
   roundMoney,
@@ -177,29 +176,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     existingKeys.set(key, (existingKeys.get(key) ?? 0) + 1)
   }
 
-  // A draft can sit at pricing_incomplete until a fare is typed in; an accepted quote has no such
-  // state to fall back to, and the client is already invoiced off it — so an amendment may not
-  // introduce an unpriced line. An unchanged carry-over (e.g. an old R0 package child leg) is
-  // tolerated: it was already on the quote the client accepted.
-  if (isAmend) {
-    const carriedOver = new Map(existingKeys)
-    const introducesUnpricedLine = normalizedLineItems.some((lineItem) => {
-      const key = lineKey(lineItem.description, lineItem.qty, lineItem.unitPrice)
-      const remaining = carriedOver.get(key) ?? 0
-      if (remaining > 0) {
-        carriedOver.set(key, remaining - 1)
-        return false
-      }
-      return isMissingPricing(lineItem)
-    })
-    if (introducesUnpricedLine) {
-      return NextResponse.json(
-        { error: "Every new line needs a price before an accepted quote can be amended." },
-        { status: 400 },
-      )
-    }
-  }
-
+  // An R0 line is allowed on any quote, including an amendment of an accepted one — a flight or
+  // other service can legitimately carry no charge. The consultant's screen still labels such a
+  // line (see isMissingPricing) but it never blocks saving, sending or amending.
   const isManualPricing = normalizedLineItems.some((lineItem) => {
     if (isPricingEngineLineItem(lineItem)) return false
     const key = lineKey(lineItem.description, lineItem.qty, lineItem.unitPrice)
@@ -280,13 +259,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
-  // A line with no price yet (e.g. a flight leg whose fare hasn't been typed in) keeps the quote
-  // out of "draft" until it's resolved. Only toggles between these two statuses -- a quote already
-  // sent/accepted/etc. isn't silently reverted by re-saving its lines.
-  const hasIncompletePricing = normalizedLineItems.some(isMissingPricing)
-  const nextStatus = hasIncompletePricing ? "pricing_incomplete" : "draft"
-  if ((quote.status === "draft" || quote.status === "pricing_incomplete") && quote.status !== nextStatus) {
-    const { error: statusError } = await supabase.from("quotes").update({ status: nextStatus }).eq("id", id)
+  // An R0 line no longer keeps a quote out of "draft" (a flight can be free), so saving lines
+  // releases a quote that an earlier save or auto-draft parked at pricing_incomplete. A quote
+  // already sent/accepted/etc. isn't silently reverted by re-saving its lines.
+  if (quote.status === "pricing_incomplete") {
+    const { error: statusError } = await supabase.from("quotes").update({ status: "draft" }).eq("id", id)
     if (statusError) {
       return NextResponse.json({ error: "Failed to update quote status" }, { status: 500 })
     }

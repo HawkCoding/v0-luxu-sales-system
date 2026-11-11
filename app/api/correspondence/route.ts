@@ -267,10 +267,10 @@ export async function POST(req: Request) {
     }
   }
 
-  // A quote whose lines are not all priced totals as though the unpriced ones were zero
-  // (calculateQuoteTotals sums item.total unconditionally). The consultant's screen says so
-  // loudly, but the client document does not — so the send is refused rather than mailing a
-  // total that is quietly short. Rendering a PDF or an email preview stays allowed: those are
+  // pricing_incomplete now only means the quote has no lines, or a service was skipped because it
+  // is not fully configured — not that a line is R0 (a flight can be free; saving lines in Build
+  // Booking releases the quote). Mailing it would send a document that leaves out part of the
+  // booking, so the send is refused. Rendering a PDF or an email preview stays allowed: those are
   // the consultant checking their own work, and neither reaches the customer.
   if (parsed.data.kind === "quote" && parsed.data.quoteId) {
     const { data: quoteRow, error: quoteStatusError } = await supabase
@@ -288,7 +288,7 @@ export async function POST(req: Request) {
     }
     if (quoteRow.status === "pricing_incomplete") {
       return jsonError(
-        "This quote still has unpriced lines — price them before sending, or the total will be short.",
+        "This quote is not finished — open Build Booking, finish every service and apply it before sending.",
         409,
       )
     }

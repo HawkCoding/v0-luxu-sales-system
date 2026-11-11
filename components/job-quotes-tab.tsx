@@ -65,7 +65,7 @@ const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline
 
 interface NextStepInput {
   status: string
-  /** A line has no price yet (or the status itself says so). */
+  /** The quote is unfinished (status pricing_incomplete). An R0 line alone is not a gap. */
   hasPricingGap: boolean
   /** This card is the quote the top button sends. */
   isQuoteToSend: boolean
@@ -90,12 +90,12 @@ function describeNextStep({
   if (hasPricingGap) {
     if (isEditable) {
       return canEdit
-        ? "Some services have no price yet. Use Edit Quote to price them before sending."
-        : "Some services have no price yet."
+        ? "This quote is not finished. Use Edit Quote to finish every service before sending."
+        : "This quote is not finished."
     }
     return canEditBooking
-      ? "Some services have no price yet. Use Edit Booking to price them."
-      : "Some services have no price yet."
+      ? "This quote is not finished. Use Edit Booking to finish every service."
+      : "This quote is not finished."
   }
   if (isEditable) {
     if (!isQuoteToSend) return null
@@ -357,7 +357,7 @@ export function JobQuotesTab({
         const hasIncomplete = q.lineItems.some(isMissingPricing)
         const isEditableQuote = EDITABLE_QUOTE_STATUSES.includes(q.status)
         const isDeadQuote = q.status === "cancelled" || q.status === "superseded"
-        const hasPricingGap = q.status === "pricing_incomplete" || (!isDeadQuote && hasIncomplete)
+        const hasPricingGap = q.status === "pricing_incomplete" && !isDeadQuote
         // Only an editor sees the send button the warning points at, and only the quote the client
         // holds gets it (a draft beside it is not what the client has).
         const showsChangedSinceSent =
@@ -399,7 +399,7 @@ export function JobQuotesTab({
                     <Badge variant={badge.variant} className={`text-[10px] ${badge.className ?? ""}`}>{badge.label}</Badge>
                     {/* The "Provisional (Incomplete)" badge already says so. */}
                     {hasIncomplete && q.status !== "pricing_incomplete" && (
-                      <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>
+                      <Badge variant="outline" className="text-[10px]">R0 line</Badge>
                     )}
                   </div>
                   {showsSentLine && <p className="mt-1 text-xs text-muted-foreground">{sentLine}</p>}
@@ -573,12 +573,12 @@ export function JobQuotesTab({
                         </td>
                         <td
                           className={`py-2 pl-6 text-xs text-right ${
-                            isMissingPricing(li) ? "text-destructive font-medium" : "text-muted-foreground"
+                            isMissingPricing(li) ? "text-amber-600 dark:text-amber-500 font-medium" : "text-muted-foreground"
                           }`}
                         >
                           {li.unitPrice === 0 && !isComplimentary && !isDeliberateZeroCommission(li)
                             ? isMissingPricing(li)
-                              ? "TBD"
+                              ? "No price"
                               : "Included"
                             : formatMoney(li.unitPrice, q.currency)}
                         </td>
