@@ -380,11 +380,26 @@ function SummaryRow({
 }
 
 /** The written-in part of a hand-finished table. */
-function FillRows({ columns, count = FILL_ROW_COUNT }: { columns: Column[]; count?: number }) {
+function FillRows({
+  columns,
+  count = FILL_ROW_COUNT,
+  closed = false,
+}: {
+  columns: Column[]
+  count?: number
+  /** True when summary rows follow, so the last blank row still needs its bottom line. */
+  closed?: boolean
+}) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <TableRow key={`fill-${i}`} columns={columns} values={[]} fill last={i === count - 1} />
+        <TableRow
+          key={`fill-${i}`}
+          columns={columns}
+          values={[]}
+          fill
+          last={i === count - 1 && !closed}
+        />
       ))}
     </>
   )
@@ -422,6 +437,7 @@ const PAYMENT_COLUMNS: Column[] = [
   { key: "notes", label: "Notes", flex: 1 },
   { key: "date", label: "Payment Made Date", flex: 1 },
   { key: "paidWith", label: "Paid With", flex: 1 },
+  { key: "payable", label: "Amounts Payable", flex: 1 },
   { key: "receivable", label: "Amounts Receivable", flex: 1 },
 ]
 
@@ -595,20 +611,21 @@ export function WorksheetDocument({
                 EMPTY,
                 dateOrBlank(p.date),
                 p.reference ? `${p.paidWith ?? ""} (${p.reference})`.trim() : (p.paidWith ?? EMPTY),
+                EMPTY,
                 formatAmount(p.amount),
               ]}
             />
           ))}
-          <FillRows columns={PAYMENT_COLUMNS} />
+          <FillRows columns={PAYMENT_COLUMNS} closed />
           <SummaryRow
             head
             columns={PAYMENT_COLUMNS}
-            spans={[{ span: 3, label: "Totals" }, { span: 1, fill: true }]}
+            spans={[{ span: 3, label: "Totals" }, { span: 1, fill: true }, { span: 1, fill: true }]}
           />
           <SummaryRow
             last
             columns={PAYMENT_COLUMNS}
-            spans={[{ span: 3, label: "Gross Profit" }, { span: 1, fill: true }]}
+            spans={[{ span: 4, label: "Gross Profit" }, { span: 1, fill: true }]}
           />
         </View>
       </Page>
