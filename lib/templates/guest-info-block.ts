@@ -154,6 +154,18 @@ function buildGroupedGuestLines(guests: GuestInfoGuest[], paxGroups: GuestInfoPa
   return paragraphs.map((entry, index) => render(entry, index === paragraphs.length - 1)).join("")
 }
 
+/**
+ * True when the flat list is a booking with one pax group (or none): fewer than two groups loaded
+ * and the guests sit in at most one. Two or more distinct guest groups mean the groups failed to
+ * load on a split booking, so numbering everyone "1.x" would mislead — those stay unnumbered. A
+ * split booking with nobody placed yet also stays unnumbered.
+ */
+function isSingleGroupBooking(input: GuestInfoInput): boolean {
+  if ((input.paxGroups?.groups.length ?? 0) >= 2) return false
+  const placedGroups = new Set(input.guests.map((guest) => guest.paxGroupId).filter(Boolean))
+  return placedGroups.size <= 1
+}
+
 export function buildGuestInfoBlock(input: GuestInfoInput): string {
   const lineStyle = "margin:0 0 6px;color:#312b24;font-size:13px;line-height:19px;"
   const rowStyle = "margin:0 0 4px;color:#312b24;font-size:13px;line-height:19px;"
@@ -167,7 +179,11 @@ export function buildGuestInfoBlock(input: GuestInfoInput): string {
     lines.push(grouped)
   } else if (input.guests.length > 0) {
     // One paragraph with <br/> breaks: separate <p>s get a full paragraph gap in Outlook.
-    const guestLines = input.guests.map(formatGuestLine).join("<br/>")
+    // A single-group booking numbers its guests "1.1", "1.2" like a split one, just without a heading.
+    const numbered = isSingleGroupBooking(input)
+    const guestLines = input.guests
+      .map((guest, index) => (numbered ? formatNumberedGuestLine(guest, `1.${index + 1}`) : formatGuestLine(guest)))
+      .join("<br/>")
     lines.push(`<p style="${rowStyle}">${guestLines}</p>`)
   } else {
     const paxCount = formatPaxCount(input.adults, input.children)

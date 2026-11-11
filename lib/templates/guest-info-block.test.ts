@@ -23,6 +23,63 @@ describe("buildGuestInfoBlock", () => {
     expect(html).not.toContain("<strong>Guests:</strong>")
   })
 
+  it("numbers a single-group booking's guests 1.1, 1.2 with no suite heading", () => {
+    const html = buildGuestInfoBlock({
+      customerName: "Mr Shackley",
+      customerEmail: null,
+      guests: [
+        { name: "Mr Duncan Shackley", dateOfBirth: "1954-08-20", countryCode: "UK", idNumber: "151261367" },
+        { name: "Mrs Moira Shannon-Shackley", dateOfBirth: "1961-03-17", countryCode: "UK", idNumber: "123545329" },
+      ],
+      adults: 2,
+      children: 0,
+    })
+
+    expect(html).toContain("1.1 Mr Duncan Shackley DOB: 20/08/1954 UK 151261367<br/>1.2 Mrs Moira Shannon-Shackley DOB: 17/03/1961 UK 123545329")
+    expect(html).not.toContain("<strong")
+  })
+
+  it("numbers a lone guest 1.1", () => {
+    const html = buildGuestInfoBlock({
+      customerName: "Mr Smith",
+      customerEmail: null,
+      guests: [{ name: "Mr John Smith", dateOfBirth: null, countryCode: null, idNumber: "8001015800083" }],
+      adults: 1,
+      children: 0,
+    })
+
+    expect(html).toContain("1.1 Mr John Smith 8001015800083")
+  })
+
+  it("numbers a single group's guests 1.x whether or not the guests carry that group's id", () => {
+    const one = { groups: [{ id: "g1", position: 1 }], headings: [{ groupId: "g1", heading: "Deluxe Suite 1" }] }
+    const guests = [
+      { name: "Mr A", dateOfBirth: null, countryCode: null, idNumber: "1", paxGroupId: "g1" },
+      { name: "Mrs A", dateOfBirth: null, countryCode: null, idNumber: "2", paxGroupId: "g1" },
+    ]
+    const html = buildGuestInfoBlock({ customerName: "Mr A", customerEmail: null, guests, adults: 2, children: 0, paxGroups: one })
+
+    expect(html).toContain("1.1 Mr A 1<br/>1.2 Mrs A 2")
+    expect(html).not.toContain("Deluxe Suite 1")
+  })
+
+  it("leaves guests unnumbered when a split booking's groups failed to load", () => {
+    const html = buildGuestInfoBlock({
+      customerName: "Mr A",
+      customerEmail: null,
+      guests: [
+        { name: "Mr A", dateOfBirth: null, countryCode: null, idNumber: "1", paxGroupId: "g1" },
+        { name: "Mr B", dateOfBirth: null, countryCode: null, idNumber: "2", paxGroupId: "g2" },
+      ],
+      adults: 2,
+      children: 0,
+      paxGroups: null,
+    })
+
+    expect(html).not.toContain("1.1")
+    expect(html).toContain("Mr A 1<br/>Mr B 2")
+  })
+
   it("flags a guest with no passport/ID number on file instead of omitting them", () => {
     const html = buildGuestInfoBlock({
       customerName: "Mr Smith",
@@ -160,11 +217,10 @@ describe("buildGuestInfoBlock with pax groups", () => {
     expect(text).toContain("3.1 Mr Hao Chen DOB: 01/07/2018 TW 300000003 – CHD\n")
   })
 
-  it("keeps today's flat list when no guest is placed in a suite", () => {
+  it("keeps an unnumbered flat list when a split booking has no guest placed in a suite yet", () => {
     const unplaced = guests.map((guest) => ({ ...guest, paxGroupId: null }))
-    const flat = buildGuestInfoBlock({ ...input, guests: unplaced })
+    const flat = buildGuestInfoBlock({ ...input, guests: unplaced, paxGroups })
 
-    expect(buildGuestInfoBlock({ ...input, guests: unplaced, paxGroups })).toBe(flat)
     expect(flat).not.toContain("1.1")
     expect(flat).not.toContain("CHD")
     expect(flat).toContain("Mr Hao Chen DOB: 01/07/2018 TW 300000003<br/>")
