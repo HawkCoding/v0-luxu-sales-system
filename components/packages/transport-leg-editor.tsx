@@ -332,7 +332,7 @@ function RequestPriceOverride({
         </p>
       ) : !complimentary ? (
         <p className="text-xs text-amber-600 dark:text-amber-500">
-          Price required — the quote will flag this {tripNoun} until it&apos;s priced.
+          No price entered — this {tripNoun} goes on the quote at R0.
         </p>
       ) : null}
     </div>

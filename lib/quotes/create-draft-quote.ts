@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import type { PackageDetail, PaxGroupMeta } from "@/lib/types"
 import { buildPackageQuoteLineItems, calculateQuoteTotals, findPrimaryLegId } from "@/lib/quotes/build-from-package"
-import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import {
   bookingServicesToLegSelections,
@@ -144,13 +143,10 @@ export async function createDraftQuoteForBooking({
         paxGroups,
       })
       lineItems = built.lineItems
-      // A flight leg with no fare typed in yet still counts as "not fully priced" -- same bar as
-      // having zero lines at all. A leg skipped for missing configuration counts too: the lines
-      // that priced are real, but the quote is not the whole booking.
-      status =
-        lineItems.length > 0 && built.incompleteLegs.length === 0 && !lineItems.some(isMissingPricing)
-          ? "draft"
-          : "pricing_incomplete"
+      // Having zero lines at all is "not fully priced". So is a leg skipped for missing
+      // configuration: the lines that priced are real, but the quote is not the whole booking. An
+      // R0 line (a flight with no fare typed in) is not -- it may genuinely be free.
+      status = lineItems.length > 0 && built.incompleteLegs.length === 0 ? "draft" : "pricing_incomplete"
       if (built.incompleteLegs.length > 0) {
         warning = built.incompleteLegs.map((leg) => leg.message).join(" · ")
       }

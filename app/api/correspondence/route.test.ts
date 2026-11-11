@@ -197,8 +197,7 @@ function buildAuth(options: AuthOptions = {}) {
     })),
   }))
   const quoteSelect = vi.fn((columns: string) => {
-    // The pricing_incomplete send gate — a quote whose lines aren't all priced must not become a
-    // client document quoting a total that summed the unpriced ones as zero.
+    // The pricing_incomplete send gate — an unfinished quote must not become a client document.
     if (columns === "status" || columns.includes("journey_class")) {
       return {
         eq: vi.fn(() => ({
@@ -1128,10 +1127,9 @@ describe("POST /api/correspondence", () => {
     )
   })
 
-  // QA 11, F11-1. calculateQuoteTotals sums item.total unconditionally, so a quote with an
-  // unpriced line totals as though that line were free. The consultant's screen says so; the
-  // client document does not — so the send is refused rather than mailing a short total.
-  it("refuses to send a quote whose lines are not all priced", async () => {
+  // pricing_incomplete = no lines, or a service skipped for missing configuration. An R0 line
+  // alone no longer parks a quote there, so the send is only refused for an unfinished quote.
+  it("refuses to send a quote that is not finished", async () => {
     buildAuth({ quoteStatus: "pricing_incomplete" })
     const res = await POST(
       postJson({
@@ -1143,7 +1141,7 @@ describe("POST /api/correspondence", () => {
     )
 
     expect(res.status).toBe(409)
-    expect((await res.json()).error).toContain("unpriced lines")
+    expect((await res.json()).error).toContain("not finished")
     // Refused before anything is rendered or mailed.
     expect(quotePdfMocks.ensureQuotePdf).not.toHaveBeenCalled()
     expect(emailMocks.sendEmail).not.toHaveBeenCalled()
