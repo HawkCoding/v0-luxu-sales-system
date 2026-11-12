@@ -97,6 +97,8 @@ type PaneView = "both" | "editor" | "preview"
 const DOCUMENT_COPY_NOT_KEPT_MESSAGE =
   "Email sent, but a copy of the PDF could not be kept for the booking history. Tell your administrator."
 
+const AUTO_ACCEPTED_MESSAGE = "Reservation form already received — booking moved to Quote Accepted."
+
 function ConfigToggleRow({
   label,
   value,
@@ -343,7 +345,11 @@ export function QuotePreviewSendDialog({
             signatureBrandId: capturedBrandId,
           }),
         })
-        const payload = (await response.json()) as { error?: string; documentCopyKept?: boolean }
+        const payload = (await response.json()) as {
+          error?: string
+          documentCopyKept?: boolean
+          autoAccepted?: boolean
+        }
         if (!response.ok) {
           throw new Error(payload.error ?? "Failed to send quote")
         }
@@ -355,6 +361,10 @@ export function QuotePreviewSendDialog({
       // The email is out either way; only the booking-history copy of its PDF can have gone missing.
       if (result.data.documentCopyKept === false) {
         toast.warning(DOCUMENT_COPY_NOT_KEPT_MESSAGE)
+      }
+      // The reservation form was ticked before this quote went out, so the send completed acceptance.
+      if (result.data.autoAccepted) {
+        toast.success(AUTO_ACCEPTED_MESSAGE)
       }
       onSent()
     }
