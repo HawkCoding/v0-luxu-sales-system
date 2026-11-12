@@ -115,6 +115,8 @@ interface AuthOptions {
   quoteStatus?: string
   /** The scheduled correspondence row a send fulfils (scheduledCorrespondenceId). */
   scheduledRow?: { id: string; status: string } | null
+  reservationFormReceivedAt?: string | null
+  revisionResetAt?: string | null
 }
 
 function buildAuth(options: AuthOptions = {}) {
@@ -287,6 +289,8 @@ function buildAuth(options: AuthOptions = {}) {
                   customer_invoice_number: customerInvoiceNumber,
                   email_import_needs_review: emailImportNeedsReview,
                   email_import_review_resolved_at: null,
+                  reservation_form_received_at: options.reservationFormReceivedAt ?? null,
+                  revision_reset_at: options.revisionResetAt ?? null,
                   customer: {
                     email: customerEmail,
                     first_name: customerFirstName,
@@ -727,6 +731,108 @@ describe("POST /api/correspondence", () => {
     expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
     expect(mocks.pipelineHistoryInsert).not.toHaveBeenCalled()
     expect(mocks.quoteUpdate).toHaveBeenCalled()
+  })
+
+  describe("reservation form already received when the quote goes out", () => {
+    const sentQuote = [{ id: QUOTE_ID, status: "sent", total: 1000, created_at: "2026-05-01T00:00:00.000Z" }]
+    const quoteSend = {
+      bookingId: BOOKING_ID,
+      subject: "Quote",
+      quoteId: QUOTE_ID,
+      moveStage: "quote_sent",
+      kind: "quote",
+    }
+
+    it("moves an Enquiry booking through Quote Sent on to Quote Accepted", async () => {
+      const mocks = buildAuth({
+        contextQuotes: sentQuote,
+        reservationFormReceivedAt: "2026-04-30T08:51:26.022Z",
+      })
+      const res = await POST(postJson(quoteSend))
+
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.autoAccepted).toBe(true)
+      expect(body.stage).toBe("accepted")
+      expect(transitionMocks.applyTransition).toHaveBeenCalledTimes(2)
+      expect(transitionMocks.applyTransition).toHaveBeenNthCalledWith(
+        1,
+        expect.anything(),
+        expect.objectContaining({ targetStage: "quote_sent", booking: expect.objectContaining({ stage: "enquiry" }) }),
+      )
+      expect(transitionMocks.applyTransition).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        expect.objectContaining({ targetStage: "accepted", booking: expect.objectContaining({ stage: "quote_sent" }) }),
+      )
+      expect(mocks.pipelineHistoryInsert).toHaveBeenCalledWith(
+        expect.objectContaining({ from_stage: "quote_sent", to_stage: "accepted" }),
+      )
+      expect(mocks.auditInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "quote_auto_accepted",
+          meta_json: expect.objectContaining({ reason: "reservation_form_already_received" }),
+        }),
+      )
+      // The client has said yes — no "have you looked at the quote" nudge.
+      expect(mocks.followUpInsert).not.toHaveBeenCalled()
+    })
+
+    it("accepts a booking already at Quote Sent when the quote is re-sent", async () => {
+      buildAuth({
+        bookingStage: "quote_sent",
+        contextQuotes: sentQuote,
+        reservationFormReceivedAt: "2026-04-30T08:51:26.022Z",
+      })
+      const res = await POST(postJson(quoteSend))
+
+      expect(res.status).toBe(200)
+      expect((await res.json()).autoAccepted).toBe(true)
+      expect(transitionMocks.applyTransition).toHaveBeenCalledTimes(1)
+      expect(transitionMocks.applyTransition).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ targetStage: "accepted" }),
+      )
+    })
+
+    it("stays at Quote Sent when the form has not been received", async () => {
+      const mocks = buildAuth({ contextQuotes: sentQuote })
+      const res = await POST(postJson(quoteSend))
+
+      const body = await res.json()
+      expect(body.autoAccepted).toBe(false)
+      expect(body.stage).toBe("quote_sent")
+      expect(transitionMocks.applyTransition).toHaveBeenCalledTimes(1)
+      expect(mocks.followUpInsert).toHaveBeenCalledTimes(1)
+    })
+
+    it("ignores a tick from before a quote revision", async () => {
+      buildAuth({
+        contextQuotes: sentQuote,
+        reservationFormReceivedAt: "2026-04-30T08:51:26.022Z",
+        revisionResetAt: "2026-04-30T10:00:00.000Z",
+      })
+      const res = await POST(postJson(quoteSend))
+
+      expect((await res.json()).autoAccepted).toBe(false)
+      expect(transitionMocks.applyTransition).toHaveBeenCalledTimes(1)
+    })
+
+    it("leaves the booking at Quote Sent, still succeeding, when acceptance gates fail", async () => {
+      // An incomplete customer is exempt from the quote_sent move but blocks acceptance.
+      buildAuth({
+        contextQuotes: sentQuote,
+        reservationFormReceivedAt: "2026-04-30T08:51:26.022Z",
+        customerFirstName: null,
+      })
+      const res = await POST(postJson(quoteSend))
+
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.autoAccepted).toBe(false)
+      expect(body.stage).toBe("quote_sent")
+      expect(transitionMocks.applyTransition).toHaveBeenCalledTimes(1)
+    })
   })
 
   it("keeps a copy of the quote PDF it attached, linked to the email that carried it", async () => {

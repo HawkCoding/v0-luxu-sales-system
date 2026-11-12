@@ -25,6 +25,10 @@ Sending it moves the booking from **Quote Sent** to **Quote Accepted** — the t
 stage move happen together, off the same send. Unticking the box afterwards clears the
 flag directly, with no email involved.
 
+If the form comes back before the quote has gone out (common when the enquiry itself is a
+reservation), tick it straight away. When you then send the quote, the booking moves through
+**Quote Sent** and on to **Quote Accepted** in one step, and a message tells you so.
+
 A dialog offers to jump straight to the guest roster once the send goes through — click
 **Fill in now**, or **Later** to record guest details at your own pace.
 

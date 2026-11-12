@@ -20,6 +20,7 @@ import {
   loadTransitionContext,
 } from "@/lib/pipeline/run-gated-transition"
 import { isAtOrPastStage, type GateFailure } from "@/lib/pipeline/validate-transition"
+import { shouldAutoAcceptOnQuoteSend } from "@/lib/pipeline/auto-accept-on-quote-send"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { hasIssuedDocumentToKeep, recordIssuedDocument } from "@/lib/documents/document-versions"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
@@ -660,6 +661,7 @@ export async function POST(req: Request) {
     })
   }
 
+  let stageAfterSend = booking.stage as PipelineStage
   if (moveStage) {
     const targetStage = moveStage
     const fromStage = booking.stage as PipelineStage
@@ -731,14 +733,103 @@ export async function POST(req: Request) {
       if (result.reason === "stale") return staleVersionResponse("booking", result.currentUpdatedAt)
       return safeSupabaseError(`correspondence:transition-${result.step}`, result.error)
     }
+    stageAfterSend = targetStage
   }
+
+  // The reservation form came back before the quote went out (ticked at Enquiry), so this send is
+  // the last missing piece of acceptance: carry the booking on to Quote Accepted. Best-effort — the
+  // email is out and the quote_sent move above is done, so a blocked or failed acceptance leaves the
+  // booking at Quote Sent (where Next still works) instead of failing the request.
+  const autoAcceptAfterQuoteSend = async (): Promise<boolean> => {
+    const targetStage: PipelineStage = "accepted"
+    const context = await loadTransitionContext(supabase, {
+      bookingId,
+      customerId: booking.customer_id,
+      fromStage: stageAfterSend,
+      targetStage,
+    })
+    const decision = decideGatedTransition({
+      booking: {
+        ...transitionBooking,
+        stage: stageAfterSend,
+        reservation_form_received_at: reservationFormReceivedAt,
+      },
+      customer: customerRecord ?? null,
+      targetStage,
+      context,
+    })
+    if (decision.blocked) {
+      console.warn(
+        "correspondence:auto-accept-blocked",
+        decision.failures.map((failure) => failure.gateId),
+      )
+      return false
+    }
+
+    const versionRes = await supabase.from("bookings").select("updated_at").eq("id", bookingId).maybeSingle()
+    if (versionRes.error) {
+      console.error("correspondence:auto-accept-load-version", versionRes.error)
+      return false
+    }
+
+    const result = await applyGatedTransition(supabase, {
+      booking: {
+        id: booking.id,
+        booking_number: booking.booking_number,
+        stage: stageAfterSend,
+        source: booking.source,
+        raw_text: booking.raw_text,
+        updated_at: versionRes.data?.updated_at ?? booking.updated_at,
+        customer_id: booking.customer_id,
+        consultant: booking.consultant,
+        assigned_salesperson_id: booking.assigned_salesperson_id,
+      },
+      departureDate: booking.departure_date,
+      durationNights: booking.duration_nights,
+      targetStage,
+      actorName: profile.actorName,
+      actorUserId: auth.value.user.id,
+      decision,
+      context,
+    })
+    if (!result.ok) {
+      console.error("correspondence:auto-accept-apply", result.reason === "error" ? result.error : result)
+      return false
+    }
+
+    await writeAuditLog(supabase, {
+      actor: profile.actorName,
+      actorUserId: auth.value.user.id,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "quote_auto_accepted",
+      before: { stage: stageAfterSend },
+      after: { stage: targetStage },
+      meta: {
+        reason: "reservation_form_already_received",
+        reservation_form_received_at: reservationFormReceivedAt ?? null,
+        quote_id: parsed.data.quoteId ?? null,
+        correspondence_id: cor.id,
+      },
+    })
+    stageAfterSend = targetStage
+    return true
+  }
+
+  const autoAccepted =
+    shouldAutoAcceptOnQuoteSend({
+      kind: parsed.data.kind,
+      stageAfterSend,
+      reservationFormReceivedAt,
+      revisionResetAt: booking.revision_reset_at,
+    }) && (await autoAcceptAfterQuoteSend())
 
   // Draft a scheduled follow-up 48h out — quote emails only, composed from the
   // editable follow_up template so the draft is a real, sendable email.
   // Not once the client has accepted: a "have you had a chance to look at the quote" nudge to
   // someone who already said yes is worse than none.
   const bookingPastQuoteStage = isAtOrPastStage(booking.stage as PipelineStage, "accepted")
-  if (parsed.data.kind === "quote" && !quoteAlreadyAccepted && !bookingPastQuoteStage) {
+  if (parsed.data.kind === "quote" && !quoteAlreadyAccepted && !bookingPastQuoteStage && !autoAccepted) {
     const customerName = formatCustomerSalutation(customerRecord) || "Valued Guest"
     const shared = await resolveSharedEmailTokens(supabase, booking.id)
     const followUp = await composeEmail(supabase, "follow_up", {
@@ -793,5 +884,7 @@ export async function POST(req: Request) {
     providerMessageId: cor.provider_message_id,
     recipients: cor.recipients,
     documentCopyKept,
+    stage: stageAfterSend,
+    autoAccepted,
   })
 }
