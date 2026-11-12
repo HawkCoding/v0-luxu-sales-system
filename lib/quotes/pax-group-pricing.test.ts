@@ -394,9 +394,47 @@ describe("allocatePaxGroups", () => {
     ]
     const result = allocatePaxGroups({ lines, target: 36_600, rateLabels: RATE_LABELS })
     expect(sentences(result)).toEqual([
-      "Twin Deluxe Suite 1 - 2 Adults x R10 300,00 per person (TW)",
+      "Twin Deluxe Suite 1 - 2 Adults x R10 300,00 per person (TW) & 1 Infant x R0,00",
       "Twin Deluxe Suite 2 - 2 Adults x R8 000,00 per person (SA)",
     ])
+  })
+
+  it("names a suite's infant at no charge beside its adults and children, as LTT-26-0151 needs", () => {
+    const meta = groups(2)
+    const suite1 = ref({ index: 0, unitId: "u1", adults: 2, infants: 1, groups: ["g1"] })
+    const suite2 = ref({ index: 1, unitId: "u2", adults: 1, children: 1, groups: ["g2"] })
+    const lines = [
+      trainFare(60_000, meta, [suite1, suite2]),
+      trainFare(10_000, meta, [suite2], { passengerKind: "child" }),
+      // The infant's own R0 fare line repeats suite 1's ref; it must not count the infant twice.
+      trainFare(0, meta, [suite1], { passengerKind: "infant" }),
+    ]
+    const result = allocatePaxGroups({ lines, target: 70_000 })
+    expect(result?.lines.map((groupLine) => groupLine.infants)).toEqual([1, 0])
+    expect(sentences(result)).toEqual([
+      "Twin Deluxe Suite 1 - 2 Adults x R20 000,00 per person & 1 Infant x R0,00",
+      "Twin Deluxe Suite 2 - 1 Adult x R20 000,00 & 1 Child x R10 000,00",
+    ])
+    // The infant changes no price and no headcount of paying guests.
+    expect(result).toMatchObject({ adults: 3, children: 1 })
+    expectAddsUp(result, 70_000)
+  })
+
+  it("counts every infant of a suite, across rate slices, without repeating one", () => {
+    const meta = groups(2)
+    const lines = [
+      trainFare(20_000, meta, [ref({ index: 0, unitId: "u1", adults: 2, infants: 1, groups: ["g1"], rate: "rate-sa" })], {
+        rateTypeId: "rate-sa",
+      }),
+      trainFare(10_000, meta, [ref({ index: 0, unitId: "u1", adults: 1, infants: 1, groups: ["g1"], rate: "rate-tw" })], {
+        rateTypeId: "rate-tw",
+      }),
+      trainFare(16_000, meta, [ref({ index: 1, unitId: "u2", adults: 2, groups: ["g2"], rate: "rate-sa" })], {
+        rateTypeId: "rate-sa",
+      }),
+    ]
+    const result = allocatePaxGroups({ lines, target: 46_000 })
+    expect(result?.lines.map((groupLine) => groupLine.infants)).toEqual([2, 0])
   })
 
   it("gives a child fare only to children and an adult fare only to adults", () => {
@@ -791,6 +829,7 @@ describe("formatPaxGroupLine / formatPaxGroupParts", () => {
     subtotal: 0,
     adults: 0,
     children: 0,
+    infants: 0,
   })
   const part = (overrides: Partial<PaxGroupPriceLine["parts"][number]>): PaxGroupPriceLine["parts"][number] => ({
     kind: "adult",
@@ -800,6 +839,19 @@ describe("formatPaxGroupLine / formatPaxGroupParts", () => {
     rateLabel: null,
     supplement: false,
     ...overrides,
+  })
+
+  it("ends the line with the group's infants at no charge, one or several", () => {
+    const withInfants = (infants: number) => ({ ...groupLine([part({ count: 2, perPerson: 25_881.88 })]), infants })
+    expect(formatPaxGroupLine(withInfants(1), money)).toBe(
+      "Twin Deluxe Suite 2 - 2 Adults x R25 881,88 per person & 1 Infant x R0,00",
+    )
+    expect(formatPaxGroupParts(withInfants(2), money)).toBe(
+      "2 Adults x R25 881,88 per person & 2 Infants x R0,00 per infant",
+    )
+    expect(formatPaxGroupLineForPrint(withInfants(1), (n) => `R${n}`).replace(/ /g, " ")).toBe(
+      "Twin Deluxe Suite 2 - 2 Adults x R25881.88 per person & 1 Infant x R0",
+    )
   })
 
   it("words one adult, several adults, one child and several children", () => {
@@ -869,6 +921,7 @@ describe("formatPaxGroupPartLines", () => {
       subtotal: 0,
       adults: 2,
       children: 2,
+      infants: 0,
     }
     expect(formatPaxGroupPartLines(line, money).map((text) => text.replace(/ /g, " "))).toEqual([
       "1 Adult x R41 939,17 (SA)",
@@ -876,6 +929,26 @@ describe("formatPaxGroupPartLines", () => {
       "2 Children x R18 900,00 per child (single supplement incl.)",
     ])
     expect(formatPaxGroupPartLines(line, (n) => `R${n}`)[0]).toBe("1 Adult x R41939.17 (SA)")
+  })
+
+  it("gives the infants their own last line, held together like the other counts", () => {
+    const line: PaxGroupPriceLine = {
+      groupId: "g1",
+      position: 1,
+      label: "Double Deluxe Suite 1",
+      parts: [part({ count: 2, perPerson: 25_881.88 })],
+      subtotal: 51_763.76,
+      adults: 2,
+      children: 0,
+      infants: 1,
+    }
+    const lines = formatPaxGroupPartLines(line, money)
+    expect(lines.map((text) => text.replace(/ /g, " "))).toEqual([
+      "2 Adults x R25 881,88 per person",
+      "1 Infant x R0,00",
+    ])
+    // The count, the guest word and the "x" are bound with non-breaking spaces, as for adults.
+    expect(lines[1]).toMatch(/^1 Infant x /)
   })
 })
 
