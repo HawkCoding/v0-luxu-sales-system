@@ -33,6 +33,9 @@ export interface PaxGroupPriceLine {
   subtotal: number
   adults: number
   children: number
+  /** Infants travelling in this group's suite. They are never priced here (an infant's fare, if
+   *  any, rides on the adults) but the line names them, so "2 Adults & 1 Infant" reads true. */
+  infants: number
 }
 
 export interface PaxGroupPricing {
@@ -93,6 +96,7 @@ interface CentLine {
   parts: CentPart[]
   adults: number
   children: number
+  infants: number
 }
 
 function snapshotOf(line: { pricing_snapshot: unknown }): PricingSnapshot | null {
@@ -234,7 +238,8 @@ function compareParts(a: Omit<PaxGroupPricePart, "count" | "perPerson">, b: Omit
  *
  * Persons are the paying guests of the primary service's units (one group each), taken from the
  * primary-leg lines' unitRefs — one person per adult or child of each unit or rate slice, carrying
- * that slice's rate type. Infants are never persons.
+ * that slice's rate type. Infants are never persons, but each group's infants are counted from the
+ * same unitRefs so the line can name them (PaxGroupPriceLine.infants).
  *
  * Splitting (commission lines and zero amounts are skipped):
  * - a per-person fare line goes evenly to the persons of its kind in the units it covers — on the
@@ -275,6 +280,7 @@ export function allocatePaxGroups({ lines, target, rateLabels }: PaxGroupPricing
   const groupIds = new Set(groups.map((group) => group.id))
   const allGroupIds = groups.map((group) => group.id)
   const personsByGroup = new Map<string, Person[]>(allGroupIds.map((id) => [id, []]))
+  const infantsByGroup = new Map<string, number>(allGroupIds.map((id) => [id, 0]))
   const slices = new Map<string, Person[]>()
   const everyone: Person[] = []
 
@@ -297,6 +303,9 @@ export function allocatePaxGroups({ lines, target, rateLabels }: PaxGroupPricing
       add("adult", headcount(ref.adults))
       add("child", headcount(ref.children))
       slices.set(key, slice)
+      // Each slice holds its own share of the unit's guests (rate splits move guests, they never
+      // copy them), and a slice is read once however many fare lines repeat its ref.
+      infantsByGroup.set(groupId, (infantsByGroup.get(groupId) ?? 0) + headcount(ref.infants))
       groupPersons.push(...slice)
       everyone.push(...slice)
     }
@@ -415,6 +424,7 @@ export function allocatePaxGroups({ lines, target, rateLabels }: PaxGroupPricing
       parts,
       adults: persons.filter((person) => person.kind === "adult").length,
       children: persons.filter((person) => person.kind === "child").length,
+      infants: infantsByGroup.get(group.id) ?? 0,
     }
   })
 
@@ -516,6 +526,7 @@ export function allocatePaxGroups({ lines, target, rateLabels }: PaxGroupPricing
     subtotal: subtotalCents(line) / 100,
     adults: line.adults,
     children: line.children,
+    infants: line.infants,
   }))
 
   return {
@@ -537,18 +548,30 @@ function formatPart(part: PaxGroupPricePart, money: (n: number) => string): stri
   return text
 }
 
+/** "1 Infant x R0,00" — an infant is named at no charge, the way the adults and children are. */
+function formatInfants(count: number, money: (n: number) => string): string {
+  return `${count} ${count === 1 ? "Infant" : "Infants"} x ${money(0)}${count === 1 ? "" : " per infant"}`
+}
+
+/** The group's parts as separate strings, its infants (when it has any) last. */
+function partTexts(line: PaxGroupPriceLine, money: (n: number) => string): string[] {
+  const texts = line.parts.map((part) => formatPart(part, money))
+  if (line.infants > 0) texts.push(formatInfants(line.infants, money))
+  return texts
+}
+
 /** "1 Adult x R24 100,00 (SA) & 1 Adult x R29 400,00 (TW)" — the group's parts, without its name. */
 export function formatPaxGroupParts(line: PaxGroupPriceLine, money: (n: number) => string): string {
-  return line.parts.map((part) => formatPart(part, money)).join(" & ")
+  return partTexts(line, money).join(" & ")
 }
 
 /** One string per part, for a narrow column that prints each on its own line:
  *  ["1 Adult x R41 939,17 (SA)", "1 Adult x R65 339,13 (TW)"]. Each is held together with
  *  non-breaking spaces between the count, its guests, the "x" and the price. */
 export function formatPaxGroupPartLines(line: PaxGroupPriceLine, money: (n: number) => string): string[] {
-  return line.parts.map((part) =>
-    formatPart(part, money).replace(
-      /^(\d+) (Adults?|Child(?:ren)?) x /,
+  return partTexts(line, money).map((text) =>
+    text.replace(
+      /^(\d+) (Adults?|Child(?:ren)?|Infants?) x /,
       (_match, count: string, noun: string) => `${count} ${noun} x `,
     ),
   )
@@ -565,7 +588,7 @@ export function formatPaxGroupLine(line: PaxGroupPriceLine, money: (n: number) =
 export function formatPaxGroupLineForPrint(line: PaxGroupPriceLine, money: (n: number) => string): string {
   const unlabelled = { ...line, parts: line.parts.map((part) => ({ ...part, rateLabel: null })) }
   return formatPaxGroupLine(unlabelled, money).replace(
-    /(\d+) (Adults?|Child(?:ren)?) x /g,
+    /(\d+) (Adults?|Child(?:ren)?|Infants?) x /g,
     (_match, count: string, noun: string) => `${count} ${noun} x `,
   )
 }
